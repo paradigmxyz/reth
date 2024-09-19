@@ -3,10 +3,12 @@
 use std::{
     collections::VecDeque,
     fs::File,
-    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
-    path::PathBuf,
+    io::{BufReader, Read, Seek, SeekFrom, Write},
+    ops::ControlFlow,
+    path::{Path, PathBuf},
 };
 
+use derive_more::derive::{Deref, DerefMut};
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
@@ -16,14 +18,6 @@ use reth_tracing::tracing::{debug, instrument};
 /// [`CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million = 48
 /// megabytes.
 const MAX_CACHED_BLOCKS: usize = 1_000_000;
-
-#[derive(Debug)]
-struct CachedBlock {
-    /// The file offset where the WAL entry is written.
-    file_offset: u64,
-    /// The block number and hash of the block.
-    block: BlockNumHash,
-}
 
 #[derive(Debug)]
 pub(crate) struct Wal {
@@ -40,16 +34,74 @@ pub(crate) struct Wal {
     ///
     /// This cache is needed only for convenience, so we can avoid walking the WAL file every time
     /// we want to find a notification corresponding to a block.
-    block_cache: VecDeque<CachedBlock>,
+    block_cache: BlockCache,
+}
+
+#[derive(Debug, Clone, Default, Deref, DerefMut)]
+struct BlockCache(VecDeque<CachedBlock>);
+
+impl BlockCache {
+    fn cache_notification_blocks(&mut self, notification: &ExExNotification, file_offset: u64) {
+        let reverted_chain = notification.reverted_chain();
+        let committed_chain = notification.committed_chain();
+
+        if let Some(reverted_chain) = reverted_chain {
+            for block in reverted_chain.blocks().values() {
+                self.push_back(CachedBlock {
+                    file_offset,
+                    action: Action::Revert,
+                    block: (block.number, block.hash()).into(),
+                });
+                if self.len() > MAX_CACHED_BLOCKS {
+                    self.pop_front();
+                }
+            }
+        }
+
+        if let Some(committed_chain) = committed_chain {
+            for block in committed_chain.blocks().values() {
+                self.push_back(CachedBlock {
+                    file_offset,
+                    action: Action::Commit,
+                    block: (block.number, block.hash()).into(),
+                });
+                if self.len() > MAX_CACHED_BLOCKS {
+                    self.pop_front();
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CachedBlock {
+    /// The file offset where the WAL entry is written.
+    pub(super) file_offset: u64,
+    pub(super) action: Action,
+    /// The block number and hash of the block.
+    pub(super) block: BlockNumHash,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Commit,
+    Revert,
+}
+
+impl Action {
+    const fn is_commit(&self) -> bool {
+        matches!(self, Self::Commit)
+    }
 }
 
 impl Wal {
     /// Creates a new instance of [`Wal`].
-    pub(crate) fn new(directory: PathBuf) -> eyre::Result<Self> {
-        let path = directory.join("latest.wal");
-        let file = File::create(&path)?;
+    pub(crate) fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+        let path = directory.as_ref().join("latest.wal");
+        let file =
+            File::options().read(true).write(true).create(true).truncate(false).open(&path)?;
 
-        let mut wal = Self { path, file, block_cache: VecDeque::new() };
+        let mut wal = Self { path, file, block_cache: Default::default() };
         wal.fill_block_cache(u64::MAX)?;
 
         Ok(wal)
@@ -59,125 +111,97 @@ impl Wal {
     /// bytes, not inclusive.
     #[instrument]
     fn fill_block_cache(&mut self, to_offset: u64) -> eyre::Result<()> {
-        self.block_cache = VecDeque::new();
+        self.block_cache.clear();
 
         let mut file_offset = 0;
-        for line in BufReader::new(&self.file).split(b'\n') {
-            let line = line?;
-            let notification: ExExNotification = bincode::deserialize(&line)?;
-            let committed_chain = notification.committed_chain().unwrap_or_default();
+        self.for_each_notification(|block_cache, raw_data, notification| {
+            let committed_chain = notification.committed_chain();
+            let reverted_chain = notification.reverted_chain();
 
             debug!(
                 target: "exex::wal",
                 ?file_offset,
-                committed_block_range = ?committed_chain.range(),
+                reverted_block_range = ?reverted_chain.as_ref().map(|chain| chain.range()),
+                committed_block_range = ?committed_chain.as_ref().map(|chain| chain.range()),
                 "Inserting block cache entries"
             );
 
-            for block in committed_chain.blocks().values() {
-                self.block_cache.push_back(CachedBlock {
-                    file_offset,
-                    block: (block.number, block.hash()).into(),
-                });
-                if self.block_cache.len() > MAX_CACHED_BLOCKS {
-                    self.block_cache.pop_front();
-                }
-            }
+            block_cache.cache_notification_blocks(&notification, file_offset);
 
-            file_offset += line.len() as u64 + 1;
             if file_offset >= to_offset {
                 debug!(
                     target: "exex::wal",
                     ?file_offset,
                     "Reached the requested offset when filling the block cache"
                 );
-                break
+                return Ok(ControlFlow::Break(()))
             }
-        }
+
+            file_offset += raw_data.len() as u64 + 1;
+
+            Ok(ControlFlow::Continue(()))
+        })?;
 
         Ok(())
     }
 
-    /// Commits the notification to WAL. If the notification contains a
-    /// reverted chain, the WAL is truncated.
-    ///
-    /// 1. If there's a reverted chain, walks the WAL file from the end and truncates all blocks
-    ///    from that were reverted.
-    /// 2. If there's a committed chain, encodes the whole notification and writes it to the WAL.
+    fn for_each_notification(
+        &mut self,
+        mut f: impl FnMut(&mut BlockCache, &[u8], ExExNotification) -> eyre::Result<ControlFlow<()>>,
+    ) -> eyre::Result<()> {
+        self.file.seek(SeekFrom::Start(0))?;
+
+        let mut reader = BufReader::new(&self.file);
+        loop {
+            // Read the u32 length prefix
+            let mut len_buf = [0; 4];
+            let bytes_read = reader.read(&mut len_buf)?;
+
+            // EOF
+            if bytes_read == 0 {
+                break
+            }
+
+            // Convert the 4 bytes to a u32 to determine the length of the serialized notification
+            let len = u32::from_le_bytes(len_buf) as usize;
+
+            // Read the serialized notification
+            let mut data = vec![0u8; len];
+            reader.read_exact(&mut data)?;
+
+            // Deserialize the notification
+            let notification: ExExNotification = rmp_serde::from_slice(&data)?;
+            f(&mut self.block_cache, &data, notification)?;
+        }
+        Ok(())
+    }
+
+    /// Reads the notification from the WAL file at the given offset.
+    fn read_notification_at(&mut self, file_offset: u64) -> eyre::Result<ExExNotification> {
+        self.file.seek(SeekFrom::Start(file_offset + 4))?;
+        Ok(rmp_serde::from_read(&self.file)?)
+    }
+
+    /// Commits the notification to WAL.
     #[instrument(target = "exex::wal", skip_all)]
     pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
-        if let Some(reverted_chain) = notification.reverted_chain() {
-            let reverted_block_range = reverted_chain.range();
+        let reverted_chain = notification.reverted_chain();
+        let committed_chain = notification.committed_chain();
 
-            let mut truncate_to = None;
-            let mut reverted_blocks = reverted_chain.blocks().values().rev();
-            loop {
-                let Some(block) = self.block_cache.pop_back() else {
-                    debug!(
-                        ?reverted_block_range,
-                        "No blocks in the block cache, filling the block cache"
-                    );
-                    self.fill_block_cache(truncate_to.unwrap_or(u64::MAX))?;
-                    if self.block_cache.is_empty() {
-                        debug!(
-                            ?reverted_block_range,
-                            "No blocks in the block cache, and filling the block cache didn't change anything"
-                        );
-                        break
-                    }
-                    continue
-                };
+        let file_offset = self.file.metadata()?.len();
+        debug!(
+            reverted_block_range = ?reverted_chain.as_ref().map(|chain| chain.range()),
+            committed_block_range = ?committed_chain.as_ref().map(|chain| chain.range()),
+            ?file_offset,
+            "Writing notification to the WAL file"
+        );
 
-                let Some(reverted_block) = reverted_blocks.next() else { break };
+        let data = rmp_serde::encode::to_vec(notification)?;
+        self.file.write_all(&(data.len() as u32).to_le_bytes())?;
+        self.file.write_all(&data)?;
+        self.file.flush()?;
 
-                if reverted_block.number != block.block.number ||
-                    reverted_block.hash() != block.block.hash
-                {
-                    return Err(eyre::eyre!("inconsistent WAL block cache entry"))
-                }
-
-                truncate_to = Some(block.file_offset);
-            }
-
-            if let Some(truncate_to) = truncate_to {
-                self.file.set_len(truncate_to)?;
-                debug!(
-                    ?truncate_to,
-                    ?reverted_block_range,
-                    "Truncated the reverted chain from the WAL file"
-                );
-            } else {
-                self.fill_block_cache(u64::MAX)?;
-                debug!(
-                    ?reverted_block_range,
-                    "Had a reverted chain, but no blocks were truncated. Block cache was filled."
-                );
-            }
-        }
-
-        if let Some(committed_chain) = notification.committed_chain() {
-            debug!(
-                committed_block_range = ?committed_chain.range(),
-                "Writing notification with a committed chain to the WAL file"
-            );
-
-            let data = bincode::serialize(&notification)?;
-
-            let file_offset = self.file.metadata()?.len();
-            self.file.write_all(&data)?;
-            self.file.write_all(b"\n")?;
-            self.file.flush()?;
-
-            for block in committed_chain.blocks().values() {
-                self.block_cache.push_back(CachedBlock {
-                    file_offset,
-                    block: (block.number, block.hash()).into(),
-                });
-                if self.block_cache.len() > MAX_CACHED_BLOCKS {
-                    self.block_cache.pop_front();
-                }
-            }
-        }
+        self.block_cache.cache_notification_blocks(notification, file_offset);
 
         Ok(())
     }
@@ -220,7 +244,7 @@ impl Wal {
                 continue
             };
 
-            if block.block.number == to_block.number {
+            if block.action.is_commit() && block.block.number == to_block.number {
                 debug!(?truncate_to, ?lowest_removed_block, "Found the requested block");
 
                 if block.block.hash != to_block.hash {
@@ -229,14 +253,12 @@ impl Wal {
 
                 truncate_to = Some(block.file_offset);
 
-                self.file.seek(SeekFrom::Start(block.file_offset))?;
-                let notification: ExExNotification = bincode::deserialize_from(&self.file)?;
+                let notification = self.read_notification_at(block.file_offset)?;
                 lowest_removed_block = notification
                     .committed_chain()
                     .as_ref()
                     .map(|chain| chain.first())
                     .map(|block| (block.number, block.hash()).into());
-
                 break
             }
 
@@ -259,7 +281,7 @@ impl Wal {
     /// 1. Finds an offset of the notification with first unfinalized block (first notification
     ///    containing a committed block higher than `to_block`). If the notificatin includes both
     ///    finalized and non-finalized blocks, the offset will include this notification (i.e.
-    ///    consider this notification unfinalized).
+    ///    consider this notification unfinalized and don't remove it).
     /// 2. Creates a new file and copies all notifications starting from the offset (inclusive) to
     ///    the end of the original file.
     /// 3. Renames the new file to the original file.
@@ -268,7 +290,7 @@ impl Wal {
         // First, walk cache to find the offset of the notification with the finalized block.
         let mut unfinalized_from_offset = None;
         while let Some(cached_block) = self.block_cache.pop_front() {
-            if cached_block.block.number == to_block.number {
+            if cached_block.action.is_commit() && cached_block.block.number == to_block.number {
                 if cached_block.block.hash != to_block.hash {
                     return Err(eyre::eyre!("block hash mismatch in WAL"))
                 }
@@ -287,10 +309,8 @@ impl Wal {
         if unfinalized_from_offset.is_none() {
             debug!("Finalized block not found in the block cache, walking the whole file");
 
-            let mut offset = 0;
-            for data in BufReader::new(&self.file).split(b'\n') {
-                let data = data?;
-                let notification: ExExNotification = bincode::deserialize(&data)?;
+            let mut file_offset = 0;
+            self.for_each_notification(|_, raw_data, notification| {
                 if let Some(committed_chain) = notification.committed_chain() {
                     let finalized_block = committed_chain.blocks().get(&to_block.number);
 
@@ -302,11 +322,11 @@ impl Wal {
                         if committed_chain.blocks().len() == 1 {
                             // If the committed chain only contains the finalized block, we can
                             // truncate the WAL file including the notification itself.
-                            unfinalized_from_offset = Some(offset + data.len() as u64 + 1);
+                            unfinalized_from_offset = Some(file_offset + raw_data.len() as u64 + 1);
                         } else {
                             // Otherwise, we need to truncate the WAL file to the offset of the
                             // notification and leave it in the WAL.
-                            unfinalized_from_offset = Some(offset);
+                            unfinalized_from_offset = Some(file_offset);
                         }
 
                         debug!(
@@ -314,12 +334,14 @@ impl Wal {
                             committed_block_range = ?committed_chain.range(),
                             "Found the finalized block in the WAL file"
                         );
-                        break
+                        return Ok(ControlFlow::Break(()))
                     }
                 }
 
-                offset += data.len() as u64 + 1;
-            }
+                file_offset += raw_data.len() as u64 + 1;
+
+                Ok(ControlFlow::Continue(()))
+            })?;
         }
 
         // If the finalized block is still not found, we can't do anything and just return.
@@ -356,6 +378,178 @@ impl Wal {
         self.fill_block_cache(u64::MAX)?;
 
         debug!(?old_size, ?new_size, "WAL file was finalized and block cache was filled");
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ops::ControlFlow, sync::Arc};
+
+    use eyre::OptionExt;
+    use reth_exex_types::ExExNotification;
+    use reth_provider::Chain;
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
+    };
+
+    use crate::wal::{Action, CachedBlock, Wal};
+
+    fn read_notifications(wal: &mut Wal) -> eyre::Result<Vec<ExExNotification>> {
+        let mut notifications = Vec::new();
+        wal.for_each_notification(|_, _, notification| {
+            notifications.push(notification);
+            Ok(ControlFlow::Continue(()))
+        })?;
+        Ok(notifications)
+    }
+
+    #[test]
+    fn test_rmp() -> eyre::Result<()> {
+        let old_block = random_block(&mut generators::rng(), 0, Default::default())
+            .seal_with_senders()
+            .ok_or_eyre("failed to recover senders")?;
+        let new_block = random_block(&mut generators::rng(), 0, Default::default())
+            .seal_with_senders()
+            .ok_or_eyre("failed to recover senders")?;
+
+        let notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(vec![old_block], Default::default(), None)),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), None)),
+        };
+
+        let deserialized_notification: ExExNotification =
+            rmp_serde::from_slice(&rmp_serde::to_vec(&notification)?)?;
+        assert_eq!(deserialized_notification, notification);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_wal() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        let mut rng = generators::rng();
+        let temp_dir = tempfile::tempdir()?;
+        let mut wal = Wal::new(&temp_dir)?;
+
+        let blocks = random_block_range(&mut rng, 0..=2, BlockRangeParams::default())
+            .into_iter()
+            .map(|block| block.seal_with_senders().ok_or_eyre("failed to recover senders"))
+            .collect::<eyre::Result<Vec<_>>>()?;
+        let reorged_block_2 = random_block(
+            &mut rng,
+            2,
+            BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
+        )
+        .seal_with_senders()
+        .ok_or_eyre("failed to recover senders")?;
+
+        let committed_notification_1 = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![blocks[0].clone(), blocks[1].clone()],
+                Default::default(),
+                None,
+            )),
+        };
+        let reverted_notification = ExExNotification::ChainReverted {
+            old: Arc::new(Chain::new(vec![blocks[1].clone()], Default::default(), None)),
+        };
+        let committed_notification_2 = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![blocks[1].clone(), blocks[2].clone()],
+                Default::default(),
+                None,
+            )),
+        };
+        let reorged_notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(vec![reorged_block_2.clone()], Default::default(), None)),
+        };
+
+        assert!(wal.block_cache.is_empty());
+
+        let mut expected_cache = vec![];
+
+        let file_offset = wal.file.metadata()?.len();
+        expected_cache.extend(vec![
+            CachedBlock {
+                file_offset,
+                action: Action::Commit,
+                block: (blocks[0].number, blocks[0].hash()).into(),
+            },
+            CachedBlock {
+                file_offset,
+                action: Action::Commit,
+                block: (blocks[1].number, blocks[1].hash()).into(),
+            },
+        ]);
+        wal.commit(&committed_notification_1)?;
+        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        assert_eq!(vec![committed_notification_1.clone()], read_notifications(&mut wal)?);
+
+        let file_offset = wal.file.metadata()?.len();
+        expected_cache.extend(vec![CachedBlock {
+            file_offset,
+            action: Action::Revert,
+            block: (blocks[1].number, blocks[1].hash()).into(),
+        }]);
+        wal.commit(&reverted_notification)?;
+        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        assert_eq!(
+            vec![committed_notification_1.clone(), reverted_notification.clone()],
+            read_notifications(&mut wal)?
+        );
+
+        let file_offset = wal.file.metadata()?.len();
+        expected_cache.extend(vec![
+            CachedBlock {
+                file_offset,
+                action: Action::Commit,
+                block: (blocks[1].number, blocks[1].hash()).into(),
+            },
+            CachedBlock {
+                file_offset,
+                action: Action::Commit,
+                block: (blocks[2].number, blocks[2].hash()).into(),
+            },
+        ]);
+        wal.commit(&committed_notification_2)?;
+        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        assert_eq!(
+            vec![
+                committed_notification_1.clone(),
+                reverted_notification.clone(),
+                committed_notification_2.clone()
+            ],
+            read_notifications(&mut wal)?
+        );
+
+        let file_offset = wal.file.metadata()?.len();
+        expected_cache.extend(vec![
+            CachedBlock {
+                file_offset,
+                action: Action::Revert,
+                block: (blocks[2].number, blocks[2].hash()).into(),
+            },
+            CachedBlock {
+                file_offset,
+                action: Action::Commit,
+                block: (reorged_block_2.number, reorged_block_2.hash()).into(),
+            },
+        ]);
+        wal.commit(&reorged_notification)?;
+        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        assert_eq!(
+            vec![
+                committed_notification_1.clone(),
+                reverted_notification.clone(),
+                committed_notification_2.clone(),
+                reorged_notification.clone()
+            ],
+            read_notifications(&mut wal)?
+        );
 
         Ok(())
     }
