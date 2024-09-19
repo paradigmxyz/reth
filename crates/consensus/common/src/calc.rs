@@ -1,5 +1,5 @@
 use alloy_primitives::{BlockNumber, U256};
-use reth_chainspec::{ChainSpec, EthereumHardfork};
+use reth_chainspec::{EthereumHardfork, Hardforks};
 use reth_primitives::constants::ETH_TO_WEI;
 
 /// Calculates the base block reward.
@@ -22,7 +22,7 @@ use reth_primitives::constants::ETH_TO_WEI;
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
 pub fn base_block_reward(
-    chain_spec: &ChainSpec,
+    chain_spec: impl Hardforks,
     block_number: BlockNumber,
     block_difficulty: U256,
     total_difficulty: U256,
@@ -37,7 +37,7 @@ pub fn base_block_reward(
 /// Calculates the base block reward __before__ the merge (Paris hardfork).
 ///
 /// Caution: The caller must ensure that the block number is before the merge.
-pub fn base_block_reward_pre_merge(chain_spec: &ChainSpec, block_number: BlockNumber) -> u128 {
+pub fn base_block_reward_pre_merge(chain_spec: impl Hardforks, block_number: BlockNumber) -> u128 {
     if chain_spec.fork(EthereumHardfork::Constantinople).active_at_block(block_number) {
         ETH_TO_WEI * 2
     } else if chain_spec.fork(EthereumHardfork::Byzantium).active_at_block(block_number) {
@@ -130,7 +130,7 @@ mod tests {
         ];
 
         for ((block_number, td), expected_reward) in cases {
-            assert_eq!(base_block_reward(&MAINNET, block_number, U256::ZERO, td), expected_reward);
+            assert_eq!(base_block_reward(&*MAINNET, block_number, U256::ZERO, td), expected_reward);
         }
     }
 

@@ -5,7 +5,7 @@ use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
 use crate::ConfigureEvm;
 use core::fmt::Display;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
@@ -21,7 +21,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultA
 pub fn pre_block_blockhashes_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_block_hash: B256,
@@ -66,7 +66,7 @@ where
 #[inline]
 pub fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_block_hash: B256,
@@ -125,7 +125,7 @@ where
 #[inline]
 pub fn apply_blockhashes_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_block_hash: B256,

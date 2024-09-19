@@ -12,7 +12,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvmEnv,
@@ -72,7 +72,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
@@ -856,7 +856,7 @@ impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
