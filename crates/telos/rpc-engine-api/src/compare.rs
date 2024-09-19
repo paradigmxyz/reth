@@ -90,7 +90,7 @@ where
         let storage_row = unrappwed_revm_side_row.storage.get(&row.key);
         if let Some(storage_row) = storage_row {
             // Check value inequality
-            if storage_row.present_value != row.value {
+            if storage_row.present_value != row.value && !(storage_row.present_value == U256::ZERO && row.removed == true) {
                 panic!("Difference in value on modified storage: \nblock: {}\naddress: {}\nkey: {}\nrevm value: {}\ntevm value: {}",
                        evm.block().number,
                        row.address,
@@ -105,7 +105,7 @@ where
             let revm_db: &mut &mut State<DB> = evm.db_mut();
             let revm_row = revm_db.storage(row.address, row.key);
             if let Ok(revm_row) = revm_row {
-                if revm_row != row.value {
+                if revm_row != row.value && !(revm_row == U256::ZERO && row.removed == true) {
                     panic!("Difference in value on revm storage");
                 }
             } else {
