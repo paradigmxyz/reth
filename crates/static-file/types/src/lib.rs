@@ -64,7 +64,10 @@ impl HighestStaticFiles {
 
 /// Each static file has a fixed number of blocks. This gives out the range where the requested
 /// block is positioned. Used for segment filename.
-pub const fn find_fixed_range(block: BlockNumber) -> SegmentRangeInclusive {
-    let start = (block / DEFAULT_BLOCKS_PER_STATIC_FILE) * DEFAULT_BLOCKS_PER_STATIC_FILE;
-    SegmentRangeInclusive::new(start, start + DEFAULT_BLOCKS_PER_STATIC_FILE - 1)
+pub const fn find_fixed_range(
+    block: BlockNumber,
+    blocks_per_static_file: u64,
+) -> SegmentRangeInclusive {
+    let start = (block / blocks_per_static_file) * blocks_per_static_file;
+    SegmentRangeInclusive::new(start, start + blocks_per_static_file - 1)
 }
