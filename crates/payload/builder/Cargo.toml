@@ -20,6 +20,7 @@ reth-errors.workspace = true
 reth-provider.workspace = true
 reth-payload-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
+reth-chain-state = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
@@ -42,4 +43,4 @@ tracing.workspace = true
 revm.workspace = true
 
 [features]
-test-utils = []
+test-utils = ["reth-chain-state"]
