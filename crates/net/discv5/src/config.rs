@@ -30,8 +30,8 @@ pub const DEFAULT_DISCOVERY_V5_ADDR_IPV6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
 
 /// The default port for discv5 via UDP.
 ///
-/// Default is port 9000. See [`discv5::ListenConfig`] default.
-pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9000;
+/// Default is port 9200. See [`discv5::ListenConfig`] default.
+pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9200;
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
