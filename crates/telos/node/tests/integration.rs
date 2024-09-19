@@ -103,7 +103,7 @@ async fn build_consensus_and_translator(
     reth_handle: TelosRethNodeHandle,
     ship_port: u16,
     chain_port: u16,
-) -> (ConsensusClient, Translator, Option<Block>) {
+) -> (ConsensusClient, Translator) {
     let config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: ChainId(41),
@@ -127,10 +127,10 @@ async fn build_consensus_and_translator(
 
     let cli_args = CliArgs { config: "".to_string(), clean: true };
 
-    let (c, lib) = build_consensus_client(&cli_args, config.clone()).await.unwrap();
-    let translator = Translator::new((&config).into());
+    let c = build_consensus_client(&cli_args, config).await.unwrap();
+    let translator = Translator::new((&c.config).into());
 
-    (c, translator, lib)
+    (c, translator)
 }
 
 #[tokio::test]
@@ -177,8 +177,7 @@ async fn testing_chain_sync() {
     println!("Starting Reth on RPC port {}!", rpc_port);
     let _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     println!("Starting consensus on RPC port {}!", rpc_port);
-
-    let (client, translator, lib) =
+    let (client, translator) =
         build_consensus_and_translator(reth_handle, ship_port, chain_port).await;
 
     let consensus_shutdown = client.shutdown_handle();
@@ -187,7 +186,7 @@ async fn testing_chain_sync() {
     let (block_sender, block_receiver) = mpsc::channel::<TelosEVMBlock>(1000);
 
     println!("Telos consensus client starting, awaiting result...");
-    let client_handle = tokio::spawn(client.run(block_receiver, lib));
+    let client_handle = tokio::spawn(client.run(block_receiver));
 
     println!("Telos translator client is starting...");
     let translator_handle = tokio::spawn(translator.launch(Some(block_sender)));
