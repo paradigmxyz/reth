@@ -12,7 +12,7 @@
 #![cfg(feature = "optimism")]
 
 pub mod builder;
-pub use builder::{OptimismBlockAttributes, OptimismPayloadBuilder};
+pub use builder::OptimismPayloadBuilder;
 pub mod error;
 pub mod payload;
 pub use payload::{
