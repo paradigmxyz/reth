@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::{Bytes, TxKind, U256};
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_network::{
@@ -15,8 +16,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{
-    Block, BlockBody, Bytes, Header, Signature, Transaction, TransactionSigned, TxEip2930, TxKind,
-    U256,
+    Block, BlockBody, Header, Signature, Transaction, TransactionSigned, TxEip2930,
 };
 use reth_provider::test_utils::MockEthProvider;
 

@@ -20,8 +20,9 @@ use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider,
+    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, ProviderFactory, StateWriter, StaticFileProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -84,7 +85,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let provider_rw = provider_factory.provider_rw()?;
+        let provider_rw = provider_factory.database_provider_rw()?;
 
         // Configure and build network
         let network_secret_path =

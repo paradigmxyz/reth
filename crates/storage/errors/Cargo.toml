@@ -15,7 +15,8 @@ workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 
-# alloy
+# ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 

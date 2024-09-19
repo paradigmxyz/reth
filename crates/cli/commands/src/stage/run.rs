@@ -34,8 +34,8 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, ChainSpecProvider, DatabaseProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -117,7 +117,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let mut provider_rw = provider_factory.provider_rw()?;
+        let mut provider_rw = provider_factory.database_provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -333,7 +333,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         provider_rw,
                         provider_factory.static_file_provider(),
                     )?;
-                    provider_rw = provider_factory.provider_rw()?;
+                    provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
         }
@@ -356,7 +356,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             }
             if self.commit {
                 UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
-                provider_rw = provider_factory.provider_rw()?;
+                provider_rw = provider_factory.database_provider_rw()?;
             }
 
             if done {

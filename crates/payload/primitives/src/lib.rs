@@ -15,7 +15,9 @@ pub use error::{EngineObjectValidationError, PayloadBuilderError, VersionSpecifi
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
-pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{
+    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
+};
 
 mod payload;
 pub use payload::PayloadOrAttributes;

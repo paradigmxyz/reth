@@ -21,7 +21,8 @@ reth-primitives.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
 
-# alloy
+# ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # async

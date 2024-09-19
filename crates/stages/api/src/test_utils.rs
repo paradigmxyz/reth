@@ -1,8 +1,6 @@
 #![allow(missing_docs)]
 
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use reth_db_api::database::Database;
-use reth_provider::DatabaseProviderRW;
 use std::collections::VecDeque;
 
 /// A test stage that can be used for testing.
@@ -44,26 +42,18 @@ impl TestStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for TestStage {
+impl<Provider> Stage<Provider> for TestStage {
     fn id(&self) -> StageId {
         self.id
     }
 
-    fn execute(
-        &mut self,
-        _: &DatabaseProviderRW<DB>,
-        _input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, _: &Provider, _input: ExecInput) -> Result<ExecOutput, StageError> {
         self.exec_outputs
             .pop_front()
             .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
     }
 
-    fn unwind(
-        &mut self,
-        _: &DatabaseProviderRW<DB>,
-        _input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    fn unwind(&mut self, _: &Provider, _input: UnwindInput) -> Result<UnwindOutput, StageError> {
         self.unwind_outputs
             .pop_front()
             .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))

@@ -1,9 +1,9 @@
 //! `RLPx` disconnect reason sent to/received from peer
 
+use alloy_primitives::bytes::{Buf, BufMut};
 use alloy_rlp::{Decodable, Encodable, Header};
 use derive_more::Display;
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::bytes::{Buf, BufMut};
 use thiserror::Error;
 
 /// RLPx disconnect reason.

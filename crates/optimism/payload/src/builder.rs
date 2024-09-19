@@ -41,9 +41,9 @@ use tracing::{debug, trace, warn};
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
-    compute_pending_block: bool,
+    pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
-    evm_config: EvmConfig,
+    pub evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
@@ -74,7 +74,7 @@ where
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    fn cfg_and_block_env(
+    pub fn cfg_and_block_env(
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         parent: &Header,
@@ -442,7 +442,7 @@ where
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
-            chain_spec.as_ref(),
+            &chain_spec,
             attributes.payload_attributes.timestamp,
         )
         .expect("Number is in range");

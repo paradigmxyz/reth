@@ -117,6 +117,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = latest.seal_slow();
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
+            block_gas_limit: latest.gas_limit,
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
@@ -403,6 +404,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
+                        block_gas_limit: tip.gas_limit,
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee,
