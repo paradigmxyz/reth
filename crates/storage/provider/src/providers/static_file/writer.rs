@@ -387,7 +387,7 @@ impl StaticFileProviderRW {
                 }
             };
 
-            if remaining_rows >= len {
+            if remaining_rows > len {
                 // If there's more rows to delete than this static file contains, then just
                 // delete the whole file and go to the next static file
                 let block_start = self.writer.user_header().expected_block_start();
