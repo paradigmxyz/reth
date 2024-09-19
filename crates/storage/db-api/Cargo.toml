@@ -22,6 +22,9 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # codecs
 modular-bitfield.workspace = true
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }

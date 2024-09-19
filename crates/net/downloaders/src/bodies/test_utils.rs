@@ -2,10 +2,11 @@
 
 #![allow(dead_code)]
 
+use alloy_primitives::B256;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
-use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
+use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(

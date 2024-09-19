@@ -3,6 +3,7 @@
 //! Stage debugging tool
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use alloy_eips::BlockHashOrNumber;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -21,7 +22,6 @@ use reth_network_p2p::HeadersClient;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
-    primitives::BlockHashOrNumber,
     version::{
         BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
         VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,

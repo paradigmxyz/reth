@@ -5,12 +5,13 @@
 use std::{fmt, fmt::Display, mem};
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
+use alloy_primitives::{Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
-use reth_primitives::{Signature, TxHash, TxType};
+use reth_primitives::TxType;
 use tracing::trace;
 
 /// The size of a decoded signature in bytes.
@@ -336,8 +337,8 @@ impl FilterAnnouncement for EthMessageFilter {
 mod test {
     use super::*;
 
+    use alloy_primitives::B256;
     use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
-    use reth_primitives::B256;
     use std::{collections::HashMap, str::FromStr};
 
     #[test]
