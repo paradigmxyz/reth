@@ -1302,7 +1302,7 @@ impl PoolSize {
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
     pub last_seen_block_hash: B256,
-    /// Current the currently tracked block.
+    /// Currently tracked block.
     pub last_seen_block_number: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
     ///
