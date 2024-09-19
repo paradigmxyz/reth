@@ -19,8 +19,9 @@ reth-primitives.workspace = true
 
 # ethereum
 alloy-chains = { workspace = true, features = ["rlp"] }
-alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp = { workspace = true, features = ["derive"] }
 
 bytes.workspace = true
 derive_more.workspace = true

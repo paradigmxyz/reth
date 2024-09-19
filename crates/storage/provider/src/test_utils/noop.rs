@@ -1,9 +1,13 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_primitives::{
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+};
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
     ForkChoiceSubscriptions,
@@ -13,18 +17,16 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
-    BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    Account, Block, BlockWithSenders, Bytecode, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::{broadcast, watch};
@@ -326,12 +328,7 @@ impl StateRootProvider for NoopProvider {
         Ok(B256::default())
     }
 
-    fn state_root_from_nodes(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
@@ -344,9 +341,7 @@ impl StateRootProvider for NoopProvider {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
@@ -365,16 +360,24 @@ impl StorageRootProvider for NoopProvider {
 impl StateProofProvider for NoopProvider {
     fn proof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
 
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        Ok(MultiProof::default())
+    }
+
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
@@ -404,7 +407,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -417,7 +420,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -429,7 +432,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -441,7 +444,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }

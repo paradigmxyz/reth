@@ -7,21 +7,23 @@ use crate::{
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::ChainInfo;
+use reth_db::Database;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -34,7 +36,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::ProviderNodeTypes;
+use super::{DatabaseProvider, ProviderNodeTypes};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -263,10 +265,15 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     type DB = N::DB;
-    type Provider = DatabaseProviderRO<N::DB>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        self.database.provider()
+        self.database.database_provider_ro()
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        self.database.database_provider_rw()
     }
 }
 
@@ -994,7 +1001,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1009,18 +1016,12 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_and_block_env(
-            cfg,
-            block_env,
-            &self.database.chain_spec(),
-            header,
-            total_difficulty,
-        );
+        evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
         Ok(())
     }
 
@@ -1031,7 +1032,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1045,12 +1046,12 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_env(cfg, &self.database.chain_spec(), header, total_difficulty);
+        evm_config.fill_cfg_env(cfg, header, total_difficulty);
         Ok(())
     }
 }
@@ -1395,6 +1396,8 @@ mod tests {
         writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
     };
+    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1407,9 +1410,8 @@ mod tests {
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Receipt, SealedBlock,
-        SealedBlockWithSenders, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
-        Withdrawals, B256,
+        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
+        TransactionMeta, TransactionSignedNoHash, Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,

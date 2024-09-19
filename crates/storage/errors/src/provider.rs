@@ -1,12 +1,12 @@
 use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256, U256};
 use derive_more::Display;
-use reth_primitives::{BlockHashOrNumber, GotExpected, StaticFileSegment, TxHashOrNumber};
+use reth_primitives::{GotExpected, StaticFileSegment, TxHashOrNumber};
 
 #[cfg(feature = "std")]
 use std::path::PathBuf;
 
-#[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
 
 /// Provider result type.

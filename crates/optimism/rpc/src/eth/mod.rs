@@ -1,7 +1,6 @@
 //! OP-Reth `eth_` endpoint implementation.
 
 pub mod receipt;
-pub mod rpc;
 pub mod transaction;
 
 mod block;
@@ -19,6 +18,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
+use reth_primitives::Header;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     HeaderProvider, StageCheckpointReader, StateProviderFactory,
@@ -37,8 +37,9 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use tokio::sync::OnceCell;
 
-use crate::{eth::rpc::SequencerClient, OpEthApiError};
+use crate::{OpEthApiError, SequencerClient};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -60,8 +61,11 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
 pub struct OpEthApi<N: FullNodeComponents> {
+    /// Gateway to node's core components.
     inner: Arc<EthApiNodeBackend<N>>,
-    sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: OnceCell<SequencerClient>,
 }
 
 impl<N> OpEthApi<N>
@@ -83,6 +87,7 @@ where
             ctx.cache.clone(),
             ctx.new_gas_price_oracle(),
             ctx.config.rpc_gas_cap,
+            ctx.config.rpc_max_simulate_blocks,
             ctx.config.eth_proof_window,
             blocking_task_pool,
             ctx.new_fee_history_cache(),
@@ -91,7 +96,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), sequencer_client: Arc::new(parking_lot::RwLock::new(None)) }
+        Self { inner: Arc::new(inner), sequencer_client: OnceCell::new() }
     }
 }
 
@@ -227,7 +232,7 @@ where
     N: FullNodeComponents,
 {
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
         self.inner.evm_config()
     }
 }

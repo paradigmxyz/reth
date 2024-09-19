@@ -58,7 +58,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
 Networking:
@@ -347,6 +347,11 @@ RPC:
 
           [default: 50000000]
 
+      --rpc.max-simulate-blocks <BLOCKS_COUNT>
+          Maximum number of blocks for `eth_simulateV1` call
+
+          [default: 256]
+
       --rpc.eth-proof-window <RPC_ETH_PROOF_WINDOW>
           The maximum proof window for historical proof generation. This value allows for generating historical proofs up to configured number of blocks from current tip (up to `tip - window`)
 
@@ -439,6 +444,16 @@ TxPool:
           Price bump (in %) for the transaction pool underpriced check
 
           [default: 10]
+
+      --txpool.minimal-protocol-fee <MINIMAL_PROTOCOL_BASEFEE>
+          Minimum base fee required by the protocol
+
+          [default: 7]
+
+      --txpool.gas-limit <GAS_LIMIT>
+          The default enforced gas limit for transactions entering the pool
+
+          [default: 30000000]
 
       --blobpool.pricebump <BLOB_TRANSACTION_PRICE_BUMP>
           Price bump percentage to replace an already existing blob transaction
@@ -541,11 +556,15 @@ Debug:
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 
       --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
-          Determines which type of bad block hook to install
+          Determines which type of invalid block hook to install
 
           Example: `witness,prestate`
 
+          [default: witness]
           [possible values: witness, pre-state, opcode]
+
+      --debug.healthy-node-rpc-url <URL>
+          The RPC URL of a healthy node to use for comparing invalid block hook results against.
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -645,6 +664,16 @@ Pruning:
 Engine:
       --engine.experimental
           Enable the engine2 experimental features on reth binary
+
+      --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
+          Configure persistence threshold for engine experimental
+
+          [default: 2]
+
+      --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
+          Configure the target number of blocks to keep in memory
+
+          [default: 2]
 
 Logging:
       --log.stdout.format <FORMAT>

@@ -287,6 +287,7 @@ mod tests {
                 assert_eq!(obj, same_obj);
             }
             #[test]
+            #[allow(missing_docs)]
             pub fn fuzz_test_struct() {
                 fuzz_test_test_struct(TestStruct::default())
             }

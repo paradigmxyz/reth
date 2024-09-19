@@ -1,9 +1,6 @@
 use crate::{Address, Transaction, TransactionSigned, TxKind, U256};
 use revm_primitives::{AuthorizationList, TxEnv};
 
-#[cfg(all(not(feature = "std"), feature = "optimism"))]
-use alloc::vec::Vec;
-
 /// Implements behaviour to fill a [`TxEnv`] from another transaction.
 pub trait FillTxEnv {
     /// Fills [`TxEnv`] with an [`Address`] and transaction.
@@ -14,7 +11,7 @@ impl FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         #[cfg(feature = "optimism")]
         let envelope = {
-            let mut envelope = Vec::with_capacity(self.length_without_header());
+            let mut envelope = alloc::vec::Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope);
             envelope
         };

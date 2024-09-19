@@ -7,6 +7,8 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
@@ -15,13 +17,13 @@ use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
-    U256,
+    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -163,7 +165,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
+        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
@@ -176,7 +178,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
+        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
     }
@@ -185,9 +187,14 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
     type Provider = DatabaseProviderRO<N::DB>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        self.provider_rw().map(|provider| provider.0)
     }
 }
 
@@ -544,7 +551,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -557,7 +564,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -569,7 +576,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -581,7 +588,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
@@ -627,6 +634,7 @@ mod tests {
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
+    use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
@@ -635,7 +643,7 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_primitives::{StaticFileSegment, TxNumber, B256, U256};
+    use reth_primitives::StaticFileSegment;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};

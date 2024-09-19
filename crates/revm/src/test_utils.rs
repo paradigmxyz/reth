@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use crate::precompile::HashMap;
+use alloc::vec::Vec;
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
@@ -8,12 +11,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -76,12 +75,7 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_from_nodes(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
@@ -94,9 +88,7 @@ impl StateRootProvider for StateProviderTest {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
@@ -115,16 +107,24 @@ impl StorageRootProvider for StateProviderTest {
 impl StateProofProvider for StateProviderTest {
     fn proof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         _address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         unimplemented!("proof generation is not supported")
     }
 
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        unimplemented!("proof generation is not supported")
+    }
+
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         unimplemented!("witness generation is not supported")

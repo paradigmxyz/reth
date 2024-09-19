@@ -7,7 +7,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use reth_primitives::{Address, BlockNumber, StorageKey};
+use alloy_primitives::{Address, BlockNumber, StorageKey};
 use serde::{Deserialize, Serialize};
 
 /// [`BlockNumber`] concatenated with [`Address`].

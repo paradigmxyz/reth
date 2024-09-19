@@ -17,7 +17,7 @@ macro_rules! impl_fuzzer_with_input {
                 use reth_db_api::table;
 
                 #[allow(unused_imports)]
-                use reth_primitives::*;
+
 
                 #[allow(unused_imports)]
                 use reth_primitives_traits::*;

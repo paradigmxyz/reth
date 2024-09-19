@@ -105,7 +105,7 @@ where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
 {
     type Item = S::Item;
 
@@ -237,7 +237,7 @@ fn create_reorg_head<Provider, Evm>(
 ) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
 where
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
 {
     let chain_spec = payload_validator.chain_spec();
 
@@ -279,13 +279,7 @@ where
     // Configure environments
     let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
     let mut block_env = BlockEnv::default();
-    evm_config.fill_cfg_and_block_env(
-        &mut cfg,
-        &mut block_env,
-        chain_spec,
-        &reorg_target.header,
-        U256::MAX,
-    );
+    evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, &reorg_target.header, U256::MAX);
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
 

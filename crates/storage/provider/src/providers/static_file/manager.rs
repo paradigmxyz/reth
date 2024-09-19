@@ -8,6 +8,8 @@ use crate::{
     HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -25,12 +27,10 @@ use reth_db_api::{
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_primitives::{
-    keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
-    U256,
+    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -358,6 +358,8 @@ impl StaticFileProvider {
     }
 
     /// Given a segment and block range it removes the cached provider from the map.
+    ///
+    /// CAUTION: cached provider should be dropped before calling this or IT WILL deadlock.
     pub fn remove_cached_provider(
         &self,
         segment: StaticFileSegment,

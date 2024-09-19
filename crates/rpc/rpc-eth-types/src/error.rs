@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
@@ -169,12 +169,18 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
-                rpc_error_with_code(
-                    EthRpcErrorCode::ResourceNotFound.code(),
-                    format!("{error}: {}", block_id_to_str(id)),
-                )
-            }
+            // TODO(onbjerg): We rewrite the error message here because op-node does string matching
+            // on the error message.
+            //
+            // Until https://github.com/ethereum-optimism/optimism/pull/11759 is released, this must be kept around.
+            EthApiError::HeaderNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!("block not found: {}", block_id_to_str(id)),
+            ),
+            EthApiError::ReceiptsNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!("{error}: {}", block_id_to_str(id)),
+            ),
             EthApiError::HeaderRangeNotFound(start_id, end_id) => rpc_error_with_code(
                 EthRpcErrorCode::ResourceNotFound.code(),
                 format!(
@@ -298,9 +304,14 @@ pub enum RpcInvalidTransactionError {
     /// thrown if creation transaction provides the init code bigger than init code size limit.
     #[error("max initcode size exceeded")]
     MaxInitCodeSizeExceeded,
-    /// Represents the inability to cover max cost + value (account balance too low).
-    #[error("insufficient funds for gas * price + value")]
-    InsufficientFunds,
+    /// Represents the inability to cover max fee + value (account balance too low).
+    #[error("insufficient funds for gas * price + value: have {balance} want {cost}")]
+    InsufficientFunds {
+        /// Transaction cost.
+        cost: U256,
+        /// Current balance of transaction sender.
+        balance: U256,
+    },
     /// Thrown when calculating gas usage
     #[error("gas uint64 overflow")]
     GasUintOverflow,
@@ -411,7 +422,7 @@ impl RpcInvalidTransactionError {
 
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
-    const fn error_code(&self) -> i32 {
+    pub const fn error_code(&self) -> i32 {
         match self {
             Self::InvalidChainId | Self::GasTooLow | Self::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
@@ -470,7 +481,9 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::CallerGasLimitMoreThanBlock |
             InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
-            InvalidTransaction::LackOfFundForMaxFee { .. } => Self::InsufficientFunds,
+            InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
+                Self::InsufficientFunds { cost: *fee, balance: *balance }
+            }
             InvalidTransaction::OverflowPaymentInTransaction => Self::GasUintOverflow,
             InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
             InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
@@ -512,7 +525,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
-            InvalidTransactionError::InsufficientFunds { .. } => Self::InsufficientFunds,
+            InvalidTransactionError::InsufficientFunds(res) => {
+                Self::InsufficientFunds { cost: res.expected, balance: res.got }
+            }
             InvalidTransactionError::NonceNotConsistent { tx, state } => {
                 Self::NonceTooLow { tx, state }
             }
@@ -561,7 +576,8 @@ impl RevertError {
         }
     }
 
-    const fn error_code(&self) -> i32 {
+    /// Returns error code to return for this error.
+    pub const fn error_code(&self) -> i32 {
         EthRpcErrorCode::ExecutionError.code()
     }
 }
@@ -672,8 +688,8 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
-            InvalidPoolTransactionError::Overdraft => {
-                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+            InvalidPoolTransactionError::Overdraft { cost, balance } => {
+                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
             }
         }
     }
@@ -738,24 +754,24 @@ mod tests {
                 "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
-        assert_eq!(err.message(), "header not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
                 "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
-        assert_eq!(err.message(), "header not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::number(100000)).into();
-        assert_eq!(err.message(), "header not found: number 0x186a0");
+        assert_eq!(err.message(), "block not found: number 0x186a0");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::latest()).into();
-        assert_eq!(err.message(), "header not found: latest");
+        assert_eq!(err.message(), "block not found: latest");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::safe()).into();
-        assert_eq!(err.message(), "header not found: safe");
+        assert_eq!(err.message(), "block not found: safe");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
-        assert_eq!(err.message(), "header not found: finalized");
+        assert_eq!(err.message(), "block not found: finalized");
     }
 }

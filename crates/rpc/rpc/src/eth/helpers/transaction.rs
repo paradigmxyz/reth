@@ -53,6 +53,7 @@ where
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{hex_literal::hex, Bytes};
+    use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
@@ -61,7 +62,9 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
-    use reth_rpc_server_types::constants::{DEFAULT_ETH_PROOF_WINDOW, DEFAULT_PROOF_PERMITS};
+    use reth_rpc_server_types::constants::{
+        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
+    };
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
@@ -74,8 +77,8 @@ mod tests {
 
         let pool = testing_pool();
 
-        let evm_config = EthEvmConfig::default();
-        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config);
+        let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
+        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config.clone());
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
@@ -85,6 +88,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,

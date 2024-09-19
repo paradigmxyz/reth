@@ -54,12 +54,20 @@ use crate::{
 pub struct EngineNodeLauncher {
     /// The task executor for the node.
     pub ctx: LaunchContext,
+
+    /// Temporary configuration for engine tree.
+    /// After engine is stabilized, this should be configured through node builder.
+    pub engine_tree_config: TreeConfig,
 }
 
 impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
-    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir) }
+    pub const fn new(
+        task_executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+        engine_tree_config: TreeConfig,
+    ) -> Self {
+        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
     }
 }
 
@@ -85,7 +93,7 @@ where
         self,
         target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
-        let Self { ctx } = self;
+        let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
@@ -221,7 +229,7 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder().clone(),
-            TreeConfig::default(),
+            engine_tree_config,
             ctx.invalid_block_hook()?,
             ctx.sync_metrics_tx(),
         );
