@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use alloy_primitives::{keccak256, Address, B256, U256};
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
