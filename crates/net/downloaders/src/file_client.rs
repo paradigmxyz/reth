@@ -1,5 +1,6 @@
 use std::{collections::HashMap, io, path::Path};
 
+use alloy_primitives::{BlockHash, BlockNumber, B256};
 use futures::Future;
 use itertools::Either;
 use reth_network_p2p::{
@@ -10,9 +11,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
-};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, SealedHeader};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
