@@ -445,6 +445,8 @@ mod tests {
                     panic!("Failed to decode transaction: {:?} {:?}", err, entry.path());
                 })
                 .unwrap();
+            // We want to test only EIP-4844 transactions
+            assert!(tx.is_eip4844());
             let encoded = tx.envelope_encoded();
             assert_eq!(encoded.as_ref(), &raw[..], "{:?}", entry.path());
         }
