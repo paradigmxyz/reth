@@ -7285,7 +7285,6 @@ name = "reth-exex"
 version = "1.0.6"
 dependencies = [
  "bincode",
- "derive_more",
  "eyre",
  "futures",
  "metrics",

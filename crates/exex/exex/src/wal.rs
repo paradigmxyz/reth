@@ -8,7 +8,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use derive_more::derive::{Deref, DerefMut};
 use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
@@ -38,10 +37,52 @@ pub(crate) struct Wal {
     block_cache: BlockCache,
 }
 
-#[derive(Debug, Clone, Default, Deref, DerefMut)]
+#[derive(Debug, Clone, Default)]
 struct BlockCache(VecDeque<CachedBlock>);
 
 impl BlockCache {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn iter(&self) -> std::collections::vec_deque::Iter<'_, CachedBlock> {
+        self.0.iter()
+    }
+
+    fn front(&self) -> Option<&CachedBlock> {
+        self.0.front()
+    }
+
+    fn back(&self) -> Option<&CachedBlock> {
+        self.0.back()
+    }
+
+    fn pop_front(&mut self) -> Option<CachedBlock> {
+        self.0.pop_front()
+    }
+
+    fn pop_back(&mut self) -> Option<CachedBlock> {
+        self.0.pop_back()
+    }
+
+    fn push_front(&mut self, block: CachedBlock) {
+        self.0.push_front(block);
+        if self.0.len() > MAX_CACHED_BLOCKS {
+            self.0.pop_back();
+        }
+    }
+
+    fn push_back(&mut self, block: CachedBlock) {
+        self.0.push_back(block);
+        if self.0.len() > MAX_CACHED_BLOCKS {
+            self.0.pop_front();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
     fn cache_notification_blocks(&mut self, notification: &ExExNotification, file_offset: u64) {
         let reverted_chain = notification.reverted_chain();
         let committed_chain = notification.committed_chain();
@@ -53,9 +94,6 @@ impl BlockCache {
                     action: Action::Revert,
                     block: (block.number, block.hash()).into(),
                 });
-                if self.len() > MAX_CACHED_BLOCKS {
-                    self.pop_front();
-                }
             }
         }
 
@@ -66,9 +104,6 @@ impl BlockCache {
                     action: Action::Commit,
                     block: (block.number, block.hash()).into(),
                 });
-                if self.len() > MAX_CACHED_BLOCKS {
-                    self.pop_front();
-                }
             }
         }
     }
@@ -111,8 +146,8 @@ impl Wal {
         File::options().read(true).write(true).create(true).truncate(false).open(&path)
     }
 
-    /// Fills the block cache with the notifications from the WAL file, up to the given offset in
-    /// bytes, not inclusive.
+    /// Clears the block cache and fills it with the notifications from the WAL file, up to the
+    /// given offset in bytes, not inclusive.
     #[instrument(target = "exex::wal", skip(self))]
     fn fill_block_cache(&mut self, to_offset: u64) -> eyre::Result<()> {
         self.block_cache.clear();
@@ -255,9 +290,9 @@ impl Wal {
             self.file.set_len(truncate_to)?;
             debug!(?truncate_to, "Truncated the WAL file");
         } else {
-            self.fill_block_cache(u64::MAX)?;
             debug!("No blocks were truncated. Block cache was filled.");
         }
+        self.fill_block_cache(u64::MAX)?;
 
         Ok(lowest_removed_block)
     }
@@ -510,6 +545,28 @@ mod tests {
             action: Action::Revert,
             block: (blocks[1].number, blocks[1].hash()).into(),
         }];
+        assert_eq!(
+            wal.block_cache.iter().copied().collect::<Vec<_>>(),
+            [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
+        );
+        assert_eq!(
+            read_notifications(&mut wal)?,
+            vec![committed_notification_1.clone(), reverted_notification.clone()]
+        );
+
+        let rolled_back_to = wal.rollback((blocks[1].number, blocks[1].hash()).into())?;
+        assert_eq!(rolled_back_to, Some((blocks[0].number, blocks[0].hash()).into()));
+        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), vec![]);
+        assert_eq!(wal.file.metadata()?.len(), 0);
+
+        wal.commit(&committed_notification_1)?;
+        assert_eq!(
+            wal.block_cache.iter().copied().collect::<Vec<_>>(),
+            [committed_notification_1_cache.clone()].concat()
+        );
+        assert_eq!(read_notifications(&mut wal)?, vec![committed_notification_1.clone()]);
+
+        wal.commit(&reverted_notification)?;
         assert_eq!(
             wal.block_cache.iter().copied().collect::<Vec<_>>(),
             [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
