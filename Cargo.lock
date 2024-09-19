@@ -7504,6 +7504,7 @@ dependencies = [
  "serde_with",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
