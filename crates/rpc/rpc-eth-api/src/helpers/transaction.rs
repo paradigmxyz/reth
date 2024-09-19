@@ -19,10 +19,7 @@ use reth_rpc_types::{
     },
     BlockNumberOrTag, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::{
-    transaction::{from_recovered, from_recovered_with_block_context},
-    TransactionCompat,
-};
+use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
@@ -195,8 +192,6 @@ pub trait EthTransactions: LoadTransaction {
     ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        Self::TransactionCompat:
-            TransactionCompat<Transaction = RpcTransaction<Self::NetworkTypes>>,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
