@@ -15,9 +15,6 @@ pub enum PayloadBuilderError {
     /// An oneshot channels has been closed.
     #[error("sender has been dropped")]
     ChannelClosed,
-    /// Build cancelled
-    #[error("build outcome cancelled")]
-    BuildOutcomeCancelled,
     /// If there's no payload to resolve.
     #[error("missing payload")]
     MissingPayload,
