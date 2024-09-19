@@ -40,6 +40,7 @@ impl TransactionPool for NoopTransactionPool {
 
     fn block_info(&self) -> BlockInfo {
         BlockInfo {
+            block_gas_limit: 0,
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,

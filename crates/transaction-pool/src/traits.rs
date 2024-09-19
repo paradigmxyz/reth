@@ -666,6 +666,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
+            block_gas_limit: self.new_tip.gas_limit,
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
@@ -1304,6 +1305,8 @@ pub struct BlockInfo {
     pub last_seen_block_hash: B256,
     /// Currently tracked block.
     pub last_seen_block_number: u64,
+    /// Current block gas limit for the latest block.
+    pub block_gas_limit: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the block the pool is
