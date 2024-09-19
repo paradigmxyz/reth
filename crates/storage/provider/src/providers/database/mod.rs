@@ -793,8 +793,9 @@ mod tests {
         );
 
         // Checkpoint and no gap
+        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
-            provider.static_file_provider().latest_writer(StaticFileSegment::Headers).unwrap();
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
         static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);

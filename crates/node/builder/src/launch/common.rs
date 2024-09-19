@@ -48,7 +48,7 @@ use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::clients::EthApiClient;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, StageId};
+use reth_stages::{sets::DefaultStages, MetricEvent, PipelineBuilder, PipelineTarget, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
@@ -430,7 +430,7 @@ where
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds an unwind-only pipeline
-            let pipeline = Pipeline::<N>::builder()
+            let pipeline = PipelineBuilder::default()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,

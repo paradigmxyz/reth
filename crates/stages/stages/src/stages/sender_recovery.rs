@@ -3,13 +3,13 @@ use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
 use reth_db_api::{
     cursor::DbCursorRW,
-    database::Database,
     transaction::{DbTx, DbTxMut},
+    DbTxUnwindExt,
 };
 use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StatsReader,
+    BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -51,7 +51,14 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for SenderRecoveryStage {
+impl<Provider> Stage<Provider> for SenderRecoveryStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + BlockReader
+        + StaticFileProviderFactory
+        + StatsReader
+        + PruneCheckpointReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::SenderRecovery
@@ -61,11 +68,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -110,7 +113,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -120,7 +123,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .last_tx_num();
-        provider.unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -129,13 +132,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
-fn recover_range<DB, CURSOR>(
+fn recover_range<Provider, CURSOR>(
     tx_range: Range<u64>,
-    provider: &DatabaseProviderRW<DB>,
+    provider: &Provider,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    DB: Database,
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
@@ -152,7 +155,7 @@ where
         })
         .unzip();
 
-    let static_file_provider = provider.static_file_provider().clone();
+    let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
     // there will be a timeout grace period in which Tokio does not allow spawning
@@ -287,9 +290,10 @@ fn recover_sender(
     Ok((tx_id, sender))
 }
 
-fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, StageError> {
+fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
+where
+    Provider: StatsReader + StaticFileProviderFactory + PruneCheckpointReader,
+{
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
@@ -335,8 +339,8 @@ mod tests {
     use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
     use reth_provider::{
-        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
-        TransactionsProvider,
+        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
+        StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
@@ -529,7 +533,7 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
