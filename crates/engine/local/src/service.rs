@@ -15,7 +15,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
-use reth_prune::Pruner;
+use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use std::fmt::Formatter;
 use tokio::sync::oneshot;
@@ -66,7 +66,7 @@ where
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_attributes_builder: B,
         provider: ProviderFactory<N>,
-        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
         head: B256,
         mode: MiningMode,
@@ -85,7 +85,7 @@ where
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_attributes_builder: B,
         provider: ProviderFactory<N>,
-        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
         head: B256,
         mode: MiningMode,

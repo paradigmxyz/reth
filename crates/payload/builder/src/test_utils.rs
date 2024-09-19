@@ -5,8 +5,8 @@ use crate::{
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_chain_state::ExecutedBlock;
 use alloy_primitives::U256;
+use reth_chain_state::ExecutedBlock;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives::Block;
 use reth_provider::CanonStateNotification;
