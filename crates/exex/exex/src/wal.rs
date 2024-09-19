@@ -9,7 +9,7 @@ use std::{
 
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
-use reth_tracing::tracing::debug;
+use reth_tracing::tracing::{debug, instrument};
 
 /// The maximum number of blocks to cache in the WAL.
 ///
@@ -57,6 +57,7 @@ impl Wal {
 
     /// Fills the block cache with the notifications from the WAL file, up to the given offset in
     /// bytes, not inclusive.
+    #[instrument]
     fn fill_block_cache(&mut self, to_offset: u64) -> eyre::Result<()> {
         self.block_cache = VecDeque::new();
 
@@ -64,7 +65,16 @@ impl Wal {
         for line in BufReader::new(&self.file).split(b'\n') {
             let line = line?;
             let notification: ExExNotification = bincode::deserialize(&line)?;
-            for block in notification.committed_chain().unwrap_or_default().blocks().values() {
+            let committed_chain = notification.committed_chain().unwrap_or_default();
+
+            debug!(
+                target: "exex::wal",
+                ?file_offset,
+                committed_block_range = ?committed_chain.range(),
+                "Inserting block cache entries"
+            );
+
+            for block in committed_chain.blocks().values() {
                 self.block_cache.push_back(CachedBlock {
                     file_offset,
                     block: (block.number, block.hash()).into(),
@@ -76,6 +86,11 @@ impl Wal {
 
             file_offset += line.len() as u64 + 1;
             if file_offset >= to_offset {
+                debug!(
+                    target: "exex::wal",
+                    ?file_offset,
+                    "Reached the requested offset when filling the block cache"
+                );
                 break
             }
         }
@@ -89,14 +104,25 @@ impl Wal {
     /// 1. If there's a reverted chain, walks the WAL file from the end and truncates all blocks
     ///    from that were reverted.
     /// 2. If there's a committed chain, encodes the whole notification and writes it to the WAL.
+    #[instrument(target = "exex::wal", skip_all)]
     pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
         if let Some(reverted_chain) = notification.reverted_chain() {
+            let reverted_block_range = reverted_chain.range();
+
             let mut truncate_to = None;
             let mut reverted_blocks = reverted_chain.blocks().values().rev();
             loop {
                 let Some(block) = self.block_cache.pop_back() else {
+                    debug!(
+                        ?reverted_block_range,
+                        "No blocks in the block cache, filling the block cache"
+                    );
                     self.fill_block_cache(truncate_to.unwrap_or(u64::MAX))?;
                     if self.block_cache.is_empty() {
+                        debug!(
+                            ?reverted_block_range,
+                            "No blocks in the block cache, and filling the block cache didn't change anything"
+                        );
                         break
                     }
                     continue
@@ -115,10 +141,26 @@ impl Wal {
 
             if let Some(truncate_to) = truncate_to {
                 self.file.set_len(truncate_to)?;
+                debug!(
+                    ?truncate_to,
+                    ?reverted_block_range,
+                    "Truncated the reverted chain from the WAL file"
+                );
+            } else {
+                self.fill_block_cache(u64::MAX)?;
+                debug!(
+                    ?reverted_block_range,
+                    "Had a reverted chain, but no blocks were truncated. Block cache was filled."
+                );
             }
         }
 
         if let Some(committed_chain) = notification.committed_chain() {
+            debug!(
+                committed_block_range = ?committed_chain.range(),
+                "Writing notification with a committed chain to the WAL file"
+            );
+
             let data = bincode::serialize(&notification)?;
 
             let file_offset = self.file.metadata()?.len();
@@ -152,6 +194,7 @@ impl Wal {
     ///
     /// The block number and hash of the lowest removed block. The caller is expected to backfill
     /// the blocks between the returned block and the given `to_block`, if there's any.
+    #[instrument(target = "exex::wal")]
     pub(crate) fn rollback(
         &mut self,
         to_block: BlockNumHash,
@@ -160,14 +203,26 @@ impl Wal {
         let mut lowest_removed_block = None;
         loop {
             let Some(block) = self.block_cache.pop_back() else {
+                debug!(
+                    ?truncate_to,
+                    ?lowest_removed_block,
+                    "No blocks in the block cache, filling the block cache"
+                );
                 self.fill_block_cache(truncate_to.unwrap_or(u64::MAX))?;
                 if self.block_cache.is_empty() {
+                    debug!(
+                        ?truncate_to,
+                        ?lowest_removed_block,
+                        "No blocks in the block cache, and filling the block cache didn't change anything"
+                    );
                     break
                 }
                 continue
             };
 
             if block.block.number == to_block.number {
+                debug!(?truncate_to, ?lowest_removed_block, "Found the requested block");
+
                 if block.block.hash != to_block.hash {
                     return Err(eyre::eyre!("block hash mismatch in WAL"))
                 }
@@ -176,7 +231,6 @@ impl Wal {
 
                 self.file.seek(SeekFrom::Start(block.file_offset))?;
                 let notification: ExExNotification = bincode::deserialize_from(&self.file)?;
-                // TODO(alexey): what if there's no committed chain?
                 lowest_removed_block = notification
                     .committed_chain()
                     .as_ref()
@@ -191,8 +245,10 @@ impl Wal {
 
         if let Some(truncate_to) = truncate_to {
             self.file.set_len(truncate_to)?;
+            debug!(?truncate_to, "Truncated the WAL file");
         } else {
             self.fill_block_cache(u64::MAX)?;
+            debug!("No blocks were truncated. Block cache was filled.");
         }
 
         Ok(lowest_removed_block)
@@ -207,6 +263,7 @@ impl Wal {
     /// 2. Creates a new file and copies all notifications starting from the offset (inclusive) to
     ///    the end of the original file.
     /// 3. Renames the new file to the original file.
+    #[instrument(target = "exex::wal")]
     pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the offset of the notification with the finalized block.
         let mut unfinalized_from_offset = None;
@@ -220,12 +277,16 @@ impl Wal {
                     || std::io::Result::Ok(self.file.metadata()?.len()),
                     |block| std::io::Result::Ok(block.file_offset),
                 )?);
+
+                debug!(?unfinalized_from_offset, "Found the finalized block in the block cache");
                 break
             }
         }
 
         // If the finalized block is not found in cache, we need to walk the whole file.
         if unfinalized_from_offset.is_none() {
+            debug!("Finalized block not found in the block cache, walking the whole file");
+
             let mut offset = 0;
             for data in BufReader::new(&self.file).split(b'\n') {
                 let data = data?;
@@ -244,6 +305,11 @@ impl Wal {
                             unfinalized_from_offset = Some(offset);
                         }
 
+                        debug!(
+                            ?unfinalized_from_offset,
+                            committed_block_range = ?committed_chain.range(),
+                            "Found the finalized block in the WAL file"
+                        );
                         break
                     }
                 }
@@ -254,7 +320,7 @@ impl Wal {
 
         // If the finalized block is still not found, we can't do anything and just return.
         let Some(unfinalized_from_offset) = unfinalized_from_offset else {
-            debug!(target: "exex::wal", ?to_block, "Could not find the finalized block in WAL");
+            debug!("Could not find the finalized block in WAL");
             return Ok(())
         };
 
@@ -275,12 +341,17 @@ impl Wal {
             }
         }
 
+        let old_size = self.file.metadata()?.len();
+        let new_size = new_file.metadata()?.len();
+
         // Rename the temporary file to the WAL file and update the file handle with it
         reth_fs_util::rename(&tmp_file_path, &self.path)?;
         self.file = new_file;
 
         // Fill the block cache with the notifications from the new file.
         self.fill_block_cache(u64::MAX)?;
+
+        debug!(?old_size, ?new_size, "WAL file was finalized and block cache was filled");
 
         Ok(())
     }

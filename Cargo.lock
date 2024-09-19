@@ -7313,6 +7313,7 @@ dependencies = [
  "secp256k1",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
