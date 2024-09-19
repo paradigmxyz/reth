@@ -70,6 +70,8 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     fn fill(tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
 
     /// Truncates the input of a transaction to only the first 4 bytes.
+    // todo: remove in favour of using constructor on `TransactionResponse` or similar
+    // <https://github.com/alloy-rs/alloy/issues/1315>.
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
 
     /// Returns the transaction type.
