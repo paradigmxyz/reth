@@ -42,6 +42,7 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
+    common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
     setup::build_networked_pipeline,
@@ -132,7 +133,7 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()

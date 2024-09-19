@@ -6,6 +6,7 @@ mod exex;
 pub(crate) mod engine;
 
 pub use common::LaunchContext;
+use common::{Attached, LaunchContextWith, WithConfigs};
 pub use exex::ExExLauncher;
 
 use std::{future::Future, sync::Arc};
@@ -170,7 +171,7 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
