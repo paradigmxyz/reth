@@ -9,6 +9,7 @@ use std::{
 };
 
 use derive_more::derive::{Deref, DerefMut};
+use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
@@ -114,7 +115,7 @@ impl Wal {
         self.block_cache.clear();
 
         let mut file_offset = 0;
-        self.for_each_notification(|block_cache, raw_data, notification| {
+        self.for_each_notification(|block_cache, raw_len, notification| {
             let committed_chain = notification.committed_chain();
             let reverted_chain = notification.reverted_chain();
 
@@ -137,7 +138,7 @@ impl Wal {
                 return Ok(ControlFlow::Break(()))
             }
 
-            file_offset += raw_data.len() as u64 + 1;
+            file_offset += raw_len as u64;
 
             Ok(ControlFlow::Continue(()))
         })?;
@@ -147,39 +148,22 @@ impl Wal {
 
     fn for_each_notification(
         &mut self,
-        mut f: impl FnMut(&mut BlockCache, &[u8], ExExNotification) -> eyre::Result<ControlFlow<()>>,
+        mut f: impl FnMut(&mut BlockCache, usize, ExExNotification) -> eyre::Result<ControlFlow<()>>,
     ) -> eyre::Result<()> {
         self.file.seek(SeekFrom::Start(0))?;
 
         let mut reader = BufReader::new(&self.file);
         loop {
-            // Read the u32 length prefix
-            let mut len_buf = [0; 4];
-            let bytes_read = reader.read(&mut len_buf)?;
-
-            // EOF
-            if bytes_read == 0 {
-                break
-            }
-
-            // Convert the 4 bytes to a u32 to determine the length of the serialized notification
-            let len = u32::from_le_bytes(len_buf) as usize;
-
-            // Read the serialized notification
-            let mut data = vec![0u8; len];
-            reader.read_exact(&mut data)?;
-
-            // Deserialize the notification
-            let notification: ExExNotification = rmp_serde::from_slice(&data)?;
-            f(&mut self.block_cache, &data, notification)?;
+            let Some((len, notification)) = read_notification(&mut reader)? else { break };
+            f(&mut self.block_cache, len, notification)?;
         }
         Ok(())
     }
 
     /// Reads the notification from the WAL file at the given offset.
-    fn read_notification_at(&mut self, file_offset: u64) -> eyre::Result<ExExNotification> {
-        self.file.seek(SeekFrom::Start(file_offset + 4))?;
-        Ok(rmp_serde::from_read(&self.file)?)
+    fn read_notification_at(&mut self, file_offset: u64) -> eyre::Result<Option<ExExNotification>> {
+        self.file.seek(SeekFrom::Start(file_offset))?;
+        Ok(read_notification(&mut self.file)?.map(|(_, notification)| notification))
     }
 
     /// Commits the notification to WAL.
@@ -196,10 +180,7 @@ impl Wal {
             "Writing notification to the WAL file"
         );
 
-        let data = rmp_serde::encode::to_vec(notification)?;
-        self.file.write_all(&(data.len() as u32).to_le_bytes())?;
-        self.file.write_all(&data)?;
-        self.file.flush()?;
+        write_notification(&mut self.file, notification)?;
 
         self.block_cache.cache_notification_blocks(notification, file_offset);
 
@@ -253,7 +234,9 @@ impl Wal {
 
                 truncate_to = Some(block.file_offset);
 
-                let notification = self.read_notification_at(block.file_offset)?;
+                let notification = self
+                    .read_notification_at(block.file_offset)?
+                    .ok_or_eyre("failed to read notification at offset")?;
                 lowest_removed_block = notification
                     .committed_chain()
                     .as_ref()
@@ -310,7 +293,7 @@ impl Wal {
             debug!("Finalized block not found in the block cache, walking the whole file");
 
             let mut file_offset = 0;
-            self.for_each_notification(|_, raw_data, notification| {
+            self.for_each_notification(|_, raw_data_len, notification| {
                 if let Some(committed_chain) = notification.committed_chain() {
                     let finalized_block = committed_chain.blocks().get(&to_block.number);
 
@@ -322,7 +305,7 @@ impl Wal {
                         if committed_chain.blocks().len() == 1 {
                             // If the committed chain only contains the finalized block, we can
                             // truncate the WAL file including the notification itself.
-                            unfinalized_from_offset = Some(file_offset + raw_data.len() as u64 + 1);
+                            unfinalized_from_offset = Some(file_offset + raw_data_len as u64);
                         } else {
                             // Otherwise, we need to truncate the WAL file to the offset of the
                             // notification and leave it in the WAL.
@@ -338,7 +321,7 @@ impl Wal {
                     }
                 }
 
-                file_offset += raw_data.len() as u64 + 1;
+                file_offset += raw_data_len as u64;
 
                 Ok(ControlFlow::Continue(()))
             })?;
@@ -381,6 +364,38 @@ impl Wal {
 
         Ok(())
     }
+}
+
+fn write_notification(w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
+    let data = rmp_serde::encode::to_vec(notification)?;
+    w.write_all(&(data.len() as u32).to_le_bytes())?;
+    w.write_all(&data)?;
+    w.flush()?;
+    Ok(())
+}
+
+fn read_notification(r: &mut impl Read) -> eyre::Result<Option<(usize, ExExNotification)>> {
+    // Read the u32 length prefix
+    let mut len_buf = [0; 4];
+    let bytes_read = r.read(&mut len_buf)?;
+
+    // EOF
+    if bytes_read == 0 {
+        return Ok(None)
+    }
+
+    // Convert the 4 bytes to a u32 to determine the length of the serialized notification
+    let len = u32::from_le_bytes(len_buf) as usize;
+
+    // Read the serialized notification
+    let mut data = vec![0u8; len];
+    r.read_exact(&mut data)?;
+
+    // Deserialize the notification
+    let notification: ExExNotification = rmp_serde::from_slice(&data)?;
+
+    let total_len = len_buf.len() + data.len();
+    Ok(Some((total_len, notification)))
 }
 
 #[cfg(test)]
