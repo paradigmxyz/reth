@@ -73,7 +73,7 @@ impl StaticFileAccess {
 }
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
@@ -195,7 +195,7 @@ impl Deref for StaticFileProvider {
 }
 
 /// [`StaticFileProviderInner`] manages all existing [`StaticFileJarProvider`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StaticFileProviderInner {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
