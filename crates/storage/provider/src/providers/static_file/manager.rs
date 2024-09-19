@@ -1,7 +1,6 @@
 use super::{
     metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
-    BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
@@ -27,7 +26,10 @@ use reth_db_api::{
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_primitives::{
-    static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
+    static_file::{
+        find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
+        DEFAULT_BLOCKS_PER_STATIC_FILE,
+    },
     Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
     Withdrawals,
@@ -893,8 +895,8 @@ impl StaticFileProvider {
                     return Ok(Some(res))
                 }
                 range = SegmentRangeInclusive::new(
-                    range.start().saturating_sub(BLOCKS_PER_STATIC_FILE),
-                    range.end().saturating_sub(BLOCKS_PER_STATIC_FILE),
+                    range.start().saturating_sub(DEFAULT_BLOCKS_PER_STATIC_FILE),
+                    range.end().saturating_sub(DEFAULT_BLOCKS_PER_STATIC_FILE),
                 );
             }
         }
