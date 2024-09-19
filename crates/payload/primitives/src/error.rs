@@ -18,6 +18,9 @@ pub enum PayloadBuilderError {
     /// If there's no payload to resolve.
     #[error("missing payload")]
     MissingPayload,
+    /// Build cancelled
+    #[error("build outcome cancelled")]
+    BuildOutcomeCancelled,
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),
