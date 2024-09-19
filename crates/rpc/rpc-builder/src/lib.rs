@@ -590,9 +590,9 @@ where
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self { provider, pool, network, executor, events, evm_config, block_executor } = self;
-
         if !module_config.is_empty() {
+            let Self { provider, pool, network, executor, events, evm_config, block_executor } = self;
+
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
             let mut registry = RpcRegistryInner::new(
@@ -1959,7 +1959,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<jsonrpsee::server::ServerHandle>,
+    ipc: Option<ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 
