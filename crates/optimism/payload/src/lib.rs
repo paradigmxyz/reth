@@ -17,5 +17,6 @@ pub mod error;
 pub mod payload;
 
 pub use payload::{
-    OptimismBuiltPayload, OptimismPayloadAttributes, OptimismPayloadBuilderAttributes,
+    OptimismBlockAttributes, OptimismBuiltPayload, OptimismPayloadAttributes,
+    OptimismPayloadBuilderAttributes,
 };
