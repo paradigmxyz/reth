@@ -480,11 +480,13 @@ mod tests {
 
         let mut rng = generators::rng();
 
+        // Create an instance of the WAL in a temporary directory
         let temp_dir = tempfile::tempdir()?;
         let mut wal = Wal::new(&temp_dir)?;
         assert!(wal.block_cache.is_empty());
 
-        let blocks = random_block_range(&mut rng, 0..=2, BlockRangeParams::default())
+        // Create 4 canonical blocks and one reorged block with number 2
+        let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
             .into_iter()
             .map(|block| block.seal_with_senders().ok_or_eyre("failed to recover senders"))
             .collect::<eyre::Result<Vec<_>>>()?;
@@ -496,6 +498,12 @@ mod tests {
         .seal_with_senders()
         .ok_or_eyre("failed to recover senders")?;
 
+        // Create notifications for the above blocks.
+        // 1. Committed notification for blocks with number 0 and 1
+        // 2. Reverted notification for block with number 1
+        // 3. Committed notification for block with number 1 and 2
+        // 4. Reorged notification for block with number 2 that was reverted, and blocks with number
+        //    2 and 3 that were committed
         let committed_notification_1 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![blocks[0].clone(), blocks[1].clone()],
@@ -515,9 +523,17 @@ mod tests {
         };
         let reorged_notification = ExExNotification::ChainReorged {
             old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), None)),
-            new: Arc::new(Chain::new(vec![block_2_reorged.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(
+                vec![block_2_reorged.clone(), blocks[3].clone()],
+                Default::default(),
+                None,
+            )),
         };
 
+        // Commit notifications, verify that the block cache is updated and the notifications are
+        // written to the WAL file.
+
+        // First notification (commit block 0, 1)
         let file_offset = wal.file.metadata()?.len();
         let committed_notification_1_cache = vec![
             CachedBlock {
@@ -538,6 +554,7 @@ mod tests {
         );
         assert_eq!(read_notifications(&mut wal)?, vec![committed_notification_1.clone()]);
 
+        // Second notification (revert block 1)
         let file_offset = wal.file.metadata()?.len();
         wal.commit(&reverted_notification)?;
         let reverted_notification_cache = vec![CachedBlock {
@@ -554,18 +571,22 @@ mod tests {
             vec![committed_notification_1.clone(), reverted_notification.clone()]
         );
 
+        // Now, rollback to block 1 and verify that both the block cache and the WAL file are
+        // empty. We expect the rollback to delete the first notification (commit block 0, 1),
+        // because we can't delete blocks partly from the notification. Additionally, check that
+        // the block that the rolled back to is the block with number 0.
         let rolled_back_to = wal.rollback((blocks[1].number, blocks[1].hash()).into())?;
-        assert_eq!(rolled_back_to, Some((blocks[0].number, blocks[0].hash()).into()));
         assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), vec![]);
         assert_eq!(wal.file.metadata()?.len(), 0);
+        assert_eq!(rolled_back_to, Some((blocks[0].number, blocks[0].hash()).into()));
 
+        // Commit notifications 1 and 2 again
         wal.commit(&committed_notification_1)?;
         assert_eq!(
             wal.block_cache.iter().copied().collect::<Vec<_>>(),
             [committed_notification_1_cache.clone()].concat()
         );
         assert_eq!(read_notifications(&mut wal)?, vec![committed_notification_1.clone()]);
-
         wal.commit(&reverted_notification)?;
         assert_eq!(
             wal.block_cache.iter().copied().collect::<Vec<_>>(),
@@ -576,6 +597,7 @@ mod tests {
             vec![committed_notification_1.clone(), reverted_notification.clone()]
         );
 
+        // Third notification (commit block 1, 2)
         let file_offset = wal.file.metadata()?.len();
         wal.commit(&committed_notification_2)?;
         let committed_notification_2_cache = vec![
@@ -608,6 +630,7 @@ mod tests {
             ]
         );
 
+        // Fourth notification (revert block 2, commit block 2, 3)
         let file_offset = wal.file.metadata()?.len();
         wal.commit(&reorged_notification)?;
         let reorged_notification_cache = vec![
@@ -620,6 +643,11 @@ mod tests {
                 file_offset,
                 action: Action::Commit,
                 block: (block_2_reorged.number, block_2_reorged.hash()).into(),
+            },
+            CachedBlock {
+                file_offset,
+                action: Action::Commit,
+                block: (blocks[3].number, blocks[3].hash()).into(),
             },
         ];
         assert_eq!(
@@ -642,6 +670,10 @@ mod tests {
             ]
         );
 
+        // Now, finalize the WAL up to the block 1. Block 1 was in the third notification that also
+        // had block 2 committed. In this case, we can't split the notification into two parts, so
+        // we preserve the whole notification in both the block cache and the WAL file, and delete
+        // the notifications before it.
         wal.finalize((blocks[1].number, blocks[1].hash()).into())?;
         let finalized_bytes_amount = reverted_notification_cache[0].file_offset;
         let finalized_notification_cache = [
