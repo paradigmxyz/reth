@@ -41,9 +41,9 @@ use tracing::{debug, trace, warn};
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
-    compute_pending_block: bool,
+    pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
-    evm_config: EvmConfig,
+    pub evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
