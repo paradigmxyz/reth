@@ -485,10 +485,8 @@ mod tests {
 
         assert!(wal.block_cache.is_empty());
 
-        let mut expected_cache = vec![];
-
         let file_offset = wal.file.metadata()?.len();
-        expected_cache.extend(vec![
+        let committed_notification_1_cache = vec![
             CachedBlock {
                 file_offset,
                 action: Action::Commit,
@@ -499,26 +497,33 @@ mod tests {
                 action: Action::Commit,
                 block: (blocks[1].number, blocks[1].hash()).into(),
             },
-        ]);
+        ];
         wal.commit(&committed_notification_1)?;
-        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
-        assert_eq!(vec![committed_notification_1.clone()], read_notifications(&mut wal)?);
+        assert_eq!(
+            wal.block_cache.iter().copied().collect::<Vec<_>>(),
+            [committed_notification_1_cache.clone()].concat()
+        );
+        assert_eq!(read_notifications(&mut wal)?, vec![committed_notification_1.clone()]);
 
         let file_offset = wal.file.metadata()?.len();
-        expected_cache.extend(vec![CachedBlock {
+        wal.commit(&reverted_notification)?;
+        let reverted_notification_cache = vec![CachedBlock {
             file_offset,
             action: Action::Revert,
             block: (blocks[1].number, blocks[1].hash()).into(),
-        }]);
-        wal.commit(&reverted_notification)?;
-        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        }];
         assert_eq!(
-            vec![committed_notification_1.clone(), reverted_notification.clone()],
-            read_notifications(&mut wal)?
+            wal.block_cache.iter().copied().collect::<Vec<_>>(),
+            [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
+        );
+        assert_eq!(
+            read_notifications(&mut wal)?,
+            vec![committed_notification_1.clone(), reverted_notification.clone()]
         );
 
         let file_offset = wal.file.metadata()?.len();
-        expected_cache.extend(vec![
+        wal.commit(&committed_notification_2)?;
+        let committed_notification_2_cache = vec![
             CachedBlock {
                 file_offset,
                 action: Action::Commit,
@@ -529,20 +534,28 @@ mod tests {
                 action: Action::Commit,
                 block: (blocks[2].number, blocks[2].hash()).into(),
             },
-        ]);
-        wal.commit(&committed_notification_2)?;
-        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        ];
         assert_eq!(
+            wal.block_cache.iter().copied().collect::<Vec<_>>(),
+            [
+                committed_notification_1_cache.clone(),
+                reverted_notification_cache.clone(),
+                committed_notification_2_cache.clone()
+            ]
+            .concat()
+        );
+        assert_eq!(
+            read_notifications(&mut wal)?,
             vec![
                 committed_notification_1.clone(),
                 reverted_notification.clone(),
                 committed_notification_2.clone()
-            ],
-            read_notifications(&mut wal)?
+            ]
         );
 
         let file_offset = wal.file.metadata()?.len();
-        expected_cache.extend(vec![
+        wal.commit(&reorged_notification)?;
+        let reorged_notification_cache = vec![
             CachedBlock {
                 file_offset,
                 action: Action::Revert,
@@ -553,17 +566,25 @@ mod tests {
                 action: Action::Commit,
                 block: (reorged_block_2.number, reorged_block_2.hash()).into(),
             },
-        ]);
-        wal.commit(&reorged_notification)?;
-        assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), expected_cache.clone());
+        ];
         assert_eq!(
+            wal.block_cache.iter().copied().collect::<Vec<_>>(),
+            [
+                committed_notification_1_cache,
+                reverted_notification_cache,
+                committed_notification_2_cache,
+                reorged_notification_cache
+            ]
+            .concat()
+        );
+        assert_eq!(
+            read_notifications(&mut wal)?,
             vec![
                 committed_notification_1.clone(),
                 reverted_notification.clone(),
                 committed_notification_2.clone(),
                 reorged_notification.clone()
-            ],
-            read_notifications(&mut wal)?
+            ]
         );
 
         Ok(())
