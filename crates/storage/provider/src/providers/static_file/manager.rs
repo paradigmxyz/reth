@@ -4,16 +4,16 @@ use super::{
     BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
-    HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
+    ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{Chain, ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -33,6 +33,7 @@ use reth_primitives::{
     Withdrawals,
 };
 use reth_stages_types::{PipelineTarget, StageId};
+use reth_storage_api::DBProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -606,15 +607,18 @@ impl StaticFileProvider {
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
     #[allow(clippy::while_let_loop)]
-    pub fn check_consistency<TX: DbTx>(
+    pub fn check_consistency<Provider>(
         &self,
-        provider: &DatabaseProvider<TX>,
+        provider: &Provider,
         has_receipt_pruning: bool,
-    ) -> ProviderResult<Option<PipelineTarget>> {
+    ) -> ProviderResult<Option<PipelineTarget>>
+    where
+        Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+    {
         // OVM chain contains duplicate transactions, so is inconsistent by default since reth db
         // not designed for duplicate transactions (see <https://github.com/paradigmxyz/reth/blob/v1.0.3/crates/optimism/primitives/src/bedrock_import.rs>). Undefined behaviour for queries
         // to OVM chain is also in op-erigon.
-        if provider.chain_spec().is_optimism_mainnet() {
+        if provider.chain_spec().chain() == Chain::optimism_mainnet() {
             info!(target: "reth::cli",
                 "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
             );
@@ -766,13 +770,16 @@ impl StaticFileProvider {
     ///
     /// * If the database tables overlap with static files and have contiguous keys, or the
     ///   checkpoint block matches the highest static files block, then [`None`] will be returned.
-    fn ensure_invariants<TX: DbTx, T: Table<Key = u64>>(
+    fn ensure_invariants<Provider, T: Table<Key = u64>>(
         &self,
-        provider: &DatabaseProvider<TX>,
+        provider: &Provider,
         segment: StaticFileSegment,
         highest_static_file_entry: Option<u64>,
         highest_static_file_block: Option<BlockNumber>,
-    ) -> ProviderResult<Option<BlockNumber>> {
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        Provider: DBProvider + BlockReader + StageCheckpointReader,
+    {
         let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
         let highest_static_file_block = highest_static_file_block.unwrap_or_default();
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;

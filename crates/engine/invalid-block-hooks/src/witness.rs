@@ -85,7 +85,7 @@ where
         // Apply pre-block system contract calls.
         apply_beacon_root_contract_call(
             &self.evm_config,
-            &self.provider.chain_spec(),
+            self.provider.chain_spec().as_ref(),
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
