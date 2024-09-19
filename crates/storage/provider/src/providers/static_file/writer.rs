@@ -453,6 +453,7 @@ impl StaticFileProviderRW {
             self.metrics.clone(),
         )?;
         self.writer = previous_writer;
+        self.writer.set_dirty();
         self.data_path = data_path;
         NippyJar::<SegmentHeader>::load(&current_path)
             .map_err(|e| ProviderError::NippyJar(e.to_string()))?
