@@ -6980,7 +6980,6 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "1.0.7"
 dependencies = [
- "reth-chainspec",
  "reth-execution-types",
  "reth-payload-primitives",
  "reth-primitives",
