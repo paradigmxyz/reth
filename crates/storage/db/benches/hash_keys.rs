@@ -1,4 +1,7 @@
 #![allow(missing_docs)]
+
+use std::{collections::HashSet, path::Path, sync::Arc};
+
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -9,9 +12,17 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::TransactionHashNumbers;
-use reth_db_api::cursor::DbCursorRW;
-use std::collections::HashSet;
+use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
+use reth_db_api::{
+    cursor::DbCursorRW,
+    database::Database,
+    table::{Table, TableRow},
+    transaction::DbTxMut,
+};
+use reth_fs_util as fs;
+
+mod utils;
+use utils::*;
 
 criterion_group! {
     name = benches;
@@ -252,5 +263,3 @@ where
     })
     .unwrap();
 }
-
-include!("./utils.rs");

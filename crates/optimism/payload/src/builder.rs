@@ -413,7 +413,7 @@ where
 
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    fn cfg_and_block_env(
+    pub fn cfg_and_block_env(
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
