@@ -208,10 +208,9 @@ pub struct ReceiptWithBlockNumber {
 
 #[cfg(test)]
 mod test {
+    use alloy_primitives::{hex, Address, Bytes, Log, LogData, B256};
     use alloy_rlp::{Decodable, RlpDecodable};
-    use reth_primitives::{
-        hex, Address, Buf, Bytes, BytesMut, Log, LogData, Receipt, TxType, B256,
-    };
+    use reth_primitives::{Buf, BytesMut, Receipt, TxType};
     use reth_tracing::init_test_tracing;
     use tokio_util::codec::Decoder;
 

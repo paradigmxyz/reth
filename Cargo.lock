@@ -6847,6 +6847,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "futures",
@@ -7075,6 +7076,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -7110,6 +7112,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
+ "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "bytes",
@@ -7508,6 +7511,7 @@ name = "reth-network"
 version = "1.0.7"
 dependencies = [
  "alloy-node-bindings",
+ "alloy-primitives",
  "alloy-provider",
  "alloy-rlp",
  "aquamarine",
@@ -7586,6 +7590,7 @@ dependencies = [
 name = "reth-network-p2p"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "auto_impl",
  "derive_more",
  "futures",
