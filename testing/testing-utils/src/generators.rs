@@ -52,7 +52,12 @@ pub struct BlockRangeParams {
 
 impl Default for BlockRangeParams {
     fn default() -> Self {
-        Self { parent: None, tx_count: 0..u8::MAX, requests_count: None, withdrawals_count: None }
+        Self {
+            parent: None,
+            tx_count: 0..u8::MAX / 2,
+            requests_count: None,
+            withdrawals_count: None,
+        }
     }
 }
 
