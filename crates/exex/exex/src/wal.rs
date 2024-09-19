@@ -99,13 +99,16 @@ impl Wal {
     /// Creates a new instance of [`Wal`].
     pub(crate) fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let path = directory.as_ref().join("latest.wal");
-        let file =
-            File::options().read(true).write(true).create(true).truncate(false).open(&path)?;
+        let file = Self::create_file(&path)?;
 
-        let mut wal = Self { path, file, block_cache: Default::default() };
+        let mut wal = Self { path, file, block_cache: BlockCache::default() };
         wal.fill_block_cache(u64::MAX)?;
 
         Ok(wal)
+    }
+
+    fn create_file(path: impl AsRef<Path>) -> std::io::Result<File> {
+        File::options().read(true).write(true).create(true).truncate(false).open(&path)
     }
 
     /// Fills the block cache with the notifications from the WAL file, up to the given offset in
@@ -350,8 +353,7 @@ impl Wal {
 
         // Rename the temporary file to the WAL file and update the file handle with it
         reth_fs_util::rename(&tmp_file_path, &self.path)?;
-        self.file =
-            File::options().read(true).write(true).create(true).truncate(false).open(&self.path)?;
+        self.file = Self::create_file(&self.path)?;
 
         // Fill the block cache with the notifications from the new file.
         self.fill_block_cache(u64::MAX)?;
