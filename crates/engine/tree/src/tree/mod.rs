@@ -500,6 +500,8 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     metrics: EngineApiMetrics,
     /// An invalid block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
+    /// Blocking task pool.
+    blocking_task_pool: BlockingTaskPool,
 }
 
 impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
@@ -569,6 +571,7 @@ where
             metrics: Default::default(),
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
+            blocking_task_pool,
         }
     }
 
