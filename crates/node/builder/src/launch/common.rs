@@ -10,7 +10,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_chainspec::{Chain, ChainSpec};
+use reth_chainspec::{Chain, ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -110,10 +110,10 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub fn with_loaded_toml_config(
+    pub fn with_loaded_toml_config<ChainSpec: EthChainSpec>(
         self,
-        config: NodeConfig,
-    ) -> eyre::Result<LaunchContextWith<WithConfigs>> {
+        config: NodeConfig<ChainSpec>,
+    ) -> eyre::Result<LaunchContextWith<WithConfigs<ChainSpec>>> {
         let toml_config = self.load_toml_config(&config)?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
@@ -122,7 +122,10 @@ impl LaunchContext {
     /// `config`.
     ///
     /// This is async because the trusted peers may have to be resolved.
-    pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
+    pub fn load_toml_config<ChainSpec: EthChainSpec>(
+        &self,
+        config: &NodeConfig<ChainSpec>,
+    ) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = reth_config::Config::from_path(&config_path)
@@ -139,9 +142,9 @@ impl LaunchContext {
     }
 
     /// Save prune config to the toml file if node is a full node.
-    fn save_pruning_config_if_full_node(
+    fn save_pruning_config_if_full_node<ChainSpec: EthChainSpec>(
         reth_config: &mut reth_config::Config,
-        config: &NodeConfig,
+        config: &NodeConfig<ChainSpec>,
         config_path: impl AsRef<std::path::Path>,
     ) -> eyre::Result<()> {
         if reth_config.prune.is_none() {
@@ -242,7 +245,7 @@ impl<T> LaunchContextWith<T> {
     }
 }
 
-impl LaunchContextWith<WithConfigs> {
+impl<ChainSpec> LaunchContextWith<WithConfigs<ChainSpec>> {
     /// Resolves the trusted peers and adds them to the toml config.
     pub async fn with_resolved_peers(mut self) -> eyre::Result<Self> {
         if !self.attachment.config.network.trusted_peers.is_empty() {
@@ -279,7 +282,7 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
         &mut self.attachment.right
     }
 }
-impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
+impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpec>, R>> {
     /// Adjust certain settings in the config to make sure they are set correctly
     ///
     /// This includes:
@@ -306,17 +309,17 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns the container for all config types
-    pub const fn configs(&self) -> &WithConfigs {
+    pub const fn configs(&self) -> &WithConfigs<ChainSpec> {
         self.attachment.left()
     }
 
     /// Returns the attached [`NodeConfig`].
-    pub const fn node_config(&self) -> &NodeConfig {
+    pub const fn node_config(&self) -> &NodeConfig<ChainSpec> {
         &self.left().config
     }
 
     /// Returns the attached [`NodeConfig`].
-    pub fn node_config_mut(&mut self) -> &mut NodeConfig {
+    pub fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.left_mut().config
     }
 
@@ -342,7 +345,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
     /// Returns the chain identifier of the node.
     pub fn chain_id(&self) -> Chain {
-        self.node_config().chain.chain
+        self.node_config().chain.chain()
     }
 
     /// Returns true if the node is configured as --dev
@@ -371,7 +374,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
     pub fn pruner_builder(&self) -> PrunerBuilder {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
-            .delete_limit(self.chain_spec().prune_delete_limit)
+            .delete_limit(self.chain_spec().prune_delete_limit())
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
@@ -394,9 +397,10 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 }
 
-impl<DB> LaunchContextWith<Attached<WithConfigs, DB>>
+impl<DB, ChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpec>, DB>>
 where
     DB: Database + Clone + 'static,
+    ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
@@ -466,7 +470,7 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
         self,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<N>>>> {
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>> {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -477,7 +481,7 @@ where
     }
 }
 
-impl<T> LaunchContextWith<Attached<WithConfigs, ProviderFactory<T>>>
+impl<T> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, ProviderFactory<T>>>
 where
     T: NodeTypesWithDB<ChainSpec = ChainSpec>,
 {
@@ -548,7 +552,7 @@ where
     /// prometheus.
     pub fn with_metrics_task(
         self,
-    ) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<T>>> {
+    ) -> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, WithMeteredProvider<T>>> {
         let (metrics_sender, metrics_receiver) = unbounded_channel();
 
         let with_metrics =
@@ -565,7 +569,7 @@ where
     }
 }
 
-impl<N> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<N>>>
+impl<N> LaunchContextWith<Attached<WithConfigs<N::ChainSpec>, WithMeteredProvider<N>>>
 where
     N: NodeTypesWithDB,
 {
@@ -580,12 +584,13 @@ where
     }
 
     /// Creates a `BlockchainProvider` and attaches it to the launch context.
+    #[allow(clippy::complexity)]
     pub fn with_blockchain_db<T, F>(
         self,
         create_blockchain_provider: F,
         tree_config: BlockchainTreeConfig,
         canon_state_notification_sender: CanonStateNotificationSender,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<T>>>>
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<N::ChainSpec>, WithMeteredProviders<T>>>>
     where
         T: FullNodeTypes<Types = N>,
         F: FnOnce(ProviderFactory<N>) -> eyre::Result<T::Provider>,
@@ -611,7 +616,10 @@ where
     }
 }
 
-impl<T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<T>>>
+impl<T>
+    LaunchContextWith<
+        Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
+    >
 where
     T: FullNodeTypes<Types: NodeTypesWithDB<ChainSpec = ChainSpec>, Provider: WithTree>,
 {
@@ -661,7 +669,11 @@ where
         on_component_initialized: Box<
             dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
         >,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>>
+    ) -> eyre::Result<
+        LaunchContextWith<
+            Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
+        >,
+    >
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -729,7 +741,10 @@ where
     }
 }
 
-impl<T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>
+impl<T, CB>
+    LaunchContextWith<
+        Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
+    >
 where
     T: FullNodeTypes<Provider: WithTree, Types: NodeTypes<ChainSpec = ChainSpec>>,
     CB: NodeComponentsBuilder<T>,
@@ -855,7 +870,10 @@ where
     }
 }
 
-impl<T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>
+impl<T, CB>
+    LaunchContextWith<
+        Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
+    >
 where
     T: FullNodeTypes<
         Provider: WithTree + StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
@@ -977,9 +995,9 @@ impl<L, R> Attached<L, R> {
 /// Helper container type to bundle the initial [`NodeConfig`] and the loaded settings from the
 /// reth.toml config
 #[derive(Debug, Clone)]
-pub struct WithConfigs {
+pub struct WithConfigs<ChainSpec> {
     /// The configured, usually derived from the CLI.
-    pub config: NodeConfig,
+    pub config: NodeConfig<ChainSpec>,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
 }
