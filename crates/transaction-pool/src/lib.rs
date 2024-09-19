@@ -505,6 +505,14 @@ where
         self.pool.get_transactions_by_origin(origin)
     }
 
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transactions_by_origin(origin)
+    }
+
     fn unique_senders(&self) -> HashSet<Address> {
         self.pool.unique_senders()
     }
@@ -532,14 +540,6 @@ where
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
-    }
-
-    /// Returns all pending transactions filtered by [`TransactionOrigin`]
-    fn get_pending_transactions_by_origin(
-        &self,
-        origin: TransactionOrigin,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_pending_transactions_by_origin(origin)
     }
 }
 
