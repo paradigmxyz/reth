@@ -5,8 +5,9 @@ use crate::{
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
+use alloy_primitives::U256;
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives::{Block, U256};
+use reth_primitives::Block;
 use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
