@@ -300,8 +300,12 @@ impl Wal {
                         }
 
                         if committed_chain.blocks().len() == 1 {
+                            // If the committed chain only contains the finalized block, we can
+                            // truncate the WAL file including the notification itself.
                             unfinalized_from_offset = Some(offset + data.len() as u64 + 1);
                         } else {
+                            // Otherwise, we need to truncate the WAL file to the offset of the
+                            // notification and leave it in the WAL.
                             unfinalized_from_offset = Some(offset);
                         }
 
