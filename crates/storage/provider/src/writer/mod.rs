@@ -546,8 +546,8 @@ mod tests {
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
-    use reth_storage_api::DatabaseProviderFactory;
     use reth_primitives::{Account, Address, Receipt, Receipts, StorageEntry};
+    use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
