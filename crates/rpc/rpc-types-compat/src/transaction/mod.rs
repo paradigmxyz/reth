@@ -38,7 +38,8 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
     type Transaction: Send + Clone + Default + fmt::Debug;
 
-    /// Returns gas price and max fee per gas w.r.t. network specific transaction type.
+    /// Formats gas price and max fee per gas for RPC transaction response w.r.t. network specific
+    /// transaction type.
     fn gas_price(signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
         match signed_tx.tx_type() {
             TxType::Legacy | TxType::Eip2930 => {
