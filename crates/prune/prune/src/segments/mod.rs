@@ -5,10 +5,7 @@ mod user;
 
 use crate::PrunerError;
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_db_api::database::Database;
-use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
-};
+use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
 use reth_prune_types::{
     PruneCheckpoint, PruneLimiter, PruneMode, PrunePurpose, PruneSegment, SegmentOutput,
 };
@@ -31,7 +28,7 @@ pub use user::{
 /// 2. If [`Segment::prune`] returned a [Some] in `checkpoint` of [`SegmentOutput`], call
 ///    [`Segment::save_checkpoint`].
 /// 3. Subtract `pruned` of [`SegmentOutput`] from `delete_limit` of next [`PruneInput`].
-pub trait Segment<DB: Database>: Debug + Send + Sync {
+pub trait Segment<Provider>: Debug + Send + Sync {
     /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;
 
@@ -42,18 +39,17 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     fn purpose(&self) -> PrunePurpose;
 
     /// Prune data for [`Self::segment`] using the provided input.
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError>;
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError>;
 
     /// Save checkpoint for [`Self::segment`] to the database.
     fn save_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         checkpoint: PruneCheckpoint,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<()>
+    where
+        Provider: PruneCheckpointWriter,
+    {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
     }
 }
@@ -78,9 +74,9 @@ impl PruneInput {
     /// 2. If checkpoint doesn't exist, return 0.
     ///
     /// To get the range end: get last tx number for `to_block`.
-    pub(crate) fn get_next_tx_num_range<DB: Database>(
+    pub(crate) fn get_next_tx_num_range<Provider: BlockReader>(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
     ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one

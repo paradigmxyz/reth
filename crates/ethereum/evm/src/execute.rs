@@ -35,7 +35,7 @@ use reth_revm::{
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
 use std::collections::hash_map::Entry;
 
@@ -67,7 +67,7 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig> {
 
 impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
@@ -83,7 +83,7 @@ where
 
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBlockExecutor<EvmConfig, DB>;
@@ -126,7 +126,7 @@ struct EthEvmExecutor<EvmConfig> {
 
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Executes the transactions in the block and returns the receipts of the transactions in the
     /// block, the total gas used and the list of EIP-7685 [requests](Request).
@@ -184,13 +184,7 @@ where
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
-                let new_err = match err {
-                    EVMError::Transaction(e) => EVMError::Transaction(e),
-                    EVMError::Header(e) => EVMError::Header(e),
-                    EVMError::Database(e) => EVMError::Database(e.into()),
-                    EVMError::Custom(e) => EVMError::Custom(e),
-                    EVMError::Precompile(e) => EVMError::Precompile(e),
-                };
+                let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
@@ -273,7 +267,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -362,7 +356,7 @@ where
 
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -397,7 +391,7 @@ pub struct BlockAccessListExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> Executor<DB> for BlockAccessListExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -491,7 +485,7 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;

@@ -114,9 +114,6 @@ where
             let start = range.next();
             let range_bounds = start.zip(range.last().or(start));
 
-            // Advance the range by `batch_size` blocks
-            this.range.nth(this.batch_size);
-
             // If we have range bounds, then we can spawn a new task for that range
             if let Some((first, last)) = range_bounds {
                 let range = first..=last;

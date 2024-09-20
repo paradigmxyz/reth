@@ -1,8 +1,5 @@
-use crate::{
-    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
-    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
+#![allow(missing_docs)]
+
 use alloy_primitives::{BlockNumber, B256};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -24,7 +21,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-    ExecutionOutcome, ProviderFactory,
+    ExecutionOutcome,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -36,6 +33,12 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
+
+use crate::{
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
 
 type DatabaseEnv = TempDatabase<DE>;
 
@@ -397,7 +400,7 @@ where
         let blockchain_provider =
             BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
 
-        let pruner = Pruner::<_, ProviderFactory<_>>::new(
+        let pruner = Pruner::new_with_factory(
             provider_factory.clone(),
             vec![],
             5,

@@ -32,7 +32,7 @@ use reth_rpc_types::{
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::{states::bundle_state::BundleRetention, CacheDB},
+    db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     StateBuilder,
 };
@@ -389,6 +389,11 @@ where
                             .await?;
                         return Ok(frame)
                     }
+                    GethDebugBuiltInTracerType::FlatCallTracer => {
+                        return Err(
+                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
+                        )
+                    }
                 },
                 #[cfg(not(feature = "js-tracer"))]
                 GethDebugTracerType::JsTracer(_) => {
@@ -581,10 +586,8 @@ where
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
                 let evm_config = Call::evm_config(this.eth_api()).clone();
-                let mut db = StateBuilder::new()
-                    .with_database(StateProviderDatabase::new(state))
-                    .with_bundle_update()
-                    .build();
+                let mut db =
+                    StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
 
                 pre_block_beacon_root_contract_call(
                     &mut db,
@@ -623,11 +626,8 @@ where
                     db.commit(res.state);
                 }
 
-                // Merge all state transitions
-                db.merge_transitions(BundleRetention::Reverts);
-
-                // Take the bundle state
-                let bundle_state = db.take_bundle();
+                // No need to merge transitions and create the bundle state, we will use Revm's
+                // cache directly.
 
                 // Initialize a map of preimages.
                 let mut state_preimages = HashMap::new();
@@ -635,8 +635,9 @@ where
                 // Grab all account proofs for the data accessed during block execution.
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
-                // referenced accounts + storage slots.
-                let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+                // referenced accounts + storage slots. Cache is a superset of `BundleState`, so we
+                // can just query it to get the latest state of all accounts and storage slots.
+                let mut hashed_state = HashedPostState::default();
                 for (address, account) in db.cache.accounts {
                     let hashed_address = keccak256(address);
                     hashed_state.accounts.insert(
@@ -670,14 +671,10 @@ where
                 // Generate an execution witness for the aggregated state of accessed accounts.
                 // Destruct the cache database to retrieve the state provider.
                 let state_provider = db.database.into_inner();
-                let witness = state_provider
-                    .witness(HashedPostState::default(), hashed_state)
-                    .map_err(Into::into)?;
+                let state =
+                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
 
-                Ok(ExecutionWitness {
-                    witness,
-                    state_preimages: include_preimages.then_some(state_preimages),
-                })
+                Ok(ExecutionWitness { state, keys: include_preimages.then_some(state_preimages) })
             })
             .await
     }
@@ -759,6 +756,11 @@ where
                             .try_into_mux_frame(&res, db)
                             .map_err(Eth::Error::from_eth_err)?;
                         return Ok((frame.into(), res.state))
+                    }
+                    GethDebugBuiltInTracerType::FlatCallTracer => {
+                        return Err(
+                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
+                        )
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]

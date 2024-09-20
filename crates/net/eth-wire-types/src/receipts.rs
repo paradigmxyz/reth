@@ -1,8 +1,9 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{ReceiptWithBloom, B256};
+use reth_primitives::ReceiptWithBloom;
 
 /// A request for transaction receipts from the given block hashes.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -28,8 +29,9 @@ pub struct Receipts(
 #[cfg(test)]
 mod tests {
     use crate::{message::RequestPair, GetReceipts, Receipts};
+    use alloy_primitives::{hex, Log};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{hex, Log, Receipt, ReceiptWithBloom, TxType};
+    use reth_primitives::{Receipt, ReceiptWithBloom, TxType};
 
     #[test]
     fn roundtrip_eip1559() {

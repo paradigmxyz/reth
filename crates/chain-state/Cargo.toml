@@ -21,6 +21,10 @@ reth-primitives.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
 
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["sync"] }

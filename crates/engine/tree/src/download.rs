@@ -1,13 +1,14 @@
 //! Handler that can download blocks on demand (e.g. from the network).
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
+use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
+use reth_primitives::{SealedBlock, SealedBlockWithSenders};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},

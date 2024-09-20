@@ -42,6 +42,7 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
+    common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
     setup::build_networked_pipeline,
@@ -54,12 +55,20 @@ use crate::{
 pub struct EngineNodeLauncher {
     /// The task executor for the node.
     pub ctx: LaunchContext,
+
+    /// Temporary configuration for engine tree.
+    /// After engine is stabilized, this should be configured through node builder.
+    pub engine_tree_config: TreeConfig,
 }
 
 impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
-    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir) }
+    pub const fn new(
+        task_executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+        engine_tree_config: TreeConfig,
+    ) -> Self {
+        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
     }
 }
 
@@ -85,7 +94,7 @@ where
         self,
         target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
-        let Self { ctx } = self;
+        let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
@@ -124,7 +133,7 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
@@ -221,7 +230,7 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder().clone(),
-            TreeConfig::default(),
+            engine_tree_config,
             ctx.invalid_block_hook()?,
             ctx.sync_metrics_tx(),
         );
@@ -351,7 +360,7 @@ where
                     }
                     event =  eth_service.next() => {
                         let Some(event) = event else { break };
-                        debug!(target: "reth::cli", "Event: {event:?}");
+                        debug!(target: "reth::cli", "Event: {event}");
                         match event {
                             ChainEvent::BackfillSyncFinished => {
                                 network_handle.update_sync_state(SyncState::Idle);

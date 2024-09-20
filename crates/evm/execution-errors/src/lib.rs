@@ -14,7 +14,7 @@ extern crate alloc;
 use alloc::{boxed::Box, string::String};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use derive_more::Display;
+use derive_more::{Display, From};
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
@@ -137,7 +137,7 @@ impl std::error::Error for BlockValidationError {
 }
 
 /// `BlockExecutor` Errors
-#[derive(Debug, Display)]
+#[derive(Debug, From, Display)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     Validation(BlockValidationError),
@@ -179,24 +179,6 @@ impl BlockExecutionError {
     }
 }
 
-impl From<BlockValidationError> for BlockExecutionError {
-    fn from(error: BlockValidationError) -> Self {
-        Self::Validation(error)
-    }
-}
-
-impl From<ConsensusError> for BlockExecutionError {
-    fn from(error: ConsensusError) -> Self {
-        Self::Consensus(error)
-    }
-}
-
-impl From<InternalBlockExecutionError> for BlockExecutionError {
-    fn from(error: InternalBlockExecutionError) -> Self {
-        Self::Internal(error)
-    }
-}
-
 impl From<ProviderError> for BlockExecutionError {
     fn from(error: ProviderError) -> Self {
         InternalBlockExecutionError::from(error).into()
@@ -215,9 +197,10 @@ impl std::error::Error for BlockExecutionError {
 }
 
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
-#[derive(Display, Debug)]
+#[derive(Display, Debug, From)]
 pub enum InternalBlockExecutionError {
     /// Pruning error, transparently wrapping [`PruneSegmentError`]
+    #[from]
     Pruning(PruneSegmentError),
     /// Error when appending chain on fork is not possible
     #[display(
@@ -230,6 +213,7 @@ pub enum InternalBlockExecutionError {
         other_chain_fork: Box<BlockNumHash>,
     },
     /// Error when fetching latest block state.
+    #[from]
     LatestBlock(ProviderError),
     /// Arbitrary Block Executor Errors
     #[cfg(feature = "std")]
@@ -250,18 +234,6 @@ impl InternalBlockExecutionError {
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
-    }
-}
-
-impl From<PruneSegmentError> for InternalBlockExecutionError {
-    fn from(error: PruneSegmentError) -> Self {
-        Self::Pruning(error)
-    }
-}
-
-impl From<ProviderError> for InternalBlockExecutionError {
-    fn from(error: ProviderError) -> Self {
-        Self::LatestBlock(error)
     }
 }
 

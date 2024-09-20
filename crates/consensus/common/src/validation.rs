@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::{
@@ -25,7 +25,7 @@ pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> 
 
 /// Ensure the EIP-1559 base fee is set if the London hardfork is active.
 #[inline]
-pub fn validate_header_base_fee(
+pub fn validate_header_base_fee<ChainSpec: EthereumHardforks>(
     header: &Header,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -101,7 +101,7 @@ pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_pre_execution(
+pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
     block: &SealedBlock,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -218,7 +218,7 @@ pub fn validate_against_parent_hash_number(
 
 /// Validates the base fee against the parent and EIP-1559 rules.
 #[inline]
-pub fn validate_against_parent_eip1559_base_fee(
+pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + EthereumHardforks>(
     header: &Header,
     parent: &Header,
     chain_spec: &ChainSpec,
