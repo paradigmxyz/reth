@@ -4,7 +4,7 @@ mod cache;
 
 use std::{
     fs::File,
-    io::{BufReader, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     ops::ControlFlow,
     path::{Path, PathBuf},
 };
@@ -282,16 +282,18 @@ impl Wal {
 
         // Open the temporary file for writing and copy the notifications with unfinalized blocks
         let tmp_file_path = self.path.with_extension("tmp");
-        let mut new_file = File::create(&tmp_file_path)?;
+        let new_file = File::create(&tmp_file_path)?;
+        let mut file_reader = BufReader::new(&self.file);
+        let mut new_file_writer = BufWriter::new(&new_file);
         loop {
-            let mut buffer = [0; 4096];
-            let read = self.file.read(&mut buffer)?;
-            new_file.write_all(&buffer[..read])?;
-
-            if read < 1024 {
+            let buffer = file_reader.fill_buf()?;
+            if buffer.is_empty() {
                 break
             }
+
+            new_file_writer.write_all(buffer)?;
         }
+        new_file_writer.flush()?;
 
         let old_size = self.file.metadata()?.len();
         let new_size = new_file.metadata()?.len();
