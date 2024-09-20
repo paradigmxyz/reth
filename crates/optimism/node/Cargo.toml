@@ -28,7 +28,7 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
-reth-revm.workspace = true
+reth-revm = { workspace = true, features = ["std", "c-kzg"] }
 reth-evm-optimism.workspace = true
 reth-beacon-consensus.workspace = true
 reth-optimism-consensus.workspace = true
@@ -38,6 +38,9 @@ reth-rpc-eth-api.workspace = true
 reth-optimism-rpc.workspace = true
 reth-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
+
+# revm
+revm = { workspace = true, features = ["secp256k1", "blst"] }
 
 # ethereum
 alloy-primitives.workspace = true
