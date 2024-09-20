@@ -388,8 +388,8 @@ mod tests {
         let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
 
         fn prune_and_validate(
-            static_dir: &tempfile::TempDir,
             sf_rw: &StaticFileProvider,
+            static_dir: impl AsRef<Path>,
             segment: StaticFileSegment,
             prune_count: u64,
             last_block: u64,
@@ -420,7 +420,7 @@ mod tests {
 
             // Ensure the file count has reduced as expected
             assert_eyre(
-                fs::read_dir(&static_dir)?.count(),
+                fs::read_dir(static_dir)?.count(),
                 expected_file_count as usize,
                 "mismatch file count",
             )?;
@@ -464,8 +464,8 @@ mod tests {
                 test_cases.into_iter().enumerate()
             {
                 prune_and_validate(
-                    &static_dir,
                     &sf_rw,
+                    &static_dir,
                     segment,
                     prune_count,
                     last_block,
