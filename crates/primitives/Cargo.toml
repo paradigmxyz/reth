@@ -20,7 +20,10 @@ reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-chainspec = { workspace = true, optional = true }
 reth-codecs = { workspace = true, optional = true }
+
+# op-reth
 reth-optimism-chainspec = { workspace = true, optional = true }
+reth-optimism-forks = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -109,11 +112,11 @@ c-kzg = [
 ]
 optimism = [
     "reth-chainspec/optimism",
-    "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
     "reth-codecs?/optimism",
     "dep:reth-optimism-chainspec",
     "dep:op-alloy-consensus",
+    "reth-optimism-forks",
 ]
 alloy-compat = [
     "reth-primitives-traits/alloy-compat",

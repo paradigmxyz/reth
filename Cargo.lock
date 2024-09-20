@@ -730,9 +730,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.5.3"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a46c9c4fdccda7982e7928904bd85fe235a0404ee3d7e197fff13d61eac8b4f"
+checksum = "398a977d774db13446b8cead8cfa9517aebf9e03fc8a1512892dc1e03e70bb04"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -4410,7 +4410,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6463,6 +6463,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "reth-ethereum-forks",
  "reth-network-peers",
+ "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-trie-common",
  "serde",
@@ -7170,9 +7171,11 @@ name = "reth-ethereum-cli"
 version = "1.0.7"
 dependencies = [
  "alloy-genesis",
+ "clap",
  "eyre",
  "reth-chainspec",
  "reth-cli",
+ "reth-cli-commands",
  "serde_json",
  "shellexpand",
 ]
@@ -7308,6 +7311,7 @@ dependencies = [
  "reth-execution-types",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
+ "reth-optimism-forks",
  "reth-primitives",
  "reth-prune-types",
  "reth-revm",
@@ -7942,6 +7946,7 @@ dependencies = [
  "reth-node-builder",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
+ "reth-optimism-forks",
  "reth-optimism-payload-builder",
  "reth-optimism-rpc",
  "reth-payload-builder",
@@ -7983,6 +7988,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "reth-chainspec",
  "reth-ethereum-forks",
+ "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
 ]
@@ -8039,9 +8045,21 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-optimism-chainspec",
+ "reth-optimism-forks",
  "reth-primitives",
  "reth-trie-common",
  "tracing",
+]
+
+[[package]]
+name = "reth-optimism-forks"
+version = "1.0.7"
+dependencies = [
+ "alloy-chains",
+ "alloy-primitives",
+ "once_cell",
+ "reth-ethereum-forks",
+ "serde",
 ]
 
 [[package]]
@@ -8056,6 +8074,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-optimism",
  "reth-execution-types",
+ "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives",
@@ -8099,6 +8118,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
+ "reth-optimism-forks",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -8197,6 +8217,7 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-optimism-chainspec",
+ "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",
@@ -11175,7 +11196,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

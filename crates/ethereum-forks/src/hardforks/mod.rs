@@ -2,10 +2,6 @@
 mod ethereum;
 pub use ethereum::EthereumHardforks;
 
-/// Optimism helper methods
-mod optimism;
-pub use optimism::OptimismHardforks;
-
 use crate::{ForkCondition, Hardfork};
 #[cfg(feature = "std")]
 use rustc_hash::FxHashMap;

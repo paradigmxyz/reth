@@ -1,9 +1,6 @@
-use alloc::vec;
-
 use alloy_primitives::U256;
 use once_cell::sync::Lazy;
-
-use crate::{ChainHardforks, EthereumHardfork, ForkCondition};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
@@ -23,7 +20,13 @@ pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: None, total_difficulty: U256::ZERO },
         ),
+        (crate::OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
+        (crate::OptimismHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OptimismHardfork::Fjord.boxed(), ForkCondition::Timestamp(0)),
+        (crate::OptimismHardfork::Granite.boxed(), ForkCondition::Timestamp(0)),
     ])
 });

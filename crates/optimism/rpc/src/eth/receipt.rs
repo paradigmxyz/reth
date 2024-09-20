@@ -4,9 +4,10 @@ use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptE
 use op_alloy_rpc_types::{
     receipt::L1BlockInfo, OpTransactionReceipt, OptimismTransactionReceiptFields,
 };
-use reth_chainspec::{ChainSpec, OptimismHardforks};
+use reth_chainspec::ChainSpec;
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
