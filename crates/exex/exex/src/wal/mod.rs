@@ -15,6 +15,12 @@ use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
 
+/// The maximum number of blocks to cache.
+///
+/// [`CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million = 48
+/// megabytes.
+const MAX_CACHED_BLOCKS: usize = 1_000_000;
+
 #[derive(Debug)]
 pub(crate) struct Wal {
     /// The path to the WAL file.
@@ -37,15 +43,16 @@ impl Wal {
     /// Creates a new instance of [`Wal`].
     pub(crate) fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let path = directory.as_ref().join("latest.wal");
-        let file = Self::create_file(&path)?;
+        let file = Self::open_file(&path)?;
 
-        let mut wal = Self { path, file, block_cache: BlockCache::default() };
+        let mut wal = Self { path, file, block_cache: BlockCache::new(MAX_CACHED_BLOCKS) };
         wal.fill_block_cache(u64::MAX)?;
 
         Ok(wal)
     }
 
-    fn create_file(path: impl AsRef<Path>) -> std::io::Result<File> {
+    /// Opens a WAL file for reading and writing. If it doesn't exist, it will be created.
+    fn open_file(path: impl AsRef<Path>) -> std::io::Result<File> {
         File::options().read(true).write(true).create(true).truncate(false).open(&path)
     }
 
@@ -291,7 +298,7 @@ impl Wal {
 
         // Rename the temporary file to the WAL file and update the file handle with it
         reth_fs_util::rename(&tmp_file_path, &self.path)?;
-        self.file = Self::create_file(&self.path)?;
+        self.file = Self::open_file(&self.path)?;
 
         // Fill the block cache with the notifications from the new file.
         self.fill_block_cache(u64::MAX)?;

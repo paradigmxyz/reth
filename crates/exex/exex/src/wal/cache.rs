@@ -3,63 +3,64 @@ use std::collections::VecDeque;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 
-/// The maximum number of blocks to cache.
-///
-/// [`CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million = 48
-/// megabytes.
-const MAX_CACHED_BLOCKS: usize = 1_000_000;
-
 #[derive(Debug, Clone, Default)]
-pub(super) struct BlockCache(VecDeque<CachedBlock>);
+pub(super) struct BlockCache {
+    deque: VecDeque<CachedBlock>,
+    max_capacity: usize,
+}
 
 impl BlockCache {
+    pub(super) fn new(max_capacity: usize) -> Self {
+        Self { deque: VecDeque::with_capacity(max_capacity), max_capacity }
+    }
+
     /// Returns `true` if the cache is empty.
     pub(super) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.deque.is_empty()
     }
 
     /// Returns a front-to-back iterator.
     pub(super) fn iter(&self) -> std::collections::vec_deque::Iter<'_, CachedBlock> {
-        self.0.iter()
+        self.deque.iter()
     }
 
     /// Provides a reference to the first block from the cache, or `None` if the cache is
     /// empty.
     pub(super) fn front(&self) -> Option<&CachedBlock> {
-        self.0.front()
+        self.deque.front()
     }
 
     /// Provides a reference to the last block from the cache, or `None` if the cache is
     /// empty.
     pub(super) fn back(&self) -> Option<&CachedBlock> {
-        self.0.back()
+        self.deque.back()
     }
 
     /// Removes the first block from the cache and returns it, or `None` if
     /// the cache is empty.
     pub(super) fn pop_front(&mut self) -> Option<CachedBlock> {
-        self.0.pop_front()
+        self.deque.pop_front()
     }
 
     /// Removes the last block from the cache and returns it, or `None` if
     /// the cache is empty.
     pub(super) fn pop_back(&mut self) -> Option<CachedBlock> {
-        self.0.pop_back()
+        self.deque.pop_back()
     }
 
     /// Appends a block to the back of the cache.
     ///
     /// If the cache is full, the oldest block is removed from the front.
     pub(super) fn push_back(&mut self, block: CachedBlock) {
-        self.0.push_back(block);
-        if self.0.len() > MAX_CACHED_BLOCKS {
-            self.0.pop_front();
+        self.deque.push_back(block);
+        if self.deque.len() > self.max_capacity {
+            self.deque.pop_front();
         }
     }
 
     /// Clears the cache, removing all blocks
     pub(super) fn clear(&mut self) {
-        self.0.clear();
+        self.deque.clear();
     }
 
     /// Inserts the blocks from the notification into the cache at the given file offset.
@@ -113,5 +114,31 @@ pub(super) enum CachedBlockAction {
 impl CachedBlockAction {
     pub(super) const fn is_commit(&self) -> bool {
         matches!(self, Self::Commit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wal::cache::{BlockCache, CachedBlock, CachedBlockAction};
+
+    #[test]
+    fn test_eviction() {
+        let mut cache = BlockCache::new(1);
+
+        let cached_block_1 = CachedBlock {
+            file_offset: 0,
+            action: CachedBlockAction::Commit,
+            block: Default::default(),
+        };
+        cache.push_back(cached_block_1);
+
+        let cached_block_2 = CachedBlock {
+            file_offset: 1,
+            action: CachedBlockAction::Revert,
+            block: Default::default(),
+        };
+        cache.push_back(cached_block_2);
+
+        assert_eq!(cache.iter().collect::<Vec<_>>(), vec![&cached_block_2]);
     }
 }
