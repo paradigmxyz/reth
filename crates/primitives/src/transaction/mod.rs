@@ -940,10 +940,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSignedNoHash {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let tx_signed = TransactionSigned::arbitrary(u)?;
 
-        Ok(Self {
-            signature: tx_signed.signature.with_parity_bool(),
-            transaction: tx_signed.transaction,
-        })
+        Ok(Self { signature: tx_signed.signature, transaction: tx_signed.transaction })
     }
 }
 
@@ -1008,9 +1005,7 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
         };
 
         if matches!(transaction, Transaction::Legacy(_)) {
-            if let Some(chain_id) = transaction.chain_id() {
-                signature = signature.with_chain_id(chain_id)
-            }
+            signature = signature.with_parity(legacy_parity(&signature, transaction.chain_id()))
         }
 
         (Self { signature, transaction }, buf)
@@ -2065,7 +2060,7 @@ mod tests {
                 .unwrap(),
             U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
                 .unwrap(),
-            Parity::Parity(false),
+            Parity::Eip155(43),
         );
 
         let inputs: Vec<Vec<u8>> = vec![
