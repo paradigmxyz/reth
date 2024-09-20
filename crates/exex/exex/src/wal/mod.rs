@@ -18,19 +18,24 @@ use storage::Storage;
 /// = 48 megabytes.
 const MAX_CACHED_BLOCKS: usize = 1_000_000;
 
+/// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
+///
+/// WAL is backed by a binary file represented by [`Storage`] and a block cache represented by
+/// [`BlockCache`].
+///
+/// The expected mode of operation is as follows:
+/// 1. On every new canonical chain notification, call [`Wal::commit`].
+/// 2. When ExEx is on a wrong fork, rollback the WAL using [`Wal::rollback`]. The caller is
+///    expected to create reverts from the removed notifications and backfill the blocks between the
+///    returned block and the given rollback block. After that, commit new notifications as usual
+///    with [`Wal::commit`].
+/// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
+///    WAL.
 #[derive(Debug)]
 pub(crate) struct Wal {
     /// The underlying WAL storage backed by a file.
     storage: Storage,
-    /// The block cache of the WAL. Acts as a FIFO queue with a maximum size of
-    /// [`MAX_CACHED_BLOCKS`].
-    ///
-    /// For each notification written to the WAL, there will be an entry per block written to
-    /// the cache with the same file offset as the notification in the [`Storage`]. I.e. for each
-    /// notification, there may be multiple blocks in the cache.
-    ///
-    /// This cache is needed only for convenience, so we can avoid walking the [`Storage`] every
-    /// time we want to find a notification corresponding to a block.
+    /// WAL block cache. See [`cache::BlockCache`] docs for more details.
     block_cache: BlockCache,
 }
 
@@ -121,13 +126,13 @@ impl Wal {
     ///
     /// # Returns
     ///
-    /// The block number and hash of the lowest removed block. The caller is expected to backfill
-    /// the blocks between the returned block and the given `to_block`, if there's any.
+    /// 1. The block number and hash of the lowest removed block.
+    /// 2. The notifications that were removed.
     #[instrument(target = "exex::wal", skip(self))]
     pub(crate) fn rollback(
         &mut self,
         to_block: BlockNumHash,
-    ) -> eyre::Result<Option<BlockNumHash>> {
+    ) -> eyre::Result<Option<(BlockNumHash, Vec<ExExNotification>)>> {
         let mut truncate_to = None;
         let mut lowest_removed_block = None;
         loop {
@@ -173,15 +178,17 @@ impl Wal {
             truncate_to = Some(block.file_offset);
         }
 
-        if let Some(truncate_to) = truncate_to {
-            self.storage.truncate_to_offset(truncate_to)?;
+        let result = if let Some(truncate_to) = truncate_to {
+            let removed_notifications = self.storage.truncate_to_offset(truncate_to)?;
             debug!(?truncate_to, "Truncated the storage");
+            Some((lowest_removed_block.expect("qed"), removed_notifications))
         } else {
             debug!("No blocks were truncated. Block cache was filled.");
-        }
+            None
+        };
         self.fill_block_cache(u64::MAX)?;
 
-        Ok(lowest_removed_block)
+        Ok(result)
     }
 
     /// Finalizes the WAL to the given block, inclusive.
@@ -388,12 +395,19 @@ mod tests {
 
         // Now, rollback to block 1 and verify that both the block cache and the storage are
         // empty. We expect the rollback to delete the first notification (commit block 0, 1),
-        // because we can't delete blocks partly from the notification. Additionally, check that
-        // the block that the rolled back to is the block with number 0.
-        let rolled_back_to = wal.rollback((blocks[1].number, blocks[1].hash()).into())?;
+        // because we can't delete blocks partly from the notification, and also the second
+        // notification (revert block 1). Additionally, check that the block that the rolled
+        // back to is the block with number 0.
+        let rollback_result = wal.rollback((blocks[1].number, blocks[1].hash()).into())?;
         assert_eq!(wal.block_cache.iter().copied().collect::<Vec<_>>(), vec![]);
         assert_eq!(wal.storage.bytes_len()?, 0);
-        assert_eq!(rolled_back_to, Some((blocks[0].number, blocks[0].hash()).into()));
+        assert_eq!(
+            rollback_result,
+            Some((
+                (blocks[0].number, blocks[0].hash()).into(),
+                vec![committed_notification_1.clone(), reverted_notification.clone()]
+            ))
+        );
 
         // Commit notifications 1 and 2 again
         wal.commit(&committed_notification_1)?;

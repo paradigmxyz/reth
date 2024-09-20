@@ -3,6 +3,14 @@ use std::collections::VecDeque;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 
+/// The block cache of the WAL. Acts as a FIFO queue with a specified maximum size.
+///
+/// For each notification written to the WAL, there will be an entry per block written to
+/// the cache with the same file offset as the notification in the file. I.e. for each
+/// notification, there may be multiple blocks in the cache.
+///
+/// This cache is needed to avoid walking the file every time we want to find a notification
+/// corresponding to a block.
 #[derive(Debug)]
 pub(super) struct BlockCache {
     deque: VecDeque<CachedBlock>,

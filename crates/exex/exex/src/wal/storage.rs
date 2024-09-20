@@ -7,6 +7,15 @@ use std::{
 
 use reth_exex_types::ExExNotification;
 
+/// The underlying WAL storage backed by a file.
+///
+/// Each notification is written without any delimiters and structured as follows:
+/// ```text
+/// +--------------------------+----------------------------------+
+/// | little endian u32 length | MessagePack-encoded notification |
+/// +--------------------------+----------------------------------+
+/// ```
+/// The length is the length of the MessagePack-encoded notification in bytes.
 #[derive(Debug)]
 pub(super) struct Storage {
     /// The path to the WAL file.
@@ -73,9 +82,23 @@ impl Storage {
     }
 
     /// Truncates the underlying file to the given byte offset (exclusive).
-    pub(super) fn truncate_to_offset(&self, to_bytes_len: u64) -> eyre::Result<()> {
+    ///
+    /// # Returns
+    ///
+    /// Notifications that were removed.
+    pub(super) fn truncate_to_offset(
+        &mut self,
+        to_bytes_len: u64,
+    ) -> eyre::Result<Vec<ExExNotification>> {
+        let mut removed_notifications = Vec::new();
+        self.for_each_notification_from_offset(to_bytes_len, |_, notification| {
+            removed_notifications.push(notification);
+            Ok(ControlFlow::Continue(()))
+        })?;
+
         self.file.set_len(to_bytes_len)?;
-        Ok(())
+
+        Ok(removed_notifications)
     }
 
     /// Iterates over the notifications in the underlying file, decoding them and calling the
@@ -83,9 +106,17 @@ impl Storage {
     /// Stops when the closure returns [`ControlFlow::Break`], or the end of the file is reached.
     pub(super) fn for_each_notification(
         &mut self,
+        f: impl FnMut(usize, ExExNotification) -> eyre::Result<ControlFlow<()>>,
+    ) -> eyre::Result<()> {
+        self.for_each_notification_from_offset(0, f)
+    }
+
+    fn for_each_notification_from_offset(
+        &mut self,
+        file_offset: u64,
         mut f: impl FnMut(usize, ExExNotification) -> eyre::Result<ControlFlow<()>>,
     ) -> eyre::Result<()> {
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.seek(SeekFrom::Start(file_offset))?;
 
         let mut reader = BufReader::new(&self.file);
         loop {
@@ -115,6 +146,7 @@ impl Storage {
 
 fn write_notification(w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
     let data = rmp_serde::encode::to_vec(notification)?;
+    // Write the length of the notification as a u32 in little endian
     w.write_all(&(data.len() as u32).to_le_bytes())?;
     w.write_all(&data)?;
     w.flush()?;
