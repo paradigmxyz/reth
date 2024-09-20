@@ -157,7 +157,6 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
         let mut account_rlp = Vec::with_capacity(128);
-
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
                 TrieElement::Branch(node) => {
@@ -167,23 +166,9 @@ where
                     let (storage_root, _, updates) = match storage_roots_receivers
                         .remove(&hashed_address)
                     {
-                        Some(rx) => {
-                            match rx.await {
-                                Ok(result) => result?,
-                                Err(_) => {
-                                    // Channel closed unexpectedly, fall back to calculating now
-                                    tracker.inc_missed_leaves();
-                                    StorageRoot::new_hashed(
-                                        trie_cursor_factory.clone(),
-                                        hashed_cursor_factory.clone(),
-                                        hashed_address,
-                                        #[cfg(feature = "metrics")]
-                                        self.metrics.storage_trie.clone(),
-                                    )
-                                    .calculate(retain_updates)?
-                                }
-                            }
-                        }
+                        Some(rx) => rx.await.map_err(|_| {
+                            AsyncStateRootError::StorageRootChannelClosed { hashed_address }
+                        })??,
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
@@ -198,6 +183,7 @@ where
                             .calculate(retain_updates)?
                         }
                     };
+
                     if retain_updates {
                         trie_updates.insert_storage_updates(hashed_address, updates);
                     }
