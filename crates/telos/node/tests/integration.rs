@@ -1,3 +1,4 @@
+use alloy_provider::{Provider, ProviderBuilder};
 use antelope::api::client::{APIClient, DefaultProvider};
 use reth::{
     args::RpcServerArgs,
@@ -7,26 +8,32 @@ use reth::{
 use reth_chainspec::{ChainSpecBuilder, TEVMTESTNET};
 use reth_e2e_test_utils::node::NodeTestContext;
 use reth_node_telos::{TelosArgs, TelosNode};
+use reth_telos_rpc::TelosClient;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread::{sleep};
 use std::time::Duration;
-use alloy_provider::{Provider, ProviderBuilder};
-use telos_consensus_client::main_utils::{build_consensus_client};
-use telos_consensus_client::client::{ConsensusClient};
+use reqwest::Url;
+use telos_consensus_client::client::ConsensusClient;
 use telos_consensus_client::config::{AppConfig, CliArgs};
 use telos_consensus_client::data::Block;
 use telos_translator_rs::{block::TelosEVMBlock, types::translator_types::ChainId};
+use telos_consensus_client::main_utils::build_consensus_client;
 use telos_translator_rs::translator::Translator;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tokio::sync::mpsc;
+use tokio::time::sleep;
+
+pub mod live_test_runner;
 
 struct TelosRethNodeHandle {
     execution_port: u16,
     jwt_secret: String,
 }
+
+const CONTAINER_TAG: &str = "v0.1.9@sha256:6d4946f112e5c26712a938ea332b76e742035e64af93149227d97dd67e1a9012";
+const CONTAINER_LAST_EVM_BLOCK: u64 = 50;
 
 async fn start_ship() -> ContainerAsync<GenericImage> {
     // Change this container to a local image if using new ship data,
@@ -35,14 +42,13 @@ async fn start_ship() -> ContainerAsync<GenericImage> {
     // The tag for this image needs to come from the Github packages UI, under the "OS/Arch" tab
     //   and should be the tag for linux/amd64
     let container: ContainerAsync<GenericImage> = GenericImage::new(
-        "ghcr.io/telosnetwork/testcontainer-nodeos-evm",
-        "v0.1.9@sha256:6d4946f112e5c26712a938ea332b76e742035e64af93149227d97dd67e1a9012",
+        "ghcr.io/telosnetwork/testcontainer-nodeos-evm", CONTAINER_TAG
     )
-        .with_exposed_port(Tcp(8888))
-        .with_exposed_port(Tcp(18999))
-        .start()
-        .await
-        .unwrap();
+    .with_exposed_port(Tcp(8888))
+    .with_exposed_port(Tcp(18999))
+    .start()
+    .await
+    .unwrap();
 
     let port_8888 = container.get_host_port_ipv4(8888).await.unwrap();
 
@@ -86,7 +92,6 @@ fn init_reth() -> eyre::Result<(NodeConfig, String)> {
     let mut rpc_config = RpcServerArgs::default().with_unused_ports().with_http();
     rpc_config.auth_jwtsecret = Some(PathBuf::from("tests/assets/jwt.hex"));
 
-    //let _jwt = rpc_config.auth_server_config(JwtSecret::random());
     // Node setup
     let node_config = NodeConfig::test().with_chain(chain_spec).with_rpc(rpc_config.clone());
 
@@ -98,7 +103,7 @@ async fn build_consensus_and_translator(
     reth_handle: TelosRethNodeHandle,
     ship_port: u16,
     chain_port: u16,
-) -> (ConsensusClient, Translator, Option<Block>) {
+) -> (ConsensusClient, Translator) {
     let config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: ChainId(41),
@@ -120,17 +125,13 @@ async fn build_consensus_and_translator(
         retry_interval: None,
     };
 
-    let cli_args = CliArgs {
-        config: "".to_string(),
-        clean: true,
-    };
+    let cli_args = CliArgs { config: "".to_string(), clean: true };
 
-    let (c, lib) = build_consensus_client(&cli_args, config.clone()).await.unwrap();
-    let translator = Translator::new((&config).into());
+    let c = build_consensus_client(&cli_args, config).await.unwrap();
+    let translator = Translator::new((&c.config).into());
 
-    (c, translator, lib)
+    (c, translator)
 }
-
 
 #[tokio::test]
 async fn testing_chain_sync() {
@@ -149,16 +150,23 @@ async fn testing_chain_sync() {
     reth_tracing::init_test_tracing();
 
     let telos_args = TelosArgs {
-        telos_endpoint: None,
-        signer_account: None,
-        signer_permission: None,
-        signer_key: None,
+        telos_endpoint: Some(format!("http://localhost:{chain_port}")),
+        signer_account: Some("rpc.evm".to_string()),
+        signer_permission: Some("active".to_string()),
+        signer_key: Some("5Jr65kdYmn33C3UabzhmWDm2PuqbRfPuDStts3ZFNSBLM7TqaiL".to_string()),
         gas_cache_seconds: None,
     };
 
     let node_handle = NodeBuilder::new(node_config.clone())
         .testing_node(exec)
-        .node(TelosNode::new(telos_args))
+        .node(TelosNode::new(telos_args.clone()))
+        .extend_rpc_modules(move |ctx| {
+            if telos_args.telos_endpoint.is_some() {
+                ctx.registry.eth_api().set_telos_client(TelosClient::new(telos_args.into()));
+            }
+
+            Ok(())
+        })
         .launch()
         .await
         .unwrap();
@@ -169,43 +177,48 @@ async fn testing_chain_sync() {
     println!("Starting Reth on RPC port {}!", rpc_port);
     let _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     println!("Starting consensus on RPC port {}!", rpc_port);
-
-    let (client, translator, lib) = build_consensus_and_translator(reth_handle, ship_port, chain_port).await;
+    let (client, translator) =
+        build_consensus_and_translator(reth_handle, ship_port, chain_port).await;
 
     let consensus_shutdown = client.shutdown_handle();
     let translator_shutdown = translator.shutdown_handle();
 
     let (block_sender, block_receiver) = mpsc::channel::<TelosEVMBlock>(1000);
 
+    println!("Telos consensus client starting, awaiting result...");
+    let client_handle = tokio::spawn(client.run(block_receiver));
+
     println!("Telos translator client is starting...");
     let translator_handle = tokio::spawn(translator.launch(Some(block_sender)));
 
-    println!("Telos consensus client starting, awaiting result...");
-    let client_handle = tokio::spawn(client.run(block_receiver, lib));
-    let rpc_url = format!("http://localhost:{}", rpc_port).parse().unwrap();
-    let provider = ProviderBuilder::new().on_http(rpc_url);
+    let rpc_url = Url::from(format!("http://localhost:{}", rpc_port).parse().unwrap());
+    let provider = ProviderBuilder::new().on_http(rpc_url.clone());
 
-    let shutdown_handle = tokio::spawn(async move {
-        // todo wait time or anything else to wait for shutdown
-        println!("Waiting to send shutdown signal...");
+    // todo wait time or anything else to wait for shutdown
+    println!("Waiting to send shutdown signal...");
 
-        loop {
-            sleep(Duration::from_secs(1));
-            let latest_block = provider.get_block_number().await.unwrap();
-            println!("Latest block: {latest_block}");
-            if latest_block > 80 {
-                break;
-            }
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let latest_block = provider.get_block_number().await.unwrap();
+        println!("Latest block: {latest_block}");
+        if client_handle.is_finished() {
+            _ = translator_shutdown.shutdown().await.unwrap();
+            break;
         }
+        if latest_block > CONTAINER_LAST_EVM_BLOCK {
+            _ = translator_shutdown.shutdown().await.unwrap();
+            _ = consensus_shutdown.shutdown().await.unwrap();
+            break;
+        }
+    }
 
-        _ = translator_shutdown.shutdown().await.unwrap();
-        _ = translator_handle.await.unwrap();
-        println!("Translator shutdown done.");
-        _ = consensus_shutdown.shutdown().await.unwrap();
-    });
-
-
-    _ = client_handle.await.unwrap();
+    _ = tokio::join!(client_handle, translator_handle);
+    println!("Translator shutdown done.");
     println!("Client shutdown done.");
-    shutdown_handle.await.unwrap();
+
+    live_test_runner::run_tests(
+        &rpc_url.clone().to_string(),
+        "87ef69a835f8cd0c44ab99b7609a20b2ca7f1c8470af4f0e5b44db927d542084",
+    )
+    .await;
 }

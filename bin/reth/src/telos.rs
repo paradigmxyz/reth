@@ -28,15 +28,11 @@ fn main() {
         let handle = builder
             .node(TelosNode::new(telos_args.clone()))
             .extend_rpc_modules(move |ctx| {
-                // register sequencer tx forwarder
-                // if telos_args.telos_endpoint.is_some() {
-                //     ctx.registry
-                //         .eth_api()
-                //         .set_telos_client(TelosClient::new(telos_args.clone()));
-                //     // ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(TelosClient::new(
-                //     //     telos_args,
-                //     // )));
-                // }
+                if telos_args.telos_endpoint.is_some() {
+                    ctx.registry
+                        .eth_api()
+                        .set_telos_client(TelosClient::new(telos_args.into()));
+                }
 
                 Ok(())
             })

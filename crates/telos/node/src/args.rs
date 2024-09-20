@@ -1,5 +1,7 @@
 //! clap [Args](clap::Args) for telos configuration
 
+use reth_telos_rpc::eth::telos_client::TelosClientArgs;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[clap(next_help_heading = "Telos")]
 /// Telos arguments
@@ -23,6 +25,17 @@ pub struct TelosArgs {
     /// Seconds to cache gas price
     #[arg(long = "telos.gas_cache_seconds")]
     pub gas_cache_seconds: Option<u32>,
+}
+
+impl From<TelosArgs> for TelosClientArgs {
+    fn from(args: TelosArgs) -> Self {
+        TelosClientArgs {
+            telos_endpoint: args.telos_endpoint,
+            signer_account: args.signer_account,
+            signer_permission: args.signer_permission,
+            signer_key: args.signer_key,
+        }
+    }
 }
 
 #[cfg(test)]

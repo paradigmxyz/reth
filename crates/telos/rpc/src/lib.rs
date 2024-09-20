@@ -1,5 +1,6 @@
 //! /// A Telos client to interact with a Sequencer
 
-mod client;
+pub mod error;
+pub mod eth;
 
-pub use crate::client::TelosClient;
+pub use eth::telos_client::TelosClient;
