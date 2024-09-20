@@ -277,7 +277,7 @@ mod tests {
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                    Parity::Parity(true),
+                    Parity::Eip155(44),
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -323,7 +323,7 @@ mod tests {
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    Parity::Eip155(43),
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -345,7 +345,7 @@ mod tests {
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    Parity::Eip155(43),
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -367,7 +367,7 @@ mod tests {
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    Parity::Eip155(43),
                 ),
             ),
         ];

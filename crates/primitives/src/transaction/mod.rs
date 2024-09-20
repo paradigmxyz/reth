@@ -1305,7 +1305,7 @@ impl TransactionSigned {
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
-        Ok((transaction, hash, signature.with_parity_bool()))
+        Ok((transaction, hash, signature))
     }
 
     /// Decodes legacy transaction from the data buffer.
@@ -1547,15 +1547,13 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         let mut signature = Signature::arbitrary(u)?;
 
         signature = if matches!(transaction, Transaction::Legacy(_)) {
-            signature.with_parity(alloy_primitives::Parity::Parity(bool::arbitrary(u)?))
-        } else {
-            signature.with_parity(alloy_primitives::Parity::Eip155(u64::arbitrary(u)?));
-
             if let Some(chain_id) = transaction.chain_id() {
-                signature = signature.with_chain_id(chain_id);
+                signature.with_chain_id(chain_id)
+            } else {
+                signature.with_parity(alloy_primitives::Parity::NonEip155(bool::arbitrary(u)?))
             }
-
-            signature
+        } else {
+            signature.with_parity_bool()
         };
 
         #[cfg(feature = "optimism")]

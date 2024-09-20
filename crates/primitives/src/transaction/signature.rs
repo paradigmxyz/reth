@@ -31,10 +31,8 @@ pub(crate) fn decode_with_eip155_chain_id(
     // transactions with an empty signature
     //
     // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-    if matches!(v, Parity::Parity(false)) {
-        if r.is_zero() && s.is_zero() {
-            return Ok((Signature::new(r, s, Parity::Parity(false)), None))
-        }
+    if matches!(v, Parity::Parity(false)) && r.is_zero() && s.is_zero() {
+        return Ok((Signature::new(r, s, Parity::Parity(false)), None))
     }
 
     Ok((Signature::new(r, s, v), v.chain_id()))
