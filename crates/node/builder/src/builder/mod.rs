@@ -5,7 +5,7 @@
 pub mod add_ons;
 mod states;
 
-use reth_rpc_types::WithOtherFields;
+use alloy_rpc_types::serde_helpers::WithOtherFields;
 pub use states::*;
 
 use std::sync::Arc;
@@ -348,7 +348,7 @@ where
                     >
                         + FullEthApiServer<
                             NetworkTypes: alloy_network::Network<
-                                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
                                 ReceiptResponse = AnyTransactionReceipt,
                             >,
                         >
@@ -499,7 +499,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
                 ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,

@@ -11,6 +11,7 @@ pub use exex::ExExLauncher;
 
 use std::{future::Future, sync::Arc};
 
+use alloy_rpc_types::{engine::ClientVersionV1, serde_helpers::WithOtherFields};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -38,7 +39,6 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -116,7 +116,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
                 ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,

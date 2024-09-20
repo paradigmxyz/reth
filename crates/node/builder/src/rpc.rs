@@ -5,6 +5,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use alloy_rpc_types::serde_helpers::WithOtherFields;
 use futures::TryFutureExt;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
@@ -25,7 +26,6 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
-use reth_rpc_types::WithOtherFields;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
@@ -308,7 +308,7 @@ where
     EthApi: EthApiBuilderProvider<Node>
         + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
                 ReceiptResponse = AnyTransactionReceipt,
             >,
         >,

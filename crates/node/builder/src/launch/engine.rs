@@ -1,5 +1,6 @@
 //! Engine node related functionality.
 
+use alloy_rpc_types::{engine::ClientVersionV1, serde_helpers::WithOtherFields};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -34,7 +35,6 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -83,7 +83,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
                 ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,

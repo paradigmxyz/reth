@@ -925,9 +925,9 @@ where
                 // Verify that the healthy node is running the same chain as the current node.
                 let chain_id = futures::executor::block_on(async {
                     EthApiClient::<
-                        reth_rpc_types::Transaction,
-                        reth_rpc_types::Block,
-                        reth_rpc_types::Receipt,
+                        alloy_rpc_types::Transaction,
+                        alloy_rpc_types::Block,
+                        alloy_rpc_types::Receipt,
                     >::chain_id(&client)
                     .await
                 })?
