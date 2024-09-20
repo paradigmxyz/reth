@@ -3,14 +3,16 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_errors::ProviderError;
 use reth_evm::{
+    execute::{BlockExecutorProvider, EvmExecutor, Executor},
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvmEnv,
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
-    StateProviderFactory, TransactionVariant,
+    StateProviderBox, StateProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -32,15 +34,15 @@ use reth_rpc_types::{
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::CacheDB,
+    db::{CacheDB, EmptyDB},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     StateBuilder,
 };
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use revm_primitives::{keccak256, HashMap};
-use std::sync::Arc;
+use revm_primitives::{db::Database, keccak256, HashMap};
+use std::{fmt::Display, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -65,6 +67,14 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
     }
 }
 
+impl<Provider, Eth> DebugApi<Provider, Eth>
+where
+    Provider: BlockReaderIdExt + BlockExecutorProvider + 'static,
+    <Provider as BlockExecutorProvider>::Executor<StateProviderDatabase<StateProviderBox>>:
+        EvmExecutor<StateProviderDatabase<StateProviderBox>>,
+{
+}
+
 // === impl DebugApi ===
 
 impl<Provider, Eth> DebugApi<Provider, Eth>
@@ -74,6 +84,7 @@ where
         + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
+        + BlockExecutorProvider
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
 {
@@ -578,7 +589,7 @@ where
             self.inner.eth_api.evm_env_at(block_id.into()),
             self.inner.eth_api.block_with_senders(block_id.into()),
         )?;
-        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
+        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id.into()))?.unseal();
 
         let this = self.clone();
 
@@ -586,95 +597,106 @@ where
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
                 let evm_config = Call::evm_config(this.eth_api()).clone();
-                let mut db =
-                    StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
 
-                pre_block_beacon_root_contract_call(
-                    &mut db,
-                    &evm_config,
-                    &this.inner.provider.chain_spec(),
-                    &cfg,
-                    &block_env,
-                    block.parent_beacon_block_root,
-                )
-                .map_err(|err| EthApiError::Internal(err.into()))?;
+                let mut outcome = this
+                    .inner
+                    .provider
+                    .executor(StateProviderDatabase::new(&state))
+                    .execute((&block, U256::MAX).into())
+                    .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                // apply eip-2935 blockhashes update
-                pre_block_blockhashes_contract_call(
-                    &mut db,
-                    &evm_config,
-                    &this.inner.provider.chain_spec(),
-                    &cfg,
-                    &block_env,
-                    block.parent_hash,
-                )
-                .map_err(|err| EthApiError::Internal(err.into()))?;
-
-                // Re-execute all of the transactions in the block to load all touched accounts into
-                // the cache DB.
-                for tx in block.into_transactions_ecrecovered() {
-                    let env = EnvWithHandlerCfg {
-                        env: Env::boxed(
-                            cfg.cfg_env.clone(),
-                            block_env.clone(),
-                            evm_config.tx_env(&tx),
-                        ),
-                        handler_cfg: cfg.handler_cfg,
-                    };
-
-                    let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
-                    db.commit(res.state);
-                }
-
-                // No need to merge transitions and create the bundle state, we will use Revm's
-                // cache directly.
-
-                // Initialize a map of preimages.
-                let mut state_preimages = HashMap::new();
-
-                // Grab all account proofs for the data accessed during block execution.
+                // let mut db =
+                //     StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
                 //
-                // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
-                // referenced accounts + storage slots. Cache is a superset of `BundleState`, so we
-                // can just query it to get the latest state of all accounts and storage slots.
-                let mut hashed_state = HashedPostState::default();
-                for (address, account) in db.cache.accounts {
-                    let hashed_address = keccak256(address);
-                    hashed_state.accounts.insert(
-                        hashed_address,
-                        account.account.as_ref().map(|a| a.info.clone().into()),
-                    );
+                // pre_block_beacon_root_contract_call(
+                //     &mut db,
+                //     &evm_config,
+                //     &this.inner.provider.chain_spec(),
+                //     &cfg,
+                //     &block_env,
+                //     block.parent_beacon_block_root,
+                // )
+                // .map_err(|err| EthApiError::Internal(err.into()))?;
+                //
+                // // apply eip-2935 blockhashes update
+                // pre_block_blockhashes_contract_call(
+                //     &mut db,
+                //     &evm_config,
+                //     &this.inner.provider.chain_spec(),
+                //     &cfg,
+                //     &block_env,
+                //     block.parent_hash,
+                // )
+                // .map_err(|err| EthApiError::Internal(err.into()))?;
+                //
+                // // Re-execute all of the transactions in the block to load all touched accounts
+                // into // the cache DB.
+                // for tx in block.into_transactions_ecrecovered() {
+                //     let env = EnvWithHandlerCfg {
+                //         env: Env::boxed(
+                //             cfg.cfg_env.clone(),
+                //             block_env.clone(),
+                //             evm_config.tx_env(&tx),
+                //         ),
+                //         handler_cfg: cfg.handler_cfg,
+                //     };
+                //
+                //     let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
+                //     db.commit(res.state);
+                // }
+                //
+                // // No need to merge transitions and create the bundle state, we will use Revm's
+                // // cache directly.
+                //
+                // // Initialize a map of preimages.
+                // let mut state_preimages = HashMap::new();
+                //
+                // // Grab all account proofs for the data accessed during block execution.
+                // //
+                // // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
+                // // referenced accounts + storage slots. Cache is a superset of `BundleState`, so
+                // we // can just query it to get the latest state of all accounts
+                // and storage slots. let mut hashed_state =
+                // HashedPostState::default(); for (address, account) in
+                // db.cache.accounts {     let hashed_address = keccak256(address);
+                //     hashed_state.accounts.insert(
+                //         hashed_address,
+                //         account.account.as_ref().map(|a| a.info.clone().into()),
+                //     );
+                //
+                //     let storage = hashed_state
+                //         .storages
+                //         .entry(hashed_address)
+                //         .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
+                //
+                //     if let Some(account) = account.account {
+                //         if include_preimages {
+                //             state_preimages
+                //                 .insert(hashed_address, alloy_rlp::encode(address).into());
+                //         }
+                //
+                //         for (slot, value) in account.storage {
+                //             let slot = B256::from(slot);
+                //             let hashed_slot = keccak256(slot);
+                //             storage.storage.insert(hashed_slot, value);
+                //
+                //             if include_preimages {
+                //                 state_preimages.insert(hashed_slot,
+                // alloy_rlp::encode(slot).into());             }
+                //         }
+                //     }
+                // }
+                //
+                // // Generate an execution witness for the aggregated state of accessed accounts.
+                // // Destruct the cache database to retrieve the state provider.
+                // let state_provider = db.database.into_inner();
+                // let state =
+                //     state_provider.witness(Default::default(),
+                // hashed_state).map_err(Into::into)?;
 
-                    let storage = hashed_state
-                        .storages
-                        .entry(hashed_address)
-                        .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
-
-                    if let Some(account) = account.account {
-                        if include_preimages {
-                            state_preimages
-                                .insert(hashed_address, alloy_rlp::encode(address).into());
-                        }
-
-                        for (slot, value) in account.storage {
-                            let slot = B256::from(slot);
-                            let hashed_slot = keccak256(slot);
-                            storage.storage.insert(hashed_slot, value);
-
-                            if include_preimages {
-                                state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
-                            }
-                        }
-                    }
-                }
-
-                // Generate an execution witness for the aggregated state of accessed accounts.
-                // Destruct the cache database to retrieve the state provider.
-                let state_provider = db.database.into_inner();
-                let state =
-                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
-
-                Ok(ExecutionWitness { state, keys: include_preimages.then_some(state_preimages) })
+                // Ok(ExecutionWitness { state, keys: include_preimages.then_some(state_preimages)
+                // })
+                todo!()
             })
             .await
     }
@@ -812,6 +834,7 @@ where
         + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
+        + BlockExecutorProvider
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
 {
