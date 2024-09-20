@@ -1,13 +1,17 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_primitives::{Bytes, B256};
+use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError,
+    FromEthApiError, FullEthApiTypes, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_rpc_types::TransactionInfo;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
@@ -54,7 +58,7 @@ where
 
 impl<N> LoadTransaction for OpEthApi<N>
 where
-    Self: SpawnBlocking,
+    Self: SpawnBlocking + FullEthApiTypes,
     N: FullNodeComponents,
 {
     type Pool = N::Pool;
@@ -87,5 +91,36 @@ where
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
         self.sequencer_client.get().cloned()
+    }
+}
+
+/// Builds OP transaction response type.
+#[derive(Clone, Debug, Copy)]
+pub struct OpTxBuilder;
+
+impl TransactionCompat for OpTxBuilder {
+    type Transaction = Transaction;
+
+    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+        let signed_tx = tx.clone().into_signed();
+
+        let inner = EthTxBuilder::fill(tx, tx_info).inner;
+
+        Transaction {
+            inner,
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint(),
+            // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
+            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+            deposit_receipt_version: None, // todo: how to fill this field?
+        }
+    }
+
+    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
+        tx.inner.input = tx.inner.input.slice(..4);
+    }
+
+    fn tx_type(tx: &Self::Transaction) -> u8 {
+        tx.inner.transaction_type.unwrap_or_default()
     }
 }

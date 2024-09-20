@@ -7714,7 +7714,6 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.0.7"
 dependencies = [
- "alloy-network",
  "alloy-primitives",
  "aquamarine",
  "eyre",
@@ -8086,6 +8085,7 @@ name = "reth-optimism-rpc"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "derive_more",
  "jsonrpsee-types",
  "op-alloy-consensus",
  "op-alloy-network",
@@ -8352,7 +8352,6 @@ name = "reth-rpc"
 version = "1.0.7"
 dependencies = [
  "alloy-dyn-abi",
- "alloy-eips",
  "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
@@ -8566,6 +8565,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-sol-types",
  "derive_more",
  "futures",
@@ -8580,6 +8580,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
+ "reth-provider",
  "reth-revm",
  "reth-rpc-server-types",
  "reth-rpc-types",

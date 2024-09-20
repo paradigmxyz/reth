@@ -15,7 +15,6 @@ use reth_node_core::{
     rpc::{
         api::EngineApiServer,
         eth::{EthApiTypes, FullEthApiServer},
-        types::AnyTransactionReceipt,
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
@@ -25,7 +24,6 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
-use reth_rpc_types::WithOtherFields;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
@@ -305,13 +303,7 @@ pub async fn launch_rpc_servers<Node, Engine, EthApi>(
 where
     Node: FullNodeComponents<Types: NodeTypesWithDB<ChainSpec = ChainSpec>> + Clone,
     Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
-    EthApi: EthApiBuilderProvider<Node>
-        + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-                ReceiptResponse = AnyTransactionReceipt,
-            >,
-        >,
+    EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;
     let module_config = config.rpc.transport_rpc_module_config();
@@ -386,15 +378,15 @@ where
 pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> + EthApiTypes {
     /// Returns the eth api builder.
     #[allow(clippy::type_complexity)]
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Self>) -> Self + Send>;
 }
 
 impl<N, F> EthApiBuilderProvider<N> for F
 where
     N: FullNodeComponents,
-    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>> + EthApiTypes,
+    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N, Self>> + EthApiTypes,
 {
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Self>) -> Self + Send> {
         F::builder()
     }
 }
