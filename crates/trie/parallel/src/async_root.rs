@@ -3,8 +3,6 @@ use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
-use itertools::Itertools;
-use rayon::prelude::*;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
@@ -20,6 +18,7 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tracing::*;
 
 /// Async state root calculator.
@@ -91,13 +90,11 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::async_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
 
-        let storage_roots: Vec<_> = storage_root_targets
+        let mut storage_roots_receivers: HashMap<
+            B256,
+            oneshot::Receiver<Result<_, AsyncStateRootError>>,
+        > = storage_root_targets
             .into_iter()
-            .sorted_unstable_by_key(|(address, _)| *address)
-            .collect();
-
-        let storage_roots_results: Vec<_> = storage_roots
-            .into_par_iter()
             .map(|(hashed_address, prefix_set)| {
                 let view = self.view.clone();
                 let hashed_state_sorted = hashed_state_sorted.clone();
@@ -105,35 +102,35 @@ where
                 #[cfg(feature = "metrics")]
                 let metrics = self.metrics.storage_trie.clone();
 
-                let result = (|| -> Result<_, AsyncStateRootError> {
-                    let provider_ro = view.provider_ro()?;
-                    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                        &trie_nodes_sorted,
-                    );
-                    let hashed_state = HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                        &hashed_state_sorted,
-                    );
-                    Ok(StorageRoot::new_hashed(
-                        trie_cursor_factory,
-                        hashed_state,
-                        hashed_address,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                    )
-                    .with_prefix_set(prefix_set)
-                    .calculate(retain_updates)?)
-                })();
+                let (tx, rx) = oneshot::channel();
 
-                (hashed_address, result)
+                rayon::spawn_fifo(move || {
+                    let result = (|| -> Result<_, AsyncStateRootError> {
+                        let provider_ro = view.provider_ro()?;
+                        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                            &trie_nodes_sorted,
+                        );
+                        let hashed_state = HashedPostStateCursorFactory::new(
+                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                            &hashed_state_sorted,
+                        );
+                        Ok(StorageRoot::new_hashed(
+                            trie_cursor_factory,
+                            hashed_state,
+                            hashed_address,
+                            #[cfg(feature = "metrics")]
+                            metrics,
+                        )
+                        .with_prefix_set(prefix_set)
+                        .calculate(retain_updates)?)
+                    })();
+                    let _ = tx.send(result);
+                });
+
+                (hashed_address, rx)
             })
             .collect();
-
-        let mut storage_roots = HashMap::with_capacity(storage_roots_results.len());
-        for (hashed_address, result) in storage_roots_results {
-            storage_roots.insert(hashed_address, result);
-        }
 
         trace!(target: "trie::async_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
@@ -160,16 +157,33 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
         let mut account_rlp = Vec::with_capacity(128);
+
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
-                        Some(result) => result.map_err(|_| {
-                            AsyncStateRootError::StorageRootChannelClosed { hashed_address }
-                        })?,
+                    let (storage_root, _, updates) = match storage_roots_receivers
+                        .remove(&hashed_address)
+                    {
+                        Some(rx) => {
+                            match rx.await {
+                                Ok(result) => result?,
+                                Err(_) => {
+                                    // Channel closed unexpectedly, fall back to calculating now
+                                    tracker.inc_missed_leaves();
+                                    StorageRoot::new_hashed(
+                                        trie_cursor_factory.clone(),
+                                        hashed_cursor_factory.clone(),
+                                        hashed_address,
+                                        #[cfg(feature = "metrics")]
+                                        self.metrics.storage_trie.clone(),
+                                    )
+                                    .calculate(retain_updates)?
+                                }
+                            }
+                        }
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
@@ -184,7 +198,6 @@ where
                             .calculate(retain_updates)?
                         }
                     };
-
                     if retain_updates {
                         trie_updates.insert_storage_updates(hashed_address, updates);
                     }
