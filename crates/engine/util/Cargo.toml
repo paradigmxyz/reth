@@ -50,5 +50,4 @@ tracing.workspace = true
 [features]
 optimism = [
     "reth-beacon-consensus/optimism",
-    "reth-ethereum-forks/optimism"
 ]

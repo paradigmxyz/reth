@@ -16,7 +16,7 @@ mod dev;
 pub use dev::DEV_HARDFORKS;
 pub use hardfork::OptimismHardfork;
 
-use reth_ethereum_forks::{ChainHardforks, EthereumHardforks};
+use reth_ethereum_forks::Hardforks;
 
 /// Extends [`crate::EthereumHardforks`] with optimism helper methods.
 pub trait OptimismHardforks: Hardforks {

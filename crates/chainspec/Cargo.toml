@@ -48,7 +48,6 @@ op-alloy-rpc-types.workspace = true
 [features]
 default = ["std"]
 optimism = [
-    "reth-ethereum-forks/optimism",
     "serde",
     "dep:op-alloy-rpc-types",
     "reth-optimism-forks",
