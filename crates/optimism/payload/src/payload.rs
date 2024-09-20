@@ -2,17 +2,14 @@
 
 //! Optimism builder support
 
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
-    transaction::WithEncoded,
-    Address, BlobTransactionSidecar, Header, Receipt, SealedBlock, TransactionSigned, Withdrawals,
-    B256, U256,
+    transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
 /// Re-export for use in downstream arguments.
 pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
@@ -24,7 +21,6 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
     convert_block_to_payload_field_v2,
 };
-use revm::primitives::HandlerCfg;
 use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
@@ -106,59 +102,6 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
     }
-
-    fn cfg_and_block_env(
-        &self,
-        chain_spec: &ChainSpec,
-        parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // configure evm env based on parent block
-        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
-
-        // ensure we're not missing any timestamp based hardforks
-        let spec_id = revm_spec_by_timestamp_after_bedrock(chain_spec, self.timestamp());
-
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id.is_enabled_in(SpecId::CANCUN) {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(BlobExcessGasAndPrice::new);
-
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
-            coinbase: self.suggested_fee_recipient(),
-            timestamp: U256::from(self.timestamp()),
-            difficulty: U256::ZERO,
-            prevrandao: Some(self.prev_randao()),
-            gas_limit: U256::from(parent.gas_limit),
-            // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()))
-                    .unwrap_or_default(),
-            ),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
-        };
-
-        let cfg_with_handler_cfg;
-        {
-            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
-                cfg_env: cfg,
-                handler_cfg: HandlerCfg { spec_id, is_optimism: true },
-            };
-        }
-
-        (cfg_with_handler_cfg, block_env)
-    }
 }
 
 /// Contains the built payload.
@@ -179,8 +122,6 @@ pub struct OptimismBuiltPayload {
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// The payload attributes.
     pub(crate) attributes: OptimismPayloadBuilderAttributes,
-    /// The receipts of the block
-    pub(crate) receipts: Vec<Receipt>,
 }
 
 // === impl BuiltPayload ===
@@ -194,18 +135,8 @@ impl OptimismBuiltPayload {
         chain_spec: Arc<ChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
-        receipts: Vec<Receipt>,
     ) -> Self {
-        Self {
-            id,
-            block,
-            executed_block,
-            fees,
-            sidecars: Vec::new(),
-            chain_spec,
-            attributes,
-            receipts,
-        }
+        Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
 
     /// Returns the identifier of the payload.
@@ -241,10 +172,6 @@ impl BuiltPayload for OptimismBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
-
-    fn receipts(&self) -> &[Receipt] {
-        &self.receipts
-    }
 }
 
 impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
@@ -258,10 +185,6 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
-    }
-
-    fn receipts(&self) -> &[Receipt] {
-        &self.receipts
     }
 }
 

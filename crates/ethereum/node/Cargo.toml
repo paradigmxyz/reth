@@ -28,6 +28,7 @@ reth-beacon-consensus.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
 reth-chainspec.workspace = true
+reth-primitives.workspace = true
 
 # misc
 eyre.workspace = true

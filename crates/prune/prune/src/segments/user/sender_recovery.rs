@@ -1,10 +1,10 @@
 use crate::{
+    db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::tables;
-use reth_db_api::database::Database;
-use reth_provider::{DatabaseProviderRW, TransactionsProvider};
+use reth_db::{tables, transaction::DbTxMut};
+use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -21,7 +21,10 @@ impl SenderRecovery {
     }
 }
 
-impl<DB: Database> Segment<DB> for SenderRecovery {
+impl<Provider> Segment<Provider> for SenderRecovery
+where
+    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+{
     fn segment(&self) -> PruneSegment {
         PruneSegment::SenderRecovery
     }
@@ -35,11 +38,7 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
@@ -52,12 +51,13 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = tx_range_end;
-        let (pruned, done) = provider.prune_table_with_range::<tables::TransactionSenders>(
-            tx_range,
-            &mut limiter,
-            |_| false,
-            |row| last_pruned_transaction = row.0,
-        )?;
+        let (pruned, done) =
+            provider.tx_ref().prune_table_with_range::<tables::TransactionSenders>(
+                tx_range,
+                &mut limiter,
+                |_| false,
+                |row| last_pruned_transaction = row.0,
+            )?;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction senders");
 
         let last_pruned_block = provider
@@ -90,7 +90,7 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
@@ -179,7 +179,7 @@ mod tests {
                 .into_inner()
                 .0;
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 

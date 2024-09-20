@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::{
@@ -25,7 +25,7 @@ pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> 
 
 /// Ensure the EIP-1559 base fee is set if the London hardfork is active.
 #[inline]
-pub fn validate_header_base_fee(
+pub fn validate_header_base_fee<ChainSpec: EthereumHardforks>(
     header: &Header,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -101,7 +101,7 @@ pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_pre_execution(
+pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
     block: &SealedBlock,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -218,7 +218,7 @@ pub fn validate_against_parent_hash_number(
 
 /// Validates the base fee against the parent and EIP-1559 rules.
 #[inline]
-pub fn validate_against_parent_eip1559_base_fee(
+pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + EthereumHardforks>(
     header: &Header,
     parent: &Header,
     chain_spec: &ChainSpec,
@@ -300,13 +300,13 @@ pub fn validate_against_parent_4844(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, U256};
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
-        BlockNumber, Bytes, Signature, Transaction, TransactionSigned, TxEip4844, Withdrawal,
-        Withdrawals, U256,
+        proofs, Account, BlockBody, BlockHashOrNumber, Signature, Transaction, TransactionSigned,
+        TxEip4844, Withdrawal, Withdrawals,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,

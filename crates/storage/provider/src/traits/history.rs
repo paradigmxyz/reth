@@ -1,11 +1,8 @@
+use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use reth_db_api::models::BlockNumberAddress;
-use reth_primitives::{Address, BlockNumber, B256};
 use reth_storage_errors::provider::ProviderResult;
-use std::{
-    collections::BTreeMap,
-    ops::{Range, RangeInclusive},
-};
+use std::ops::{Range, RangeInclusive};
 
 /// History Writer
 #[auto_impl(&, Arc, Box)]
@@ -21,7 +18,7 @@ pub trait HistoryWriter: Send + Sync {
     /// Insert account change index to database. Used inside AccountHistoryIndex stage
     fn insert_account_history_index(
         &self,
-        account_transitions: BTreeMap<Address, Vec<u64>>,
+        index_updates: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()>;
 
     /// Unwind and clear storage history indices.
@@ -35,7 +32,7 @@ pub trait HistoryWriter: Send + Sync {
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage
     fn insert_storage_history_index(
         &self,
-        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
+        storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()>;
 
     /// Read account/storage changesets and update account/storage history indices.

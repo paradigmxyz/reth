@@ -30,6 +30,9 @@ reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
@@ -44,6 +47,8 @@ tracing.workspace = true
 thiserror.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
+
+reth-chainspec = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -76,4 +81,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-chainspec"
 ]

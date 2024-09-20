@@ -24,6 +24,8 @@ reth-tasks.workspace = true
 revm.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # async/futures

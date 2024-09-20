@@ -66,6 +66,7 @@ exclude_crates=(
   reth-rpc-types
   reth-stages
   reth-storage-errors
+  reth-engine-local
   # The following are not supposed to be working
   reth # all of the crates below
   reth-invalid-block-hooks # reth-provider

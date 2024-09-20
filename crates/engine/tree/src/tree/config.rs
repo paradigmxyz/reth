@@ -1,7 +1,11 @@
 //! Engine tree configuration.
 
-const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 6;
-const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 6;
+/// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+
+/// How close to the canonical head we persist blocks.
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 
@@ -15,6 +19,8 @@ pub struct TreeConfig {
     persistence_threshold: u64,
     /// How close to the canonical head we persist blocks. Represents the ideal
     /// number of most recent blocks to keep in memory for quick access and reorgs.
+    ///
+    /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
@@ -22,6 +28,9 @@ pub struct TreeConfig {
     /// Number of invalid headers to keep in cache.
     max_invalid_header_cache_length: u32,
     /// Maximum number of blocks to execute sequentially in a batch.
+    ///
+    /// This is used as a cutoff to prevent long-running sequential block execution when we receive
+    /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
 }
 

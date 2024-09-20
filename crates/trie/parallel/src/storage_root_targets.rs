@@ -1,5 +1,5 @@
+use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
-use reth_primitives::B256;
 use reth_trie::prefix_set::PrefixSet;
 use std::collections::HashMap;
 

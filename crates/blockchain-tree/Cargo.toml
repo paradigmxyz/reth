@@ -22,7 +22,6 @@ reth-evm.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true
 reth-execution-types.workspace = true
-reth-prune-types.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
@@ -30,6 +29,9 @@ reth-trie-parallel = { workspace = true, features = ["parallel"] }
 reth-network.workspace = true
 reth-consensus.workspace = true
 reth-node-types.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 
 # common
 parking_lot.workspace = true

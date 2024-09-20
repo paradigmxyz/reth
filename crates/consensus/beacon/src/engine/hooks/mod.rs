@@ -1,5 +1,5 @@
+use alloy_primitives::BlockNumber;
 use reth_errors::{RethError, RethResult};
-use reth_primitives::BlockNumber;
 use std::{
     fmt,
     task::{Context, Poll},

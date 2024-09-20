@@ -87,8 +87,9 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, Header, B256, U256};
+    use reth_primitives::Header;
     use std::str::FromStr;
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481

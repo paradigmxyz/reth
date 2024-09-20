@@ -1,7 +1,7 @@
 //! The mode the auto seal miner is operating in.
 
+use alloy_primitives::TxHash;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_primitives::TxHash;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     fmt,

@@ -1099,6 +1099,7 @@ mod tests {
         time::Duration,
     };
 
+    use alloy_primitives::B512;
     use reth_eth_wire::{
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
@@ -1109,7 +1110,6 @@ mod tests {
     use reth_network_types::{
         peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
     };
-    use reth_primitives::B512;
     use url::Host;
 
     use super::PeersManager;

@@ -20,7 +20,12 @@ pub struct DatadirArgs {
     pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// The absolute path to store static files in.
-    #[arg(long = "datadir.static_files", verbatim_doc_comment, value_name = "PATH")]
+    #[arg(
+        long = "datadir.static-files",
+        alias = "datadir.static_files",
+        value_name = "PATH",
+        verbatim_doc_comment
+    )]
     pub static_files_path: Option<PathBuf>,
 }
 

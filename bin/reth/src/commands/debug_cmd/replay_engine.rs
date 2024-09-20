@@ -19,7 +19,7 @@ use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
-use reth_node_ethereum::{EthEngineTypes, EthExecutorProvider};
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -93,11 +93,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(
-            tree_externals,
-            BlockchainTreeConfig::default(),
-            PruneModes::none(),
-        )?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
@@ -117,7 +113,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .await?;
 
         // Set up payload builder
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
+        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),

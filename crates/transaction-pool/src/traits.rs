@@ -7,14 +7,16 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList,
     BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -29,7 +31,7 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 
 /// The `PeerId` type.
-pub type PeerId = reth_primitives::B512;
+pub type PeerId = alloy_primitives::B512;
 
 /// General purpose abstraction of a transaction-pool.
 ///
@@ -413,6 +415,12 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
+    fn get_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -658,6 +666,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
+            block_gas_limit: self.new_tip.gas_limit,
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
@@ -1294,8 +1303,10 @@ impl PoolSize {
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
     pub last_seen_block_hash: B256,
-    /// Current the currently tracked block.
+    /// Currently tracked block.
     pub last_seen_block_number: u64,
+    /// Current block gas limit for the latest block.
+    pub block_gas_limit: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
     ///
     /// Note: this is the derived base fee of the _next_ block that builds on the block the pool is

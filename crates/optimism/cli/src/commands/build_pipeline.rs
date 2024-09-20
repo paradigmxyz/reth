@@ -32,7 +32,7 @@ pub(crate) async fn build_import_pipeline<N, C>(
     provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
-    static_file_producer: StaticFileProducer<N>,
+    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where

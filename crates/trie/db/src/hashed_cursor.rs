@@ -1,9 +1,10 @@
+use alloy_primitives::{B256, U256};
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_primitives::{Account, B256, U256};
+use reth_primitives::Account;
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].

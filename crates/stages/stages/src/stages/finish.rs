@@ -1,5 +1,3 @@
-use reth_db_api::database::Database;
-use reth_provider::DatabaseProviderRW;
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -12,14 +10,14 @@ use reth_stages_api::{
 #[non_exhaustive]
 pub struct FinishStage;
 
-impl<DB: Database> Stage<DB> for FinishStage {
+impl<Provider> Stage<Provider> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish
     }
 
     fn execute(
         &mut self,
-        _provider: &DatabaseProviderRW<DB>,
+        _provider: &Provider,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
@@ -27,7 +25,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
 
     fn unwind(
         &mut self,
-        _provider: &DatabaseProviderRW<DB>,
+        _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })

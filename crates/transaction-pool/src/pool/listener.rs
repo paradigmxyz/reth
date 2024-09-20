@@ -5,8 +5,8 @@ use crate::{
     traits::PropagateKind,
     PoolTransaction, ValidPoolTransaction,
 };
+use alloy_primitives::{TxHash, B256};
 use futures_util::Stream;
-use reth_primitives::{TxHash, B256};
 use std::{
     collections::{hash_map::Entry, HashMap},
     pin::Pin,

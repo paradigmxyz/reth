@@ -9,7 +9,6 @@ use tracing::*;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     transaction::DbTxMut,
 };
@@ -17,7 +16,7 @@ use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockRespon
 use reth_primitives::{StaticFileSegment, TxNumber};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, StatsReader,
+    BlockReader, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -70,7 +69,10 @@ impl<D: BodyDownloader> BodyStage<D> {
     }
 }
 
-impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
+impl<Provider, D: BodyDownloader> Stage<Provider> for BodyStage<D>
+where
+    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + StatsReader + BlockReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Bodies
@@ -106,11 +108,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -155,7 +153,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             Ordering::Less => {
                 return Err(missing_static_data_error(
                     next_static_file_tx_num.saturating_sub(1),
-                    static_file_provider,
+                    &static_file_provider,
                     provider,
                 )?)
             }
@@ -264,7 +262,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
@@ -327,7 +325,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if db_tx_num > static_file_tx_num {
             return Err(missing_static_data_error(
                 static_file_tx_num,
-                static_file_provider,
+                &static_file_provider,
                 provider,
             )?)
         }
@@ -343,11 +341,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     }
 }
 
-fn missing_static_data_error<DB: Database>(
+fn missing_static_data_error<Provider>(
     last_tx_num: TxNumber,
     static_file_provider: &StaticFileProvider,
-    provider: &DatabaseProviderRW<DB>,
-) -> Result<StageError, ProviderError> {
+    provider: &Provider,
+) -> Result<StageError, ProviderError>
+where
+    Provider: BlockReader,
+{
     let mut last_block = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Transactions)
         .unwrap_or_default();
@@ -377,9 +378,10 @@ fn missing_static_data_error<DB: Database>(
 // TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know
 //  beforehand how many bytes we need to download. So the good solution would be to measure the
 //  progress in gas as a proxy to size. Execution stage uses a similar approach.
-fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> ProviderResult<EntitiesCheckpoint> {
+fn stage_checkpoint<Provider>(provider: &Provider) -> ProviderResult<EntitiesCheckpoint>
+where
+    Provider: StatsReader + StaticFileProviderFactory,
+{
     Ok(EntitiesCheckpoint {
         processed: provider.count_entries::<tables::BlockBodyIndices>()? as u64,
         // Count only static files entries. If we count the database entries too, we may have

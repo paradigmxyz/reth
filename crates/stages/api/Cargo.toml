@@ -14,7 +14,6 @@ workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-db-api.workspace = true
 reth-static-file.workspace = true
 reth-network-p2p.workspace = true
 reth-tokio-util.workspace = true
@@ -23,7 +22,6 @@ reth-prune.workspace = true
 reth-errors.workspace = true
 reth-stages-types.workspace = true
 reth-static-file-types.workspace = true
-reth-node-types.workspace = true
 
 alloy-primitives.workspace = true
 

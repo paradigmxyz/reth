@@ -6,6 +6,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_types::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::Header;
 use reth_provider::FullProvider;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_tasks::TaskExecutor;
@@ -48,7 +49,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm;
+    type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;

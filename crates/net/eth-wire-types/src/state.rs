@@ -1,8 +1,8 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{Bytes, B256};
 
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
@@ -26,7 +26,7 @@ pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::hex;
+    use alloy_primitives::hex;
 
     use crate::{message::RequestPair, GetNodeData, NodeData};
     use alloy_rlp::{Decodable, Encodable};

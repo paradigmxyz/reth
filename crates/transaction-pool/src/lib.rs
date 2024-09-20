@@ -151,10 +151,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
+use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
+use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -503,6 +505,14 @@ where
         self.pool.get_transactions_by_origin(origin)
     }
 
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transactions_by_origin(origin)
+    }
+
     fn unique_senders(&self) -> HashSet<Address> {
         self.pool.unique_senders()
     }
@@ -525,12 +535,11 @@ where
         self.pool.blob_store().get_exact(tx_hashes)
     }
 
-    /// Returns all pending transactions filtered by [`TransactionOrigin`]
-    fn get_pending_transactions_by_origin(
+    fn get_blobs_for_versioned_hashes(
         &self,
-        origin: TransactionOrigin,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_pending_transactions_by_origin(origin)
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
     }
 }
 

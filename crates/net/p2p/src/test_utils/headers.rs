@@ -108,7 +108,7 @@ impl TestDownload {
             let request = HeadersRequest {
                 limit: self.limit,
                 direction: HeadersDirection::Rising,
-                start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
+                start: 0u64.into(), // ignored
             };
             let client = self.client.clone();
             self.fut = Some(Box::pin(client.get_headers(request)));

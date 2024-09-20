@@ -46,6 +46,7 @@ macro_rules! fuzz_type_and_name {
 }
 
 #[cfg(test)]
+#[allow(missing_docs)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
@@ -56,7 +57,7 @@ pub mod fuzz_rlp {
         NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData, P2PMessage,
         PooledTransactions, Receipts, Status, Transactions,
     };
-    use reth_primitives::{BlockHashOrNumber, TransactionSigned};
+    use reth_primitives::TransactionSigned;
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
@@ -138,7 +139,7 @@ pub mod fuzz_rlp {
     impl Default for GetBlockHeadersWrapper {
         fn default() -> Self {
             Self(GetBlockHeaders {
-                start_block: BlockHashOrNumber::Number(0),
+                start_block: 0u64.into(),
                 limit: Default::default(),
                 skip: Default::default(),
                 direction: Default::default(),

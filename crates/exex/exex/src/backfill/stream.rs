@@ -114,9 +114,6 @@ where
             let start = range.next();
             let range_bounds = start.zip(range.last().or(start));
 
-            // Advance the range by `batch_size` blocks
-            this.range.nth(this.batch_size);
-
             // If we have range bounds, then we can spawn a new task for that range
             if let Some((first, last)) = range_bounds {
                 let range = first..=last;
@@ -202,7 +199,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),
@@ -243,7 +240,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),

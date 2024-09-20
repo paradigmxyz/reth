@@ -85,7 +85,7 @@ impl ExecutionOutcome {
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
-        contracts_init: Vec<(B256, Bytecode)>,
+        contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
         receipts: Receipts,
         first_block: BlockNumber,
         requests: Vec<Requests>,

@@ -1,9 +1,10 @@
+use alloy_primitives::private::getrandom::getrandom;
 use arbitrary::Arbitrary;
 use eyre::Result;
 use proptest::{
     prelude::ProptestConfig,
     strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
+    test_runner::{TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
 use reth_db::tables;
@@ -17,7 +18,16 @@ const PER_TABLE: usize = 1000;
 
 /// Generates test vectors for specified `tables`. If list is empty, then generate for all tables.
 pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    // Prepare random seed for test (same method as used by proptest)
+    let mut seed = [0u8; 32];
+    getrandom(&mut seed)?;
+    println!("Seed for test vectors: {:?}", seed);
+
+    // Start the runner with the seed
+    let config = ProptestConfig::default();
+    let rng = TestRng::from_seed(config.rng_algorithm, &seed);
+    let mut runner = TestRunner::new_with_rng(config, rng);
+
     fs::create_dir_all(VECTORS_FOLDER)?;
 
     macro_rules! generate_vector {

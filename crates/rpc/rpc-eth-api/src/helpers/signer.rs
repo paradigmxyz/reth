@@ -3,8 +3,9 @@
 use std::result;
 
 use alloy_dyn_abi::TypedData;
+use alloy_primitives::Address;
 use dyn_clone::DynClone;
-use reth_primitives::{Address, Signature, TransactionSigned};
+use reth_primitives::{Signature, TransactionSigned};
 use reth_rpc_eth_types::SignError;
 use reth_rpc_types::TypedTransactionRequest;
 

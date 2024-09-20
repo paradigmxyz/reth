@@ -1,7 +1,8 @@
 use std::ops::Range;
 
+use alloy_primitives::TxNumber;
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::TxNumber;
+use reth_primitives::Withdrawals;
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
@@ -64,6 +65,15 @@ impl StoredBlockBodyIndices {
     pub const fn tx_count(&self) -> NumTransactions {
         self.tx_count
     }
+}
+
+/// The storage representation of block withdrawals.
+#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
+pub struct StoredBlockWithdrawals {
+    /// The block withdrawals.
+    pub withdrawals: Withdrawals,
 }
 
 #[cfg(test)]

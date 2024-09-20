@@ -1,5 +1,6 @@
 use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
+use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
@@ -12,7 +13,7 @@ use reth_network_p2p::{
     },
     error::{DownloadError, DownloadResult},
 };
-use reth_primitives::{BlockNumber, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -601,11 +602,12 @@ mod tests {
         bodies::test_utils::{insert_headers, zip_blocks},
         test_utils::{generate_bodies, TestBodiesClient},
     };
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_chainspec::MAINNET;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{BlockBody, B256};
+    use reth_primitives::BlockBody;
     use reth_provider::{
         providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
     };

@@ -8,7 +8,6 @@
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
-use reth_node_types::NodeTypesWithDB;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -79,7 +78,7 @@ pub enum BackfillEvent {
 
 /// Pipeline sync.
 #[derive(Debug)]
-pub struct PipelineSync<N: NodeTypesWithDB> {
+pub struct PipelineSync<N: ProviderNodeTypes> {
     /// The type that can spawn the pipeline task.
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
@@ -213,14 +212,14 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<N: NodeTypesWithDB> {
+enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<N>>),
     /// Pipeline is running and waiting for a response
     Running(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
-impl<N: NodeTypesWithDB> PipelineState<N> {
+impl<N: ProviderNodeTypes> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
@@ -231,11 +230,12 @@ impl<N: NodeTypesWithDB> PipelineState<N> {
 mod tests {
     use super::*;
     use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{BlockNumber, Header, B256};
+    use reth_primitives::Header;
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;

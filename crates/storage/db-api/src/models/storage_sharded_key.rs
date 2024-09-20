@@ -3,8 +3,8 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
+use alloy_primitives::{Address, BlockNumber, B256};
 use derive_more::AsRef;
-use reth_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
 
 use super::ShardedKey;

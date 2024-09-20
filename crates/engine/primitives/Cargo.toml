@@ -18,5 +18,8 @@ reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
 reth-trie.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 # misc
 serde.workspace = true

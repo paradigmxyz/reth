@@ -1,9 +1,10 @@
 use std::{collections::HashMap, future::Future, sync::Arc};
 
+use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_errors::RethResult;
-use reth_primitives::{Address, BlockId, U256};
+use reth_primitives::BlockId;
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
@@ -64,7 +65,7 @@ where
 
     fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<HashMap<Address, U256>> {
         let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
-            return Err(EthApiError::UnknownBlockNumber)
+            return Err(EthApiError::HeaderNotFound(block_id))
         };
 
         let state = self.provider().state_by_block_id(block_id)?;

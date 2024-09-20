@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::U256;
 use futures::StreamExt;
 use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
 use reth_network_api::PeersInfo;
-use reth_primitives::{TransactionSigned, TxLegacy, U256};
+use reth_primitives::{TransactionSigned, TxLegacy};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 

@@ -197,6 +197,15 @@ impl FromStr for NodeRecord {
 }
 
 #[cfg(feature = "secp256k1")]
+impl TryFrom<Enr<secp256k1::SecretKey>> for NodeRecord {
+    type Error = NodeRecordParseError;
+
+    fn try_from(enr: Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
+        (&enr).try_into()
+    }
+}
+
+#[cfg(feature = "secp256k1")]
 impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 

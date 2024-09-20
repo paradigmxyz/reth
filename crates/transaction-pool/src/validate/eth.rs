@@ -833,8 +833,9 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, CoinbaseTipOrdering,
         EthPooledTransaction, Pool, TransactionPool,
     };
+    use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
-    use reth_primitives::{hex, PooledTransactionsElement, U256};
+    use reth_primitives::PooledTransactionsElement;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

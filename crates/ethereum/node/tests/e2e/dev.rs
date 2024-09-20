@@ -48,7 +48,7 @@ fn custom_chain() -> Arc<ChainSpec> {
     "nonce": "0x42",
     "timestamp": "0x0",
     "extraData": "0x5343",
-    "gasLimit": "0x1388",
+    "gasLimit": "0x13880",
     "difficulty": "0x400000000",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0x0000000000000000000000000000000000000000",

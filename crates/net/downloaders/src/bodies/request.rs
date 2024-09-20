@@ -1,4 +1,5 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
+use alloy_primitives::B256;
 use futures::{Future, FutureExt};
 use reth_consensus::Consensus;
 use reth_network_p2p::{
@@ -7,7 +8,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader, B256};
+use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader};
 use std::{
     collections::VecDeque,
     mem,

@@ -1,9 +1,7 @@
 use crate::Compact;
+use alloc::vec::Vec;
 use alloy_eips::eip2930::{AccessList, AccessListItem};
 use alloy_primitives::Address;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Implement `Compact` for `AccessListItem` and `AccessList`.
 impl Compact for AccessListItem {

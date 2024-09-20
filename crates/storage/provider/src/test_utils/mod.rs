@@ -1,4 +1,5 @@
 use crate::{providers::StaticFileProvider, HashingWriter, ProviderFactory, TrieWriter};
+use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
@@ -6,7 +7,7 @@ use reth_db::{
 };
 use reth_errors::ProviderResult;
 use reth_node_types::{NodeTypesWithDB, NodeTypesWithDBAdapter};
-use reth_primitives::{Account, StorageEntry, B256};
+use reth_primitives::{Account, StorageEntry};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;

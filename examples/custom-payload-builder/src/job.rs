@@ -3,7 +3,7 @@ use reth::{
     providers::StateProviderFactory, tasks::TaskSpawner, transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{PayloadBuilder, PayloadConfig};
-use reth_payload_builder::{error::PayloadBuilderError, KeepPayloadJobAlive, PayloadJob};
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
 use std::{
     pin::Pin,

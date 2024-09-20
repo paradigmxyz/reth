@@ -2,6 +2,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
@@ -14,7 +15,6 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
-use reth_primitives::BlockHashOrNumber;
 
 mod rlpx;
 
@@ -31,7 +31,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = C::help_messge(),
+        long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser()
     )]

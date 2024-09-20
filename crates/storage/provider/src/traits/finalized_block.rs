@@ -1,5 +1,5 @@
+use alloy_primitives::BlockNumber;
 use reth_errors::ProviderResult;
-use reth_primitives::BlockNumber;
 
 /// Functionality to read the last known finalized block from the database.
 pub trait FinalizedBlockReader: Send + Sync {

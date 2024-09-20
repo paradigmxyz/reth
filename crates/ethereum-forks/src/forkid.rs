@@ -3,7 +3,6 @@
 //! Previously version of Apache licenced [`ethereum-forkid`](https://crates.io/crates/ethereum-forkid).
 
 use crate::Head;
-#[cfg(not(feature = "std"))]
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     vec::Vec,
@@ -22,8 +21,6 @@ use crc::*;
 use proptest_derive::Arbitrary as PropTestArbitrary;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::collections::{BTreeMap, BTreeSet};
 
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 const TIMESTAMP_BEFORE_ETHEREUM_MAINNET: u64 = 1_300_000_000;

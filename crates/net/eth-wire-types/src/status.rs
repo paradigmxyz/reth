@@ -1,10 +1,11 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
+use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{hex, EthereumHardfork, ForkId, Head, B256, U256};
+use reth_primitives::{EthereumHardfork, ForkId, Head};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
@@ -152,9 +153,10 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use alloy_primitives::{B256, U256};
 /// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
-/// use reth_primitives::{B256, MAINNET_GENESIS_HASH, U256};
+/// use reth_primitives::MAINNET_GENESIS_HASH;
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
@@ -230,10 +232,11 @@ impl StatusBuilder {
 mod tests {
     use crate::{EthVersion, Status};
     use alloy_genesis::Genesis;
+    use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use reth_primitives::{hex, EthereumHardfork, ForkHash, ForkId, Head, B256, U256};
+    use reth_primitives::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 
     #[test]

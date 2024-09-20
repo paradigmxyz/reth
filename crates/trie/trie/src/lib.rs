@@ -36,6 +36,10 @@ pub mod node_iter;
 mod state;
 pub use state::*;
 
+/// Input for trie computation.
+mod input;
+pub use input::TrieInput;
+
 /// Merkle proof generation.
 pub mod proof;
 

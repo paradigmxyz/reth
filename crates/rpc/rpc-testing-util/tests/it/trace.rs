@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Instant};
+//! Integration tests for the trace API.
 
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
@@ -10,6 +10,7 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest},
     Block, Transaction,
 };
+use std::{collections::HashSet, time::Instant};
 
 /// This is intended to be run locally against a running node.
 ///

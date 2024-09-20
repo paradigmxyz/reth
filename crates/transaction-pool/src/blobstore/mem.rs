@@ -1,8 +1,9 @@
 use crate::blobstore::{
     BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTransactionSidecar,
 };
+use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_primitives::B256;
 use parking_lot::RwLock;
-use reth_primitives::B256;
 use std::{collections::HashMap, sync::Arc};
 
 /// An in-memory blob store.
@@ -111,6 +112,31 @@ impl BlobStore for InMemoryBlobStore {
         }
 
         Ok(items)
+    }
+
+    fn get_by_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        let mut result = vec![None; versioned_hashes.len()];
+        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
+            for (i, blob_versioned_hash) in blob_sidecar.versioned_hashes().enumerate() {
+                for (j, target_versioned_hash) in versioned_hashes.iter().enumerate() {
+                    if blob_versioned_hash == *target_versioned_hash {
+                        result[j].get_or_insert_with(|| BlobAndProofV1 {
+                            blob: Box::new(blob_sidecar.blobs[i]),
+                            proof: blob_sidecar.proofs[i],
+                        });
+                    }
+                }
+            }
+
+            // Return early if all blobs are found.
+            if result.iter().all(|blob| blob.is_some()) {
+                break;
+            }
+        }
+        Ok(result)
     }
 
     fn data_size_hint(&self) -> Option<usize> {

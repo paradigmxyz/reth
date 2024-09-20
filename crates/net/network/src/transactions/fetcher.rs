@@ -32,6 +32,7 @@ use std::{
     time::Duration,
 };
 
+use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -42,7 +43,7 @@ use reth_eth_wire::{
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_primitives::{PooledTransactionsElement, TxHash};
+use reth_primitives::PooledTransactionsElement;
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
@@ -1337,9 +1338,10 @@ struct TxFetcherSearchDurations {
 mod test {
     use std::{collections::HashSet, str::FromStr};
 
+    use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
-    use reth_primitives::{hex, TransactionSigned, B256};
+    use reth_primitives::TransactionSigned;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
 

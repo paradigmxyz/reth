@@ -1,11 +1,9 @@
 //! Native Compact codec impl for primitive alloy log types.
 
 use crate::Compact;
+use alloc::vec::Vec;
 use alloy_primitives::{Address, Bytes, Log, LogData};
 use bytes::BufMut;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Implement `Compact` for `LogData` and `Log`.
 impl Compact for LogData {

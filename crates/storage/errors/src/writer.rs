@@ -3,7 +3,7 @@ use reth_primitives::StaticFileSegment;
 
 /// `UnifiedStorageWriter` related errors
 /// `StorageWriter` related errors
-#[derive(Clone, Debug, derive_more::Display, PartialEq, Eq)]
+#[derive(Clone, Debug, derive_more::Display, PartialEq, Eq, derive_more::Error)]
 pub enum UnifiedStorageWriterError {
     /// Database writer is missing
     #[display("Database writer is missing")]
@@ -16,16 +16,6 @@ pub enum UnifiedStorageWriterError {
     IncorrectStaticFileWriter(StaticFileSegment, StaticFileSegment),
     /// Database-related errors.
     Database(DatabaseError),
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for UnifiedStorageWriterError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Database(source) => std::error::Error::source(source),
-            _ => Option::None,
-        }
-    }
 }
 
 impl From<DatabaseError> for UnifiedStorageWriterError {

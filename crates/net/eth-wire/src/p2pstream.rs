@@ -5,15 +5,16 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
+use alloy_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    hex,
+};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
 use reth_metrics::metrics::counter;
-use reth_primitives::{
-    bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex, GotExpected,
-};
+use reth_primitives::GotExpected;
 use std::{
     collections::VecDeque,
     io,

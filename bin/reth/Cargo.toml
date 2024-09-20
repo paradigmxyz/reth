@@ -91,9 +91,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 backon.workspace = true
 similar-asserts.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { workspace = true, optional = true }
-
 [dev-dependencies]
 reth-discv4.workspace = true
 tempfile.workspace = true
@@ -105,8 +102,13 @@ dev = ["reth-cli-commands/dev"]
 
 asm-keccak = ["reth-node-core/asm-keccak", "reth-primitives/asm-keccak"]
 
-jemalloc = ["dep:tikv-jemallocator", "reth-node-core/jemalloc", "reth-node-metrics/jemalloc"]
-jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+jemalloc = [
+    "reth-cli-util/jemalloc",
+    "reth-node-core/jemalloc",
+    "reth-node-metrics/jemalloc",
+]
+jemalloc-prof = ["reth-cli-util/jemalloc"]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]

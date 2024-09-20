@@ -1,9 +1,11 @@
 use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_ethereum_forks::{EthereumHardfork, Head};
 
-/// Returns the spec id at the given timestamp.
+/// Returns the revm [`SpecId`](revm_primitives::SpecId) at the given timestamp.
 ///
-/// Note: This is only intended to be used after the merge, when hardforks are activated by
+/// # Note
+///
+/// This is only intended to be used after the Bedrock, when hardforks are activated by
 /// timestamp.
 pub fn revm_spec_by_timestamp_after_bedrock(
     chain_spec: &ChainSpec,
@@ -24,7 +26,7 @@ pub fn revm_spec_by_timestamp_after_bedrock(
     }
 }
 
-/// return `revm_spec` from spec configuration.
+/// Map the latest active hardfork at the given block to a revm [`SpecId`](revm_primitives::SpecId).
 pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecId {
     if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
         revm_primitives::GRANITE

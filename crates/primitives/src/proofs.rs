@@ -4,11 +4,9 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
     ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
 };
+use alloc::vec::Vec;
 use alloy_eips::eip7685::Encodable7685;
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Calculate a transaction root.
 ///

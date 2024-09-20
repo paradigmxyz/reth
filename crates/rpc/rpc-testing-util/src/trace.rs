@@ -1,8 +1,9 @@
 //! Helpers for testing trace calls.
 
+use alloy_primitives::{Bytes, TxHash, B256};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, Bytes, TxHash, B256};
+use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
     trace::{

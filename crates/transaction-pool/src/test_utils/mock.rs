@@ -7,6 +7,7 @@ use crate::{
     CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
     ValidPoolTransaction,
 };
+use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
     distributions::{Uniform, WeightedIndex},
@@ -15,12 +16,12 @@ use rand::{
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     transaction::TryFromRecoveredTransactionError,
-    AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError, Bytes, ChainId,
+    AccessList, BlobTransactionSidecar, BlobTransactionValidationError,
     PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy,
-    TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
-    U256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
+
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.

@@ -95,6 +95,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
+            .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)

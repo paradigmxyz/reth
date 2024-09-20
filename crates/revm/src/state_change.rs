@@ -46,7 +46,7 @@ pub fn post_block_balance_increments(
 ///
 /// Zero-valued withdrawals are filtered out.
 #[inline]
-pub fn post_block_withdrawals_balance_increments(
+pub fn post_block_withdrawals_balance_increments<ChainSpec: EthereumHardforks>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     withdrawals: &[Withdrawal],
@@ -66,7 +66,7 @@ pub fn post_block_withdrawals_balance_increments(
 ///
 /// Zero-valued withdrawals are filtered out.
 #[inline]
-pub fn insert_post_block_withdrawals_balance_increments(
+pub fn insert_post_block_withdrawals_balance_increments<ChainSpec: EthereumHardforks>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     withdrawals: Option<&[Withdrawal]>,

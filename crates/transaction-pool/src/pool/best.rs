@@ -2,8 +2,8 @@ use crate::{
     identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
     TransactionOrdering, ValidPoolTransaction,
 };
+use alloy_primitives::B256 as TxHash;
 use core::fmt;
-use reth_primitives::B256 as TxHash;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
@@ -268,7 +268,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         Priority,
     };
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
 
     #[test]
     fn test_best_iter() {

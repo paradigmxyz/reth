@@ -1,8 +1,8 @@
 //! Decoding tests for [`NewBlock`]
 
+use alloy_primitives::hex;
 use alloy_rlp::Decodable;
 use reth_eth_wire::NewBlock;
-use reth_primitives::hex;
 use std::{fs, path::PathBuf};
 
 #[test]

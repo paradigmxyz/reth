@@ -6,9 +6,10 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy_primitives::{TxHash, B256};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, Receipt, TxHash, B256};
+use reth_primitives::{BlockId, Receipt};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
     trace::{

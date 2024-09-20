@@ -5,6 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use alloy_primitives::{BlockHash, BlockNumber, U256};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, InsertBlockErrorKind},
     BlockAttachment, BlockValidationKind,
@@ -13,15 +14,13 @@ use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
-};
+use reth_primitives::{ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
-    FullExecutionDataProvider, ProviderError, StateRootProvider,
+    FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -199,7 +198,7 @@ impl AppendableChain {
             // State root calculation can take a while, and we're sure no write transaction
             // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/7509.
             .disable_long_read_transaction_safety()
-            .state_provider_by_block_number(canonical_fork.number)?;
+            .try_into_history_at_block(canonical_fork.number)?;
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
@@ -225,11 +224,13 @@ impl AppendableChain {
                 let mut execution_outcome =
                     provider.block_execution_data_provider.execution_outcome().clone();
                 execution_outcome.extend(initial_execution_outcome.clone());
-                let hashed_state = execution_outcome.hash_state_slow();
-                ParallelStateRoot::new(consistent_view, hashed_state)
-                    .incremental_root_with_updates()
-                    .map(|(root, updates)| (root, Some(updates)))
-                    .map_err(ProviderError::from)?
+                ParallelStateRoot::new(
+                    consistent_view,
+                    TrieInput::from_state(execution_outcome.hash_state_slow()),
+                )
+                .incremental_root_with_updates()
+                .map(|(root, updates)| (root, Some(updates)))
+                .map_err(ProviderError::from)?
             } else {
                 let hashed_state =
                     HashedPostState::from_bundle_state(&initial_execution_outcome.state().state);

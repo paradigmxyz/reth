@@ -23,7 +23,6 @@ reth-tokio-util.workspace = true
 reth-config.workspace = true
 reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
-reth-node-types.workspace = true
 
 # metrics
 reth-metrics.workspace = true

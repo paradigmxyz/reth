@@ -31,6 +31,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alloy_primitives::{TxHash, B256};
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -47,9 +48,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{
-    PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256,
-};
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1738,6 +1737,7 @@ struct TxManagerPollDurations {
 mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
+    use alloy_primitives::hex;
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
@@ -1746,7 +1746,6 @@ mod tests {
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
     };
-    use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,

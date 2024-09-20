@@ -3,7 +3,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use reth_primitives::BlockNumber;
+use alloy_primitives::BlockNumber;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 

@@ -5,13 +5,11 @@ use crate::{
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
     TxEip4844, TxLegacy, TxType,
 };
+use alloc::{string::ToString, vec::Vec};
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
-
-#[cfg(not(feature = "std"))]
-use alloc::{string::ToString, vec::Vec};
 
 impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>> for Block {
     type Error = alloy_rpc_types::ConversionError;

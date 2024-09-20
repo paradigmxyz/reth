@@ -1,10 +1,9 @@
-use reth_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -21,12 +20,7 @@ pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the `HashedPostState` on top of the current state but re-uses the
     /// intermediate nodes to speed up the computation. It's up to the caller to construct the
     /// prefix sets and inform the provider of the trie paths that have changes.
-    fn state_root_from_nodes(
-        &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256>;
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256>;
 
     /// Returns the state root of the `HashedPostState` on top of the current state with trie
     /// updates to be committed to the database.
@@ -39,9 +33,7 @@ pub trait StateRootProvider: Send + Sync {
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.
     fn state_root_from_nodes_with_updates(
         &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 }
 
@@ -61,15 +53,23 @@ pub trait StateProofProvider: Send + Sync {
     /// on top of the current state.
     fn proof(
         &self,
-        hashed_state: HashedPostState,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof>;
 
+    /// Generate [`MultiProof`] for target hashed account and corresponding
+    /// hashed storage slot keys.
+    fn multiproof(
+        &self,
+        input: TrieInput,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof>;
+
     /// Get trie witness for provided state.
     fn witness(
         &self,
-        overlay: HashedPostState,
+        input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>>;
 }

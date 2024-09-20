@@ -5,9 +5,10 @@
 use alloy_genesis::Genesis;
 use parking_lot::RwLock;
 use reth::{
+    api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
+        revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
         Address, Bytes, U256,
     },
     revm::{
@@ -50,13 +51,19 @@ pub struct PrecompileCache {
 }
 
 /// Custom EVM configuration
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MyEvmConfig {
+    inner: EthEvmConfig,
     precompile_cache: Arc<RwLock<PrecompileCache>>,
 }
 
 impl MyEvmConfig {
+    /// Creates a new instance.
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: EthEvmConfig::new(chain_spec), precompile_cache: Default::default() }
+    }
+
     /// Sets the precompiles to the EVM handler
     ///
     /// This will be invoked when the EVM is created via [ConfigureEvm::evm] or
@@ -138,18 +145,10 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
-    }
+    type Header = Header;
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
-        header: &Header,
-        total_difficulty: U256,
-    ) {
-        EthEvmConfig::default().fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        self.inner.fill_tx_env(tx_env, transaction, sender)
     }
 
     fn fill_tx_env_system_contract_call(
@@ -159,7 +158,24 @@ impl ConfigureEvmEnv for MyEvmConfig {
         contract: Address,
         data: Bytes,
     ) {
-        EthEvmConfig::default().fill_tx_env_system_contract_call(env, caller, contract, data)
+        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
+    }
+
+    fn fill_cfg_env(
+        &self,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
+        header: &Self::Header,
+        total_difficulty: U256,
+    ) {
+        self.inner.fill_cfg_env(cfg_env, header, total_difficulty)
+    }
+
+    fn next_cfg_and_block_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
 
@@ -216,7 +232,10 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = MyEvmConfig { precompile_cache: self.precompile_cache.clone() };
+        let evm_config = MyEvmConfig {
+            inner: EthEvmConfig::new(ctx.chain_spec()),
+            precompile_cache: self.precompile_cache.clone(),
+        };
         Ok((evm_config.clone(), EthExecutorProvider::new(ctx.chain_spec(), evm_config)))
     }
 }

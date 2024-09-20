@@ -1,6 +1,7 @@
+use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::{BlockNumber, SealedBlockWithSenders};
+use reth_primitives::SealedBlockWithSenders;
 use reth_storage_api::BlockReader;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};

@@ -34,8 +34,9 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
-alloy-network.workspace = true
 alloy-json-rpc.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
 
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

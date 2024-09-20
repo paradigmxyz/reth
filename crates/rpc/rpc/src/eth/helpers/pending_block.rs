@@ -2,6 +2,7 @@
 
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
+use reth_primitives::Header;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
 use reth_rpc_eth_types::PendingBlock;
@@ -18,7 +19,7 @@ where
         + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
     fn provider(
@@ -41,7 +42,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
         self.inner.evm_config()
     }
 }

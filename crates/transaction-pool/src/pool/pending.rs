@@ -597,7 +597,8 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
-    use reth_primitives::{address, TxType};
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
     use std::collections::HashSet;
 
     #[test]

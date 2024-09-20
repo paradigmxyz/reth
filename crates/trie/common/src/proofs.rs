@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
+/// Multiproof is effectively a state subtrie that only contains the nodes
+/// in the paths of target accounts.  
 #[derive(Clone, Default, Debug)]
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.

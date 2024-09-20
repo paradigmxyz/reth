@@ -108,6 +108,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.dirty
     }
 
+    /// Sets writer as dirty.
+    pub fn set_dirty(&mut self) {
+        self.dirty = true
+    }
+
     /// Gets total writer rows in jar.
     pub const fn rows(&self) -> usize {
         self.jar.rows()

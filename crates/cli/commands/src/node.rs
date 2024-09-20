@@ -34,7 +34,7 @@ pub struct NodeCommand<
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = C::help_messge(),
+        long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
         value_parser = C::parser(),
@@ -135,7 +135,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> No
     /// closure.
     pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");

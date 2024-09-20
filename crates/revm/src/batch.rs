@@ -4,13 +4,11 @@ use crate::{
     precompile::{Address, HashSet},
     primitives::alloy_primitives::BlockNumber,
 };
+use alloc::vec::Vec;
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -183,14 +181,9 @@ impl BlockBatchRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::collections::BTreeMap;
     use reth_primitives::{Address, Log, Receipt};
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    #[cfg(feature = "std")]
-    use std::collections::BTreeMap;
-    #[cfg(not(feature = "std"))]
-    extern crate alloc;
-    #[cfg(not(feature = "std"))]
-    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_save_receipts_empty() {

@@ -3,14 +3,13 @@ use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    database::Database,
     models::{BlockNumberAddress, CompactU256},
     table::Decompress,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
 use reth_primitives::{keccak256, BufMut, StorageEntry, B256};
-use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
+use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     StorageHashingCheckpoint, UnwindInput, UnwindOutput,
@@ -62,18 +61,17 @@ impl Default for StorageHashingStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for StorageHashingStage {
+impl<Provider> Stage<Provider> for StorageHashingStage
+where
+    Provider: DBProvider<Tx: DbTxMut> + StorageReader + HashingWriter + StatsReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::StorageHashing
     }
 
     /// Execute the stage.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
@@ -164,7 +162,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -199,9 +197,7 @@ fn collect(
     Ok(())
 }
 
-fn stage_checkpoint_progress<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> ProviderResult<EntitiesCheckpoint> {
+fn stage_checkpoint_progress(provider: &impl StatsReader) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
         processed: provider.count_entries::<tables::HashedStorages>()? as u64,
         total: provider.count_entries::<tables::PlainStorageState>()? as u64,

@@ -3,6 +3,7 @@
 //! Stage debugging tool
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use alloy_eips::BlockHashOrNumber;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -21,20 +22,20 @@ use reth_network_p2p::HeadersClient;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
-    primitives::BlockHashOrNumber,
     version::{
         BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
         VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
     },
 };
 use reth_node_metrics::{
+    chain::ChainSpecInfo,
     hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, ChainSpecProvider, DatabaseProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -116,7 +117,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let mut provider_rw = provider_factory.provider_rw()?;
+        let mut provider_rw = provider_factory.database_provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -130,6 +131,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
+                ChainSpecInfo { name: provider_factory.chain_spec().chain.to_string() },
                 ctx.task_executor,
                 Hooks::new(
                     provider_factory.db_ref().clone(),
@@ -331,7 +333,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         provider_rw,
                         provider_factory.static_file_provider(),
                     )?;
-                    provider_rw = provider_factory.provider_rw()?;
+                    provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
         }
@@ -354,7 +356,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             }
             if self.commit {
                 UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
-                provider_rw = provider_factory.provider_rw()?;
+                provider_rw = provider_factory.database_provider_rw()?;
             }
 
             if done {

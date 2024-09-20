@@ -144,7 +144,7 @@ mod tests {
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
-            let provider = factory.provider_rw().unwrap();
+            let provider = factory.database_provider_rw().unwrap();
 
             // Check execution and create receipts and changesets according to the pruning
             // configuration

@@ -64,7 +64,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
-        static_file_producer: StaticFileProducer<N>,
+        static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
         Client: BlockClient + 'static,

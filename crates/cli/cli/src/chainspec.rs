@@ -57,7 +57,7 @@ pub trait ChainSpecParser: Clone + Send + Sync + 'static {
     }
 
     /// Produces a help message for the chain spec argument.
-    fn help_messge() -> String {
+    fn help_message() -> String {
         format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", Self::SUPPORTED_CHAINS.join(", "))
     }
 }

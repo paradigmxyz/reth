@@ -15,7 +15,7 @@ use reth_downloaders::{
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
-use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_optimism_primitives::bedrock::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
     writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
@@ -252,8 +252,8 @@ pub struct ImportReceiptsResult {
 
 #[cfg(test)]
 mod test {
+    use alloy_primitives::hex;
     use reth_db_common::init::init_genesis;
-    use reth_primitives::hex;
     use reth_stages::test_utils::TestStageDB;
     use tempfile::tempfile;
     use tokio::{
@@ -285,7 +285,7 @@ mod test {
             ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE).await.unwrap();
 
         let db = TestStageDB::default();
-        init_genesis(db.factory.clone()).unwrap();
+        init_genesis(&db.factory).unwrap();
 
         // todo: where does import command init receipts ? probably somewhere in pipeline
 

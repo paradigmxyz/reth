@@ -1,10 +1,11 @@
 //! Blockchain tree externals.
 
+use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::Consensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
+use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::ProviderNodeTypes, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
     StaticFileProviderFactory, StatsReader,

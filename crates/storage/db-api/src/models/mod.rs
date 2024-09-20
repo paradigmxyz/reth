@@ -4,8 +4,12 @@ use crate::{
     table::{Compress, Decode, Decompress, Encode},
     DatabaseError,
 };
+use alloy_primitives::{Address, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{Address, B256, *};
+use reth_primitives::{
+    Account, Bytecode, GenesisAccount, Header, Receipt, Requests, SealedHeader, StorageEntry,
+    TransactionSignedNoHash, TxType,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
@@ -13,15 +17,15 @@ use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
-pub mod client_version;
 pub mod integer_list;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
-pub use client_version::ClientVersion;
-pub use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
+pub use reth_db_models::{
+    AccountBeforeTx, ClientVersion, StoredBlockBodyIndices, StoredBlockWithdrawals,
+};
 pub use sharded_key::ShardedKey;
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.

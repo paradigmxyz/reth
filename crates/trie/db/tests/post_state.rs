@@ -1,8 +1,11 @@
+#![allow(missing_docs)]
+
+use alloy_primitives::{B256, U256};
 use proptest::prelude::*;
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::create_test_rw_db};
 use reth_db_api::{database::Database, transaction::DbTxMut};
-use reth_primitives::{Account, StorageEntry, B256, U256};
+use reth_primitives::{Account, StorageEntry};
 use reth_trie::{
     hashed_cursor::{
         HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory, HashedStorageCursor,

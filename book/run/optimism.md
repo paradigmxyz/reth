@@ -42,20 +42,6 @@ Next, you'll need to install a [Rollup Node][rollup-node-spec], which is the equ
 
 For the sake of this tutorial, we'll use the reference implementation of the Rollup Node maintained by OP Labs, the `op-node`. The `op-node` can be built from source, or pulled from a [Docker image available on Google Cloud][op-node-docker].
 
-**`rethdb` build tag**  
-The `op-node` also comes with an experimental `rethdb` build tag, which allows it to read receipts directly from an L1 `reth` database during [derivation][derivation-spec]. This can speed up sync times, but it is not required if you do not
-have access to the L1 archive node on the same machine as your L2 node.
-
-To build the `op-node` with the `rethdb` build tag enabled:
-```sh
-git clone https://github.com/ethereum-optimism/optimism.git && \
-    (cd optimism/op-service/rethdb-reader && cargo build --release) && \ 
-    cd optimism/op-node && \
-    go build -v -tags rethdb -o ./bin/op-node ./cmd/main.go && \
-    mv bin/op-node /usr/bin/op-node
-```
-This will build the `rethdb-reader` dylib and instruct the `op-node` build to statically link this dylib into the binary. The `op-node` binary will be installed to `/usr/bin/op-node`.
-
 ### Running `op-reth`
 
 The `optimism` feature flag in `op-reth` adds several new CLI flags to the `reth` binary:
@@ -90,17 +76,6 @@ op-node \
 ```
 
 Consider adding the `--l1.trustrpc` flag to improve performance, if the connection to l1 is over localhost.
-
-If you opted to build the `op-node` with the `rethdb` build tag, this feature can be enabled by appending one extra flag to the `op-node` invocation:
-
-> Note, the `reth_db_path` is the path to the `db` folder inside of the reth datadir, not the `mdbx.dat` file itself. This can be fetched from `op-reth db path [--chain <chain-name>]`, or if you are using a custom datadir location via the `--datadir` flag,
-> by appending `/db` to the end of the path.
-
-```sh
-op-node \
-    # ...
-    --l1.rethdb=<your_L1_reth_db_path>
-```
 
 [l1-el-spec]: https://github.com/ethereum/execution-specs
 [rollup-node-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/rollup-node.md

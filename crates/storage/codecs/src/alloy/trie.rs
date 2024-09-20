@@ -1,12 +1,10 @@
 //! Native Compact codec impl for EIP-7685 requests.
 
 use crate::Compact;
+use alloc::vec::Vec;
 use alloy_primitives::B256;
 use alloy_trie::{hash_builder::HashBuilderValue, BranchNodeCompact, TrieMask};
 use bytes::{Buf, BufMut};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Identifier for [`HashBuilderValue::Hash`]
 const HASH_BUILDER_TYPE_HASH: u8 = 0;

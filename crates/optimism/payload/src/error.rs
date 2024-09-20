@@ -13,7 +13,7 @@ pub enum OptimismPayloadBuilderError {
     L1BlockInfoParseFailed,
     /// Thrown when a database account could not be loaded.
     #[error("failed to load account {0}")]
-    AccountLoadFailed(reth_primitives::Address),
+    AccountLoadFailed(alloy_primitives::Address),
     /// Thrown when force deploy of create2deployer code fails.
     #[error("failed to force create2deployer account code")]
     ForceCreate2DeployerFail,

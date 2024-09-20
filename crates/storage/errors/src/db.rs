@@ -1,14 +1,9 @@
-#[cfg(feature = "std")]
-use std::{fmt, fmt::Display, str::FromStr, string::String};
-
-#[cfg(not(feature = "std"))]
 use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
 };
-#[cfg(not(feature = "std"))]
 use core::{
     fmt,
     fmt::{Debug, Display},
@@ -111,7 +106,7 @@ impl fmt::Display for DatabaseWriteError {
             f,
             "write operation {:?} failed for key \"{}\" in table {}: {}",
             self.operation,
-            reth_primitives::hex::encode(&self.key),
+            alloy_primitives::hex::encode(&self.key),
             self.table_name,
             self.info
         )

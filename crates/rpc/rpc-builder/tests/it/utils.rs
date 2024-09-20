@@ -17,7 +17,10 @@ use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_tasks::TokioTaskExecutor;
-use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
+use reth_transaction_pool::{
+    noop::NoopTransactionPool,
+    test_utils::{TestPool, TestPoolBuilder},
+};
 use tokio::sync::mpsc::unbounded_channel;
 
 /// Localhost with port 0 so a free port is used.
@@ -43,6 +46,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         MAINNET.clone(),
         beacon_engine_handle,
         spawn_test_payload_service().into(),
+        NoopTransactionPool::default(),
         Box::<TokioTaskExecutor>::default(),
         client,
         EngineCapabilities::default(),
@@ -126,5 +130,5 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
-        .with_evm_config(EthEvmConfig::default())
+        .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
 }

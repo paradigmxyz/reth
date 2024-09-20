@@ -24,8 +24,7 @@ use reth::{
     utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::{mdbx::DatabaseArguments, DatabaseEnv};
-use reth_db_api::models::ClientVersion;
+use reth_db::{mdbx::DatabaseArguments, ClientVersion, DatabaseEnv};
 
 // Bringing up the RPC
 use reth::rpc::builder::{
@@ -67,7 +66,7 @@ async fn main() -> eyre::Result<()> {
         .with_noop_pool()
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
-        .with_evm_config(EthEvmConfig::default())
+        .with_evm_config(EthEvmConfig::new(spec))
         .with_events(TestCanonStateSubscriptions::default());
 
     // Pick which namespaces to expose.

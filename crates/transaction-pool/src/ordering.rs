@@ -1,5 +1,6 @@
 use crate::traits::PoolTransaction;
-use reth_primitives::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered, U256};
+use alloy_primitives::U256;
+use reth_primitives::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 use std::{fmt, marker::PhantomData};
 
 /// Priority of the transaction that can be missing.

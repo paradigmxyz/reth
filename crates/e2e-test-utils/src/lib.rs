@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use alloy_network::Network;
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -59,12 +58,7 @@ where
     >,
     N::AddOns: NodeAddOns<
         Adapter<N>,
-        EthApi: FullEthApiServer<
-            NetworkTypes: Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        > + AddDevSigners
-                    + EthApiBuilderProvider<Adapter<N>>,
+        EthApi: FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
     >,
 {
     let tasks = TaskManager::current();
