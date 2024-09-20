@@ -43,7 +43,7 @@ use reth_rpc_types::{
 };
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::parallel_root::ParallelStateRoot;
+use reth_trie_parallel::{async_root::AsyncStateRootError, parallel_root::ParallelStateRoot};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -56,10 +56,10 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-    oneshot::error::TryRecvError,
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot::{self, error::TryRecvError},
 };
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 pub mod config;
@@ -69,6 +69,9 @@ use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use reth_engine_primitives::InvalidBlockHook;
+
+mod root;
+use root::StateRootTask;
 
 /// Keeps track of the state of the tree.
 ///
@@ -524,7 +527,13 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
 
 impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
 where
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory
+        + BlockReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Unpin
+        + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
@@ -2151,11 +2160,47 @@ where
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
 
+        let (state_root_tx, state_root_rx) = oneshot::channel();
+        let (state_tx, state_rx) = mpsc::unbounded_channel();
+        let persistence_in_progress = self.persistence_state.in_progress();
+        if !persistence_in_progress {
+            let started_at = Instant::now();
+            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let mut input = TrieInput::default();
+            if let Some((historical, blocks)) =
+                self.state.tree_state.blocks_by_hash(block.parent_hash)
+            {
+                input.append(consistent_view.revert_state(historical)?);
+                for block in blocks.iter().rev() {
+                    input.append_cached_ref(block.trie_updates(), block.hashed_state())
+                }
+            } else {
+                input.append(consistent_view.revert_state(block.parent_hash)?);
+            }
+
+            let parent_state_root = parent_block.state_root;
+            rayon::spawn(move || {
+                let result: Result<(B256, TrieUpdates), AsyncStateRootError> =
+                    futures::executor::block_on(async move {
+                        StateRootTask::new(
+                            consistent_view,
+                            input,
+                            UnboundedReceiverStream::from(state_rx),
+                            parent_state_root,
+                        )
+                        .await
+                    });
+                let _ = state_root_tx.send((started_at.elapsed(), result));
+            });
+        } else {
+            drop(state_rx);
+            drop(state_root_tx);
+        }
+
         let exec_time = Instant::now();
-        let output = self
-            .metrics
-            .executor
-            .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
+        let output = self.metrics.executor.metered((&block, U256::MAX).into(), |input| {
+            executor.execute_and_stream(input, state_tx)
+        })?;
         debug!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
         if let Err(err) = self.consensus.validate_block_post_execution(
@@ -2202,6 +2247,19 @@ where
             debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
+        let root_elapsed = root_time.elapsed();
+
+        match state_root_rx.blocking_recv() {
+            Ok((elapsed, Ok((root, _updates)))) => {
+                info!(target: "engine", regular_root = %state_root, regular_elapsed = ?root_elapsed, task_root = %root, task_elapsed = ?elapsed, "State root task finished");
+            }
+            Ok((_, Err(error))) => {
+                error!(target: "engine", %error, persistence_in_progress, "State root task failed");
+            }
+            Err(error) => {
+                warn!(target: "engine", %error, persistence_in_progress, "State root task skipped");
+            }
+        }
 
         if state_root != block.state_root {
             // call post-block hook
@@ -2217,7 +2275,6 @@ where
             .into())
         }
 
-        let root_elapsed = root_time.elapsed();
         self.metrics.block_validation.record_state_root(root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, ?block_number, "Calculated state root");
 

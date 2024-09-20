@@ -18,6 +18,12 @@ pub struct TriePrefixSetsMut {
 }
 
 impl TriePrefixSetsMut {
+    pub fn is_empty(&self) -> bool {
+        self.account_prefix_set.is_empty() &&
+            self.storage_prefix_sets.is_empty() &&
+            self.destroyed_accounts.is_empty()
+    }
+
     /// Extends prefix sets with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
         self.account_prefix_set.extend(other.account_prefix_set.keys);
@@ -110,6 +116,16 @@ impl PrefixSetMut {
         Self { all: true, keys: Vec::new() }
     }
 
+    /// Returns `true` if the set is empty.
+    pub fn is_empty(&self) -> bool {
+        !self.all && self.keys.is_empty()
+    }
+
+    /// Returns the number of elements in the set.
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+
     /// Inserts the given `nibbles` into the set.
     pub fn insert(&mut self, nibbles: Nibbles) {
         self.keys.push(nibbles);
@@ -121,16 +137,6 @@ impl PrefixSetMut {
         I: IntoIterator<Item = Nibbles>,
     {
         self.keys.extend(nibbles_iter);
-    }
-
-    /// Returns the number of elements in the set.
-    pub fn len(&self) -> usize {
-        self.keys.len()
-    }
-
-    /// Returns `true` if the set is empty.
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
     }
 
     /// Returns a `PrefixSet` with the same elements as this set.

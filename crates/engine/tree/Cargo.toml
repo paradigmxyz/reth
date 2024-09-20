@@ -39,10 +39,14 @@ reth-trie-parallel.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
+revm-primitives.workspace = true
+
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+tokio-stream.workspace = true
 thiserror.workspace = true
+rayon.workspace = true
 
 # metrics
 metrics.workspace = true
