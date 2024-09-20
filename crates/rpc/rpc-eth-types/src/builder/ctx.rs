@@ -2,7 +2,9 @@
 
 use std::marker::PhantomData;
 
-use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
+use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::ChainSpecProvider;
+use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 
 use crate::{
