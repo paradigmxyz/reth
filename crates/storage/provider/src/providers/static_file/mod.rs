@@ -58,10 +58,17 @@ mod tests {
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use alloy_primitives::{B256, U256};
     use rand::seq::SliceRandom;
-    use reth_db::{CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers};
+    use reth_db::{
+        test_utils::create_test_static_files_dir, CanonicalHeaders, HeaderNumbers,
+        HeaderTerminalDifficulties, Headers,
+    };
     use reth_db_api::transaction::DbTxMut;
-    use reth_primitives::static_file::{find_fixed_range, DEFAULT_BLOCKS_PER_STATIC_FILE};
+    use reth_primitives::{
+        static_file::{find_fixed_range, DEFAULT_BLOCKS_PER_STATIC_FILE},
+        BlockHash, Header,
+    };
     use reth_testing_utils::generators::{self, random_header_range};
+    use std::{fs, path::Path};
 
     #[test]
     fn test_snap() {
@@ -137,6 +144,124 @@ mod tests {
                 assert_eq!(
                     db_provider.header_td(&header_hash).unwrap().unwrap(),
                     jar_provider.header_td_by_number(header.number).unwrap().unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_header_truncation() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let blocks_per_file = 10; // Number of headers per file
+        let files_per_range = 3; // Number of files per range (data/conf/offset files)
+        let file_set_count = 3; // Number of sets of files to create
+        let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
+        let tip = blocks_per_file * file_set_count - 1; // Initial highest block (29 in this case)
+
+        // [ Headers Creation and Commit ]
+        {
+            let sf_rw = StaticFileProvider::read_write(&static_dir)
+                .expect("Failed to create static file provider")
+                .with_custom_blocks_per_file(blocks_per_file);
+
+            let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
+
+            // Append headers from 0 to the tip (29) and commit
+            let mut header = Header::default();
+            for num in 0..=tip {
+                header.number = num;
+                header_writer
+                    .append_header(&header, U256::default(), &BlockHash::default())
+                    .unwrap();
+            }
+            header_writer.commit().unwrap();
+        }
+
+        // Helper function to prune headers and validate truncation results
+        fn prune_and_validate(
+            writer: &mut StaticFileProviderRWRefMut<'_>,
+            sf_rw: &StaticFileProvider,
+            static_dir: impl AsRef<Path>,
+            prune_count: u64,
+            expected_tip: Option<u64>,
+            expected_file_count: u64,
+        ) {
+            writer.prune_headers(prune_count).unwrap();
+            writer.commit().unwrap();
+
+            // Validate the highest block after pruning
+            assert_eq!(
+                sf_rw.get_highest_static_file_block(StaticFileSegment::Headers),
+                expected_tip
+            );
+
+            // Validate the number of files remaining in the directory
+            assert_eq!(fs::read_dir(static_dir).unwrap().count(), expected_file_count as usize);
+        }
+
+        // [ Test Cases ]
+        type PruneCount = u64;
+        type ExpectedTip = u64;
+        type ExpectedFileCount = u64;
+        let mut tmp_tip = tip;
+        let test_cases: Vec<(PruneCount, Option<ExpectedTip>, ExpectedFileCount)> = vec![
+            // Case 1: Pruning 1 header
+            {
+                tmp_tip -= 1;
+                (1, Some(tmp_tip), initial_file_count)
+            },
+            // Case 2: Pruning remaining rows from file should result in its deletion
+            {
+                tmp_tip -= blocks_per_file - 1;
+                (blocks_per_file - 1, Some(tmp_tip), initial_file_count - files_per_range)
+            },
+            // Case 3: Pruning more headers than a single file has (tip reduced by
+            // blocks_per_file + 1) should result in a file set deletion
+            {
+                tmp_tip -= blocks_per_file + 1;
+                (blocks_per_file + 1, Some(tmp_tip), initial_file_count - files_per_range * 2)
+            },
+            // Case 4: Pruning all remaining headers from the file except the genesis header
+            {
+                (
+                    tmp_tip,
+                    Some(0),             // Only genesis block remains
+                    files_per_range + 1, // The file set with block 0 should remain
+                )
+            },
+            // Case 5: Pruning the genesis header (should not delete the file set with block 0)
+            {
+                (
+                    1,
+                    None,                // No blocks left
+                    files_per_range + 1, // The file set with block 0 remains
+                )
+            },
+        ];
+
+        // Test cases execution
+        {
+            let sf_rw = StaticFileProvider::read_write(&static_dir)
+                .expect("Failed to create static file provider")
+                .with_custom_blocks_per_file(blocks_per_file);
+
+            assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
+            assert_eq!(
+                fs::read_dir(static_dir.as_ref()).unwrap().count(),
+                initial_file_count as usize
+            );
+
+            let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
+
+            for (prune_count, expected_tip, expected_file_count) in test_cases {
+                prune_and_validate(
+                    &mut header_writer,
+                    &sf_rw,
+                    &static_dir,
+                    prune_count,
+                    expected_tip,
+                    expected_file_count,
                 );
             }
         }
