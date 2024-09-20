@@ -15,7 +15,6 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_optimism_forks::OptimismHardforks;
 use reth_primitives_traits::{
     constants::{
         DEV_GENESIS_HASH, EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT,
@@ -622,7 +621,8 @@ impl EthereumHardforks for ChainSpec {
     }
 }
 
-impl OptimismHardforks for ChainSpec {}
+#[cfg(feature = "optimism")]
+impl reth_optimism_forks::OptimismHardforks for ChainSpec {}
 
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]

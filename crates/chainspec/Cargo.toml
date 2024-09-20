@@ -16,6 +16,8 @@ reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
 reth-trie-common.workspace = true
 reth-primitives-traits.workspace = true
+
+# op-reth
 reth-optimism-forks = { workspace = true, optional = true }
 
 # ethereum
