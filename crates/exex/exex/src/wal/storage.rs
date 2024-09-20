@@ -1,11 +1,13 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
-    ops::ControlFlow,
+    ops::{Bound, ControlFlow, RangeBounds},
     path::{Path, PathBuf},
 };
 
+use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
+use reth_tracing::tracing::debug;
 
 /// The underlying WAL storage backed by a file.
 ///
@@ -20,25 +22,45 @@ use reth_exex_types::ExExNotification;
 pub(super) struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
-    /// The file handle of the WAL file.
-    file: File,
+    min_id: Option<u64>,
+    max_id: Option<u64>,
 }
 
 impl Storage {
     /// Creates a new instance of [`Storage`] backed by the file at the given path and creates
     /// it doesn't exist.
     pub(super) fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
-        Ok(Self { path: path.as_ref().to_path_buf(), file: Self::open_file(&path)? })
+        reth_fs_util::create_dir_all(&path)?;
+
+        let (mut min_id, mut max_id) = (None, None);
+
+        for entry in reth_fs_util::read_dir(&path)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
+
+            min_id = min_id.map_or(Some(file_id), |min_id: u64| Some(min_id.min(file_id)));
+            max_id = max_id.map_or(Some(file_id), |max_id: u64| Some(max_id.max(file_id)));
+        }
+
+        debug!(?min_id, ?max_id, "Initialized WAL storage");
+
+        Ok(Self { path: path.as_ref().to_path_buf(), min_id, max_id })
     }
 
-    /// Opens the file at the given path and creates it if it doesn't exist.
-    pub(super) fn open_file(path: impl AsRef<Path>) -> std::io::Result<File> {
-        File::options().read(true).write(true).create(true).truncate(false).open(path)
+    fn file_path(&self, id: u64) -> PathBuf {
+        self.path.join(format!("{id}.wal"))
     }
 
-    /// Returns the length of the underlying file in bytes.
-    pub(super) fn bytes_len(&self) -> std::io::Result<u64> {
-        Ok(self.file.metadata()?.len())
+    fn parse_filename(filename: &str) -> eyre::Result<u64> {
+        filename
+            .strip_suffix(".wal")
+            .and_then(|s| s.parse().ok())
+            .ok_or_eyre(format!("failed to parse file name: {filename}"))
+    }
+
+    pub(super) const fn max_id(&self) -> Option<u64> {
+        self.max_id
     }
 
     /// Truncates the underlying file from the given byte offset (inclusive) to the end of the file.
@@ -50,35 +72,25 @@ impl Storage {
     /// # Returns
     ///
     /// The old and new underlying file sizes in bytes
-    pub(super) fn truncate_from_offset(&mut self, offset: u64) -> eyre::Result<(u64, u64)> {
-        // Seek the original file to the given offset
-        self.file.seek(SeekFrom::Start(offset))?;
-
-        // Open the temporary file for writing and copy the notifications with unfinalized blocks
-        let tmp_file_path = self.path.with_extension("tmp");
-        let new_file = File::create(&tmp_file_path)?;
-        let mut file_reader = BufReader::new(&self.file);
-        let mut new_file_writer = BufWriter::new(&new_file);
-        loop {
-            let buffer = file_reader.fill_buf()?;
-            let buffer_len = buffer.len();
-            if buffer_len == 0 {
-                break
+    pub(super) fn truncate_from_file_id(&mut self, from_id: u64) -> eyre::Result<usize> {
+        let mut removed_files = 0;
+        let to_id = self.max_id.unwrap_or(u64::MAX);
+        for id in from_id..=to_id {
+            let file_path = self.file_path(id);
+            match reth_fs_util::remove_file(&file_path) {
+                Ok(()) => removed_files += 1,
+                Err(reth_fs_util::FsPathError::RemoveFile { source, .. })
+                    if source.kind() == std::io::ErrorKind::NotFound && self.max_id.is_none() =>
+                {
+                    break
+                }
+                Err(err) => return Err(err.into()),
             }
-
-            new_file_writer.write_all(buffer)?;
-            file_reader.consume(buffer_len);
         }
-        new_file_writer.flush()?;
 
-        let old_size = self.file.metadata()?.len();
-        let new_size = new_file.metadata()?.len();
+        self.min_id = Some(from_id);
 
-        // Rename the temporary file to the WAL file and update the file handle with it
-        reth_fs_util::rename(&tmp_file_path, &self.path)?;
-        self.file = Self::open_file(&self.path)?;
-
-        Ok((old_size, new_size))
+        Ok(removed_files)
     }
 
     /// Truncates the underlying file to the given byte offset (exclusive).
@@ -86,95 +98,83 @@ impl Storage {
     /// # Returns
     ///
     /// Notifications that were removed.
-    pub(super) fn truncate_to_offset(
+    pub(super) fn truncate_to_file_id(
         &mut self,
-        to_bytes_len: u64,
+        to_id: u64,
     ) -> eyre::Result<Vec<ExExNotification>> {
-        let mut removed_notifications = Vec::new();
-        self.for_each_notification_from_offset(to_bytes_len, |_, notification| {
-            removed_notifications.push(notification);
-            Ok(ControlFlow::Continue(()))
-        })?;
+        let removed_notifications =
+            self.iter_notifications(to_id..).collect::<eyre::Result<Vec<_>>>()?;
 
-        self.file.set_len(to_bytes_len)?;
-
-        Ok(removed_notifications)
-    }
-
-    /// Iterates over the notifications in the underlying file, decoding them and calling the
-    /// provided closure with the length of the notification in bytes and the notification itself.
-    /// Stops when the closure returns [`ControlFlow::Break`], or the end of the file is reached.
-    pub(super) fn for_each_notification(
-        &mut self,
-        f: impl FnMut(usize, ExExNotification) -> eyre::Result<ControlFlow<()>>,
-    ) -> eyre::Result<()> {
-        self.for_each_notification_from_offset(0, f)
-    }
-
-    fn for_each_notification_from_offset(
-        &mut self,
-        file_offset: u64,
-        mut f: impl FnMut(usize, ExExNotification) -> eyre::Result<ControlFlow<()>>,
-    ) -> eyre::Result<()> {
-        self.file.seek(SeekFrom::Start(file_offset))?;
-
-        let mut reader = BufReader::new(&self.file);
-        loop {
-            let Some((len, notification)) = read_notification(&mut reader)? else { break };
-            f(len, notification)?;
+        for (id, _) in &removed_notifications {
+            reth_fs_util::remove_file(self.file_path(*id))?;
         }
-        Ok(())
+
+        self.max_id = to_id.checked_sub(1);
+
+        Ok(removed_notifications.into_iter().map(|(_, notification)| notification).collect())
+    }
+
+    pub(super) fn iter_notifications(
+        &self,
+        range: impl RangeBounds<u64>,
+    ) -> Box<dyn Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_> {
+        let Some((min_id, max_id)) = self.min_id.zip(self.max_id) else {
+            return Box::new(std::iter::empty())
+        };
+
+        let start = match range.start_bound() {
+            Bound::Included(start) => *start,
+            Bound::Excluded(start) => *start + 1,
+            Bound::Unbounded => min_id,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(end) => *end,
+            Bound::Excluded(end) => *end - 1,
+            Bound::Unbounded => max_id,
+        };
+
+        Box::new(
+            (start..=end)
+                .map(move |id| self.read_notification(id).map(|notification| (id, notification))),
+        )
     }
 
     /// Reads the notification from the underlying file at the given offset.
-    pub(super) fn read_notification_at(
-        &mut self,
-        file_offset: u64,
-    ) -> eyre::Result<Option<ExExNotification>> {
-        self.file.seek(SeekFrom::Start(file_offset))?;
-        Ok(read_notification(&mut self.file)?.map(|(_, notification)| notification))
+    pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<ExExNotification> {
+        debug!(?file_id, "Reading notification from WAL");
+
+        let file_path = self.file_path(file_id);
+        let mut file = File::open(&file_path)?;
+        read_notification(&mut file)
     }
 
     /// Writes the notification to the end of the underlying file.
     pub(super) fn write_notification(
         &mut self,
         notification: &ExExNotification,
-    ) -> eyre::Result<()> {
-        write_notification(&mut self.file, notification)
+    ) -> eyre::Result<u64> {
+        let file_id = self.max_id.map_or(0, |id| id + 1);
+        self.min_id = self.min_id.map_or(Some(file_id), |min_id| Some(min_id.min(file_id)));
+        self.max_id = self.max_id.map_or(Some(file_id), |max_id| Some(max_id.max(file_id)));
+
+        debug!(?file_id, "Writing notification to WAL");
+
+        let file_path = self.file_path(file_id);
+        let mut file = File::create_new(&file_path)?;
+        write_notification(&mut file, notification)?;
+
+        Ok(file_id)
     }
 }
 
 fn write_notification(w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
-    let data = rmp_serde::encode::to_vec(notification)?;
-    // Write the length of the notification as a u32 in little endian
-    w.write_all(&(data.len() as u32).to_le_bytes())?;
-    w.write_all(&data)?;
+    rmp_serde::encode::write(w, notification)?;
     w.flush()?;
     Ok(())
 }
 
-fn read_notification(r: &mut impl Read) -> eyre::Result<Option<(usize, ExExNotification)>> {
-    // Read the u32 length prefix
-    let mut len_buf = [0; 4];
-    let bytes_read = r.read(&mut len_buf)?;
-
-    // EOF
-    if bytes_read == 0 {
-        return Ok(None)
-    }
-
-    // Convert the 4 bytes to a u32 to determine the length of the serialized notification
-    let len = u32::from_le_bytes(len_buf) as usize;
-
-    // Read the serialized notification
-    let mut data = vec![0u8; len];
-    r.read_exact(&mut data)?;
-
-    // Deserialize the notification
-    let notification: ExExNotification = rmp_serde::from_slice(&data)?;
-
-    let total_len = len_buf.len() + data.len();
-    Ok(Some((total_len, notification)))
+fn read_notification(r: &mut impl Read) -> eyre::Result<ExExNotification> {
+    Ok(rmp_serde::from_read(r)?)
 }
 
 #[cfg(test)]
@@ -192,8 +192,8 @@ mod tests {
     fn test_roundtrip() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
-        let temp_file = tempfile::NamedTempFile::new()?;
-        let mut storage = Storage::new(&temp_file)?;
+        let temp_dir = tempfile::tempdir()?;
+        let mut storage = Storage::new(&temp_dir)?;
 
         let old_block = random_block(&mut rng, 0, Default::default())
             .seal_with_senders()
@@ -209,8 +209,8 @@ mod tests {
 
         // Do a round trip serialization and deserialization
         storage.write_notification(&notification)?;
-        let deserialized_notification = storage.read_notification_at(0)?;
-        assert_eq!(deserialized_notification, Some(notification));
+        let deserialized_notification = storage.read_notification(0)?;
+        assert_eq!(deserialized_notification, notification);
 
         Ok(())
     }
