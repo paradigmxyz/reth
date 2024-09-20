@@ -51,7 +51,6 @@ reth-node-api.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
-reth-trie.workspace = true
 
 secp256k1.workspace = true
 tempfile.workspace = true

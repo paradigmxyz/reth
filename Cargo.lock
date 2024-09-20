@@ -7309,7 +7309,6 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
- "reth-trie",
  "rmp-serde",
  "secp256k1",
  "tempfile",

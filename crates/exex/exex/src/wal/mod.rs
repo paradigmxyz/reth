@@ -1,23 +1,19 @@
 #![allow(dead_code)]
 
+mod cache;
+
 use std::{
-    collections::VecDeque,
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom, Write},
     ops::ControlFlow,
     path::{Path, PathBuf},
 };
 
+use cache::BlockCache;
 use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
-
-/// The maximum number of blocks to cache in the WAL.
-///
-/// [`CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million = 48
-/// megabytes.
-const MAX_CACHED_BLOCKS: usize = 1_000_000;
 
 #[derive(Debug)]
 pub(crate) struct Wal {
@@ -35,99 +31,6 @@ pub(crate) struct Wal {
     /// This cache is needed only for convenience, so we can avoid walking the WAL file every time
     /// we want to find a notification corresponding to a block.
     block_cache: BlockCache,
-}
-
-#[derive(Debug, Clone, Default)]
-struct BlockCache(VecDeque<CachedBlock>);
-
-impl BlockCache {
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn iter(&self) -> std::collections::vec_deque::Iter<'_, CachedBlock> {
-        self.0.iter()
-    }
-
-    fn front(&self) -> Option<&CachedBlock> {
-        self.0.front()
-    }
-
-    fn back(&self) -> Option<&CachedBlock> {
-        self.0.back()
-    }
-
-    fn pop_front(&mut self) -> Option<CachedBlock> {
-        self.0.pop_front()
-    }
-
-    fn pop_back(&mut self) -> Option<CachedBlock> {
-        self.0.pop_back()
-    }
-
-    fn push_front(&mut self, block: CachedBlock) {
-        self.0.push_front(block);
-        if self.0.len() > MAX_CACHED_BLOCKS {
-            self.0.pop_back();
-        }
-    }
-
-    fn push_back(&mut self, block: CachedBlock) {
-        self.0.push_back(block);
-        if self.0.len() > MAX_CACHED_BLOCKS {
-            self.0.pop_front();
-        }
-    }
-
-    fn clear(&mut self) {
-        self.0.clear();
-    }
-
-    fn cache_notification_blocks(&mut self, notification: &ExExNotification, file_offset: u64) {
-        let reverted_chain = notification.reverted_chain();
-        let committed_chain = notification.committed_chain();
-
-        if let Some(reverted_chain) = reverted_chain {
-            for block in reverted_chain.blocks().values() {
-                self.push_back(CachedBlock {
-                    file_offset,
-                    action: Action::Revert,
-                    block: (block.number, block.hash()).into(),
-                });
-            }
-        }
-
-        if let Some(committed_chain) = committed_chain {
-            for block in committed_chain.blocks().values() {
-                self.push_back(CachedBlock {
-                    file_offset,
-                    action: Action::Commit,
-                    block: (block.number, block.hash()).into(),
-                });
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CachedBlock {
-    /// The file offset where the WAL entry is written.
-    pub(super) file_offset: u64,
-    pub(super) action: Action,
-    /// The block number and hash of the block.
-    pub(super) block: BlockNumHash,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Action {
-    Commit,
-    Revert,
-}
-
-impl Action {
-    const fn is_commit(&self) -> bool {
-        matches!(self, Self::Commit)
-    }
 }
 
 impl Wal {
@@ -165,7 +68,7 @@ impl Wal {
                 "Inserting block cache entries"
             );
 
-            block_cache.cache_notification_blocks(&notification, file_offset);
+            block_cache.insert_notification_blocks_at_offset(&notification, file_offset);
 
             if file_offset >= to_offset {
                 debug!(
@@ -220,7 +123,7 @@ impl Wal {
 
         write_notification(&mut self.file, notification)?;
 
-        self.block_cache.cache_notification_blocks(notification, file_offset);
+        self.block_cache.insert_notification_blocks_at_offset(notification, file_offset);
 
         Ok(())
     }
@@ -442,7 +345,10 @@ mod tests {
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
 
-    use crate::wal::{Action, CachedBlock, Wal};
+    use crate::wal::{
+        cache::{CachedBlock, CachedBlockAction},
+        read_notification, write_notification, Wal,
+    };
 
     fn read_notifications(wal: &mut Wal) -> eyre::Result<Vec<ExExNotification>> {
         let mut notifications = Vec::new();
@@ -467,9 +373,11 @@ mod tests {
             new: Arc::new(Chain::new(vec![new_block], Default::default(), None)),
         };
 
-        let deserialized_notification: ExExNotification =
-            rmp_serde::from_slice(&rmp_serde::to_vec(&notification)?)?;
-        assert_eq!(deserialized_notification, notification);
+        // Do a round trip serialization and deserialization
+        let mut serialized_notification = Vec::new();
+        write_notification(&mut serialized_notification, &notification)?;
+        let deserialized_notification = read_notification(&mut serialized_notification.as_slice())?;
+        assert_eq!(deserialized_notification, Some((serialized_notification.len(), notification)));
 
         Ok(())
     }
@@ -538,12 +446,12 @@ mod tests {
         let committed_notification_1_cache = vec![
             CachedBlock {
                 file_offset,
-                action: Action::Commit,
+                action: CachedBlockAction::Commit,
                 block: (blocks[0].number, blocks[0].hash()).into(),
             },
             CachedBlock {
                 file_offset,
-                action: Action::Commit,
+                action: CachedBlockAction::Commit,
                 block: (blocks[1].number, blocks[1].hash()).into(),
             },
         ];
@@ -559,7 +467,7 @@ mod tests {
         wal.commit(&reverted_notification)?;
         let reverted_notification_cache = vec![CachedBlock {
             file_offset,
-            action: Action::Revert,
+            action: CachedBlockAction::Revert,
             block: (blocks[1].number, blocks[1].hash()).into(),
         }];
         assert_eq!(
@@ -603,12 +511,12 @@ mod tests {
         let committed_notification_2_cache = vec![
             CachedBlock {
                 file_offset,
-                action: Action::Commit,
+                action: CachedBlockAction::Commit,
                 block: (blocks[1].number, blocks[1].hash()).into(),
             },
             CachedBlock {
                 file_offset,
-                action: Action::Commit,
+                action: CachedBlockAction::Commit,
                 block: (blocks[2].number, blocks[2].hash()).into(),
             },
         ];
@@ -636,17 +544,17 @@ mod tests {
         let reorged_notification_cache = vec![
             CachedBlock {
                 file_offset,
-                action: Action::Revert,
+                action: CachedBlockAction::Revert,
                 block: (blocks[2].number, blocks[2].hash()).into(),
             },
             CachedBlock {
                 file_offset,
-                action: Action::Commit,
+                action: CachedBlockAction::Commit,
                 block: (block_2_reorged.number, block_2_reorged.hash()).into(),
             },
             CachedBlock {
                 file_offset,
-                action: Action::Commit,
+                action: CachedBlockAction::Commit,
                 block: (blocks[3].number, blocks[3].hash()).into(),
             },
         ];
