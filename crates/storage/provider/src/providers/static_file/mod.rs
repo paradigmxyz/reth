@@ -68,7 +68,14 @@ mod tests {
         BlockHash, Header, Receipt, TransactionSignedNoHash,
     };
     use reth_testing_utils::generators::{self, random_header_range};
-    use std::{fs, ops::Range, path::Path};
+    use std::{fmt::Debug, fs, ops::Range, path::Path};
+
+    fn assert_eyre<T: PartialEq + Debug>(got: T, expected: T, msg: &str) -> eyre::Result<()> {
+        if got != expected {
+            eyre::bail!("{msg} | got: {got:?} expected: {expected:?})");
+        }
+        Ok(())
+    }
 
     #[test]
     fn test_snap() {
@@ -186,18 +193,25 @@ mod tests {
             prune_count: u64,
             expected_tip: Option<u64>,
             expected_file_count: u64,
-        ) {
-            writer.prune_headers(prune_count).unwrap();
-            writer.commit().unwrap();
+        ) -> eyre::Result<()> {
+            writer.prune_headers(prune_count)?;
+            writer.commit()?;
 
             // Validate the highest block after pruning
-            assert_eq!(
+            assert_eyre(
                 sf_rw.get_highest_static_file_block(StaticFileSegment::Headers),
-                expected_tip
-            );
+                expected_tip,
+                "mismatch tip",
+            )?;
 
             // Validate the number of files remaining in the directory
-            assert_eq!(fs::read_dir(static_dir).unwrap().count(), expected_file_count as usize);
+            assert_eyre(
+                fs::read_dir(static_dir)?.count(),
+                expected_file_count as usize,
+                "mismatch file count",
+            )?;
+
+            Ok(())
         }
 
         // [ Test Cases ]
@@ -206,23 +220,23 @@ mod tests {
         type ExpectedFileCount = u64;
         let mut tmp_tip = tip;
         let test_cases: Vec<(PruneCount, Option<ExpectedTip>, ExpectedFileCount)> = vec![
-            // Case 1: Pruning 1 header
+            // Case 0: Pruning 1 header
             {
                 tmp_tip -= 1;
                 (1, Some(tmp_tip), initial_file_count)
             },
-            // Case 2: Pruning remaining rows from file should result in its deletion
+            // Case 1: Pruning remaining rows from file should result in its deletion
             {
                 tmp_tip -= blocks_per_file - 1;
                 (blocks_per_file - 1, Some(tmp_tip), initial_file_count - files_per_range)
             },
-            // Case 3: Pruning more headers than a single file has (tip reduced by
+            // Case 2: Pruning more headers than a single file has (tip reduced by
             // blocks_per_file + 1) should result in a file set deletion
             {
                 tmp_tip -= blocks_per_file + 1;
                 (blocks_per_file + 1, Some(tmp_tip), initial_file_count - files_per_range * 2)
             },
-            // Case 4: Pruning all remaining headers from the file except the genesis header
+            // Case 3: Pruning all remaining headers from the file except the genesis header
             {
                 (
                     tmp_tip,
@@ -230,7 +244,7 @@ mod tests {
                     files_per_range + 1, // The file set with block 0 should remain
                 )
             },
-            // Case 5: Pruning the genesis header (should not delete the file set with block 0)
+            // Case 4: Pruning the genesis header (should not delete the file set with block 0)
             {
                 (
                     1,
@@ -254,7 +268,9 @@ mod tests {
 
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
 
-            for (prune_count, expected_tip, expected_file_count) in test_cases {
+            for (case, (prune_count, expected_tip, expected_file_count)) in
+                test_cases.into_iter().enumerate()
+            {
                 prune_and_validate(
                     &mut header_writer,
                     &sf_rw,
@@ -262,7 +278,9 @@ mod tests {
                     prune_count,
                     expected_tip,
                     expected_file_count,
-                );
+                )
+                .map_err(|err| eyre::eyre!("Test case {case}: {err}"))
+                .unwrap();
             }
         }
     }
@@ -369,6 +387,46 @@ mod tests {
         let file_set_count = 3; // Number of sets of files to create
         let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
 
+        fn prune_and_validate(
+            static_dir: &tempfile::TempDir,
+            sf_rw: &StaticFileProvider,
+            segment: StaticFileSegment,
+            prune_count: u64,
+            last_block: u64,
+            expected_tx_tip: u64,
+            expected_file_count: i32,
+        ) -> eyre::Result<()> {
+            let mut writer = sf_rw.latest_writer(segment)?;
+
+            // Prune transactions or receipts based on the segment type
+            if segment.is_receipts() {
+                writer.prune_receipts(prune_count, last_block)?;
+            } else {
+                writer.prune_transactions(prune_count, last_block)?;
+            }
+            writer.commit()?;
+
+            // Verify the highest block and transaction tips
+            assert_eyre(
+                sf_rw.get_highest_static_file_block(segment),
+                Some(last_block),
+                "mismatch block",
+            )?;
+            assert_eyre(
+                sf_rw.get_highest_static_file_tx(segment),
+                Some(expected_tx_tip),
+                "mismatch tx",
+            )?;
+
+            // Ensure the file count has reduced as expected
+            assert_eyre(
+                fs::read_dir(&static_dir)?.count(),
+                expected_file_count as usize,
+                "mismatch file count",
+            )?;
+            Ok(())
+        }
+
         for segment in segments {
             let (static_dir, _) = create_test_static_files_dir();
 
@@ -402,26 +460,18 @@ mod tests {
             ];
 
             // Loop through test cases
-            for (prune_count, last_block, expected_tx_tip, expected_file_count) in test_cases {
-                let mut writer = sf_rw.latest_writer(segment).unwrap();
-
-                // Prune transactions or receipts based on the segment type
-                if segment.is_receipts() {
-                    writer.prune_receipts(prune_count, last_block).unwrap();
-                } else {
-                    writer.prune_transactions(prune_count, last_block).unwrap();
-                }
-                writer.commit().unwrap();
-
-                // Verify the highest block and transaction tips
-                assert_eq!(sf_rw.get_highest_static_file_block(segment), Some(last_block));
-                assert_eq!(sf_rw.get_highest_static_file_tx(segment), Some(expected_tx_tip));
-
-                // Ensure the file count has reduced as expected
-                assert_eq!(
-                    fs::read_dir(&static_dir).unwrap().count(),
-                    expected_file_count as usize
-                );
+            for (case, (prune_count, last_block, expected_tx_tip, expected_file_count)) in test_cases.into_iter().enumerate() {
+                prune_and_validate(
+                    &static_dir,
+                    &sf_rw,
+                    segment,
+                    prune_count,
+                    last_block,
+                    expected_tx_tip,
+                    expected_file_count,
+                )
+                .map_err(|err| eyre::eyre!("Test case {case}: {err}"))
+                .unwrap();
             }
         }
     }
