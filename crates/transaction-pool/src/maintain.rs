@@ -17,8 +17,8 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    BlockNumberOrTag, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    TransactionSigned, TransactionSignedEcRecovered,
+    BlockNumberOrTag, PooledTransactionsElementEcRecovered, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -81,6 +81,8 @@ where
         + Send
         + 'static,
     P: TransactionPoolExt + 'static,
+    // <P as TransactionPool>::Transaction: From<PooledTransactionsElementEcRecovered>,
+    // <P as TransactionPool>::Transaction: From<TransactionSignedEcRecovered>,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -107,8 +109,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         + Send
         + 'static,
     P: TransactionPoolExt + 'static,
-    <P as TransactionPool>::Transaction: From<PooledTransactionsElementEcRecovered>,
-    <P as TransactionPool>::Transaction: TryFrom<TransactionSignedEcRecovered>,
+    // <P as TransactionPool>::Transaction: From<PooledTransactionsElementEcRecovered>,
+    // <P as TransactionPool>::Transaction: TryFrom<TransactionSignedEcRecovered>,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -345,12 +347,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     .ok()
                                 })
                                 .map(|tx| {
-                                    <P as TransactionPool>::Transaction::from(tx)
+                                    <P as TransactionPool>::Transaction::from_pooled(tx.into())
                                     // <<P as TransactionPool>::Transaction as
                                     // PoolTransaction>::from_pooled(tx)
                                 })
                         } else {
-                            <P as TransactionPool>::Transaction::try_from(tx).ok()
+                            <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
                             // <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
                         }
                     })
@@ -596,7 +598,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
         })
         .collect::<Vec<_>>();
 
@@ -619,7 +621,11 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.to_recovered_transaction().into_signed())
+        .map(|tx| {
+            let x = tx.transaction.clone().into_consensus();
+            let y: TransactionSignedEcRecovered = x.into();
+            y.into_signed()
+        })
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();

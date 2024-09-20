@@ -33,13 +33,15 @@ where
 {
     fn content(&self) -> TxpoolContent<WithOtherFields<Transaction>> {
         #[inline]
-        fn insert<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+        fn insert<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
             tx: &T,
             content: &mut BTreeMap<Address, BTreeMap<String, WithOtherFields<Transaction>>>,
         ) {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                reth_rpc_types_compat::transaction::from_recovered(tx.clone().into_consensus()),
+                reth_rpc_types_compat::transaction::from_recovered(
+                    tx.clone().into_consensus().into(),
+                ),
             );
         }
 
@@ -83,12 +85,12 @@ where
         trace!(target: "rpc::eth", "Serving txpool_inspect");
 
         #[inline]
-        fn insert<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+        fn insert<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
             tx: &T,
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx = tx.clone().into_consensus();
+            let tx: TransactionSignedEcRecovered = tx.clone().into_consensus().into();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {

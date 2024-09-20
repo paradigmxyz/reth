@@ -14,9 +14,9 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList,
-    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    BlobTransactionSidecar, BlobTransactionValidationError, IntoRecoveredTransaction,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
+    TransactionSignedEcRecovered, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -44,11 +44,7 @@ pub type PeerId = alloy_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction;
-    // <
-    //     Pooled = PooledTransactionsElementEcRecovered,
-    //     Consensus = TransactionSignedEcRecovered,
-    // >;
+    type Transaction: EthPoolTransaction;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -497,12 +493,12 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 }
 
@@ -811,22 +807,28 @@ impl BestTransactionsAttributes {
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// Associated error type for the `try_from_consensus` method.
-    type TryFromConsensusError;
+    type TryFromConsensusError: std::fmt::Debug;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self> + TryInto<Self>;
+    type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
 
     /// Define a method to convert from the `Consensus` type to `Self`
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError>;
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
 
     /// Define a method to convert from the `Self` type to `Consensus`
-    fn into_consensus(self) -> Self::Consensus;
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
-    fn from_pooled(pooled: Self::Pooled) -> Self;
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -922,13 +924,14 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     fn chain_id(&self) -> Option<u64>;
 }
 
-/// An extension trait that provides additional interfaces for the
-/// [`EthTransactionValidator`](crate::EthTransactionValidator).
-pub trait EthPoolTransaction: PoolTransaction
-// <
-//     Pooled = PooledTransactionsElementEcRecovered,
-//     Consensus = TransactionSignedEcRecovered,
-// >
+pub trait EthPoolTransaction:
+    PoolTransaction<
+        Consensus: From<TransactionSignedEcRecovered>
+                       // + TryInto<TransactionSignedEcRecovered, Error: std::fmt::Debug>
+                       + Into<TransactionSignedEcRecovered>,
+        Pooled: From<PooledTransactionsElementEcRecovered>
+                    + Into<PooledTransactionsElementEcRecovered>,
+    > + IntoRecoveredTransaction
 {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
@@ -968,6 +971,13 @@ pub struct EthPooledTransaction {
 
     /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
+}
+
+// TODO: get rid of this trait
+impl IntoRecoveredTransaction for EthPooledTransaction {
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.transaction.clone()
+    }
 }
 
 /// Represents the blob sidecar of the [`EthPooledTransaction`].
@@ -1070,17 +1080,17 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
-        tx.try_into()
-    }
-
-    fn into_consensus(self) -> Self::Consensus {
-        self.into()
-    }
-
-    fn from_pooled(pooled: Self::Pooled) -> Self {
-        pooled.into()
-    }
+    // fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+    //     tx.try_into()
+    // }
+    //
+    // fn into_consensus(self) -> Self::Consensus {
+    //     self.into()
+    // }
+    //
+    // fn from_pooled(pooled: Self::Pooled) -> Self {
+    //     pooled.into()
+    // }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {

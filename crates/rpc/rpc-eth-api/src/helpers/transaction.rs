@@ -232,7 +232,7 @@ pub trait EthTransactions: LoadTransaction {
                     LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered(transaction)));
+                    return Ok(Some(from_recovered(transaction.into())));
                 }
             }
 
@@ -323,7 +323,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             let recovered = recover_raw_transaction(tx.clone())?;
             let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -533,7 +533,7 @@ pub trait EthTransactions: LoadTransaction {
             let recovered =
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered).map_err(|_| EthApiError::TransactionConversionError)?;
+            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered.into()).map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
             let hash = LoadTransaction::pool(self)
@@ -670,7 +670,7 @@ pub trait LoadTransaction: SpawnBlocking {
                 if let Some(tx) =
                     self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
                 {
-                    resp = Some(TransactionSource::Pool(tx));
+                    resp = Some(TransactionSource::Pool(tx.into()));
                 }
             }
 

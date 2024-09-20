@@ -52,8 +52,8 @@ use reth_primitives::{PooledTransactionsElement, TransactionSigned, TransactionS
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
-    GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
-    TransactionPool, ValidPoolTransaction,
+    EthPoolTransaction, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
+    PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
@@ -511,7 +511,7 @@ where
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::new(peer.version);
 
-        let to_propagate = self.pool.get_all(txs).into_iter().map(PropagateTransaction::new);
+        let to_propagate = self.pool.get_all(txs).into_iter().map(|x| PropagateTransaction::new(x));
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
@@ -1033,7 +1033,7 @@ where
                             has_bad_transactions = true;
                         } else {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
+                            let pool_transaction = Pool::Transaction::from_pooled(tx.into());
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1396,11 +1396,11 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
-        tx: Arc<ValidPoolTransaction<T>>,
-    ) -> Self {
+    fn new<T: EthPoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
+        let consensus = tx.transaction.clone().into_consensus();
+        let recovered: TransactionSignedEcRecovered = consensus.into();
+        let transaction = Arc::new(recovered.into_signed());
         Self { size, transaction }
     }
 }

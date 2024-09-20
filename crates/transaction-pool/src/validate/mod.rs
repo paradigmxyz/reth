@@ -381,11 +381,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> IntoRecoveredTransaction
+impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> IntoRecoveredTransaction
     for ValidPoolTransaction<T>
 {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus()
+        self.transaction.clone().into_consensus().into()
     }
 }
 
