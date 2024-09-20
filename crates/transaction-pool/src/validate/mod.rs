@@ -154,10 +154,6 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
-    // <
-    //     Pooled = PooledTransactionsElementEcRecovered,
-    //     Consensus = TransactionSignedEcRecovered,
-    // >;
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
