@@ -201,14 +201,14 @@ mod tests {
             assert_eyre(
                 sf_rw.get_highest_static_file_block(StaticFileSegment::Headers),
                 expected_tip,
-                "mismatch tip",
+                "block mismatch",
             )?;
 
             // Validate the number of files remaining in the directory
             assert_eyre(
                 fs::read_dir(static_dir)?.count(),
                 expected_file_count as usize,
-                "mismatch file count",
+                "file count mismatch",
             )?;
 
             Ok(())
@@ -410,19 +410,19 @@ mod tests {
             assert_eyre(
                 sf_rw.get_highest_static_file_block(segment),
                 Some(last_block),
-                "mismatch block",
+                "block mismatch",
             )?;
             assert_eyre(
                 sf_rw.get_highest_static_file_tx(segment),
                 Some(expected_tx_tip),
-                "mismatch tx",
+                "tx mismatch",
             )?;
 
             // Ensure the file count has reduced as expected
             assert_eyre(
                 fs::read_dir(static_dir)?.count(),
                 expected_file_count as usize,
-                "mismatch file count",
+                "file count mismatch",
             )?;
             Ok(())
         }
