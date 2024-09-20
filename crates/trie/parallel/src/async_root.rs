@@ -90,47 +90,45 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::async_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
 
-        let mut storage_roots_receivers: HashMap<
-            B256,
-            oneshot::Receiver<Result<_, AsyncStateRootError>>,
-        > = storage_root_targets
-            .into_iter()
-            .map(|(hashed_address, prefix_set)| {
-                let view = self.view.clone();
-                let hashed_state_sorted = hashed_state_sorted.clone();
-                let trie_nodes_sorted = trie_nodes_sorted.clone();
-                #[cfg(feature = "metrics")]
-                let metrics = self.metrics.storage_trie.clone();
+        let mut storage_roots: HashMap<B256, oneshot::Receiver<Result<_, AsyncStateRootError>>> =
+            storage_root_targets
+                .into_iter()
+                .map(|(hashed_address, prefix_set)| {
+                    let view = self.view.clone();
+                    let hashed_state_sorted = hashed_state_sorted.clone();
+                    let trie_nodes_sorted = trie_nodes_sorted.clone();
+                    #[cfg(feature = "metrics")]
+                    let metrics = self.metrics.storage_trie.clone();
 
-                let (tx, rx) = oneshot::channel();
+                    let (tx, rx) = oneshot::channel();
 
-                rayon::spawn_fifo(move || {
-                    let result = (|| -> Result<_, AsyncStateRootError> {
-                        let provider_ro = view.provider_ro()?;
-                        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                            &trie_nodes_sorted,
-                        );
-                        let hashed_state = HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                            &hashed_state_sorted,
-                        );
-                        Ok(StorageRoot::new_hashed(
-                            trie_cursor_factory,
-                            hashed_state,
-                            hashed_address,
-                            #[cfg(feature = "metrics")]
-                            metrics,
-                        )
-                        .with_prefix_set(prefix_set)
-                        .calculate(retain_updates)?)
-                    })();
-                    let _ = tx.send(result);
-                });
+                    rayon::spawn_fifo(move || {
+                        let result = (|| -> Result<_, AsyncStateRootError> {
+                            let provider_ro = view.provider_ro()?;
+                            let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                                &trie_nodes_sorted,
+                            );
+                            let hashed_state = HashedPostStateCursorFactory::new(
+                                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                                &hashed_state_sorted,
+                            );
+                            Ok(StorageRoot::new_hashed(
+                                trie_cursor_factory,
+                                hashed_state,
+                                hashed_address,
+                                #[cfg(feature = "metrics")]
+                                metrics,
+                            )
+                            .with_prefix_set(prefix_set)
+                            .calculate(retain_updates)?)
+                        })();
+                        let _ = tx.send(result);
+                    });
 
-                (hashed_address, rx)
-            })
-            .collect();
+                    (hashed_address, rx)
+                })
+                .collect();
 
         trace!(target: "trie::async_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
@@ -163,9 +161,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let (storage_root, _, updates) = match storage_roots_receivers
-                        .remove(&hashed_address)
-                    {
+                    let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.await.map_err(|_| {
                             AsyncStateRootError::StorageRootChannelClosed { hashed_address }
                         })??,
