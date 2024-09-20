@@ -48,7 +48,6 @@ macro_rules! fuzz_type_and_name {
 #[cfg(test)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
-    use alloy_eips::BlockHashOrNumber;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
     use reth_codecs::add_arbitrary_tests;
     use reth_eth_wire::{
@@ -139,7 +138,7 @@ pub mod fuzz_rlp {
     impl Default for GetBlockHeadersWrapper {
         fn default() -> Self {
             Self(GetBlockHeaders {
-                start_block: BlockHashOrNumber::Number(0),
+                start_block: 0u64.into(),
                 limit: Default::default(),
                 skip: Default::default(),
                 direction: Default::default(),
