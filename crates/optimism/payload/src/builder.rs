@@ -1,18 +1,17 @@
 //! Optimism payload builder implementation.
 
-use crate::{
-    error::OptimismPayloadBuilderError,
-    payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
-};
+use std::sync::Arc;
+
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
     NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::BEACON_NONCE,
@@ -32,8 +31,12 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
-use std::sync::Arc;
 use tracing::{debug, trace, warn};
+
+use crate::{
+    error::OptimismPayloadBuilderError,
+    payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
+};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
