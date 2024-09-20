@@ -184,7 +184,7 @@ mod test {
 
     #[test]
     fn parse_dev() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["op-reth", "--op-dev"]);
+        let cmd: NodeCommand = NodeCommand::parse_from(["op-reth", "--dev"]);
         let chain = OP_DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
