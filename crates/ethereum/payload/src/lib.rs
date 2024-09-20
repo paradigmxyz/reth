@@ -110,7 +110,7 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        let tx_filter =  NoopTransactionFilter::default();
+        let tx_filter = NoopTransactionFilter::default();
         default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)
     }
 
@@ -129,7 +129,7 @@ where
             best_payload: None,
         };
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        let tx_filter =  NoopTransactionFilter::default();
+        let tx_filter = NoopTransactionFilter::default();
         default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
@@ -150,7 +150,7 @@ pub struct EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter> {
 impl<EvmConfig, Pool, Client, TxFilter> PayloadBuilder<Pool, Client>
     for EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
     TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
@@ -162,10 +162,15 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
+        let (cfg_env, block_env) = self
+            .ethereum_payload_builder
+            .cfg_and_block_env(&args.config, &args.config.parent_block);
         default_ethereum_payload(
             self.ethereum_payload_builder.evm_config.clone(),
             args,
             self.tx_filter.clone(),
+            cfg_env,
+            block_env,
         )
     }
 
