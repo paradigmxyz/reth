@@ -48,12 +48,12 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{IntoRecoveredTransaction, PooledTransactionsElement, TransactionSigned};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
-    EthPoolTransaction, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
-    PropagatedTransactions, TransactionPool, ValidPoolTransaction,
+    GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
+    TransactionPool, ValidPoolTransaction,
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
@@ -511,7 +511,7 @@ where
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::new(peer.version);
 
-        let to_propagate = self.pool.get_all(txs).into_iter().map(|x| PropagateTransaction::new(x));
+        let to_propagate = self.pool.get_all(txs).into_iter().map(PropagateTransaction::new);
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
@@ -1396,10 +1396,11 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: EthPoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
+    fn new<T: IntoRecoveredTransaction + PoolTransaction>(
+        tx: Arc<ValidPoolTransaction<T>>,
+    ) -> Self {
         let size = tx.encoded_length();
-        let consensus = tx.transaction.clone().into_consensus();
-        let recovered: TransactionSignedEcRecovered = consensus.into();
+        let recovered = tx.transaction.to_recovered_transaction();
         let transaction = Arc::new(recovered.into_signed());
         Self { size, transaction }
     }

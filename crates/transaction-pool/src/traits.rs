@@ -924,11 +924,10 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     fn chain_id(&self) -> Option<u64>;
 }
 
+/// Super trait for transactions that can be converted to and from Eth transactions
 pub trait EthPoolTransaction:
     PoolTransaction<
-        Consensus: From<TransactionSignedEcRecovered>
-                       // + TryInto<TransactionSignedEcRecovered, Error: std::fmt::Debug>
-                       + Into<TransactionSignedEcRecovered>,
+        Consensus: From<TransactionSignedEcRecovered> + Into<TransactionSignedEcRecovered>,
         Pooled: From<PooledTransactionsElementEcRecovered>
                     + Into<PooledTransactionsElementEcRecovered>,
     > + IntoRecoveredTransaction
@@ -973,7 +972,6 @@ pub struct EthPooledTransaction {
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
 
-// TODO: get rid of this trait
 impl IntoRecoveredTransaction for EthPooledTransaction {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.transaction.clone()

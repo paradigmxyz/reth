@@ -8,8 +8,7 @@ use crate::{
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives::{
-    BlobTransactionSidecar, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    SealedBlock, TransactionSignedEcRecovered,
+    BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionSignedEcRecovered,
 };
 use std::{fmt, future::Future, time::Instant};
 

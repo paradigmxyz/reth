@@ -81,8 +81,6 @@ where
         + Send
         + 'static,
     P: TransactionPoolExt + 'static,
-    // <P as TransactionPool>::Transaction: From<PooledTransactionsElementEcRecovered>,
-    // <P as TransactionPool>::Transaction: From<TransactionSignedEcRecovered>,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -109,8 +107,6 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         + Send
         + 'static,
     P: TransactionPoolExt + 'static,
-    // <P as TransactionPool>::Transaction: From<PooledTransactionsElementEcRecovered>,
-    // <P as TransactionPool>::Transaction: TryFrom<TransactionSignedEcRecovered>,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -348,8 +344,6 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 })
                                 .map(|tx| {
                                     <P as TransactionPool>::Transaction::from_pooled(tx.into())
-                                    // <<P as TransactionPool>::Transaction as
-                                    // PoolTransaction>::from_pooled(tx)
                                 })
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
@@ -622,9 +616,9 @@ where
     let local_transactions = local_transactions
         .into_iter()
         .map(|tx| {
-            let x = tx.transaction.clone().into_consensus();
-            let y: TransactionSignedEcRecovered = x.into();
-            y.into_signed()
+            let recovered: TransactionSignedEcRecovered =
+                tx.transaction.clone().into_consensus().into();
+            recovered.into_signed()
         })
         .collect::<Vec<_>>();
 

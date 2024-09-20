@@ -1,6 +1,5 @@
 use crate::traits::PoolTransaction;
 use alloy_primitives::U256;
-use reth_primitives::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 use std::{fmt, marker::PhantomData};
 
 /// Priority of the transaction that can be missing.
@@ -33,10 +32,6 @@ pub trait TransactionOrdering: Send + Sync + 'static {
 
     /// The transaction type to determine the priority of.
     type Transaction: PoolTransaction;
-    // <
-    //     Pooled = PooledTransactionsElementEcRecovered,
-    //     Consensus = TransactionSignedEcRecovered,
-    // >;
 
     /// Returns the priority score for the given transaction.
     fn priority(
@@ -56,10 +51,7 @@ pub struct CoinbaseTipOrdering<T>(PhantomData<T>);
 
 impl<T> TransactionOrdering for CoinbaseTipOrdering<T>
 where
-    T: PoolTransaction + 'static, /* <
-                                   *         Pooled = PooledTransactionsElementEcRecovered,
-                                   *         Consensus = TransactionSignedEcRecovered,
-                                   *     > + 'static, */
+    T: PoolTransaction + 'static,
 {
     type PriorityValue = U256;
     type Transaction = T;
