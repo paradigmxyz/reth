@@ -807,7 +807,7 @@ impl BestTransactionsAttributes {
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     /// Associated error type for the `try_from_consensus` method.
-    type TryFromConsensusError: std::fmt::Debug;
+    type TryFromConsensusError;
 
     /// Associated type representing the raw consensus variant of the transaction.
     type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;

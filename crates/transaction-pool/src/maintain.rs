@@ -347,7 +347,6 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 })
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
-                            // <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
                         }
                     })
                     .collect::<Vec<_>>();
