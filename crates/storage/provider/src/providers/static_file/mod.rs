@@ -64,11 +64,11 @@ mod tests {
     };
     use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
-        static_file::{find_fixed_range, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        BlockHash, Header,
+        static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
+        BlockHash, Header, Receipt, TransactionSignedNoHash,
     };
     use reth_testing_utils::generators::{self, random_header_range};
-    use std::{fs, path::Path};
+    use std::{fs, ops::Range, path::Path};
 
     #[test]
     fn test_snap() {
@@ -262,6 +262,164 @@ mod tests {
                     prune_count,
                     expected_tip,
                     expected_file_count,
+                );
+            }
+        }
+    }
+
+    /// 3 block ranges are built
+    ///
+    /// for `blocks_per_file = 10`:
+    /// * `0..=9` : except genesis, every block has a tx/receipt
+    /// * `10..=19`: no txs/receipts
+    /// * `20..=29`: only one tx/receipt
+    fn setup_tx_based_scenario(
+        sf_rw: &StaticFileProvider,
+        segment: StaticFileSegment,
+        blocks_per_file: u64,
+    ) {
+        fn setup_block_ranges(
+            writer: &mut StaticFileProviderRWRefMut<'_>,
+            sf_rw: &StaticFileProvider,
+            segment: StaticFileSegment,
+            block_range: &Range<u64>,
+            mut tx_count: u64,
+            next_tx_num: &mut u64,
+        ) {
+            for block in block_range.clone() {
+                writer.increment_block(block).unwrap();
+
+                // Append transaction/receipt if there's still a transaction count to append
+                if tx_count > 0 {
+                    if segment.is_receipts() {
+                        writer.append_receipt(*next_tx_num, &Receipt::default()).unwrap();
+                    } else {
+                        writer
+                            .append_transaction(*next_tx_num, &TransactionSignedNoHash::default())
+                            .unwrap();
+                    }
+                    *next_tx_num += 1;
+                    tx_count -= 1;
+                }
+            }
+            writer.commit().unwrap();
+
+            // Calculate expected values based on the range and transactions
+            let expected_block = block_range.end - 1;
+            let expected_tx = if tx_count == 0 { *next_tx_num - 1 } else { *next_tx_num };
+
+            // Perform assertions after processing the blocks
+            assert_eq!(sf_rw.get_highest_static_file_block(segment), Some(expected_block),);
+            assert_eq!(sf_rw.get_highest_static_file_tx(segment), Some(expected_tx),);
+        }
+
+        // Define the block ranges and transaction counts as vectors
+        let block_ranges = vec![
+            0..blocks_per_file,
+            blocks_per_file..blocks_per_file * 2,
+            blocks_per_file * 2..blocks_per_file * 3,
+        ];
+
+        let tx_counts = vec![
+            blocks_per_file - 1, // First range: tx per block except genesis
+            0,                   // Second range: no transactions
+            1,                   // Third range: 1 transaction in the second block
+        ];
+
+        let mut writer = sf_rw.latest_writer(segment).unwrap();
+        let mut next_tx_num = 0;
+
+        // Loop through setup scenarios
+        for (block_range, tx_count) in block_ranges.iter().zip(tx_counts.iter()) {
+            setup_block_ranges(
+                &mut writer,
+                sf_rw,
+                segment,
+                block_range,
+                *tx_count,
+                &mut next_tx_num,
+            );
+        }
+
+        // Ensure that scenario was properly setup
+        let expected_tx_ranges = vec![
+            Some(SegmentRangeInclusive::new(0, 8)),
+            None,
+            Some(SegmentRangeInclusive::new(9, 9)),
+        ];
+
+        block_ranges.iter().zip(expected_tx_ranges).for_each(|(block_range, expected_tx_range)| {
+            assert_eq!(
+                sf_rw
+                    .get_segment_provider_from_block(segment, block_range.start, None)
+                    .unwrap()
+                    .user_header()
+                    .tx_range(),
+                expected_tx_range.as_ref()
+            );
+        });
+    }
+
+    #[test]
+    #[ignore]
+    fn test_tx_based_truncation() {
+        let segments = [StaticFileSegment::Transactions, StaticFileSegment::Receipts];
+        let blocks_per_file = 10; // Number of headers per file
+        let files_per_range = 3; // Number of files per range (data/conf/offset files)
+        let file_set_count = 3; // Number of sets of files to create
+        let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
+
+        for segment in segments {
+            let (static_dir, _) = create_test_static_files_dir();
+
+            let sf_rw = StaticFileProvider::read_write(&static_dir)
+                .expect("Failed to create static file provider")
+                .with_custom_blocks_per_file(blocks_per_file);
+
+            setup_tx_based_scenario(&sf_rw, segment, blocks_per_file);
+
+            let sf_rw = StaticFileProvider::read_write(&static_dir)
+                .expect("Failed to create static file provider")
+                .with_custom_blocks_per_file(blocks_per_file);
+            let highest_tx = sf_rw.get_highest_static_file_tx(segment).unwrap();
+
+            // Test cases
+            // [prune_count, last_block, expected_tx_tip, expected_file_count)
+            let test_cases = vec![
+                // Case 1: 20..=29 has only one tx. Prune the only tx of the block range.
+                // It ensures that the file is not deleted even though there are no rows, since the
+                // `last_block` which is passed to the prune method is the first
+                // block of the range.
+                (1, blocks_per_file * 2, highest_tx - 1, initial_file_count),
+                // Case 2: 10..=19 has no txs. There are no txes in the whole block range, but want to unwind to block 9.
+                // Ensures that the 20..=29 and 10..=19 files are deleted.
+                (0, blocks_per_file - 1, highest_tx - 1, files_per_range + 1), // includes lockfile
+                // Case 3: Prune most txs up to block 1.
+                (7, 1, 1, files_per_range + 1),
+                // Case 4: Prune remaining tx and ensure that file is not deleted.
+                (1, 0, 0, files_per_range + 1),
+            ];
+
+            // Loop through test cases
+            for (prune_count, last_block, expected_tx_tip, expected_file_count) in test_cases {
+                let mut writer = sf_rw.latest_writer(segment).unwrap();
+
+                // Prune transactions or receipts based on the segment type
+                if segment.is_receipts() {
+                    writer.prune_receipts(prune_count, last_block).unwrap();
+                } else {
+                    writer.prune_transactions(prune_count, last_block).unwrap();
+                }
+                writer.commit().unwrap();
+
+                // Verify the highest block and transaction tips
+                assert_eq!(sf_rw.get_highest_static_file_block(segment), Some(last_block));
+                assert_eq!(sf_rw.get_highest_static_file_tx(segment), Some(expected_tx_tip));
+
+                // Ensure the file count has reduced as expected
+                assert_eq!(
+                    fs::read_dir(&static_dir).unwrap().count(),
+                    expected_file_count as usize
                 );
             }
         }
