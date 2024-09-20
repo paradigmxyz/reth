@@ -460,7 +460,9 @@ mod tests {
             ];
 
             // Loop through test cases
-            for (case, (prune_count, last_block, expected_tx_tip, expected_file_count)) in test_cases.into_iter().enumerate() {
+            for (case, (prune_count, last_block, expected_tx_tip, expected_file_count)) in
+                test_cases.into_iter().enumerate()
+            {
                 prune_and_validate(
                     &static_dir,
                     &sf_rw,
