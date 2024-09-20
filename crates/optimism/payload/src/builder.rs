@@ -13,8 +13,7 @@ use reth_evm::{
     NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_payload_builder::error::PayloadBuilderError;
-use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::BEACON_NONCE,
     eip4844::calculate_excess_blob_gas,
