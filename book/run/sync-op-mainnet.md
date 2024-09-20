@@ -32,7 +32,7 @@ Importing OP mainnet Bedrock datadir requires exported data:
 
 ### Manual Export Steps
 
-The `op-geth` Bedrock datadir can be downloaded from <https://datadirs.optimism.io/mainnet-bedrock.tar.zst>.
+The `op-geth` Bedrock datadir can be downloaded from <https://datadirs.optimism.io>.
 
 To export the OVM chain from `op-geth`, clone the `testinprod-io/op-geth` repo and checkout
 <https://github.com/testinprod-io/op-geth/pull/1>. Commands to export blocks, receipts and state dump can be
