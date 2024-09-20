@@ -6849,6 +6849,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
@@ -7146,6 +7147,7 @@ name = "reth-eth-wire-types"
 version = "1.0.7"
 dependencies = [
  "alloy-chains",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -7546,6 +7548,7 @@ dependencies = [
 name = "reth-network"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-node-bindings",
  "alloy-primitives",
  "alloy-provider",
@@ -7626,6 +7629,7 @@ dependencies = [
 name = "reth-network-p2p"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "derive_more",

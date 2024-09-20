@@ -2,10 +2,11 @@
 //! types.
 
 use crate::HeadersDirection;
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
+use reth_primitives::{BlockBody, Header};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
