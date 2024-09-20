@@ -9028,7 +9028,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-tasks",
  "reth-trie",
  "reth-trie-db",
  "thiserror",

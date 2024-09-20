@@ -4,11 +4,11 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
+use rayon::prelude::*;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
 };
-use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
@@ -39,8 +39,6 @@ use tracing::*;
 pub struct AsyncStateRoot<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
-    /// Blocking task pool.
-    blocking_pool: BlockingTaskPool,
     /// Trie input.
     input: TrieInput,
     /// Parallel state root metrics.
@@ -50,14 +48,9 @@ pub struct AsyncStateRoot<Factory> {
 
 impl<Factory> AsyncStateRoot<Factory> {
     /// Create new async state root calculator.
-    pub fn new(
-        view: ConsistentDbView<Factory>,
-        blocking_pool: BlockingTaskPool,
-        input: TrieInput,
-    ) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
         Self {
             view,
-            blocking_pool,
             input,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
@@ -97,17 +90,22 @@ where
         // Pre-calculate storage roots async for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::async_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
-        let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
-        {
-            let view = self.view.clone();
-            let hashed_state_sorted = hashed_state_sorted.clone();
-            let trie_nodes_sorted = trie_nodes_sorted.clone();
-            #[cfg(feature = "metrics")]
-            let metrics = self.metrics.storage_trie.clone();
-            let handle =
-                self.blocking_pool.spawn_fifo(move || -> Result<_, AsyncStateRootError> {
+
+        let storage_roots: Vec<_> = storage_root_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(address, _)| *address)
+            .collect();
+
+        let storage_roots_results: Vec<_> = storage_roots
+            .into_par_iter()
+            .map(|(hashed_address, prefix_set)| {
+                let view = self.view.clone();
+                let hashed_state_sorted = hashed_state_sorted.clone();
+                let trie_nodes_sorted = trie_nodes_sorted.clone();
+                #[cfg(feature = "metrics")]
+                let metrics = self.metrics.storage_trie.clone();
+
+                let result = (|| -> Result<_, AsyncStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
@@ -126,8 +124,15 @@ where
                     )
                     .with_prefix_set(prefix_set)
                     .calculate(retain_updates)?)
-                });
-            storage_roots.insert(hashed_address, handle);
+                })();
+
+                (hashed_address, result)
+            })
+            .collect();
+
+        let mut storage_roots = HashMap::with_capacity(storage_roots_results.len());
+        for (hashed_address, result) in storage_roots_results {
+            storage_roots.insert(hashed_address, result);
         }
 
         trace!(target: "trie::async_state_root", "calculating state root");
@@ -162,9 +167,9 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.await.map_err(|_| {
+                        Some(result) => result.map_err(|_| {
                             AsyncStateRootError::StorageRootChannelClosed { hashed_address }
-                        })??,
+                        })?,
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
@@ -242,15 +247,12 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
-    use rayon::ThreadPoolBuilder;
     use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
     #[tokio::test]
     async fn random_async_root() {
-        let blocking_pool = BlockingTaskPool::new(ThreadPoolBuilder::default().build().unwrap());
-
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
@@ -295,14 +297,10 @@ mod tests {
         }
 
         assert_eq!(
-            AsyncStateRoot::new(
-                consistent_view.clone(),
-                blocking_pool.clone(),
-                Default::default(),
-            )
-            .incremental_root()
-            .await
-            .unwrap(),
+            AsyncStateRoot::new(consistent_view.clone(), Default::default(),)
+                .incremental_root()
+                .await
+                .unwrap(),
             test_utils::state_root(state.clone())
         );
 
@@ -332,14 +330,10 @@ mod tests {
         }
 
         assert_eq!(
-            AsyncStateRoot::new(
-                consistent_view.clone(),
-                blocking_pool.clone(),
-                TrieInput::from_state(hashed_state)
-            )
-            .incremental_root()
-            .await
-            .unwrap(),
+            AsyncStateRoot::new(consistent_view.clone(), TrieInput::from_state(hashed_state))
+                .incremental_root()
+                .await
+                .unwrap(),
             test_utils::state_root(state)
         );
     }
