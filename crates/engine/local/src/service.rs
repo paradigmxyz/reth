@@ -7,13 +7,13 @@
 //! building at a fixed interval.
 
 use crate::miner::MiningMode;
+use alloy_primitives::B256;
 use reth_beacon_consensus::EngineNodeTypes;
 use reth_engine_tree::persistence::PersistenceHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, PayloadAttributesBuilder, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
@@ -157,6 +157,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
     use reth_chainspec::MAINNET;
     use reth_config::PruneConfig;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
@@ -164,7 +165,6 @@ mod tests {
     use reth_exex_test_utils::TestNode;
     use reth_node_types::NodeTypesWithDBAdapter;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::B256;
     use reth_provider::{providers::StaticFileProvider, BlockReader, ProviderFactory};
     use reth_prune::PrunerBuilder;
     use reth_transaction_pool::{

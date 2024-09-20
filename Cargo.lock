@@ -6951,6 +6951,7 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures-util",
  "reth-beacon-consensus",
@@ -6980,6 +6981,7 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-execution-types",
  "reth-payload-primitives",
@@ -7020,6 +7022,8 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "futures",
@@ -7065,6 +7069,7 @@ dependencies = [
 name = "reth-engine-util"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures",
  "itertools 0.13.0",
@@ -7424,6 +7429,7 @@ dependencies = [
 name = "reth-invalid-block-hooks"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "eyre",

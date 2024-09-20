@@ -4,6 +4,8 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockNumber, B256, U256};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -24,8 +26,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256, U256,
+    Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
@@ -2583,13 +2584,13 @@ impl PersistenceState {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
+    use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;
