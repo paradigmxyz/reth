@@ -12,8 +12,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_forks::OptimismHardfork;
-use reth_payload_builder::error::PayloadBuilderError;
-use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::BEACON_NONCE,
     eip4844::calculate_excess_blob_gas,
@@ -44,9 +43,9 @@ use crate::{
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
-    compute_pending_block: bool,
+    pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
-    evm_config: EvmConfig,
+    pub evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
@@ -73,11 +72,11 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 }
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvmEnv<Header = Header>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    fn cfg_and_block_env(
+    pub fn cfg_and_block_env(
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         parent: &Header,
@@ -96,7 +95,7 @@ impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBu
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -164,7 +163,7 @@ pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -434,7 +433,7 @@ where
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
+    db.merge_transitions(BundleRetention::Reverts);
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
@@ -445,7 +444,7 @@ where
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
-            chain_spec.as_ref(),
+            &chain_spec,
             attributes.payload_attributes.timestamp,
         )
         .expect("Number is in range");

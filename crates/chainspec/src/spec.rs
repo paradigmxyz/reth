@@ -1,8 +1,7 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-
-use alloy_chains::{Chain, ChainKind, NamedChain};
+use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
@@ -10,7 +9,8 @@ use derive_more::From;
 use once_cell::sync::{Lazy, OnceCell};
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
+    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, OptimismHardforks,
+    DEV_HARDFORKS,
 };
 use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
@@ -236,20 +236,8 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
-    pub const fn is_eth(&self) -> bool {
-        matches!(
-            self.chain.kind(),
-            ChainKind::Named(
-                NamedChain::Mainnet |
-                    NamedChain::Morden |
-                    NamedChain::Ropsten |
-                    NamedChain::Rinkeby |
-                    NamedChain::Goerli |
-                    NamedChain::Kovan |
-                    NamedChain::Holesky |
-                    NamedChain::Sepolia
-            )
-        )
+    pub const fn is_ethereum(&self) -> bool {
+        self.chain.is_ethereum()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -617,6 +605,24 @@ impl From<Genesis> for ChainSpec {
         }
     }
 }
+
+impl Hardforks for ChainSpec {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
+        self.hardforks.fork(fork)
+    }
+
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
+        self.hardforks.forks_iter()
+    }
+}
+
+impl EthereumHardforks for ChainSpec {
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.final_paris_total_difficulty(block_number)
+    }
+}
+
+impl OptimismHardforks for ChainSpec {}
 
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]

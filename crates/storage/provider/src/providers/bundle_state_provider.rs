@@ -1,7 +1,8 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, B256};
+use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -160,8 +161,8 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProvider for BundleStat
     fn storage(
         &self,
         account: Address,
-        storage_key: reth_primitives::StorageKey,
-    ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
+        storage_key: alloy_primitives::StorageKey,
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         let u256_storage_key = storage_key.into();
         if let Some(value) = self
             .block_execution_data_provider

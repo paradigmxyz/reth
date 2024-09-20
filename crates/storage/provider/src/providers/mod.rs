@@ -7,22 +7,22 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
-use reth_chainspec::{ChainInfo, ChainSpec};
-use reth_db::Database;
+use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -62,9 +62,9 @@ mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
-pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec = ChainSpec> {}
+pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
 
-impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec = ChainSpec> {}
+impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
 
 /// The main type for interacting with the blockchain.
 ///
@@ -172,15 +172,15 @@ where
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
+    type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
+    type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        self.database.provider()
+        self.database.database_provider_ro()
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        self.database.provider_rw().map(|p| p.0)
+        self.database.database_provider_rw()
     }
 }
 
@@ -524,7 +524,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -537,7 +537,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -549,7 +549,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -561,7 +561,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }

@@ -164,7 +164,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
         self.inner.fill_cfg_env(cfg_env, header, total_difficulty)
@@ -172,7 +172,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
 
     fn next_cfg_and_block_env(
         &self,
-        parent: &Header,
+        parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         self.inner.next_cfg_and_block_env(parent, attributes)

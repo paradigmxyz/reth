@@ -14,7 +14,7 @@ use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
 use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
 use reth_stages::StageId;
-use reth_static_file_types::{find_fixed_range, StaticFileSegment};
+use reth_static_file_types::StaticFileSegment;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
@@ -54,8 +54,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     .sorted_by_key(|(block_range, _)| block_range.start())
                     .rev()
                 {
-                    static_file_provider
-                        .delete_jar(static_file_segment, find_fixed_range(block_range.start()))?;
+                    static_file_provider.delete_jar(static_file_segment, block_range.start())?;
                 }
             }
         }

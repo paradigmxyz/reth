@@ -123,7 +123,7 @@ where
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir

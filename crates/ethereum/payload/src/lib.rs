@@ -25,10 +25,8 @@ use reth_evm::{
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
-use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
-};
-use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     eip4844::calculate_excess_blob_gas,
@@ -67,7 +65,7 @@ impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
 
 impl<EvmConfig> EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
@@ -88,7 +86,7 @@ where
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -137,7 +135,7 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
     initialized_block_env: BlockEnv,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {

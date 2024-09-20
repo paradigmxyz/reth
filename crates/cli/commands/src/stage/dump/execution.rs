@@ -10,7 +10,7 @@ use reth_db_common::DbTool;
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
@@ -135,7 +135,7 @@ fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let provider = db_tool.provider_factory.provider_rw()?;
+    let provider = db_tool.provider_factory.database_provider_rw()?;
 
     let mut exec_stage = ExecutionStage::new_with_executor(NoopBlockExecutorProvider::default());
 
@@ -175,7 +175,7 @@ where
 
     let input =
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
-    exec_stage.execute(&output_provider_factory.provider_rw()?, input)?;
+    exec_stage.execute(&output_provider_factory.database_provider_rw()?, input)?;
 
     info!(target: "reth::cli", "Success");
 
