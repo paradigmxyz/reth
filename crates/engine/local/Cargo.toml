@@ -21,6 +21,9 @@ reth-prune.workspace = true
 reth-transaction-pool.workspace = true
 reth-stages-api.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 # async
 tokio.workspace = true
 tokio-stream.workspace = true

@@ -27,6 +27,9 @@ reth-ethereum-forks.workspace = true
 revm-primitives.workspace = true
 reth-trie.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 # async
 tokio = { workspace = true, default-features = false }
 tokio-util.workspace = true
