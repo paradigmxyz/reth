@@ -2,8 +2,9 @@
 
 use crate::OptimismBlockExecutionError;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
-use reth_chainspec::{ChainSpec, OptimismHardfork};
+use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
+use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::Block;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -296,8 +297,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use reth_chainspec::OptimismHardforks;
     use reth_optimism_chainspec::OP_MAINNET;
+    use reth_optimism_forks::OptimismHardforks;
     use reth_primitives::TransactionSigned;
 
     use super::*;

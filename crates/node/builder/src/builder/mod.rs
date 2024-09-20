@@ -5,7 +5,6 @@
 pub mod add_ons;
 mod states;
 
-use reth_rpc_types::WithOtherFields;
 pub use states::*;
 
 use std::sync::Arc;
@@ -30,10 +29,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
-    rpc::{
-        eth::{helpers::AddDevSigners, FullEthApiServer},
-        types::AnyTransactionReceipt,
-    },
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
@@ -346,12 +342,7 @@ where
                             <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
                         >
                     >
-                        + FullEthApiServer<
-                            NetworkTypes: alloy_network::Network<
-                                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-                                ReceiptResponse = AnyTransactionReceipt,
-                            >,
-                        >
+                        + FullEthApiServer
                         + AddDevSigners
         >,
     {
@@ -497,12 +488,8 @@ where
     AO: NodeAddOns<
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
-                    + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-                ReceiptResponse = AnyTransactionReceipt,
-            >,
-        > + AddDevSigners,
+                    + FullEthApiServer
+                    + AddDevSigners,
     >,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc

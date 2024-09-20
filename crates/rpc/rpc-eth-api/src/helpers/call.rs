@@ -1,7 +1,9 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
-use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+use crate::{
+    AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
+};
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -31,8 +33,7 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use reth_rpc_types::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    Block, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
-    WithOtherFields,
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
 };
 use revm::{Database, DatabaseCommit, GetInspector};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -61,14 +62,10 @@ pub trait EthCall: Call + LoadPendingBlock {
         &self,
         payload: SimulatePayload,
         block: Option<BlockId>,
-    ) -> impl Future<
-        Output = Result<
-            Vec<SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>>,
-            Self::Error,
-        >,
-    > + Send
+    ) -> impl Future<Output = Result<Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>>, Self::Error>>
+           + Send
     where
-        Self: LoadBlock,
+        Self: LoadBlock + FullEthApiTypes,
     {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
@@ -108,9 +105,8 @@ pub trait EthCall: Call + LoadPendingBlock {
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let mut blocks: Vec<
-                    SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>,
-                > = Vec::with_capacity(block_state_calls.len());
+                let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
+                    Vec::with_capacity(block_state_calls.len());
                 let mut gas_used = 0;
                 for block in block_state_calls {
                     // Increase number and timestamp for every new block
@@ -191,7 +187,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         results.push((env.tx.caller, res.result));
                     }
 
-                    let block = simulate::build_block(
+                    let block = simulate::build_block::<Self::TransactionCompat>(
                         results,
                         transactions,
                         &block_env,

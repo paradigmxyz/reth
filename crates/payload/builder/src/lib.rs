@@ -27,8 +27,7 @@
 //! use std::future::Future;
 //! use std::pin::Pin;
 //! use std::task::{Context, Poll};
-//! use reth_payload_builder::{EthBuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
-//! use reth_payload_builder::error::PayloadBuilderError;
+//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
 //! use reth_primitives::{Block, Header, U256};
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
@@ -102,8 +101,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod database;
-pub mod error;
-mod events;
 mod metrics;
 mod service;
 mod traits;
@@ -113,7 +110,7 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use events::{Events, PayloadEvents};
+pub use reth_payload_primitives::PayloadBuilderError;
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,

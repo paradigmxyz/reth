@@ -21,6 +21,7 @@ reth-network-types.workspace = true
 reth-storage-errors.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # async

@@ -4,6 +4,8 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockNumber, B256, U256};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -21,11 +23,10 @@ use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256, U256,
+    Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
@@ -2105,15 +2106,18 @@ where
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk2, InsertBlockErrorKindTwo> {
+        debug!(target: "engine::tree", block=?block.num_hash(), "Inserting new block into tree");
         if self.block_by_hash(block.hash())?.is_some() {
             return Ok(InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid))
         }
 
         let start = Instant::now();
 
+        trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         self.validate_block(&block)?;
 
+        trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash, "Fetching block state provider");
         let Some(state_provider) = self.state_provider(block.parent_hash)? else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
@@ -2143,6 +2147,7 @@ where
             return Err(e.into())
         }
 
+        trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block_number = block.number;
@@ -2155,8 +2160,8 @@ where
             .metrics
             .executor
             .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
-        debug!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
+        trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2173,6 +2178,7 @@ where
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
+        trace!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Calculating block state root");
         let root_time = Instant::now();
         let mut state_root_result = None;
 
@@ -2188,7 +2194,7 @@ where
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(ProviderError::ConsistentView(error)) => {
-                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                    debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
                     None
                 }
                 Err(error) => return Err(error.into()),
@@ -2198,7 +2204,7 @@ where
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
         } else {
-            debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
 
@@ -2250,6 +2256,7 @@ where
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
+        debug!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Finished inserting block");
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
@@ -2583,13 +2590,13 @@ impl PersistenceState {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
+    use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;

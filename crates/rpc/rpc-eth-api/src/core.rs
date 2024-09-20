@@ -2,7 +2,6 @@
 //! the `eth_` namespace.
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
-use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{transaction::AccessListResult, BlockId, BlockNumberOrTag};
@@ -11,8 +10,8 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
+    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
+    Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
 use tracing::trace;
 
@@ -368,7 +367,7 @@ impl<T>
         RpcReceipt<T::NetworkTypes>,
     > for T
 where
-    T: FullEthApi<NetworkTypes: Network<ReceiptResponse = AnyTransactionReceipt>>,
+    T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
@@ -499,7 +498,9 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+        Ok(EthTransactions::transaction_by_hash(self, hash)
+            .await?
+            .map(|tx| tx.into_transaction::<T::TransactionCompat>()))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`

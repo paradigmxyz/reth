@@ -23,6 +23,8 @@ use reth_tasks::{
 };
 use tokio::sync::Mutex;
 
+use crate::eth::EthTxBuilder;
+
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -93,7 +95,7 @@ where
 {
     /// Creates a new, shareable instance.
     pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Self>,
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
@@ -127,7 +129,9 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
+    // todo: replace with alloy_network::Ethereum
     type NetworkTypes = AnyNetwork;
+    type TransactionCompat = EthTxBuilder;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
@@ -159,16 +163,22 @@ where
     }
 }
 
-impl<N, Network> BuilderProvider<N> for EthApi<N::Provider, N::Pool, Network, N::Evm>
+impl<N> BuilderProvider<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 where
     N: FullNodeComponents,
-    Network: Send + Sync + Clone + 'static,
 {
-    type Ctx<'a> =
-        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<
+        N::Provider,
+        N::Pool,
+        N::Evm,
+        N::Network,
+        TaskExecutor,
+        N::Provider,
+        Self,
+    >;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self::with_spawner(ctx))
+        Box::new(Self::with_spawner)
     }
 }
 
