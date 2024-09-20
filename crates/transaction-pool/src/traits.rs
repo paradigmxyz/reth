@@ -1080,18 +1080,6 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    // fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
-    //     tx.try_into()
-    // }
-    //
-    // fn into_consensus(self) -> Self::Consensus {
-    //     self.into()
-    // }
-    //
-    // fn from_pooled(pooled: Self::Pooled) -> Self {
-    //     pooled.into()
-    // }
-
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
