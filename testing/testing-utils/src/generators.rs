@@ -3,7 +3,7 @@
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, BlockNumber, Bytes, Parity, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
@@ -136,8 +136,17 @@ pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> Tra
 
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
-    let signature =
+    let mut signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+
+    if matches!(tx, Transaction::Legacy(_)) {
+        signature = if let Some(chain_id) = tx.chain_id() {
+            signature.with_chain_id(chain_id)
+        } else {
+            signature.with_parity(Parity::NonEip155(signature.v().y_parity()))
+        }
+    }
+
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
