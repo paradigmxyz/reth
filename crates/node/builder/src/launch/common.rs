@@ -180,10 +180,10 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system.
-        // If the system has less than 2 cores, it will use 1 core.
+        // Limit the global rayon thread pool, reserving 1 core for the rest of the system.
+        // If the system only has 1 core the pool will use it.
         let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(1));
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(1).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
