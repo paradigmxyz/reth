@@ -4,6 +4,7 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256, U256};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
@@ -25,7 +26,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,

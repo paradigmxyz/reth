@@ -1,7 +1,7 @@
 use crate::metrics::PersistenceMetrics;
+use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_primitives::BlockNumHash;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,

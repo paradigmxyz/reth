@@ -7022,6 +7022,7 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",

@@ -37,6 +37,7 @@ reth-trie-parallel.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 # common
 futures.workspace = true
