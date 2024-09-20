@@ -987,7 +987,7 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
         let bitflags = buf.get_u8() as usize;
 
         let sig_bit = bitflags & 1;
-        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+        let (mut signature, buf) = Signature::from_compact(buf, sig_bit);
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
@@ -1006,6 +1006,12 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
             let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
         };
+
+        if matches!(transaction, Transaction::Legacy(_)) {
+            if let Some(chain_id) = transaction.chain_id() {
+                signature = signature.with_chain_id(chain_id)
+            }
+        }
 
         (Self { signature, transaction }, buf)
     }
