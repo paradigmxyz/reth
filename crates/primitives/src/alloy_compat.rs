@@ -234,9 +234,17 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
             }
         };
 
+        let mut parity = Parity::Parity(y_parity);
+
+        if matches!(transaction.tx_type(), TxType::Legacy) {
+            if let Some(chain_id) = transaction.chain_id() {
+                parity = parity.with_chain_id(chain_id)
+            }
+        }
+
         Ok(Self::from_transaction_and_signature(
             transaction,
-            Signature::new(signature.r, signature.s, Parity::Parity(y_parity)),
+            Signature::new(signature.r, signature.s, parity),
         ))
     }
 }
