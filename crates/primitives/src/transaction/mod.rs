@@ -6,6 +6,7 @@ use crate::{
 };
 
 use alloy_consensus::SignableTransaction;
+use alloy_primitives::Parity;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -1376,6 +1377,10 @@ impl TransactionSigned {
         } else {
             Signature::decode_rlp_vrs(data)?
         };
+
+        if !matches!(signature.v(), Parity::Parity(_)) {
+            return Err(alloy_rlp::Error::Custom("invalid parity for typed transaction"));
+        }
 
         let bytes_consumed = remaining_len - data.len();
         if bytes_consumed != header.payload_length {
