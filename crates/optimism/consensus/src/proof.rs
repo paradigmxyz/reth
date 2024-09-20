@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, OptimismHardfork};
-use reth_primitives::ReceiptWithBloom;
+use reth_primitives::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 use reth_trie_common::root::ordered_trie_root_with_encoder;
 
 /// Calculates the receipt root for a header.
@@ -34,6 +34,42 @@ pub(crate) fn calculate_receipt_root_optimism(
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
+/// Calculates the receipt root for a header for the reference type of [Receipt].
+///
+/// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
+pub fn calculate_receipt_root_no_memo_optimism(
+    receipts: &[&Receipt],
+    chain_spec: &reth_chainspec::ChainSpec,
+    timestamp: u64,
+) -> B256 {
+    // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
+    // the receipt root calculation does not include the deposit nonce in the receipt
+    // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
+    // receipts before calculating the receipt root. This was corrected in the Canyon
+    // hardfork.
+    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Regolith, timestamp) &&
+        !chain_spec
+            .is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Canyon, timestamp)
+    {
+        let receipts = receipts
+            .iter()
+            .map(|r| {
+                let mut r = (*r).clone();
+                r.deposit_nonce = None;
+                r
+            })
+            .collect::<Vec<_>>();
+
+        return ordered_trie_root_with_encoder(&receipts, |r, buf| {
+            ReceiptWithBloomRef::from(r).encode_inner(buf, false)
+        })
+    }
+
+    ordered_trie_root_with_encoder(receipts, |r, buf| {
+        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
+    })
 }
 
 #[cfg(test)]
