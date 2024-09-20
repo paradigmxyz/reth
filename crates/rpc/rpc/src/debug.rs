@@ -399,10 +399,9 @@ where
                         return Ok(frame);
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(EthApiError::Unsupported(
-                            "Flatcall tracer is not supported yet",
+                        return Err(
+                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
                         )
-                        .into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -768,10 +767,9 @@ where
                         return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(EthApiError::Unsupported(
-                            "Flatcall tracer is not supported yet",
+                        return Err(
+                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
                         )
-                        .into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
