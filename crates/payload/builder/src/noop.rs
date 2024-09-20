@@ -20,7 +20,7 @@ pub struct NoopPayloadBuilderService<T: PayloadTypes> {
 
 impl<T> NoopPayloadBuilderService<T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
 {
     /// Creates a new [`NoopPayloadBuilderService`].
     pub fn new() -> (Self, PayloadBuilderHandle<T>) {

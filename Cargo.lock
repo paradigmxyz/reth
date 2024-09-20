@@ -6903,6 +6903,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-ethereum",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -7748,6 +7749,7 @@ dependencies = [
  "reth-node-events",
  "reth-node-metrics",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
@@ -8118,20 +8120,17 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
  "futures-util",
  "metrics",
- "pin-project",
  "reth-chain-state",
- "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
- "reth-transaction-pool",
  "revm",
- "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -8142,6 +8141,8 @@ name = "reth-payload-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
+ "pin-project",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
@@ -8151,6 +8152,8 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
