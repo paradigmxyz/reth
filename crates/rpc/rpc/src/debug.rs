@@ -93,14 +93,13 @@ where
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         if transactions.is_empty() {
             // nothing to trace
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // replay all transactions of the block
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                //let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
@@ -110,7 +109,6 @@ where
 
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 while let Some((_, tx)) = transactions.next() {
-
                     let tx_hash = tx.hash;
 
                     let env = EnvWithHandlerCfg {
@@ -127,9 +125,13 @@ where
                     let gas_used = res.result.gas_used();
                     let return_value = res.result.into_output().unwrap_or_default();
 
-                    let frame = inspector.geth_builder().geth_traces(gas_used, return_value, opts.config.clone());
+                    let frame =
+                        inspector.geth_builder().geth_traces(gas_used, return_value, opts.config);
 
-                    results.push(TraceResult::Success { result: GethTrace::Default(frame), tx_hash: Some(tx_hash) });
+                    results.push(TraceResult::Success {
+                        result: GethTrace::Default(frame),
+                        tx_hash: Some(tx_hash),
+                    });
 
                     // Reset the inspector for the next iteration
                     inspector.fuse();
@@ -316,7 +318,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(&inspector).into())
+                        return Ok(FourByteFrame::from(&inspector).into());
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -339,7 +341,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        return Ok(frame);
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -367,7 +369,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into())
+                        return Ok(frame.into());
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -394,12 +396,13 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        return Ok(frame);
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
+                        return Err(EthApiError::Unsupported(
+                            "Flatcall tracer is not supported yet",
                         )
+                        .into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -431,7 +434,7 @@ where
 
                     Ok(GethTrace::JS(res))
                 }
-            }
+            };
         }
 
         // default structlog tracer
@@ -467,7 +470,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -709,7 +712,7 @@ where
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
                         let (res, _) = self.eth_api().inspect(db, env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(&inspector).into(), res.state))
+                        return Ok((FourByteFrame::from(&inspector).into(), res.state));
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -727,7 +730,7 @@ where
                             .into_geth_builder()
                             .geth_call_traces(call_config, res.result.gas_used());
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -745,7 +748,7 @@ where
                             .geth_prestate_traces(&res, &prestate_config, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
@@ -762,12 +765,13 @@ where
                         let frame = inspector
                             .try_into_mux_frame(&res, db)
                             .map_err(Eth::Error::from_eth_err)?;
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
+                        return Err(EthApiError::Unsupported(
+                            "Flatcall tracer is not supported yet",
                         )
+                        .into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -791,7 +795,7 @@ where
                         inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)?;
                     Ok((GethTrace::JS(result), state))
                 }
-            }
+            };
         }
 
         // default structlog tracer
