@@ -1816,7 +1816,7 @@ mod tests {
                 .unwrap(),
             U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
                 .unwrap(),
-            Parity::Parity(false),
+            Parity::Eip155(43),
         );
         let hash = b256!("a517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34");
         test_decode_and_encode(&bytes, transaction, signature, Some(hash));
@@ -1836,7 +1836,7 @@ mod tests {
                 .unwrap(),
             U256::from_str("0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
                 .unwrap(),
-            Parity::Parity(false),
+            Parity::Eip155(43),
         );
         test_decode_and_encode(&bytes, transaction, signature, None);
 
@@ -1855,7 +1855,7 @@ mod tests {
                 .unwrap(),
             U256::from_str("0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
                 .unwrap(),
-            Parity::Parity(false),
+            Parity::Eip155(43),
         );
         test_decode_and_encode(&bytes, transaction, signature, None);
 
@@ -1895,7 +1895,7 @@ mod tests {
                 .unwrap(),
             U256::from_str("0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
                 .unwrap(),
-            Parity::Parity(true),
+            Parity::Eip155(44),
         );
         test_decode_and_encode(&bytes, transaction, signature, None);
     }

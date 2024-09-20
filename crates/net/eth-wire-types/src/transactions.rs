@@ -210,7 +210,7 @@ mod tests {
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    Parity::Eip155(37),
                 ),
             ),
             TransactionSigned::from_transaction_and_signature(
@@ -232,7 +232,7 @@ mod tests {
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    Parity::Parity(false),
+                    Parity::Eip155(37),
                 ),
             ),
         ];
