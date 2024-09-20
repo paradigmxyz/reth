@@ -100,11 +100,17 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                let block_hash = at.as_block_hash();
+                //let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // Create and configure the inspector once
+                let inspector_config = TracingInspectorConfig::from_geth_config(&opts.config);
+                let mut inspector = TracingInspector::new(inspector_config);
+
                 let mut transactions = transactions.into_iter().enumerate().peekable();
-                while let Some((index, tx)) = transactions.next() {
+                while let Some((_, tx)) = transactions.next() {
+
                     let tx_hash = tx.hash;
 
                     let env = EnvWithHandlerCfg {
@@ -115,22 +121,23 @@ where
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
-                    let (result, state_changes) = this.trace_transaction(
-                        opts.clone(),
-                        env,
-                        &mut db,
-                        Some(TransactionContext {
-                            block_hash,
-                            tx_hash: Some(tx_hash),
-                            tx_index: Some(index),
-                        }),
-                    )?;
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
+                    let (res, _) = this.eth_api().inspect(&mut db, env.clone(), &mut inspector)?;
+
+                    let gas_used = res.result.gas_used();
+                    let return_value = res.result.into_output().unwrap_or_default();
+
+                    let frame = inspector.geth_builder().geth_traces(gas_used, return_value, opts.config.clone());
+
+                    results.push(TraceResult::Success { result: GethTrace::Default(frame), tx_hash: Some(tx_hash) });
+
+                    // Reset the inspector for the next iteration
+                    inspector.fuse();
+
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit(state_changes)
+                        db.commit(res.state)
                     }
                 }
 
