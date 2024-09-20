@@ -12,6 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::debug;
 
 pub type AsyncStateRootFut =
     Pin<Box<dyn Future<Output = Result<(B256, TrieUpdates), AsyncStateRootError>> + Send>>;
@@ -97,6 +98,7 @@ where
 
             if let Poll::Ready(next) = this.state_stream.poll_next_unpin(cx) {
                 if let Some(update) = next {
+                    debug!(target: "engine::root", len = update.len(), "Received new state update");
                     this.on_state_update(update);
                     continue
                 } else {
@@ -107,6 +109,7 @@ where
             if let Some(mut pending) = this.pending_state_root.take() {
                 match pending.poll_unpin(cx)? {
                     Poll::Ready((state_root, trie_updates)) => {
+                        debug!(target: "engine::root", %state_root, "Computed intermediate root");
                         this.state_root = state_root;
                         this.trie_updates.extend(trie_updates);
                         continue
@@ -118,6 +121,7 @@ where
             }
 
             if this.pending_state_root.is_none() && !this.prefix_sets.is_empty() {
+                debug!(target: "engine::root", accounts_len = this.prefix_sets.account_prefix_set.len(), "Spawning state root task");
                 let view = this.consistent_view.clone();
                 let task_pool = this.blocking_task_pool.clone();
                 let mut input = this.input.clone(); // TODO: avoid cloning?
