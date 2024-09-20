@@ -90,8 +90,7 @@ where
         // Pre-calculate storage roots async for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::async_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
-        let mut storage_roots: HashMap<B256, oneshot::Receiver<Result<_, AsyncStateRootError>>> =
-            HashMap::with_capacity(storage_root_targets.len());
+        let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -128,6 +127,7 @@ where
             });
             storage_roots.insert(hashed_address, rx);
         }
+
         trace!(target: "trie::async_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
 
