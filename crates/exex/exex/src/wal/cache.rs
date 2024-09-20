@@ -3,13 +3,14 @@ use std::collections::VecDeque;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub(super) struct BlockCache {
     deque: VecDeque<CachedBlock>,
     max_capacity: usize,
 }
 
 impl BlockCache {
+    /// Creates a new instance of [`BlockCache`] with the given maximum capacity.
     pub(super) fn new(max_capacity: usize) -> Self {
         Self { deque: VecDeque::with_capacity(max_capacity), max_capacity }
     }

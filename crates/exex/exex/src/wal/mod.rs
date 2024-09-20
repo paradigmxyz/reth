@@ -3,7 +3,7 @@
 mod cache;
 mod storage;
 
-use std::{fs::File, ops::ControlFlow, path::Path};
+use std::{ops::ControlFlow, path::Path};
 
 use cache::BlockCache;
 use eyre::OptionExt;
@@ -20,7 +20,7 @@ const MAX_CACHED_BLOCKS: usize = 1_000_000;
 
 #[derive(Debug)]
 pub(crate) struct Wal {
-    /// The underlying storage backed by the WAL file.
+    /// The underlying WAL storage backed by a file.
     storage: Storage,
     /// The block cache of the WAL. Acts as a FIFO queue with a maximum size of
     /// [`MAX_CACHED_BLOCKS`].
@@ -168,7 +168,7 @@ impl Wal {
         }
 
         if let Some(truncate_to) = truncate_to {
-            self.storage.truncate_to_bytes_len(truncate_to)?;
+            self.storage.truncate_to_offset(truncate_to)?;
             debug!(?truncate_to, "Truncated the WAL file");
         } else {
             debug!("No blocks were truncated. Block cache was filled.");
@@ -248,7 +248,8 @@ impl Wal {
             return Ok(())
         };
 
-        let (old_size, new_size) = self.storage.truncate_from_bytes_len(unfinalized_from_offset)?;
+        // Truncate the WAL file to the unfinalized block.
+        let (old_size, new_size) = self.storage.truncate_from_offset(unfinalized_from_offset)?;
 
         // Fill the block cache with the notifications from the new file.
         self.fill_block_cache(u64::MAX)?;
