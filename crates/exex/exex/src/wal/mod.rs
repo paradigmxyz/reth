@@ -14,8 +14,8 @@ use storage::Storage;
 
 /// The maximum number of blocks to cache.
 ///
-/// [`CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million = 48
-/// megabytes.
+/// [`cache::CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million
+/// = 48 megabytes.
 const MAX_CACHED_BLOCKS: usize = 1_000_000;
 
 #[derive(Debug)]
