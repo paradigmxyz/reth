@@ -314,13 +314,13 @@ mod tests {
         }
 
         // Define the block ranges and transaction counts as vectors
-        let block_ranges = vec![
+        let block_ranges = [
             0..blocks_per_file,
             blocks_per_file..blocks_per_file * 2,
             blocks_per_file * 2..blocks_per_file * 3,
         ];
 
-        let tx_counts = vec![
+        let tx_counts = [
             blocks_per_file - 1, // First range: tx per block except genesis
             0,                   // Second range: no transactions
             1,                   // Third range: 1 transaction in the second block
@@ -391,8 +391,9 @@ mod tests {
                 // `last_block` which is passed to the prune method is the first
                 // block of the range.
                 (1, blocks_per_file * 2, highest_tx - 1, initial_file_count),
-                // Case 2: 10..=19 has no txs. There are no txes in the whole block range, but want to unwind to block 9.
-                // Ensures that the 20..=29 and 10..=19 files are deleted.
+                // Case 2: 10..=19 has no txs. There are no txes in the whole block range, but want
+                // to unwind to block 9. Ensures that the 20..=29 and 10..=19 files
+                // are deleted.
                 (0, blocks_per_file - 1, highest_tx - 1, files_per_range + 1), // includes lockfile
                 // Case 3: Prune most txs up to block 1.
                 (7, 1, 1, files_per_range + 1),
