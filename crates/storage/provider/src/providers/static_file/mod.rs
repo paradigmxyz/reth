@@ -382,7 +382,7 @@ mod tests {
     #[ignore]
     fn test_tx_based_truncation() {
         let segments = [StaticFileSegment::Transactions, StaticFileSegment::Receipts];
-        let blocks_per_file = 10; // Number of headers per file
+        let blocks_per_file = 10; // Number of blocks per file
         let files_per_range = 3; // Number of files per range (data/conf/offset files)
         let file_set_count = 3; // Number of sets of files to create
         let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
