@@ -8,6 +8,7 @@ use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
+use tokio::sync::mpsc;
 
 use crate::execute::{BatchExecutor, BlockExecutorProvider, Executor};
 
@@ -44,6 +45,14 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
+    }
+
+    fn execute_and_stream(
+        self,
+        _: Self::Input<'_>,
+        _: mpsc::UnboundedSender<revm_primitives::EvmState>,
+    ) -> Result<Self::Output, Self::Error> {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 }

@@ -14,7 +14,8 @@ use reth_evm::{
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::{
-        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
+        apply_beacon_root_contract_call, apply_beacon_root_contract_call2,
+        apply_blockhashes_contract_call, apply_blockhashes_contract_call2,
         apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
     },
     ConfigureEvm,
@@ -37,7 +38,8 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, HashMap};
+use tokio::sync::mpsc;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -122,6 +124,7 @@ struct EthEvmExecutor<EvmConfig> {
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    sender: Option<mpsc::UnboundedSender<revm_primitives::EvmState>>,
 }
 
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
@@ -148,21 +151,23 @@ where
         DB::Error: Into<ProviderError> + Display,
     {
         // apply pre execution changes
-        apply_beacon_root_contract_call(
+        apply_beacon_root_contract_call2(
             &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
             &mut evm,
+            &self.sender,
         )?;
-        apply_blockhashes_contract_call(
+        apply_blockhashes_contract_call2(
             &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_hash,
             &mut evm,
+            &self.sender,
         )?;
 
         // execute transactions
@@ -191,6 +196,9 @@ where
                     error: Box::new(new_err),
                 }
             })?;
+            if let Some(tx) = &self.sender {
+                let _ = tx.send(state.clone());
+            }
             evm.db_mut().commit(state);
 
             // append gas used
@@ -212,6 +220,7 @@ where
             );
         }
 
+        // TODO: ignored for testing as we are not in prague yet
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
             // Collect all EIP-6110 deposits
             let deposit_requests =
@@ -250,7 +259,7 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state }
+        Self { executor: EthEvmExecutor { chain_spec, evm_config, sender: None }, state }
     }
 
     #[inline]
@@ -347,8 +356,29 @@ where
         }
         // increment balances
         self.state
-            .increment_balances(balance_increments)
+            .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+
+        if let Some(tx) = &self.executor.sender {
+            let mut updated_state = HashMap::with_capacity(balance_increments.len());
+            for address in balance_increments.keys() {
+                let cache_account = self
+                    .state
+                    .load_cache_account(*address)
+                    .map_err(|_| BlockExecutionError::msg("failed to load cache account"))?;
+                let account = revm_primitives::Account {
+                    status: revm_primitives::AccountStatus::Touched,
+                    info: cache_account
+                        .account
+                        .as_ref()
+                        .map(|a| a.info.clone().without_code())
+                        .unwrap_or_default(),
+                    storage: HashMap::default(), // storage cannot be updated here
+                };
+                updated_state.insert(*address, account);
+            }
+            let _ = tx.send(updated_state);
+        }
 
         Ok(())
     }
@@ -377,6 +407,15 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+    }
+
+    fn execute_and_stream(
+        mut self,
+        input: Self::Input<'_>,
+        tx: mpsc::UnboundedSender<revm_primitives::EvmState>,
+    ) -> Result<Self::Output, Self::Error> {
+        self.executor.sender = Some(tx);
+        self.execute(input)
     }
 }
 
@@ -459,6 +498,15 @@ where
         }
 
         Ok(BlockExecutionOutput { state: bundle_state, receipts, requests, gas_used })
+    }
+
+    fn execute_and_stream(
+        mut self,
+        input: Self::Input<'_>,
+        tx: mpsc::UnboundedSender<revm_primitives::EvmState>,
+    ) -> Result<Self::Output, Self::Error> {
+        self.executor.executor.sender = Some(tx);
+        self.execute(input)
     }
 }
 

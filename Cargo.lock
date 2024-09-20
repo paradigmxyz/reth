@@ -7274,6 +7274,7 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "revm-primitives",
+ "tokio",
 ]
 
 [[package]]
@@ -7294,6 +7295,7 @@ dependencies = [
  "revm-primitives",
  "secp256k1",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

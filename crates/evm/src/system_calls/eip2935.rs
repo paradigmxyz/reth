@@ -2,6 +2,7 @@
 
 use alloc::{boxed::Box, string::ToString};
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
+use tokio::sync::mpsc;
 
 use crate::ConfigureEvm;
 use core::fmt::Display;
@@ -144,6 +145,37 @@ where
         parent_block_hash,
         evm,
     )? {
+        evm.context.evm.db.commit(res.state);
+    }
+
+    Ok(())
+}
+
+pub fn apply_blockhashes_contract_call2<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    block_number: u64,
+    parent_block_hash: B256,
+    evm: &mut Evm<'_, EXT, DB>,
+    sender: &Option<mpsc::UnboundedSender<revm_primitives::EvmState>>,
+) -> Result<(), BlockExecutionError>
+where
+    DB: Database + DatabaseCommit,
+    DB::Error: core::fmt::Display,
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    if let Some(res) = transact_blockhashes_contract_call(
+        evm_config,
+        chain_spec,
+        block_timestamp,
+        block_number,
+        parent_block_hash,
+        evm,
+    )? {
+        if let Some(tx) = sender {
+            let _ = tx.send(res.state.clone());
+        }
         evm.context.evm.db.commit(res.state);
     }
 

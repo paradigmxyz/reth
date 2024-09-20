@@ -12,6 +12,7 @@ use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
+use tokio::sync::mpsc;
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
@@ -69,6 +70,17 @@ where
         match self {
             Self::Left(a) => a.execute(input),
             Self::Right(b) => b.execute(input),
+        }
+    }
+
+    fn execute_and_stream(
+        self,
+        input: Self::Input<'_>,
+        tx: mpsc::UnboundedSender<revm_primitives::EvmState>,
+    ) -> Result<Self::Output, Self::Error> {
+        match self {
+            Self::Left(a) => a.execute_and_stream(input, tx),
+            Self::Right(b) => b.execute_and_stream(input, tx),
         }
     }
 }

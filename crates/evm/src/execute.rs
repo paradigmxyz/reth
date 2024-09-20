@@ -6,10 +6,10 @@ pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, Execut
 pub use reth_storage_errors::provider::ProviderError;
 
 use core::fmt::Display;
-
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm_primitives::db::Database;
+use tokio::sync::mpsc;
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -32,6 +32,12 @@ pub trait Executor<DB> {
     /// # Returns
     /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+
+    fn execute_and_stream(
+        self,
+        input: Self::Input<'_>,
+        tx: mpsc::UnboundedSender<revm_primitives::EvmState>,
+    ) -> Result<Self::Output, Self::Error>;
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
@@ -176,6 +182,14 @@ mod tests {
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
+        }
+
+        fn execute_and_stream(
+            self,
+            _input: Self::Input<'_>,
+            _tx: mpsc::UnboundedSender<revm_primitives::EvmState>,
+        ) -> Result<Self::Output, Self::Error> {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }
