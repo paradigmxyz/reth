@@ -35,6 +35,10 @@ reth-tasks.workspace = true
 reth-trie.workspace = true
 reth-trie-parallel.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }

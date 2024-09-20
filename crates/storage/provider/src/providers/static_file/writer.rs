@@ -8,7 +8,7 @@ use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
+    static_file::{SegmentHeader, SegmentRangeInclusive},
     Header, Receipt, StaticFileSegment, TransactionSignedNoHash,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -139,7 +139,7 @@ impl StaticFileProviderRW {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let block_range = find_fixed_range(block);
+        let block_range = static_file_provider.find_fixed_range(block);
         let (jar, path) = match static_file_provider.get_segment_provider_from_block(
             segment,
             block_range.start(),
@@ -328,8 +328,12 @@ impl StaticFileProviderRW {
                 self.writer = writer;
                 self.data_path = data_path;
 
-                *self.writer.user_header_mut() =
-                    SegmentHeader::new(find_fixed_range(last_block + 1), None, None, segment);
+                *self.writer.user_header_mut() = SegmentHeader::new(
+                    self.reader().find_fixed_range(last_block + 1),
+                    None,
+                    None,
+                    segment,
+                );
             }
         }
 

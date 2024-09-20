@@ -159,16 +159,15 @@ where
     }
 }
 
-impl<N, Network> BuilderProvider<N> for EthApi<N::Provider, N::Pool, Network, N::Evm>
+impl<N> BuilderProvider<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 where
     N: FullNodeComponents,
-    Network: Send + Sync + Clone + 'static,
 {
     type Ctx<'a> =
-        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
+        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, N::Network, TaskExecutor, N::Provider>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self::with_spawner(ctx))
+        Box::new(Self::with_spawner)
     }
 }
 

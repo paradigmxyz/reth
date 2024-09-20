@@ -1,5 +1,6 @@
+use alloy_primitives::B256;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader, B256};
+use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 

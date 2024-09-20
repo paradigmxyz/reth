@@ -4,7 +4,7 @@ use std::{fmt, fmt::Debug};
 
 use futures::future;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
@@ -17,7 +17,7 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     head: Head,
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
-    config_container: WithConfigs,
+    config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
 }
 
 impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
@@ -26,7 +26,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         head: Head,
         components: Node,
         extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
-        config_container: WithConfigs,
+        config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
         Self { head, extensions, components, config_container }
     }

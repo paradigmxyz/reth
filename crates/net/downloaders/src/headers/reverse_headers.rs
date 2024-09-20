@@ -2,6 +2,7 @@
 
 use super::task::TaskDownloader;
 use crate::metrics::HeaderDownloaderMetrics;
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
@@ -18,7 +19,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockHashOrNumber, GotExpected, Header, SealedHeader};
+use reth_primitives::{GotExpected, Header, SealedHeader};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},

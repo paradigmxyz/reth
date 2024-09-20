@@ -7,7 +7,9 @@ use std::{
 
 use futures::TryFutureExt;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_api::{
+    BuilderProvider, FullNodeComponents, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
@@ -237,7 +239,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) node: Node,
 
     /// Gives access to the node configuration.
-    pub(crate) config: &'a NodeConfig,
+    pub(crate) config: &'a NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
 
     /// A Helper type the holds instances of the configured modules.
     ///
@@ -260,7 +262,7 @@ where
     EthApi: EthApiTypes,
 {
     /// Returns the config of the node.
-    pub const fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
         self.config
     }
 
@@ -296,7 +298,7 @@ where
 pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     node: Node,
     engine_api: Engine,
-    config: &NodeConfig,
+    config: &NodeConfig<ChainSpec>,
     jwt_secret: JwtSecret,
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>

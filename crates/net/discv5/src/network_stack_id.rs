@@ -25,7 +25,7 @@ impl NetworkStackId {
     pub fn id(chain: &ChainSpec) -> Option<&'static [u8]> {
         if chain.is_optimism() {
             return Some(Self::OPEL)
-        } else if chain.is_eth() {
+        } else if chain.is_ethereum() {
             return Some(Self::ETH)
         }
 

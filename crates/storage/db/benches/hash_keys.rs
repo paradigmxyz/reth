@@ -161,7 +161,7 @@ where
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
-    let mut unique_keys = HashSet::new();
+    let mut unique_keys = HashSet::with_capacity(preload.len() + input.len());
     preload.retain(|(k, _)| unique_keys.insert(k.clone()));
     input.retain(|(k, _)| unique_keys.insert(k.clone()));
 
