@@ -444,18 +444,18 @@ mod tests {
             // Test cases
             // [prune_count, last_block, expected_tx_tip, expected_file_count)
             let test_cases = vec![
-                // Case 1: 20..=29 has only one tx. Prune the only tx of the block range.
+                // Case 0: 20..=29 has only one tx. Prune the only tx of the block range.
                 // It ensures that the file is not deleted even though there are no rows, since the
                 // `last_block` which is passed to the prune method is the first
                 // block of the range.
                 (1, blocks_per_file * 2, highest_tx - 1, initial_file_count),
-                // Case 2: 10..=19 has no txs. There are no txes in the whole block range, but want
+                // Case 1: 10..=19 has no txs. There are no txes in the whole block range, but want
                 // to unwind to block 9. Ensures that the 20..=29 and 10..=19 files
                 // are deleted.
                 (0, blocks_per_file - 1, highest_tx - 1, files_per_range + 1), // includes lockfile
-                // Case 3: Prune most txs up to block 1.
+                // Case 2: Prune most txs up to block 1.
                 (7, 1, 1, files_per_range + 1),
-                // Case 4: Prune remaining tx and ensure that file is not deleted.
+                // Case 3: Prune remaining tx and ensure that file is not deleted.
                 (1, 0, 0, files_per_range + 1),
             ];
 
