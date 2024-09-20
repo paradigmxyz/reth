@@ -6,10 +6,10 @@ use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache};
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index};
+use reth_rpc_types::{Header, Index};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
-use crate::{FromEthApiError, RpcBlock};
+use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -25,7 +25,10 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
+    where
+        Self: FullEthApiTypes,
+    {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
     }
 
@@ -38,6 +41,8 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
         full: bool,
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
+    where
+        Self: FullEthApiTypes,
     {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
@@ -46,8 +51,13 @@ pub trait EthBlocks: LoadBlock {
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
-            let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
-                .map_err(Self::Error::from_eth_err)?;
+            let block = from_block::<Self::TransactionCompat>(
+                block.unseal(),
+                total_difficulty,
+                full.into(),
+                Some(block_hash),
+            )
+            .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block))
         }
     }
@@ -65,7 +75,7 @@ pub trait EthBlocks: LoadBlock {
                 return Ok(LoadBlock::provider(self)
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.len()))
+                    .map(|block| block.body.len()));
             }
 
             let block_hash = match LoadBlock::provider(self)
@@ -91,7 +101,7 @@ pub trait EthBlocks: LoadBlock {
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>> + Send
     where
         Self: LoadReceipt;
 

@@ -60,7 +60,6 @@ reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 
 ## ethereum
-alloy-network.workspace = true
 alloy-primitives.workspace = true
 
 ## async
