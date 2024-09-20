@@ -26,7 +26,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
-use tokio_util::sync::{PollSender, ReusableBoxFuture};
+use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
@@ -99,7 +99,7 @@ impl ExExHandle {
         &mut self,
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification),
-    ) -> Poll<eyre::Result<()>> {
+    ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -132,25 +132,24 @@ impl ExExHandle {
             %notification_id,
             "Reserving slot for notification"
         );
-        ready!(self.sender.poll_reserve(cx)?);
-
-        // debug!(
-        //     exex_id = %self.id,
-        //     %notification_id,
-        //     "Appending notification to WAL"
-        // );
-        // self.wal.commit(notification)?;
+        match self.sender.poll_reserve(cx) {
+            Poll::Ready(Ok(())) => (),
+            other => return other,
+        }
 
         debug!(
             exex_id = %self.id,
             %notification_id,
             "Sending notification"
         );
-        self.sender.send_item(notification.clone())?;
-        self.next_notification_id = notification_id + 1;
-        self.metrics.notifications_sent_total.increment(1);
-
-        Poll::Ready(Ok(()))
+        match self.sender.send_item(notification.clone()) {
+            Ok(()) => {
+                self.next_notification_id = notification_id + 1;
+                self.metrics.notifications_sent_total.increment(1);
+                Poll::Ready(Ok(()))
+            }
+            Err(err) => Poll::Ready(Err(err)),
+        }
     }
 }
 
@@ -648,7 +647,10 @@ impl Future for ExExManager {
                 .checked_sub(self.min_id)
                 .expect("exex expected notification ID outside the manager's range");
             if let Some(notification) = self.buffer.get(notification_index) {
-                let _ = exex.send(cx, notification)?;
+                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
+                    // the channel was closed, which is irrecoverable for the manager
+                    return Poll::Ready(Err(err.into()))
+                }
             }
             min_id = min_id.min(exex.next_notification_id);
             self.exex_handles.push(exex);
