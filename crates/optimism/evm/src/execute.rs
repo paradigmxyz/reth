@@ -8,7 +8,7 @@ use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
+        BlockExecutorProvider, BlockValidationError, EvmExecutor, Executor, ProviderError,
     },
     system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
@@ -18,19 +18,14 @@ use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::BlockBatchRecord,
-    db::{
-        states::{bundle_state::BundleRetention, StorageSlot},
-        BundleAccount,
-    },
-    state_change::post_block_balance_increments,
-    Evm, State,
+    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
+    state_change::post_block_balance_increments, Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{collections::hash_map::Entry, fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Provides executors to execute regular optimism blocks
@@ -365,85 +360,32 @@ where
     }
 }
 
-/// An executor that retains all cache state from execution in its bundle state.
-#[derive(Debug)]
-pub struct OpBlockAccessListExecutor<EvmConfig, DB> {
-    /// The executor used to execute single blocks
-    ///
-    /// All state changes are committed to the [State].
-    executor: OpBlockExecutor<EvmConfig, DB>,
-}
-
-impl<EvmConfig, DB> Executor<DB> for OpBlockAccessListExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> EvmExecutor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
-    type Error = BlockExecutionError;
-
-    /// Executes the block and commits the changes to the internal state.
-    ///
-    /// Returns the receipts of the transactions in the block.
-    ///
-    /// This also returns the accounts from the internal state cache in the bundle state, allowing
-    /// access to not only the state that changed during execution, but also the state accessed
-    /// during execution.
-    ///
-    /// Returns an error if the block could not be executed or failed verification.
-    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_with_state_witness<F>(
+        mut self,
+        input: Self::Input<'_>,
+        mut witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, gas_used) =
-            self.executor.execute_without_verification(block, total_difficulty)?;
+        let (receipts, gas_used) = self.execute_without_verification(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
-        self.executor.state.merge_transitions(BundleRetention::Reverts);
+        self.state.merge_transitions(BundleRetention::Reverts);
+        witness(&self.state);
 
-        // now, ensure each account from the state is included in the bundle state
-        let mut bundle_state = self.executor.state.take_bundle();
-        for (address, account) in self.executor.state.cache.accounts {
-            // convert all slots, insert all slots
-            let account_info = account.account_info();
-            let account_storage = account.account.map(|a| a.storage).unwrap_or_default();
-
-            match bundle_state.state.entry(address) {
-                Entry::Vacant(entry) => {
-                    // we have to add the entire account here
-                    let extracted_storage = account_storage
-                        .into_iter()
-                        .map(|(k, v)| {
-                            (k, StorageSlot { previous_or_original_value: v, present_value: v })
-                        })
-                        .collect();
-
-                    let bundle_account = BundleAccount {
-                        info: account_info.clone(),
-                        original_info: account_info,
-                        storage: extracted_storage,
-                        status: account.status,
-                    };
-                    entry.insert(bundle_account);
-                }
-                Entry::Occupied(mut entry) => {
-                    // only add slots that are unchanged
-                    let current_account = entry.get_mut();
-
-                    // iterate over all storage slots, checking keys that are not in the bundle
-                    // state
-                    for (k, v) in account_storage {
-                        if let Entry::Vacant(storage_entry) = current_account.storage.entry(k) {
-                            storage_entry.insert(StorageSlot {
-                                previous_or_original_value: v,
-                                present_value: v,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(BlockExecutionOutput { state: bundle_state, receipts, requests: vec![], gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests: vec![],
+            gas_used,
+        })
     }
 }
 

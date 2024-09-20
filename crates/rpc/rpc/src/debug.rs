@@ -67,14 +67,6 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
     }
 }
 
-impl<Provider, Eth> DebugApi<Provider, Eth>
-where
-    Provider: BlockReaderIdExt + BlockExecutorProvider + 'static,
-    <Provider as BlockExecutorProvider>::Executor<StateProviderDatabase<StateProviderBox>>:
-        EvmExecutor<StateProviderDatabase<StateProviderBox>>,
-{
-}
-
 // === impl DebugApi ===
 
 impl<Provider, Eth> DebugApi<Provider, Eth>
@@ -84,6 +76,7 @@ where
         + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
+    // TODO convert this into a separate object
         + BlockExecutorProvider
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,

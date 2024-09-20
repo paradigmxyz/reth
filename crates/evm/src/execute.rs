@@ -6,9 +6,9 @@ pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, Execut
 pub use reth_storage_errors::provider::ProviderError;
 
 use core::fmt::Display;
+use revm::State;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
-use revm::State;
 use revm_primitives::db::Database;
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
@@ -35,16 +35,11 @@ pub trait Executor<DB> {
 }
 
 /// An Executor that operates on the EVM
-pub trait EvmExecutor<DB>: Executor<DB> {
-    /// Executes the EVM with the given input and accepts a witness closure that is invoked with the
-    /// EVM state after execution.
-    fn execute_with<F>(
-        self,
-        input: Self::Input<'_>,
-        witness: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: FnMut(&State<DB>);
+pub trait EvmExecutor<DB> : Executor<DB> {
+
+    /// Executes the EVM with the given input and accepts a witness closure that is invoked with the EVM state after execution.
+    fn execute_with_state_witness<F>(self, input: Self::Input<'_>, witness: F) -> Result<Self::Output, Self::Error>
+    where F: FnMut(&State<DB>);
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
@@ -107,7 +102,7 @@ pub trait BatchExecutor<DB> {
     fn size_hint(&self) -> Option<usize>;
 }
 
-/// A type that can create a new executor for single block execution and batch execution.
+/// A type that can create a new executor for block execution.
 pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// An executor that can execute a single block given a database.
     ///
