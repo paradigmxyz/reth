@@ -64,10 +64,10 @@ impl BlockCache {
         self.deque.clear();
     }
 
-    /// Inserts the blocks from the notification into the cache at the given file offset.
+    /// Inserts the blocks from the notification into the cache with the given file offset.
     ///
     /// First, inserts the reverted blocks (if any), then the committed blocks (if any).
-    pub(super) fn insert_notification_blocks_at_offset(
+    pub(super) fn insert_notification_blocks_with_offset(
         &mut self,
         notification: &ExExNotification,
         file_offset: u64,

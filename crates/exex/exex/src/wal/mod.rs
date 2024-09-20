@@ -26,11 +26,11 @@ pub(crate) struct Wal {
     /// [`MAX_CACHED_BLOCKS`].
     ///
     /// For each notification written to the WAL, there will be an entry per block written to
-    /// the cache with the same file offset as the notification in the WAL file. I.e. for each
+    /// the cache with the same file offset as the notification in the [`Storage`]. I.e. for each
     /// notification, there may be multiple blocks in the cache.
     ///
-    /// This cache is needed only for convenience, so we can avoid walking the WAL file every time
-    /// we want to find a notification corresponding to a block.
+    /// This cache is needed only for convenience, so we can avoid walking the [`Storage`] every
+    /// time we want to find a notification corresponding to a block.
     block_cache: BlockCache,
 }
 
@@ -46,7 +46,7 @@ impl Wal {
         Ok(wal)
     }
 
-    /// Clears the block cache and fills it with the notifications from the WAL file, up to the
+    /// Clears the block cache and fills it with the notifications from the [`Storage`], up to the
     /// given offset in bytes, not inclusive.
     #[instrument(target = "exex::wal", skip(self))]
     fn fill_block_cache(&mut self, to_offset: u64) -> eyre::Result<()> {
@@ -65,7 +65,7 @@ impl Wal {
                 "Inserting block cache entries"
             );
 
-            self.block_cache.insert_notification_blocks_at_offset(&notification, file_offset);
+            self.block_cache.insert_notification_blocks_with_offset(&notification, file_offset);
 
             if file_offset >= to_offset {
                 debug!(
@@ -91,27 +91,33 @@ impl Wal {
         let committed_chain = notification.committed_chain();
 
         let file_offset = self.storage.bytes_len()?;
+
         debug!(
             reverted_block_range = ?reverted_chain.as_ref().map(|chain| chain.range()),
             committed_block_range = ?committed_chain.as_ref().map(|chain| chain.range()),
             ?file_offset,
-            "Writing notification to the WAL file"
+            "Writing notification to WAL"
         );
-
         self.storage.write_notification(notification)?;
 
-        self.block_cache.insert_notification_blocks_at_offset(notification, file_offset);
+        debug!(
+            reverted_block_range = ?reverted_chain.as_ref().map(|chain| chain.range()),
+            committed_block_range = ?committed_chain.as_ref().map(|chain| chain.range()),
+            ?file_offset,
+            "Inserting notification blocks into the block cache"
+        );
+        self.block_cache.insert_notification_blocks_with_offset(notification, file_offset);
 
         Ok(())
     }
 
     /// Rollbacks the WAL to the given block, inclusive.
     ///
-    /// 1. Walks the WAL file from the end and searches for the first notification where committed
-    ///    chain contains a block with the same number and hash as `to_block`.
-    /// 2. If the notification is found, truncates the WAL file to the offset of the notification.
-    ///    It means that if the notification contains both given block and blocks before it, the
-    ///    whole notification will be truncated.
+    /// 1. Walks the WAL from the end and searches for the first notification where committed chain
+    ///    contains a block with the same number and hash as `to_block`.
+    /// 2. If the notification is found, truncates the WAL to the offset of the notification. It
+    ///    means that if the notification contains both given block and blocks before it, the whole
+    ///    notification will be truncated.
     ///
     /// # Returns
     ///
@@ -169,7 +175,7 @@ impl Wal {
 
         if let Some(truncate_to) = truncate_to {
             self.storage.truncate_to_offset(truncate_to)?;
-            debug!(?truncate_to, "Truncated the WAL file");
+            debug!(?truncate_to, "Truncated the storage");
         } else {
             debug!("No blocks were truncated. Block cache was filled.");
         }
@@ -184,9 +190,7 @@ impl Wal {
     ///    containing a committed block higher than `to_block`). If the notificatin includes both
     ///    finalized and non-finalized blocks, the offset will include this notification (i.e.
     ///    consider this notification unfinalized and don't remove it).
-    /// 2. Creates a new file and copies all notifications starting from the offset (inclusive) to
-    ///    the end of the original file.
-    /// 3. Renames the new file to the original file.
+    /// 2. Truncates the storage from the offset of the notification, not inclusive.
     #[instrument(target = "exex::wal", skip(self))]
     pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the offset of the notification with the finalized block.
@@ -207,9 +211,9 @@ impl Wal {
             }
         }
 
-        // If the finalized block is not found in cache, we need to walk the whole file.
+        // If the finalized block is not found in cache, we need to walk the whole storage.
         if unfinalized_from_offset.is_none() {
-            debug!("Finalized block not found in the block cache, walking the whole file");
+            debug!("Finalized block not found in the block cache, walking the whole storage");
 
             let mut file_offset = 0;
             self.storage.for_each_notification(|raw_data_len, notification| {
@@ -218,10 +222,10 @@ impl Wal {
                         if finalized_block.hash() == to_block.hash {
                             if committed_chain.blocks().len() == 1 {
                                 // If the committed chain only contains the finalized block, we can
-                                // truncate the WAL file including the notification itself.
+                                // truncate the WAL including the notification itself.
                                 unfinalized_from_offset = Some(file_offset + raw_data_len as u64);
                             } else {
-                                // Otherwise, we need to truncate the WAL file to the offset of the
+                                // Otherwise, we need to truncate the WAL to the offset of the
                                 // notification and leave it in the WAL.
                                 unfinalized_from_offset = Some(file_offset);
                             }
@@ -229,7 +233,7 @@ impl Wal {
                             debug!(
                                 ?unfinalized_from_offset,
                                 committed_block_range = ?committed_chain.range(),
-                                "Found the finalized block in the WAL file"
+                                "Found the finalized block in the storage"
                             );
                             return Ok(ControlFlow::Break(()))
                         }
@@ -248,13 +252,13 @@ impl Wal {
             return Ok(())
         };
 
-        // Truncate the WAL file to the unfinalized block.
+        // Truncate the storage to the unfinalized block.
         let (old_size, new_size) = self.storage.truncate_from_offset(unfinalized_from_offset)?;
 
-        // Fill the block cache with the notifications from the new file.
+        // Fill the block cache with the notifications from updated storage.
         self.fill_block_cache(u64::MAX)?;
 
-        debug!(?old_size, ?new_size, "WAL file was finalized and block cache was filled");
+        debug!(?old_size, ?new_size, "WAL was finalized and block cache was filled");
 
         Ok(())
     }
@@ -342,7 +346,7 @@ mod tests {
         };
 
         // Commit notifications, verify that the block cache is updated and the notifications are
-        // written to the WAL file.
+        // written to WAL.
 
         // First notification (commit block 0, 1)
         let file_offset = wal.storage.bytes_len()?;
@@ -382,7 +386,7 @@ mod tests {
             vec![committed_notification_1.clone(), reverted_notification.clone()]
         );
 
-        // Now, rollback to block 1 and verify that both the block cache and the WAL file are
+        // Now, rollback to block 1 and verify that both the block cache and the storage are
         // empty. We expect the rollback to delete the first notification (commit block 0, 1),
         // because we can't delete blocks partly from the notification. Additionally, check that
         // the block that the rolled back to is the block with number 0.
@@ -483,7 +487,7 @@ mod tests {
 
         // Now, finalize the WAL up to the block 1. Block 1 was in the third notification that also
         // had block 2 committed. In this case, we can't split the notification into two parts, so
-        // we preserve the whole notification in both the block cache and the WAL file, and delete
+        // we preserve the whole notification in both the block cache and the storage, and delete
         // the notifications before it.
         wal.finalize((blocks[1].number, blocks[1].hash()).into())?;
         let finalized_bytes_amount = reverted_notification_cache[0].file_offset;
