@@ -1,5 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
+use alloy_primitives::U256;
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
@@ -9,7 +10,7 @@ use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{system_calls::apply_beacon_root_contract_call, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, Header, Receipt, Receipts, U256,
+    eip4844::calculate_excess_blob_gas, proofs, Block, Header, Receipt, Receipts,
 };
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{

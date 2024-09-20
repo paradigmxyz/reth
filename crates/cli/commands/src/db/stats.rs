@@ -12,7 +12,7 @@ use reth_fs_util as fs;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::providers::StaticFileProvider;
-use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
+use reth_static_file_types::SegmentRangeInclusive;
 use std::{sync::Arc, time::Duration};
 
 #[derive(Parser, Debug)]
@@ -191,7 +191,7 @@ impl Command {
             ) = (0, 0, 0, 0, 0, 0);
 
             for (block_range, tx_range) in &ranges {
-                let fixed_block_range = find_fixed_range(block_range.start());
+                let fixed_block_range = static_file_provider.find_fixed_range(block_range.start());
                 let jar_provider = static_file_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {

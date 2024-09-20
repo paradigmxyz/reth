@@ -1,7 +1,7 @@
 //! Contains the implementation of the mining mode for the local engine.
 
+use alloy_primitives::TxHash;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_primitives::TxHash;
 use reth_transaction_pool::TransactionPool;
 use std::{
     future::Future,

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
+use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
@@ -9,9 +10,7 @@ use reth_evm::{
     system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
     ConfigureEvm,
 };
-use reth_primitives::{
-    keccak256, Header, Receipt, SealedBlockWithSenders, SealedHeader, B256, U256,
-};
+use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,

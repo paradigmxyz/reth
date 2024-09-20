@@ -252,7 +252,7 @@ where
     type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self::with_spawner(ctx))
+        Box::new(Self::with_spawner)
     }
 }
 

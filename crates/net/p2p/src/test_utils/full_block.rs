@@ -5,13 +5,12 @@ use crate::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader};
 use std::{collections::HashMap, sync::Arc};
 
 /// A headers+bodies client implementation that does nothing.
