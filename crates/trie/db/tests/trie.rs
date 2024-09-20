@@ -692,8 +692,8 @@ fn storage_trie_around_extension_node() {
     assert_trie_updates(updates.storage_nodes_ref());
 }
 
-fn extension_node_storage_trie(
-    tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>,
+fn extension_node_storage_trie<Spec: Send + Sync>(
+    tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, Spec>,
     hashed_address: B256,
 ) -> (B256, StorageTrieUpdates) {
     let value = U256::from(1);
@@ -720,7 +720,9 @@ fn extension_node_storage_trie(
     (root, trie_updates)
 }
 
-fn extension_node_trie(tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>) -> B256 {
+fn extension_node_trie<Spec: Send + Sync>(
+    tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, Spec>,
+) -> B256 {
     let a = Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
     let val = encode_account(a, None);
 

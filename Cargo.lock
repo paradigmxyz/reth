@@ -97,9 +97,9 @@ checksum = "5c6cb57a04249c6480766f7f7cef5467412af1490f8d1e243141daddada3264f"
 
 [[package]]
 name = "alloy-chains"
-version = "0.1.31"
+version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b68b94c159bcc2ca5f758b8663d7b00fc7c5e40569984595ddf2221b0f7f7f6e"
+checksum = "abf770dad29577cd3580f3dd09005799224a912b8cdfdd6dc04d030d42b3df4e"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -4410,7 +4410,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6424,6 +6424,7 @@ dependencies = [
 name = "reth-chain-state"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
@@ -6848,6 +6849,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
@@ -6901,6 +6903,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-ethereum",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -6950,6 +6953,7 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures-util",
  "reth-beacon-consensus",
@@ -6979,6 +6983,7 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-execution-types",
  "reth-payload-primitives",
@@ -7019,6 +7024,8 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "futures",
@@ -7064,6 +7071,7 @@ dependencies = [
 name = "reth-engine-util"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures",
  "itertools 0.13.0",
@@ -7140,6 +7148,7 @@ name = "reth-eth-wire-types"
 version = "1.0.7"
 dependencies = [
  "alloy-chains",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -7423,6 +7432,7 @@ dependencies = [
 name = "reth-invalid-block-hooks"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "eyre",
@@ -7539,6 +7549,7 @@ dependencies = [
 name = "reth-network"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-node-bindings",
  "alloy-primitives",
  "alloy-provider",
@@ -7619,6 +7630,7 @@ dependencies = [
 name = "reth-network-p2p"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -7737,6 +7749,7 @@ dependencies = [
  "reth-node-events",
  "reth-node-metrics",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
@@ -8107,20 +8120,17 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
  "futures-util",
  "metrics",
- "pin-project",
  "reth-chain-state",
- "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
- "reth-transaction-pool",
  "revm",
- "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -8131,6 +8141,8 @@ name = "reth-payload-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
+ "pin-project",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
@@ -8140,6 +8152,8 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -11161,7 +11175,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

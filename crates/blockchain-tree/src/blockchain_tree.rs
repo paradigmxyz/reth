@@ -16,7 +16,7 @@ use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    BlockNumHash, EthereumHardfork, ForkBlock, GotExpected, Receipt, SealedBlock,
+    BlockNumHash, EthereumHardfork, ForkBlock, GotExpected, Hardforks, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{

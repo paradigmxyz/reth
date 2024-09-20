@@ -139,7 +139,7 @@ impl OpReceiptFieldsBuilder {
                 .saturating_to(),
         );
 
-        self.l1_fee_scalar = (!chain_spec.hardforks.is_ecotone_active_at_timestamp(timestamp))
+        self.l1_fee_scalar = (!chain_spec.is_ecotone_active_at_timestamp(timestamp))
             .then_some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
 
         self.l1_base_fee = Some(l1_block_info.l1_base_fee.saturating_to());
@@ -358,7 +358,7 @@ mod test {
             reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");
 
         // test
-        assert!(OP_MAINNET.hardforks.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
+        assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP)
             .l1_block_info(&OP_MAINNET, &tx_1, l1_block_info)

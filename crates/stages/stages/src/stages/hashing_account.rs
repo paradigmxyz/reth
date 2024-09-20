@@ -57,8 +57,11 @@ impl AccountHashingStage {
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
-    pub fn seed<Tx: DbTx + DbTxMut + 'static>(
-        provider: &reth_provider::DatabaseProvider<Tx>,
+    pub fn seed<
+        Tx: DbTx + DbTxMut + 'static,
+        Spec: Send + Sync + 'static + reth_chainspec::EthereumHardforks,
+    >(
+        provider: &reth_provider::DatabaseProvider<Tx, Spec>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db_api::models::AccountBeforeTx;

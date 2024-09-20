@@ -1,7 +1,7 @@
 use crate::metrics::PersistenceMetrics;
+use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_primitives::BlockNumHash;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
@@ -264,9 +264,9 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
-    use reth_primitives::B256;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_prune::Pruner;
     use tokio::sync::mpsc::unbounded_channel;

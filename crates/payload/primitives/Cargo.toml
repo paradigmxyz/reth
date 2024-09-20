@@ -24,8 +24,12 @@ reth-chain-state.workspace = true
 alloy-primitives.workspace = true
 
 # async
+async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
+pin-project.workspace = true
 
 # misc
-thiserror.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

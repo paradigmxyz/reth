@@ -5,11 +5,12 @@ use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
+use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineTypes;
-use reth_primitives::{SealedBlockWithSenders, B256};
+use reth_primitives::SealedBlockWithSenders;
 use std::{
     collections::HashSet,
     fmt::Display,

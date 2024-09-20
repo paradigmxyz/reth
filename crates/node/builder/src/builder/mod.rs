@@ -11,7 +11,7 @@ pub use states::*;
 use std::sync::Arc;
 
 use futures::Future;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
@@ -154,28 +154,30 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
 /// configured by the builder itself during launch. This might change in the future.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
-pub struct NodeBuilder<DB> {
+pub struct NodeBuilder<DB, ChainSpec> {
     /// All settings for how the node should be configured.
-    config: NodeConfig,
+    config: NodeConfig<ChainSpec>,
     /// The configured database for the node.
     database: DB,
 }
 
-impl NodeBuilder<()> {
+impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     /// Create a new [`NodeBuilder`].
-    pub const fn new(config: NodeConfig) -> Self {
+    pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
         Self { config, database: () }
     }
 }
 
-impl<DB> NodeBuilder<DB> {
+impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         &self.config
     }
+}
 
+impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Configures the underlying database that the node will use.
-    pub fn with_database<D>(self, database: D) -> NodeBuilder<D> {
+    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec> {
         NodeBuilder { config: self.config, database }
     }
 
@@ -191,8 +193,9 @@ impl<DB> NodeBuilder<DB> {
     pub fn testing_node(
         mut self,
         task_executor: TaskExecutor,
-    ) -> WithLaunchContext<NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>
-    {
+    ) -> WithLaunchContext<
+        NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
+    > {
         let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
             reth_db::test_utils::tempdir_path(),
         );
@@ -202,7 +205,7 @@ impl<DB> NodeBuilder<DB> {
         });
 
         let data_dir =
-            path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
+            path.unwrap_or_chain_default(self.config.chain.chain(), self.config.datadir.clone());
 
         let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
 
@@ -210,7 +213,7 @@ impl<DB> NodeBuilder<DB> {
     }
 }
 
-impl<DB> NodeBuilder<DB>
+impl<DB> NodeBuilder<DB, ChainSpec>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
@@ -263,15 +266,17 @@ impl<Builder> WithLaunchContext<Builder> {
     }
 }
 
-impl<DB> WithLaunchContext<NodeBuilder<DB>>
+impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
+    /// Returns a reference to the node builder's config.
+    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
+        self.builder.config()
+    }
+}
+
+impl<DB> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
-    /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig {
-        self.builder.config()
-    }
-
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
@@ -395,7 +400,7 @@ where
     AO: NodeAddOns<NodeAdapter<T, CB::Components>, EthApi: FullEthApiServer + AddDevSigners>,
 {
     /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.config
     }
 
@@ -520,7 +525,7 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
     /// Config container
-    pub(crate) config_container: WithConfigs,
+    pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -529,7 +534,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        config_container: WithConfigs,
+        config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
         Self { head, provider, executor, config_container }
     }
@@ -545,7 +550,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the config of the node.
-    pub const fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
         &self.config_container.config
     }
 
@@ -584,13 +589,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config for payload building.
     pub fn payload_builder_config(&self) -> impl PayloadBuilderConfig {
         self.config().builder.clone()
-    }
-
-    /// Creates the [`NetworkBuilder`] for the node.
-    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
-        let network_config = self.network_config()?;
-        let builder = NetworkManager::builder(network_config).await?;
-        Ok(builder)
     }
 
     /// Convenience function to start the network.
@@ -634,6 +632,31 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         handle
     }
 
+    /// Get the network secret from the given data dir
+    fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
+        let network_secret_path =
+            self.config().network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+        let secret_key = get_secret_key(&network_secret_path)?;
+        Ok(secret_key)
+    }
+
+    /// Builds the [`NetworkConfig`].
+    pub fn build_network_config(
+        &self,
+        network_builder: NetworkConfigBuilder,
+    ) -> NetworkConfig<Node::Provider> {
+        network_builder.build(self.provider.clone())
+    }
+}
+
+impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>> BuilderContext<Node> {
+    /// Creates the [`NetworkBuilder`] for the node.
+    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
+        let network_config = self.network_config()?;
+        let builder = NetworkManager::builder(network_config).await?;
+        Ok(builder)
+    }
+
     /// Returns the default network config for the node.
     pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
         let network_builder = self.network_config_builder();
@@ -657,22 +680,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .set_head(self.head);
 
         Ok(builder)
-    }
-
-    /// Get the network secret from the given data dir
-    fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
-        let network_secret_path =
-            self.config().network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
-        let secret_key = get_secret_key(&network_secret_path)?;
-        Ok(secret_key)
-    }
-
-    /// Builds the [`NetworkConfig`].
-    pub fn build_network_config(
-        &self,
-        network_builder: NetworkConfigBuilder,
-    ) -> NetworkConfig<Node::Provider> {
-        network_builder.build(self.provider.clone())
     }
 }
 

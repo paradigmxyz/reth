@@ -17,6 +17,7 @@ use alloc::collections::btree_map::Entry;
 use alloc::{boxed::Box, vec::Vec};
 
 /// Generic trait over a set of ordered hardforks
+#[auto_impl::auto_impl(&, Arc)]
 pub trait Hardforks: Default + Clone {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].

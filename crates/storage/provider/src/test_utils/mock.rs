@@ -148,8 +148,8 @@ impl MockEthProvider {
 
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
-    type Provider = DatabaseProvider<TxMock>;
-    type ProviderRW = DatabaseProvider<TxMock>;
+    type Provider = DatabaseProvider<TxMock, ChainSpec>;
+    type ProviderRW = DatabaseProvider<TxMock, ChainSpec>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())

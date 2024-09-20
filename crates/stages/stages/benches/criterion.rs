@@ -2,6 +2,7 @@
 use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
 #[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
+use reth_chainspec::ChainSpec;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 
@@ -147,7 +148,7 @@ fn measure_stage<F, S>(
     block_interval: RangeInclusive<BlockNumber>,
     label: String,
 ) where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut>>,
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
     F: Fn(S, &TestStageDB, StageRange),
 {
     let stage_range = (
