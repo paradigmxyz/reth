@@ -69,6 +69,7 @@ reth-node-api.workspace = true
 reth-rpc-types-compat.workspace = true
 
 alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
