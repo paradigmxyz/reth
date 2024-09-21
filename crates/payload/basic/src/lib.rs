@@ -47,8 +47,6 @@ use tracing::{debug, trace, warn};
 pub mod builder_stack;
 mod metrics;
 
-pub use builder_stack::PayloadBuilderStack;
-
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
@@ -67,7 +65,7 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
-    builders: PayloadBuilderStack<Builder>,
+    builder: Builder,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
 }
@@ -83,7 +81,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
-        builders: Builder,
+        builder: Builder,
     ) -> Self {
         Self {
             client,
@@ -92,7 +90,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             chain_spec,
-            builders: PayloadBuilderStack::new(vec![builders]),
+            builder,
             pre_cached: None,
         }
     }
@@ -192,7 +190,7 @@ where
             cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
-            builders: self.builders.clone(),
+            builder: self.builder.clone(),
         };
 
         // start the first job right away
@@ -349,7 +347,7 @@ where
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
-    builders: PayloadBuilderStack<Builder>,
+    builder: Builder,
 }
 
 impl<Client, Pool, Tasks, Builder> BasicPayloadJob<Client, Pool, Tasks, Builder>
@@ -374,7 +372,7 @@ where
         let best_payload = self.best_payload.clone();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
-        let builder = self.builders.clone();
+        let builder = self.builder.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
@@ -411,7 +409,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(Ok(()))
         }
 
         // check if the interval is reached
@@ -478,7 +476,7 @@ where
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
         self.metrics.inc_requested_empty_payload();
-        self.builders.build_empty_payload(&self.client, self.config.clone())
+        self.builder.build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
@@ -508,7 +506,7 @@ where
                 best_payload: None,
             };
 
-            match self.builders.on_missing_payload(args) {
+            match self.builder.on_missing_payload(args) {
                 MissingPayloadBehaviour::AwaitInProgress => {
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
                 }
@@ -521,7 +519,7 @@ where
                     let (tx, rx) = oneshot::channel();
                     let client = self.client.clone();
                     let config = self.config.clone();
-                    let builder = self.builders.clone();
+                    let builder = self.builder.clone();
                     self.executor.spawn_blocking(Box::pin(async move {
                         let res = builder.build_empty_payload(&client, config);
                         let _ = tx.send(res);

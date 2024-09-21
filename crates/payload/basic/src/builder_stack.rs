@@ -3,76 +3,78 @@ use crate::{
     PayloadConfig,
 };
 
-/// A stack of payload builders that can be used in sequence.
-#[derive(Clone, Debug)]
-pub struct PayloadBuilderStack<B>(Vec<B>);
+/// A stack of payload builders that allows for flexible composition of payload builders.
+///
+/// This structure enables the chaining of multiple `PayloadBuilder` implementations,
+/// creating a hierarchical fallback system. It's designed to be nestable, allowing
+/// for complex builder arrangements like `Stack<Stack<A, B>, C>`.
+#[derive(Debug)]
+pub struct PayloadBuilderStack<L, R> {
+    left: L,
+    right: R,
+}
 
-impl<B> PayloadBuilderStack<B> {
-    /// Create a new payload builder stack.
-    pub fn new(builders: Vec<B>) -> Self {
-        Self(builders)
-    }
-
-    /// Push a builder onto the stack.
-    pub fn push(&mut self, builder: B) {
-        self.0.push(builder);
+impl<L, R> PayloadBuilderStack<L, R> {
+    /// Creates a new `PayloadBuilderStack` with the given left and right builders.
+    pub const fn new(left: L, right: R) -> Self {
+        Self { left, right }
     }
 }
 
-impl<B, Pool, Client> PayloadBuilder<Pool, Client> for PayloadBuilderStack<B>
+impl<L, R, Pool, Client> PayloadBuilder<Pool, Client> for PayloadBuilderStack<L, R>
 where
-    B: PayloadBuilder<Pool, Client>,
+    L: PayloadBuilder<Pool, Client>,
+    R: PayloadBuilder<Pool, Client, Attributes = L::Attributes, BuiltPayload = L::BuiltPayload>,
 {
-    type Attributes = B::Attributes;
-    type BuiltPayload = B::BuiltPayload;
+    type Attributes = L::Attributes;
+    type BuiltPayload = L::BuiltPayload;
 
+    /// Attempts to build a payload using the left builder first, falling back to the right.
     fn try_build(
         &self,
         args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let mut args = Some(args);
-        // Iterate through all builders in the stack
-        for builder in &self.0 {
-            match builder.try_build(args.take().unwrap()) {
-                // If a builder produces a Better outcome, return it immediately
-                Ok(outcome @ BuildOutcome::Better { .. }) => return Ok(outcome),
-                // If a builder produces a Valid outcome, continue with the next builder
-                Ok(_) => continue,
-                // If a builder produces an Invalid outcome, continue with the next builder
-                Err(_) => continue,
-            }
+        match self.left.try_build(args.take().unwrap()) {
+            Ok(outcome) => Ok(outcome),
+            Err(_) => self.right.try_build(args.take().unwrap()),
         }
-        // If no builder produced a Better outcome, return an error
-        Err(PayloadBuilderError::NoBetterPayload)
     }
 
+    /// Handles the case where a payload is missing by delegating to the left builder first,
+    /// then to the right.
     fn on_missing_payload(
         &self,
         args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         let mut args = Some(args);
-        // Find the first builder that returns a non-AwaitInProgress behaviour
-        self.0
-            .iter()
-            .find_map(|builder| match builder.on_missing_payload(args.take().unwrap()) {
-                MissingPayloadBehaviour::AwaitInProgress => None,
-                behaviour => Some(behaviour),
-            })
-            // If all builders return AwaitInProgress, use that as the default
-            .unwrap_or(MissingPayloadBehaviour::AwaitInProgress)
+        match self.left.on_missing_payload(args.take().unwrap()) {
+            MissingPayloadBehaviour::RaceEmptyPayload => {
+                self.right.on_missing_payload(args.take().unwrap())
+            }
+            other => other,
+        }
     }
 
+    /// Builds an empty payload using the left builder, falling back to the right.
     fn build_empty_payload(
         &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let mut config = Some(config);
-        // Try to build an empty payload using each builder in the stack
-        self.0
-            .iter()
-            .find_map(|builder| builder.build_empty_payload(client, config.take().unwrap()).ok())
-            // If no builder can build an empty payload, return an error
-            .ok_or(PayloadBuilderError::MissingPayload)
+        self.left
+            .build_empty_payload(client, config.take().unwrap())
+            .or_else(|_| self.right.build_empty_payload(client, config.take().unwrap()))
+    }
+}
+
+impl<L, R> Clone for PayloadBuilderStack<L, R>
+where
+    L: Clone,
+    R: Clone,
+{
+    fn clone(&self) -> Self {
+        Self::new(self.left.clone(), self.right.clone())
     }
 }
