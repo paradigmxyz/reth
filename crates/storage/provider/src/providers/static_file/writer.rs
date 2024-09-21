@@ -397,12 +397,14 @@ impl StaticFileProviderRW {
                 // delete the whole file and go to the next static file
                 let block_start = self.writer.user_header().expected_block_start();
 
+                // We only delete the file if it's NOT the first static file AND:
+                // * it's a Header segment  OR
+                // * it's a tx-based segment AND `last_block` is lower than the first block of this
+                //   file's block range. Otherwise, having no rows simply means that this block
+                //   range has no transactions, but the file should remain.
                 if block_start != 0 &&
                     (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
                 {
-                    // If it's a tx-based segment and `block_start` has no transactions, we need to
-                    // ensure that `last_block` is lower than this file's block start, before
-                    // deleting the current file.
                     self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`
