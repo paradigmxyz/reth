@@ -12,7 +12,7 @@ use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNum
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chainspec::{Chain, ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
