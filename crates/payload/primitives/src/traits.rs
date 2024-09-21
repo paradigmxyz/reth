@@ -3,14 +3,14 @@ use crate::{
     PayloadBuilderError, PayloadEvents, PayloadTypes,
 };
 use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types::{
+    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
+    Withdrawal,
+};
+use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{SealedBlock, Withdrawals};
-use reth_rpc_types::{
-    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
-    optimism::OptimismPayloadAttributes,
-    Withdrawal,
-};
 use std::{future::Future, pin::Pin};
 use tokio::sync::oneshot;
 
