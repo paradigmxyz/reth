@@ -8142,6 +8142,7 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
  "futures-util",
  "metrics",
@@ -8151,7 +8152,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "revm",
  "tokio",
  "tokio-stream",
@@ -8163,13 +8163,14 @@ name = "reth-payload-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
+ "op-alloy-rpc-types-engine",
  "pin-project",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
  "reth-primitives",
- "reth-rpc-types",
  "reth-transaction-pool",
  "serde",
  "thiserror",
@@ -8182,9 +8183,9 @@ dependencies = [
 name = "reth-payload-validator"
 version = "1.0.7"
 dependencies = [
+ "alloy-rpc-types",
  "reth-chainspec",
  "reth-primitives",
- "reth-rpc-types",
  "reth-rpc-types-compat",
 ]
 
