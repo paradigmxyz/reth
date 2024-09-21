@@ -4,7 +4,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use jsonrpsee::proc_macros::rpc;
-use reth_rpc_types::mev::{
+use alloy_rpc_types_mev::{
     CancelBundleRequest, CancelPrivateTransactionRequest, EthBundleHash, EthCallBundle,
     EthCallBundleResponse, EthSendBundle, PrivateTransactionRequest,
 };

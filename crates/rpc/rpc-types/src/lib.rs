@@ -36,9 +36,6 @@ pub use alloy_rpc_types_admin as admin;
 // Anvil specific rpc types coming from alloy.
 pub use alloy_rpc_types_anvil as anvil;
 
-// re-export mev
-pub use alloy_rpc_types_mev as mev;
-
 // re-export beacon
 #[cfg(feature = "jsonrpsee-types")]
 pub use alloy_rpc_types_beacon as beacon;
