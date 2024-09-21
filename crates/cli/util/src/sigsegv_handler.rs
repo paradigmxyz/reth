@@ -49,10 +49,12 @@ extern "C" fn print_stack_trace(_: libc::c_int) {
     static mut STACK_TRACE: [*mut libc::c_void; MAX_FRAMES] = [ptr::null_mut(); MAX_FRAMES];
     let stack = unsafe {
         // Collect return addresses
+        #[allow(static_mut_refs)]
         let depth = libc::backtrace(STACK_TRACE.as_mut_ptr(), MAX_FRAMES as i32);
         if depth == 0 {
             return
         }
+        #[allow(static_mut_refs)]
         &STACK_TRACE.as_slice()[0..(depth as _)]
     };
 
