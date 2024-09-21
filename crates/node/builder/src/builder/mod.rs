@@ -5,7 +5,6 @@
 pub mod add_ons;
 mod states;
 
-use alloy_rpc_types::serde_helpers::WithOtherFields;
 pub use states::*;
 
 use std::sync::Arc;

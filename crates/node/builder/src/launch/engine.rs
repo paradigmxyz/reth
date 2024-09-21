@@ -1,6 +1,6 @@
 //! Engine node related functionality.
 
-use alloy_rpc_types::{engine::ClientVersionV1, serde_helpers::WithOtherFields};
+use alloy_rpc_types::engine::ClientVersionV1;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},

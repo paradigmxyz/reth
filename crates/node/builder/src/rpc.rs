@@ -5,7 +5,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use alloy_rpc_types::serde_helpers::WithOtherFields;
 use futures::TryFutureExt;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
