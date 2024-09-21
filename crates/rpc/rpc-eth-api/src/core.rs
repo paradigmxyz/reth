@@ -2,17 +2,17 @@
 //! the `eth_` namespace.
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
-use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{transaction::AccessListResult, BlockId, BlockNumberOrTag};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
-    simulate::{SimBlock, SimulatedBlock},
+    simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
+    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
+    Index, StateContext, SyncStatus, Work,
 };
 use tracing::trace;
 
@@ -211,9 +211,9 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
     #[method(name = "simulateV1")]
     async fn simulate_v1(
         &self,
-        opts: SimBlock,
+        opts: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>>;
+    ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
@@ -368,7 +368,7 @@ impl<T>
         RpcReceipt<T::NetworkTypes>,
     > for T
 where
-    T: FullEthApi<NetworkTypes: Network<ReceiptResponse = AnyTransactionReceipt>>,
+    T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
@@ -499,7 +499,9 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+        Ok(EthTransactions::transaction_by_hash(self, hash)
+            .await?
+            .map(|tx| tx.into_transaction::<T::TransactionCompat>()))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
@@ -618,11 +620,11 @@ where
     /// Handler for: `eth_simulateV1`
     async fn simulate_v1(
         &self,
-        opts: SimBlock,
+        payload: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>> {
+    ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
-        Ok(EthCall::simulate_v1(self, opts, block_number).await?)
+        Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
     /// Handler for: `eth_call`

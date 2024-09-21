@@ -1,10 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{
-    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
+    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned,
 };
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -76,11 +77,11 @@ impl FromIterator<PooledTransactionsElement> for PooledTransactions {
 #[cfg(test)]
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
+    use alloy_primitives::{hex, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_primitives::{
-        hex, PooledTransactionsElement, Signature, Transaction, TransactionSigned, TxEip1559,
-        TxKind, TxLegacy, U256,
+        PooledTransactionsElement, Signature, Transaction, TransactionSigned, TxEip1559, TxLegacy,
     };
     use std::str::FromStr;
 

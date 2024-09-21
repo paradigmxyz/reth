@@ -152,58 +152,64 @@ pub trait EthFees: LoadFee {
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
-            // read the requested header range
-            let headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(Self::Error::from_eth_err)?;
-            if headers.len() != block_count as usize {
-                return Err(EthApiError::InvalidBlockRange.into())
-            }
+                // read the requested header range
+                let headers = LoadFee::provider(self)
+                    .sealed_headers_range(start_block..=end_block)
+                    .map_err(Self::Error::from_eth_err)?;
+                if headers.len() != block_count as usize {
+                    return Err(EthApiError::InvalidBlockRange.into())
+                }
 
-            for header in &headers {
-                base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
-                gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
-                base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
-                blob_gas_used_ratio.push(
-                    header.blob_gas_used.unwrap_or_default() as f64 /
-                        reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                for header in &headers {
+                    base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
+                    gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
+                    base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
+                    blob_gas_used_ratio.push(
+                        header.blob_gas_used.unwrap_or_default() as f64
+                            / reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                    );
+
+                    // Percentiles were specified, so we need to collect reward percentile ino
+                    if let Some(percentiles) = &reward_percentiles {
+                        let (transactions, receipts) = LoadFee::cache(self)
+                            .get_transactions_and_receipts(header.hash())
+                            .await
+                            .map_err(Self::Error::from_eth_err)?
+                            .ok_or(EthApiError::InvalidBlockRange)?;
+                        rewards.push(
+                            calculate_reward_percentiles_for_block(
+                                percentiles,
+                                header.gas_used,
+                                header.base_fee_per_gas.unwrap_or_default(),
+                                &transactions,
+                                &receipts,
+                            )
+                            .unwrap_or_default(),
+                        );
+                    }
+                }
+
+                // The spec states that `base_fee_per_gas` "[..] includes the next block after the
+                // newest of the returned range, because this value can be derived from the
+                // newest block"
+                //
+                // The unwrap is safe since we checked earlier that we got at least 1 header.
+                let last_header = headers.last().expect("is present");
+                base_fee_per_gas.push(
+                    LoadFee::provider(self)
+                        .chain_spec()
+                        .base_fee_params_at_timestamp(last_header.timestamp)
+                        .next_block_base_fee(
+                            last_header.gas_used as u128,
+                            last_header.gas_limit as u128,
+                            last_header.base_fee_per_gas.unwrap_or_default() as u128,
+                        ),
                 );
 
-                // Percentiles were specified, so we need to collect reward percentile ino
-                if let Some(percentiles) = &reward_percentiles {
-                    let (transactions, receipts) = LoadFee::cache(self)
-                        .get_transactions_and_receipts(header.hash())
-                        .await.map_err(Self::Error::from_eth_err)?
-                        .ok_or(EthApiError::InvalidBlockRange)?;
-                    rewards.push(
-                        calculate_reward_percentiles_for_block(
-                            percentiles,
-                            header.gas_used,
-                            header.base_fee_per_gas.unwrap_or_default(),
-                            &transactions,
-                            &receipts,
-                        )
-                        .unwrap_or_default(),
-                    );
-                }
-            }
-
-            // The spec states that `base_fee_per_gas` "[..] includes the next block after the
-            // newest of the returned range, because this value can be derived from the
-            // newest block"
-            //
-            // The unwrap is safe since we checked earlier that we got at least 1 header.
-            let last_header = headers.last().expect("is present");
-            base_fee_per_gas.push(
-                LoadFee::provider(self).chain_spec().base_fee_params_at_timestamp(last_header.timestamp).next_block_base_fee(
-                    last_header.gas_used as u128,
-                    last_header.gas_limit as u128,
-                    last_header.base_fee_per_gas.unwrap_or_default() as u128,
-                ));
-
-            // Same goes for the `base_fee_per_blob_gas`:
-            // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
-            base_fee_per_blob_gas
-                .push(last_header.next_block_blob_fee().unwrap_or_default());
-        };
+                // Same goes for the `base_fee_per_blob_gas`:
+                // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
+                base_fee_per_blob_gas.push(last_header.next_block_blob_fee().unwrap_or_default());
+            };
 
             Ok(FeeHistory {
                 base_fee_per_gas,

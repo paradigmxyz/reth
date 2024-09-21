@@ -43,16 +43,13 @@ pub use alloy_rpc_types_mev as mev;
 #[cfg(feature = "jsonrpsee-types")]
 pub use alloy_rpc_types_beacon as beacon;
 
-// re-export txpool
-pub use alloy_rpc_types_txpool as txpool;
-
 // re-export debug
 pub use alloy_rpc_types_debug as debug;
 
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::error::ToRpcError;
-pub use eth::transaction::{self, TransactionRequest, TypedTransactionRequest};
+pub use eth::transaction::{self, TypedTransactionRequest};
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::{
     engine,
@@ -60,18 +57,6 @@ pub use eth::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
 };
-
-use alloy_eips::eip4844::{Blob, Bytes48};
-use serde::{Deserialize, Serialize};
-
-/// Blob type returned in responses to `engine_getBlobsV1`: <https://github.com/ethereum/execution-apis/pull/559>
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BlobAndProofV1 {
-    /// The blob data.
-    pub blob: Box<Blob>,
-    /// The KZG proof for the blob.
-    pub proof: Bytes48,
-}
 
 /// Optimism specific rpc types.
 pub mod optimism {

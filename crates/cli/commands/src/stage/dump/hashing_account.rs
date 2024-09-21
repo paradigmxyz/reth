@@ -9,7 +9,7 @@ use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory, ProviderFactory};
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
@@ -55,7 +55,7 @@ fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let provider = db_tool.provider_factory.provider_rw()?;
+    let provider = db_tool.provider_factory.database_provider_rw()?;
     let mut exec_stage = AccountHashingStage::default();
 
     exec_stage.unwind(
@@ -81,7 +81,7 @@ fn dry_run<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
 
-    let provider = output_provider_factory.provider_rw()?;
+    let provider = output_provider_factory.database_provider_rw()?;
     let mut stage = AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()

@@ -45,6 +45,9 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc
 #[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
+/// The default limit for blocks count in `eth_simulateV1`.
+pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
+
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 

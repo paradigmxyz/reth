@@ -38,11 +38,12 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-dyn-abi.workspace = true
-alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-txpool.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",

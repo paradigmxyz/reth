@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-evm-optimism.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
@@ -29,8 +28,13 @@ reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 
+# op-reth
+reth-evm-optimism.workspace = true
+reth-optimism-forks.workspace = true
+
 # ethereum
 alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
 op-alloy-consensus.workspace = true
@@ -48,6 +52,7 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true

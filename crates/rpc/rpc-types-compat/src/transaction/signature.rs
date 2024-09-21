@@ -7,7 +7,7 @@ use reth_rpc_types::{Parity, Signature};
 /// recovery id.
 ///
 /// If the chain id is `Some`, the recovery id is computed according to [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
-pub(crate) fn from_legacy_primitive_signature(
+pub fn from_legacy_primitive_signature(
     signature: PrimitiveSignature,
     chain_id: Option<u64>,
 ) -> Signature {
@@ -22,7 +22,7 @@ pub(crate) fn from_legacy_primitive_signature(
 /// Creates a new rpc signature from a non-legacy [primitive
 /// signature](reth_primitives::Signature). This sets the `v` value to `0` or `1` depending on
 /// the signature's `odd_y_parity`.
-pub(crate) fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signature {
+pub fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signature {
     Signature {
         r: signature.r,
         s: signature.s,
@@ -40,7 +40,7 @@ pub(crate) fn from_typed_primitive_signature(signature: PrimitiveSignature) -> S
 /// If the transaction is a legacy transaction, it will use the `chain_id` to compute the
 /// signature's recovery id. If the transaction is a typed transaction, it will set the `v`
 /// value to `0` or `1` depending on the signature's `odd_y_parity`.
-pub(crate) fn from_primitive_signature(
+pub fn from_primitive_signature(
     signature: PrimitiveSignature,
     tx_type: TxType,
     chain_id: Option<u64>,

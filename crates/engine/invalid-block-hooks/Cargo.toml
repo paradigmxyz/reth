@@ -23,6 +23,7 @@ reth-tracing.workspace = true
 reth-trie = { workspace = true, features = ["serde"] }
 
 # alloy
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
 

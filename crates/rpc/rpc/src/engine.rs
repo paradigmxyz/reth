@@ -1,14 +1,14 @@
-use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee::core::RpcResult as Result;
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
-    SyncStatus, TransactionRequest, WithOtherFields,
+    SyncStatus,
 };
 use tracing_futures::Instrument;
 
@@ -41,11 +41,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthApiTypes<
-            NetworkTypes: Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        >,
+        > + FullEthApiTypes,
     EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
 {
     /// Handler for: `eth_syncing`

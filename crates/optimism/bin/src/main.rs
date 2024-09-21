@@ -4,7 +4,7 @@
 #![cfg(feature = "optimism")]
 
 use clap::Parser;
-use reth_node_builder::EngineNodeLauncher;
+use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};
 use reth_node_optimism::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_rpc::SequencerClient;
@@ -27,6 +27,9 @@ fn main() {
             let sequencer_http_arg = rollup_args.sequencer_http.clone();
             match enable_engine2 {
                 true => {
+                    let engine_tree_config = TreeConfig::default()
+                        .with_persistence_threshold(rollup_args.persistence_threshold)
+                        .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
                     let handle = builder
                         .with_types_and_provider::<OptimismNode, BlockchainProvider2<_>>()
                         .with_components(OptimismNode::components(rollup_args))
@@ -45,6 +48,7 @@ fn main() {
                             let launcher = EngineNodeLauncher::new(
                                 builder.task_executor().clone(),
                                 builder.config().datadir(),
+                                engine_tree_config,
                             );
                             builder.launch_with(launcher)
                         })

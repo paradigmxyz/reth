@@ -8,6 +8,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
     capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
@@ -16,9 +17,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_primitives::{
-    BlockBody, Bytes, Header, PooledTransactionsElement, ReceiptWithBloom, B256,
-};
+use reth_primitives::{BlockBody, Header, PooledTransactionsElement, ReceiptWithBloom};
 use tokio::sync::oneshot;
 
 /// Internal form of a `NewBlock` message

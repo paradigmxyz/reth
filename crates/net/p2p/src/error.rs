@@ -1,13 +1,13 @@
 use std::ops::RangeInclusive;
 
 use super::headers::client::HeadersRequest;
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{BlockNumber, B256};
 use derive_more::{Display, Error};
 use reth_consensus::ConsensusError;
 use reth_network_peers::WithPeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, B256,
-};
+use reth_primitives::{GotExpected, GotExpectedBoxed, Header};
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use tokio::sync::{mpsc, oneshot};
 

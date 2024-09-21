@@ -1,13 +1,14 @@
-use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_types::{
     debug::ExecutionWitness,
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
-    Block, Bundle, StateContext, TransactionRequest,
+    Block, Bundle, StateContext,
 };
 
 /// Debug rpc interface.
