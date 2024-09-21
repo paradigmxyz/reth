@@ -510,9 +510,9 @@ mod tests {
                     0,
                     blocks_per_file - 1,
                     Some(highest_tx - 1),
-                    files_per_range + 1,
+                    files_per_range + 1, // includes lockfile
                     vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
-                ), /* includes lockfile */
+                ),
                 // Case 2: Prune most txs up to block 1.
                 (
                     highest_tx - 1,
