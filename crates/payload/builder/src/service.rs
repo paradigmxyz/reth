@@ -7,13 +7,13 @@ use crate::{
     metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator, KeepPayloadJobAlive,
     PayloadJob,
 };
+use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_payload_primitives::{
     BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
     PayloadEvents, PayloadTypes,
 };
 use reth_provider::CanonStateNotification;
-use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
     future::Future,
