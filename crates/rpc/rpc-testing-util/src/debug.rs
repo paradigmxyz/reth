@@ -17,7 +17,7 @@ use reth_rpc_types::{
         common::TraceResult,
         geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
     },
-    Block, Transaction, TransactionRequest,
+    Block, Transaction,
 };
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
