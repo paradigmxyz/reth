@@ -43,9 +43,6 @@ pub use alloy_rpc_types_mev as mev;
 #[cfg(feature = "jsonrpsee-types")]
 pub use alloy_rpc_types_beacon as beacon;
 
-// re-export txpool
-pub use alloy_rpc_types_txpool as txpool;
-
 // re-export debug
 pub use alloy_rpc_types_debug as debug;
 
