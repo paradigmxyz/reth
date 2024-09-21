@@ -529,9 +529,9 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
+    use reth_optimism_chainspec::optimism_deposit_tx_signature;
     use reth_primitives::{
-        optimism_deposit_tx_signature, Account, Block, Signature, Transaction, TransactionSigned,
-        TxEip1559, BASE_MAINNET,
+        Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,

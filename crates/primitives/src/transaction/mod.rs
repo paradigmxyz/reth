@@ -57,7 +57,7 @@ mod variant;
 #[cfg(feature = "optimism")]
 pub use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
-pub use signature::optimism_deposit_tx_signature;
+pub use reth_optimism_chainspec::optimism_deposit_tx_signature;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]

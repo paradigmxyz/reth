@@ -17,6 +17,7 @@ mod dev;
 mod op;
 mod op_sepolia;
 
+use alloy_primitives::{Parity, Signature, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use dev::OP_DEV;
@@ -31,6 +32,12 @@ use reth_chainspec::ChainSpec;
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,
+}
+
+/// Returns the signature for the optimism deposit transactions, which don't include a
+/// signature.
+pub fn optimism_deposit_tx_signature() -> Signature {
+    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
 #[cfg(test)]

@@ -5,6 +5,9 @@ use alloy_rlp::{Decodable, Error as RlpError};
 
 pub use alloy_primitives::Signature;
 
+#[cfg(feature = "optimism")]
+use reth_optimism_chainspec::optimism_deposit_tx_signature;
+
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
 ///
@@ -90,13 +93,6 @@ pub fn legacy_parity(signature: &Signature, chain_id: Option<u64>) -> Parity {
 /// Returns a signature with the given chain ID applied to the `v` value.
 pub(crate) fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
     Signature::new(signature.r(), signature.s(), legacy_parity(signature, chain_id))
-}
-
-/// Returns the signature for the optimism deposit transactions, which don't include a
-/// signature.
-#[cfg(feature = "optimism")]
-pub fn optimism_deposit_tx_signature() -> Signature {
-    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
 /// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.
