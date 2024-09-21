@@ -21,7 +21,6 @@ alloy-rpc-types-anvil.workspace = true
 alloy-rpc-types-beacon = { workspace = true, optional = true }
 alloy-rpc-types-mev.workspace = true
 alloy-rpc-types-trace.workspace = true
-alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-serde.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["std", "serde", "jsonrpsee-types"], optional = true }
