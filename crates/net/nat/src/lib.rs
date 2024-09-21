@@ -16,6 +16,7 @@ pub mod net_if;
 
 pub use net_if::{NetInterfaceError, DEFAULT_NET_IF_NAME};
 
+use reqwest::StatusCode;
 use std::{
     fmt,
     future::{poll_fn, Future},
@@ -204,7 +205,13 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
 
 async fn resolve_external_ip() -> Option<IpAddr> {
     let futures = EXTERNAL_IP_APIS.iter().copied().map(resolve_external_ip_url_res).map(Box::pin);
-    futures_util::future::select_ok(futures).await.ok().map(|(res, _)| res)
+    match futures_util::future::select_ok(futures).await {
+        Ok((ip, _)) => Some(ip),
+        Err(_) => {
+            error!("Failed to resolve external IP from any of: {:?}", EXTERNAL_IP_APIS);
+            None
+        }
+    }
 }
 
 async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
@@ -213,7 +220,17 @@ async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
 
 async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
     let response = reqwest::get(url).await.ok()?;
-    let response = response.error_for_status().ok()?;
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+        Err(err) => {
+            let status = err.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            error!(
+                "HTTP error when attempting to resolve external IP using {}: status code {}",
+                url, status
+            );
+            return None;
+        }
+    };
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
 }
