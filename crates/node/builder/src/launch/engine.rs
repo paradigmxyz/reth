@@ -24,16 +24,14 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
-    rpc::{
-        eth::{helpers::AddDevSigners, FullEthApiServer},
-        types::AnyTransactionReceipt,
-    },
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+use reth_payload_primitives::PayloadBuilder;
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
+use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -42,6 +40,7 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
+    common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
     setup::build_networked_pipeline,
@@ -79,12 +78,8 @@ where
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-                ReceiptResponse = AnyTransactionReceipt,
-            >,
-        > + AddDevSigners,
+                    + FullEthApiServer
+                    + AddDevSigners,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
@@ -132,7 +127,7 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
@@ -359,7 +354,7 @@ where
                     }
                     event =  eth_service.next() => {
                         let Some(event) = event else { break };
-                        debug!(target: "reth::cli", "Event: {event:?}");
+                        debug!(target: "reth::cli", "Event: {event}");
                         match event {
                             ChainEvent::BackfillSyncFinished => {
                                 network_handle.update_sync_state(SyncState::Idle);
