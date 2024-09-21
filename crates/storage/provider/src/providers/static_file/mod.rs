@@ -393,8 +393,10 @@ mod tests {
 
         // Ensure transaction index
         let tx_index = sf_rw.tx_index().read();
-        let expected_tx_index =
-            vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
+        let expected_tx_index = vec![
+            (8, SegmentRangeInclusive::new(0, 9)),
+            (9, SegmentRangeInclusive::new(20, 29)),
+        ];
         assert_eq!(
             tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
             (!expected_tx_index.is_empty()).then_some(expected_tx_index),
@@ -410,6 +412,7 @@ mod tests {
         let file_set_count = 3; // Number of sets of files to create
         let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
 
+        #[allow(clippy::too_many_arguments)]
         fn prune_and_validate(
             sf_rw: &StaticFileProvider,
             static_dir: impl AsRef<Path>,
@@ -513,13 +516,7 @@ mod tests {
                     vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
                 ), /* includes lockfile */
                 // Case 2: Prune most txs up to block 1.
-                (
-                    highest_tx - 1,
-                    1,
-                    Some(0),
-                    files_per_range + 1,
-                    vec![(0, SegmentRangeInclusive::new(0, 1))],
-                ),
+                (highest_tx - 1, 1, Some(0), files_per_range + 1, vec![(0, SegmentRangeInclusive::new(0, 1))]),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
                 (1, 0, None, files_per_range + 1, vec![]),
             ];
