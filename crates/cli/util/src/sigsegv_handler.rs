@@ -47,6 +47,8 @@ extern "C" fn print_stack_trace(_: libc::c_int) {
     // Reserve data segment so we don't have to malloc in a signal handler, which might fail
     // in incredibly undesirable and unexpected ways due to e.g. the allocator deadlocking
     static mut STACK_TRACE: [*mut libc::c_void; MAX_FRAMES] = [ptr::null_mut(); MAX_FRAMES];
+    #[allow(static_mut_refs)]
+    // TODO: remove static mut; this will become a hard error in edition 2024
     let stack = unsafe {
         // Collect return addresses
         let depth = libc::backtrace(STACK_TRACE.as_mut_ptr(), MAX_FRAMES as i32);

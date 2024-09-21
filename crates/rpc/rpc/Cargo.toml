@@ -38,7 +38,6 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-dyn-abi.workspace = true
-alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
