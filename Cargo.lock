@@ -8142,6 +8142,7 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
  "futures-util",
  "metrics",
@@ -8151,7 +8152,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "revm",
  "tokio",
  "tokio-stream",

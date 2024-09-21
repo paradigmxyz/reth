@@ -110,8 +110,8 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_primitives::PayloadBuilderError;
-pub use reth_rpc_types::engine::PayloadId;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
