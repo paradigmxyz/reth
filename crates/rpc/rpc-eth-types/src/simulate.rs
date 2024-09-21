@@ -1,6 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     logs_bloom,
@@ -11,7 +12,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    Block, BlockTransactionsKind, ToRpcError, TransactionRequest,
+    Block, BlockTransactionsKind, ToRpcError,
 };
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;

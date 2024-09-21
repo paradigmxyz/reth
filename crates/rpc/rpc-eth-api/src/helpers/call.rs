@@ -5,6 +5,7 @@ use crate::{
     AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
 };
 use alloy_primitives::{Bytes, TxKind, B256, U256};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
@@ -33,7 +34,7 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use reth_rpc_types::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use revm::{Database, DatabaseCommit, GetInspector};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};

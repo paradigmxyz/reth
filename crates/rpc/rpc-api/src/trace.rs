@@ -1,4 +1,5 @@
 use alloy_primitives::{Bytes, B256};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::BlockId;
 use reth_rpc_types::{
@@ -8,7 +9,7 @@ use reth_rpc_types::{
         opcode::{BlockOpcodeGas, TransactionOpcodeGas},
         parity::*,
     },
-    BlockOverrides, Index, TransactionRequest,
+    BlockOverrides, Index,
 };
 use std::collections::HashSet;
 

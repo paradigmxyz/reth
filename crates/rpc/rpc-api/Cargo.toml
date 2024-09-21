@@ -23,6 +23,7 @@ reth-network-peers.workspace = true
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
