@@ -1,14 +1,14 @@
 //! Integration tests for the trace API.
 
+use alloy_rpc_types::{Block, Transaction};
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
 use jsonrpsee_http_client::HttpClient;
 use reth_primitives::Receipt;
 use reth_rpc_api_testing_util::{debug::DebugApiExt, trace::TraceApiExt, utils::parse_env_url};
 use reth_rpc_eth_api::EthApiClient;
-use reth_rpc_types::{
-    trace::{filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest},
-    Block, Transaction,
+use reth_rpc_types::trace::{
+    filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
 };
 use std::{collections::HashSet, time::Instant};
 

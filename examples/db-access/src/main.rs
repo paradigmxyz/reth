@@ -6,7 +6,7 @@ use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
 };
-use reth_rpc_types::{Filter, FilteredParams};
+use alloy_rpc_types::{Filter, FilteredParams};
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction

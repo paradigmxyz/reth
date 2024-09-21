@@ -33,6 +33,7 @@ reth-primitives.workspace = true
 
 # ethereum
 alloy-network.workspace = true
+alloy-rpc-types.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

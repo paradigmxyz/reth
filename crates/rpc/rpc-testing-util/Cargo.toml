@@ -20,6 +20,7 @@ reth-rpc-api = { workspace = true, features = ["client"] }
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
 
 # async
 futures.workspace = true

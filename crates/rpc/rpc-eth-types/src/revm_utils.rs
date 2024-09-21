@@ -1,7 +1,7 @@
 //! utilities for working with revm
 
 use alloy_primitives::{Address, B256, U256};
-use reth_rpc_types::{
+use alloy_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
 };

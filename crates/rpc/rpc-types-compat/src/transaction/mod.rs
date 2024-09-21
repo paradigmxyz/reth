@@ -10,10 +10,10 @@ use std::fmt;
 
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
-    TransactionInfo,
+    Transaction, TransactionInfo,
 };
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
-use reth_rpc_types::{Transaction, WithOtherFields};
+use reth_rpc_types::WithOtherFields;
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.

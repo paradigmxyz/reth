@@ -1,13 +1,11 @@
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_rpc_types::Header;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::BlockId;
-use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
-        TransactionsWithReceipts,
-    },
-    Header,
+use reth_rpc_types::trace::otterscan::{
+    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
+    TransactionsWithReceipts,
 };
 
 /// Otterscan rpc interface.

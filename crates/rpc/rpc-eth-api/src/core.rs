@@ -3,17 +3,17 @@
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
-use alloy_rpc_types_eth::transaction::TransactionRequest;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{transaction::AccessListResult, BlockId, BlockNumberOrTag};
-use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
-use reth_rpc_types::{
+use alloy_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
     Index, StateContext, SyncStatus, Work,
 };
+use alloy_rpc_types_eth::transaction::TransactionRequest;
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_primitives::{transaction::AccessListResult, BlockId, BlockNumberOrTag};
+use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
 
 use crate::{
@@ -276,7 +276,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<reth_rpc_types::Account>>;
+    ) -> RpcResult<Option<alloy_rpc_types::Account>>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -694,7 +694,7 @@ where
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<reth_rpc_types::Account>> {
+    ) -> RpcResult<Option<alloy_rpc_types::Account>> {
         trace!(target: "rpc::eth", "Serving eth_getAccount");
         Ok(EthState::get_account(self, address, block).await?)
     }

@@ -11,7 +11,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, FullEthApiTypes, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
-use reth_rpc_types::TransactionInfo;
+use alloy_rpc_types::TransactionInfo;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
