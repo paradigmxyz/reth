@@ -99,7 +99,7 @@ pub(crate) static TEST_BLOCK: Lazy<SealedBlock> = Lazy::new(|| SealedBlock {
                 "29056683545955299640297374067888344259176096769870751649153779895496107008675",
             )
             .unwrap(),
-            Parity::Parity(false),
+            Parity::NonEip155(false),
         ),
         transaction: Transaction::Legacy(TxLegacy {
             gas_price: 10,
