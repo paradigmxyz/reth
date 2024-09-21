@@ -1,7 +1,8 @@
 //! Error types emitted by types or implementations of this crate.
 
+use alloy_primitives::B256;
 use reth_errors::{ProviderError, RethError};
-use reth_primitives::{revm_primitives::EVMError, B256};
+use reth_primitives::revm_primitives::EVMError;
 use reth_transaction_pool::BlobStoreError;
 use tokio::sync::oneshot;
 
@@ -29,9 +30,6 @@ pub enum PayloadBuilderError {
     /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]
     WithdrawalsBeforeShanghai,
-    /// Thrown when no better payload could be built.
-    #[error("no better payload could be built")]
-    NoBetterPayload,
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),

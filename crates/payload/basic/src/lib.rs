@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -19,7 +20,7 @@ use reth_payload_builder::{
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -43,8 +44,6 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
-/// The [`PayloadBuilder`] that builds payloads using a stack of builders.
-pub mod builder_stack;
 mod metrics;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
@@ -467,7 +466,7 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone());
+            return Ok(payload.clone())
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -585,14 +584,14 @@ where
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
                     debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(payload));
+                    return Poll::Ready(Ok(payload))
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best));
+            return Poll::Ready(Ok(best))
         }
 
         if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() {
@@ -608,12 +607,12 @@ where
                         Poll::Ready(res)
                     }
                     Err(err) => Poll::Ready(Err(err.into())),
-                };
+                }
             }
         }
 
         if this.is_empty() {
-            return Poll::Ready(Err(PayloadBuilderError::MissingPayload));
+            return Poll::Ready(Err(PayloadBuilderError::MissingPayload))
         }
 
         Poll::Pending
@@ -920,11 +919,11 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     withdrawals: Withdrawals,
 ) -> Result<WithdrawalsOutcome, DB::Error> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai());
+        return Ok(WithdrawalsOutcome::pre_shanghai())
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty());
+        return Ok(WithdrawalsOutcome::empty())
     }
 
     let balance_increments =
