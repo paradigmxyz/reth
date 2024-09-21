@@ -96,7 +96,7 @@ pub fn from_block_full<T: TransactionCompat>(
     ))
 }
 
-/// Converts from a [`reth_primitives::SealedHeader`] to a [`reth_rpc_types::Header`]
+/// Converts from a [`reth_primitives::SealedHeader`] to a [`alloy-rpc-types::Header`]
 ///
 /// # Note
 ///
