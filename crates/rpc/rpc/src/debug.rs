@@ -1,5 +1,6 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -27,7 +28,7 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
+    Block as RpcBlock, BlockError, Bundle, StateContext,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
