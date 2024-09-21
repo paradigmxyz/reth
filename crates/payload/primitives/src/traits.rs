@@ -7,10 +7,14 @@ use alloy_rpc_types::Withdrawal;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{SealedBlock, Withdrawals};
-use reth_rpc_types::{
+use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
-    optimism::OptimismPayloadAttributes,
+    Withdrawal,
 };
+use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
+use reth_chain_state::ExecutedBlock;
+use reth_chainspec::ChainSpec;
+use reth_primitives::{SealedBlock, Withdrawals};
 use std::{future::Future, pin::Pin};
 use tokio::sync::oneshot;
 

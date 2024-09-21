@@ -1,6 +1,6 @@
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloy_primitives::B256;
-use reth_rpc_types::engine::ExecutionPayload;
+use alloy_rpc_types::engine::ExecutionPayload;
 
 /// Either an [`ExecutionPayload`] or a types that implements the [`PayloadAttributes`] trait.
 #[derive(Debug)]
