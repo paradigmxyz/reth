@@ -1142,6 +1142,12 @@ impl StaticFileProvider {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Returns `static_files` transaction index
+    pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
+        &self.static_files_tx_index
+    }
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
