@@ -398,45 +398,69 @@ where
     let nonce = 1;
     let block_hash = B256::default();
 
-    OtterscanClient::get_header_by_number(client, block_number).await.unwrap();
+    OtterscanClient::<Transaction>::get_header_by_number(client, block_number).await.unwrap();
 
-    OtterscanClient::has_code(client, address, None).await.unwrap();
-    OtterscanClient::has_code(client, address, Some(block_number.into())).await.unwrap();
-
-    OtterscanClient::get_api_level(client).await.unwrap();
-
-    OtterscanClient::get_internal_operations(client, tx_hash).await.unwrap();
-
-    OtterscanClient::get_transaction_error(client, tx_hash).await.unwrap();
-
-    OtterscanClient::trace_transaction(client, tx_hash).await.unwrap();
-
-    OtterscanClient::get_block_details(client, block_number).await.unwrap_err();
-
-    OtterscanClient::get_block_details_by_hash(client, block_hash).await.unwrap_err();
-
-    OtterscanClient::get_block_transactions(client, block_number, page_number, page_size)
+    OtterscanClient::<Transaction>::has_code(client, address, None).await.unwrap();
+    OtterscanClient::<Transaction>::has_code(client, address, Some(block_number.into()))
         .await
-        .err()
         .unwrap();
 
+    OtterscanClient::<Transaction>::get_api_level(client).await.unwrap();
+
+    OtterscanClient::<Transaction>::get_internal_operations(client, tx_hash).await.unwrap();
+
+    OtterscanClient::<Transaction>::get_transaction_error(client, tx_hash).await.unwrap();
+
+    OtterscanClient::<Transaction>::trace_transaction(client, tx_hash).await.unwrap();
+
+    OtterscanClient::<Transaction>::get_block_details(client, block_number).await.unwrap_err();
+
+    OtterscanClient::<Transaction>::get_block_details_by_hash(client, block_hash)
+        .await
+        .unwrap_err();
+
+    OtterscanClient::<Transaction>::get_block_transactions(
+        client,
+        block_number,
+        page_number,
+        page_size,
+    )
+    .await
+    .err()
+    .unwrap();
+
     assert!(is_unimplemented(
-        OtterscanClient::search_transactions_before(client, address, block_number, page_size,)
-            .await
-            .err()
-            .unwrap()
-    ));
-    assert!(is_unimplemented(
-        OtterscanClient::search_transactions_after(client, address, block_number, page_size,)
-            .await
-            .err()
-            .unwrap()
-    ));
-    assert!(OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce)
+        OtterscanClient::<Transaction>::search_transactions_before(
+            client,
+            address,
+            block_number,
+            page_size,
+        )
         .await
         .err()
+        .unwrap()
+    ));
+    assert!(is_unimplemented(
+        OtterscanClient::<Transaction>::search_transactions_after(
+            client,
+            address,
+            block_number,
+            page_size,
+        )
+        .await
+        .err()
+        .unwrap()
+    ));
+    assert!(OtterscanClient::<Transaction>::get_transaction_by_sender_and_nonce(
+        client, sender, nonce
+    )
+    .await
+    .err()
+    .is_none());
+    assert!(OtterscanClient::<Transaction>::get_contract_creator(client, address)
+        .await
+        .unwrap()
         .is_none());
-    assert!(OtterscanClient::get_contract_creator(client, address).await.unwrap().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

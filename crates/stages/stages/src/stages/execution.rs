@@ -2,7 +2,7 @@ use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::{
     execute::{BatchExecutor, BlockExecutorProvider},
     metrics::ExecutorMetrics,
@@ -14,8 +14,9 @@ use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateWriter, StatsReader, TransactionVariant,
+    BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory, StatsReader,
+    TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -149,9 +150,9 @@ impl<E> ExecutionStage<E> {
     /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
     /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
     /// been previously executed.
-    fn adjust_prune_modes<DB: Database>(
+    fn adjust_prune_modes(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: impl StatsReader,
         start_block: u64,
         max_block: u64,
     ) -> Result<PruneModes, StageError> {
@@ -169,10 +170,12 @@ impl<E> ExecutionStage<E> {
     }
 }
 
-impl<E, DB> Stage<DB> for ExecutionStage<E>
+impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    DB: Database,
     E: BlockExecutorProvider,
+    Provider:
+        DBProvider + BlockReader + StaticFileProviderFactory + StatsReader + StateChangeWriter,
+    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -190,11 +193,7 @@ where
     }
 
     /// Execute the stage
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -209,7 +208,8 @@ where
             self.prune_modes.receipts_log_filter.is_empty()
         {
             debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
-            let mut producer = prepare_static_file_producer(provider, start_block)?;
+            let mut producer =
+                prepare_static_file_producer(provider, &static_file_provider, start_block)?;
             // Since there might be a database <-> static file inconsistency (read
             // `prepare_static_file_producer` for context), we commit the change straight away.
             producer.commit()?;
@@ -220,7 +220,7 @@ where
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(
             provider.tx_ref(),
-            provider.static_file_provider().clone(),
+            provider.static_file_provider(),
         ));
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
@@ -228,8 +228,12 @@ where
 
         // Progress tracking
         let mut stage_progress = start_block;
-        let mut stage_checkpoint =
-            execution_checkpoint(static_file_provider, start_block, max_block, input.checkpoint())?;
+        let mut stage_checkpoint = execution_checkpoint(
+            &static_file_provider,
+            start_block,
+            max_block,
+            input.checkpoint(),
+        )?;
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -354,7 +358,7 @@ where
         let time = Instant::now();
 
         // write output
-        let mut writer = UnifiedStorageWriter::new(&provider, static_file_producer);
+        let mut writer = UnifiedStorageWriter::new(provider, static_file_producer);
         writer.write_to_storage(state, OriginalValuesKnown::Yes)?;
 
         let db_write_duration = time.elapsed();
@@ -390,7 +394,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, _) =
@@ -425,6 +429,8 @@ where
             }
         }
 
+        let static_file_provider = provider.static_file_provider();
+
         // Unwind all receipts for transactions in the block range
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
             // We only use static files for Receipts, if there is no receipt pruning of any kind.
@@ -432,7 +438,8 @@ where
             // prepare_static_file_producer does a consistency check that will unwind static files
             // if the expected highest receipt in the files is higher than the database.
             // Which is essentially what happens here when we unwind this stage.
-            let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
+            let _static_file_producer =
+                prepare_static_file_producer(provider, &static_file_provider, *range.start())?;
         } else {
             // If there is any kind of receipt pruning/filtering we use the database, since static
             // files do not support filters.
@@ -572,11 +579,13 @@ fn calculate_gas_used_from_headers(
 /// the height in the static file is higher**, it rolls back (unwinds) the static file.
 /// **Conversely, if the height in the database is lower**, it triggers a rollback in the database
 /// (by returning [`StageError`]) until the heights in both the database and static file match.
-fn prepare_static_file_producer<'a, 'b, DB: Database>(
-    provider: &'b DatabaseProviderRW<DB>,
+fn prepare_static_file_producer<'a, 'b, Provider>(
+    provider: &'b Provider,
+    static_file_provider: &'a StaticFileProvider,
     start_block: u64,
 ) -> Result<StaticFileProviderRWRefMut<'a>, StageError>
 where
+    Provider: DBProvider + BlockReader + HeaderProvider,
     'b: 'a,
 {
     // Get next expected receipt number
@@ -588,7 +597,6 @@ where
         .unwrap_or(0);
 
     // Get next expected receipt number in static files
-    let static_file_provider = provider.static_file_provider();
     let next_static_file_receipt_num = static_file_provider
         .get_highest_static_file_tx(StaticFileSegment::Receipts)
         .map(|num| num + 1)
@@ -657,8 +665,8 @@ mod tests {
         StorageEntry, B256, U256,
     };
     use reth_provider::{
-        test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
-        StaticFileProviderFactory,
+        test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
+        ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
@@ -845,8 +853,9 @@ mod tests {
             .commit()
             .unwrap();
         {
+            let static_file_provider = provider.static_file_provider();
             let mut receipts_writer =
-                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
             receipts_writer.increment_block(0).unwrap();
             receipts_writer.commit().unwrap();
         }
@@ -886,7 +895,7 @@ mod tests {
 
         // Tests node with database and node with static files
         for mut mode in modes {
-            let provider = factory.provider_rw().unwrap();
+            let provider = factory.database_provider_rw().unwrap();
 
             if let Some(mode) = &mut mode {
                 // Simulating a full node where we write receipts to database
@@ -959,7 +968,7 @@ mod tests {
                 "Post changed of a account"
             );
 
-            let provider = factory.provider_rw().unwrap();
+            let provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
             stage.prune_modes = mode.unwrap_or_default();
 
@@ -991,8 +1000,9 @@ mod tests {
             .commit()
             .unwrap();
         {
+            let static_file_provider = provider.static_file_provider();
             let mut receipts_writer =
-                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
             receipts_writer.increment_block(0).unwrap();
             receipts_writer.commit().unwrap();
         }
@@ -1017,7 +1027,7 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let mut provider = factory.provider_rw().unwrap();
+        let mut provider = factory.database_provider_rw().unwrap();
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
@@ -1040,7 +1050,7 @@ mod tests {
             provider.commit().unwrap();
 
             // Test Unwind
-            provider = factory.provider_rw().unwrap();
+            provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
             stage.prune_modes = mode.unwrap_or_default();
 
@@ -1093,7 +1103,7 @@ mod tests {
     #[tokio::test]
     async fn test_selfdestruct() {
         let test_db = TestStageDB::default();
-        let provider = test_db.factory.provider_rw().unwrap();
+        let provider = test_db.factory.database_provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901f8f901f3a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0c9ceb8372c88cb461724d8d3d87e8b933f6fc5f679d4841800e662f4428ffd0da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080830f4240808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
@@ -1108,8 +1118,9 @@ mod tests {
             .commit()
             .unwrap();
         {
+            let static_file_provider = provider.static_file_provider();
             let mut receipts_writer =
-                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
             receipts_writer.increment_block(0).unwrap();
             receipts_writer.commit().unwrap();
         }
@@ -1159,13 +1170,13 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let provider = test_db.factory.provider_rw().unwrap();
+        let provider = test_db.factory.database_provider_rw().unwrap();
         let mut execution_stage = stage();
         let _ = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
 
         // assert unwind stage
-        let provider = test_db.factory.provider_rw().unwrap();
+        let provider = test_db.factory.database_provider_rw().unwrap();
         assert_eq!(provider.basic_account(destroyed_address), Ok(None), "Account was destroyed");
 
         assert_eq!(

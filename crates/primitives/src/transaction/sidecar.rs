@@ -27,6 +27,7 @@ pub struct BlobTransaction {
     /// The transaction signature.
     pub signature: Signature,
     /// The transaction payload with the sidecar.
+    #[serde(flatten)]
     pub transaction: TxEip4844WithSidecar,
 }
 
@@ -208,7 +209,7 @@ impl BlobTransaction {
         let inner_remaining_len = data.len();
 
         // inner transaction
-        let transaction = TxEip4844::decode(data)?;
+        let transaction = TxEip4844::decode_fields(data)?;
 
         // signature
         let signature = Signature::decode(data)?;
@@ -287,7 +288,7 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
 #[cfg(all(test, feature = "c-kzg"))]
 mod tests {
     use super::*;
-    use crate::{hex, kzg::Blob};
+    use crate::{hex, kzg::Blob, PooledTransactionsElement};
     use alloy_eips::eip4844::Bytes48;
     use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
@@ -429,5 +430,25 @@ mod tests {
 
         // Assert the equality between the original BlobTransactionSidecar and the decoded one
         assert_eq!(sidecar, decoded_sidecar);
+    }
+
+    #[test]
+    fn decode_encode_raw_4844_rlp() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/4844rlp");
+        let dir = fs::read_dir(path).expect("Unable to read folder");
+        for entry in dir {
+            let entry = entry.unwrap();
+            let content = fs::read_to_string(entry.path()).unwrap();
+            let raw = hex::decode(content.trim()).unwrap();
+            let tx = PooledTransactionsElement::decode_enveloped(&mut raw.as_ref())
+                .map_err(|err| {
+                    panic!("Failed to decode transaction: {:?} {:?}", err, entry.path());
+                })
+                .unwrap();
+            // We want to test only EIP-4844 transactions
+            assert!(tx.is_eip4844());
+            let encoded = tx.envelope_encoded();
+            assert_eq!(encoded.as_ref(), &raw[..], "{:?}", entry.path());
+        }
     }
 }

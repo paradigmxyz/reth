@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
@@ -20,7 +20,7 @@ use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT_HASH, U256,
 };
-use std::{sync::Arc, time::SystemTime};
+use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 /// The bound divisor of the gas limit, used in update calculations.
 const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
@@ -32,12 +32,12 @@ pub use validation::validate_block_post_execution;
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
 #[derive(Debug)]
-pub struct EthBeaconConsensus {
+pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
 }
 
-impl EthBeaconConsensus {
+impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
@@ -89,7 +89,9 @@ impl EthBeaconConsensus {
     }
 }
 
-impl Consensus for EthBeaconConsensus {
+impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus
+    for EthBeaconConsensus<ChainSpec>
+{
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
@@ -224,7 +226,7 @@ impl Consensus for EthBeaconConsensus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::ChainSpecBuilder;
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_primitives::{proofs, B256};
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {

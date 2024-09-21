@@ -2,10 +2,6 @@
 mod ethereum;
 pub use ethereum::EthereumHardforks;
 
-/// Optimism helper methods
-mod optimism;
-pub use optimism::OptimismHardforks;
-
 use crate::{ForkCondition, Hardfork};
 #[cfg(feature = "std")]
 use rustc_hash::FxHashMap;
@@ -17,6 +13,7 @@ use alloc::collections::btree_map::Entry;
 use alloc::{boxed::Box, vec::Vec};
 
 /// Generic trait over a set of ordered hardforks
+#[auto_impl::auto_impl(&, Arc)]
 pub trait Hardforks: Default + Clone {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].

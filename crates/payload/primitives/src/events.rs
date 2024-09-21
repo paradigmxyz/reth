@@ -1,4 +1,4 @@
-use reth_payload_primitives::PayloadTypes;
+use crate::PayloadTypes;
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
@@ -29,7 +29,7 @@ pub struct PayloadEvents<T: PayloadTypes> {
     pub receiver: broadcast::Receiver<Events<T>>,
 }
 
-impl<T: PayloadTypes + 'static> PayloadEvents<T> {
+impl<T: PayloadTypes> PayloadEvents<T> {
     /// Convert this receiver into a stream of `PayloadEvents`.
     pub fn into_stream(self) -> BroadcastStream<Events<T>> {
         BroadcastStream::new(self.receiver)
@@ -60,7 +60,7 @@ pub struct BuiltPayloadStream<T: PayloadTypes> {
     st: BroadcastStream<Events<T>>,
 }
 
-impl<T: PayloadTypes + 'static> Stream for BuiltPayloadStream<T> {
+impl<T: PayloadTypes> Stream for BuiltPayloadStream<T> {
     type Item = T::BuiltPayload;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -90,7 +90,7 @@ pub struct PayloadAttributeStream<T: PayloadTypes> {
     st: BroadcastStream<Events<T>>,
 }
 
-impl<T: PayloadTypes + 'static> Stream for PayloadAttributeStream<T> {
+impl<T: PayloadTypes> Stream for PayloadAttributeStream<T> {
     type Item = T::PayloadBuilderAttributes;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
