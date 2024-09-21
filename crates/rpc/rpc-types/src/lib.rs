@@ -52,7 +52,7 @@ pub use alloy_rpc_types_debug as debug;
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::error::ToRpcError;
-pub use eth::transaction::{self, TransactionRequest, TypedTransactionRequest};
+pub use eth::transaction::{self, TypedTransactionRequest};
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::{
     engine,

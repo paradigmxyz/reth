@@ -3,6 +3,7 @@
 
 use alloy_dyn_abi::TypedData;
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
 use reth_primitives::{
     BlockId, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
@@ -17,7 +18,7 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    BlockNumberOrTag, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    BlockNumberOrTag, TransactionInfo, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
