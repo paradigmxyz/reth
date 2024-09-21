@@ -4,7 +4,7 @@ use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
 use alloy_primitives::{BlockNumber, U256};
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -15,6 +15,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
+use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{

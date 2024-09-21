@@ -180,10 +180,10 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system.
-        // If the system has less than 2 cores, it will use 1 core.
+        // Limit the global rayon thread pool, reserving 1 core for the rest of the system.
+        // If the system only has 1 core the pool will use it.
         let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(1));
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(1).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -925,9 +925,9 @@ where
                 // Verify that the healthy node is running the same chain as the current node.
                 let chain_id = futures::executor::block_on(async {
                     EthApiClient::<
-                        reth_rpc_types::Transaction,
-                        reth_rpc_types::Block,
-                        reth_rpc_types::Receipt,
+                        alloy_rpc_types::Transaction,
+                        alloy_rpc_types::Block,
+                        alloy_rpc_types::Receipt,
                     >::chain_id(&client)
                     .await
                 })?

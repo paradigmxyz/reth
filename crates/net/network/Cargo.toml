@@ -34,6 +34,7 @@ reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
