@@ -2931,7 +2931,6 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
- "alloy-rpc-types-trace",
  "clap",
  "futures-util",
  "reth",
@@ -8143,6 +8142,7 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
  "futures-util",
  "metrics",
@@ -8152,7 +8152,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "revm",
  "tokio",
  "tokio-stream",
@@ -8164,13 +8163,14 @@ name = "reth-payload-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
+ "op-alloy-rpc-types-engine",
  "pin-project",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
  "reth-primitives",
- "reth-rpc-types",
  "reth-transaction-pool",
  "serde",
  "thiserror",
@@ -8183,9 +8183,9 @@ dependencies = [
 name = "reth-payload-validator"
 version = "1.0.7"
 dependencies = [
+ "alloy-rpc-types",
  "reth-chainspec",
  "reth-primitives",
- "reth-rpc-types",
  "reth-rpc-types-compat",
 ]
 
@@ -8381,7 +8381,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
- "alloy-rpc-types-trace",
+ "alloy-rpc-types-txpool",
  "async-trait",
  "derive_more",
  "futures",
@@ -8439,7 +8439,7 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-rpc-types-trace",
+ "alloy-rpc-types-txpool",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -8455,7 +8455,6 @@ version = "1.0.7"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-rpc-types-trace",
  "futures",
  "jsonrpsee",
  "jsonrpsee-http-client",
@@ -8475,7 +8474,6 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-rpc-types-trace",
  "clap",
  "http",
  "jsonrpsee",
@@ -8676,7 +8674,7 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-mev",
- "alloy-rpc-types-txpool",
+ "alloy-rpc-types-trace",
  "alloy-serde",
  "arbitrary",
  "jsonrpsee-types",
