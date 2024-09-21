@@ -517,9 +517,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_trace::filter::TraceFilterMode;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
-    use reth_rpc_types::trace::filter::TraceFilterMode;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
 

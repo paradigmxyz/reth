@@ -8452,6 +8452,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
  "futures",
  "jsonrpsee",
  "jsonrpsee-http-client",
@@ -8671,7 +8672,6 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-mev",
- "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
  "alloy-serde",
  "arbitrary",

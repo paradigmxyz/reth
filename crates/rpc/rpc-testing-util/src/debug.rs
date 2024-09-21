@@ -378,9 +378,9 @@ mod tests {
         debug::{DebugApiExt, JsTracerBuilder, NoopJsTracer},
         utils::parse_env_url,
     };
+    use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions};
     use futures::StreamExt;
     use jsonrpsee::http_client::HttpClientBuilder;
-    use reth_rpc_types::trace::geth::{CallConfig, GethDebugTracingOptions};
 
     // random tx <https://sepolia.etherscan.io/tx/0x5525c63a805df2b83c113ebcc8c7672a3b290673c4e81335b410cd9ebc64e085>
     const TX_1: &str = "0x5525c63a805df2b83c113ebcc8c7672a3b290673c4e81335b410cd9ebc64e085";
