@@ -15,7 +15,7 @@ mod eth;
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::error::ToRpcError;
-pub use eth::transaction::{self, TypedTransactionRequest};
+pub use eth::transaction;
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::{
     engine,

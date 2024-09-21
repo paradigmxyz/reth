@@ -2,13 +2,16 @@
 
 use std::collections::HashMap;
 
+use alloy_consensus::TxEnvelope;
 use alloy_dyn_abi::TypedData;
+use alloy_network::{EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, B256};
+use alloy_rlp::Encodable;
+use alloy_rpc_types_eth::TransactionRequest;
+use alloy_signer_local::PrivateKeySigner;
 use reth_primitives::{sign_message, Signature, TransactionSigned};
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
-use reth_rpc_types::TypedTransactionRequest;
-use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;
 
 use crate::EthApi;
@@ -79,18 +82,28 @@ impl EthSigner for DevSigner {
         self.sign_hash(hash, address)
     }
 
-    fn sign_transaction(
+    async fn sign_transaction(
         &self,
-        request: TypedTransactionRequest,
+        request: TransactionRequest,
         address: &Address,
     ) -> Result<TransactionSigned> {
-        // convert to primitive transaction
-        let transaction =
-            to_primitive_transaction(request).ok_or(SignError::InvalidTransactionRequest)?;
-        let tx_signature_hash = transaction.signature_hash();
-        let signature = self.sign_hash(tx_signature_hash, *address)?;
+        // create local signer wallet from signing key
+        let sk_bytes = self.accounts.get(address).ok_or(SignError::NoAccount)?.secret_bytes();
+        let wallet =
+            PrivateKeySigner::from_bytes(&sk_bytes.into()).map_err(|_| SignError::NoAccount)?;
+        let signer = EthereumWallet::from(wallet);
 
-        Ok(TransactionSigned::from_transaction_and_signature(transaction, signature))
+        // build and sign transaction with signer
+        let txn_envelope: TxEnvelope =
+            request.build(&signer).await.map_err(|_| SignError::InvalidTransactionRequest)?;
+
+        // decode transaction into signed transaction type
+        let mut enveloped_tx = Vec::new();
+        txn_envelope.encode(&mut enveloped_tx);
+        let txn_signed = TransactionSigned::decode_enveloped(&mut enveloped_tx.as_ref())
+            .map_err(|_| SignError::InvalidTransactionRequest)?;
+
+        Ok(txn_signed)
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
@@ -101,18 +114,23 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{Parity, Bytes, U256};
+    use alloy_rpc_types_eth::TransactionInput;
+    use revm_primitives::TxKind;
     use std::str::FromStr;
-
-    use alloy_primitives::{Parity, U256};
 
     use super::*;
 
     fn build_signer() -> DevSigner {
-        let addresses = vec![];
         let secret =
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
-        let accounts = HashMap::from([(Address::default(), secret)]);
+        let local_signer = PrivateKeySigner::from_bytes(&secret.secret_bytes().into())
+            .map_err(|_| SignError::NoAccount)
+            .unwrap();
+        let address = local_signer.address();
+        let accounts = HashMap::from([(address, secret)]);
+        let addresses = vec![address];
         DevSigner { addresses, accounts }
     }
 
@@ -184,7 +202,8 @@ mod tests {
         }"#;
         let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
-        let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
+        let from = *signer.addresses.first().unwrap();
+        let sig = signer.sign_typed_data(from, &data).unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
@@ -205,7 +224,8 @@ mod tests {
     async fn test_signer() {
         let message = b"Test message";
         let signer = build_signer();
-        let sig = signer.sign(Address::default(), message).await.unwrap();
+        let from = *signer.addresses.first().unwrap();
+        let sig = signer.sign(from, message).await.unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "54313da7432e4058b8d22491b2e7dbb19c7186c35c24155bec0820a8a2bfe0c1",
@@ -220,5 +240,30 @@ mod tests {
             Parity::Parity(true),
         );
         assert_eq!(sig, expected)
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction() {
+        let message = b"Test message";
+        let signer = build_signer();
+        let from = *signer.addresses.first().unwrap();
+        let request = TransactionRequest {
+            chain_id: Some(1u64),
+            from: Some(from),
+            to: Some(TxKind::Create),
+            gas: Some(1000u128),
+            gas_price: Some(1000u128),
+            value: Some(U256::from(1000)),
+            input: TransactionInput {
+                data: Some(Bytes::from(message.to_vec())),
+                input: Some(Bytes::from(message.to_vec())),
+            },
+            nonce: Some(0u64),
+            ..Default::default()
+        };
+        let txn_signed = signer.sign_transaction(request, &from).await;
+        assert!(txn_signed.is_ok());
+
+        assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);
     }
 }

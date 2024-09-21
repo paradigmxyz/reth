@@ -1,25 +1,6 @@
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 
-/// Container type for various Ethereum transaction requests
-///
-/// Its variants correspond to specific allowed transactions:
-/// 1. Legacy (pre-EIP2718) [`LegacyTransactionRequest`]
-/// 2. EIP2930 (state access lists) [`EIP2930TransactionRequest`]
-/// 3. EIP1559 [`EIP1559TransactionRequest`]
-/// 4. EIP4844 [`EIP4844TransactionRequest`]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum TypedTransactionRequest {
-    /// Represents a Legacy (pre-EIP2718) transaction request
-    Legacy(LegacyTransactionRequest),
-    /// Represents an EIP2930 (state access lists) transaction request
-    EIP2930(EIP2930TransactionRequest),
-    /// Represents an EIP1559 transaction request
-    EIP1559(EIP1559TransactionRequest),
-    /// Represents an EIP4844 transaction request
-    EIP4844(EIP4844TransactionRequest),
-}
-
 /// Represents a legacy transaction request
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyTransactionRequest {
