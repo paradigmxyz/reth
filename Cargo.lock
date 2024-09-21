@@ -8674,7 +8674,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-mev",
  "alloy-rpc-types-trace",
- "alloy-rpc-types-txpool",
  "alloy-serde",
  "arbitrary",
  "jsonrpsee-types",
