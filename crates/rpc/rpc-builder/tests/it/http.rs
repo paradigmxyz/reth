@@ -8,6 +8,7 @@ use alloy_rpc_types::{
     TransactionReceipt,
 };
 use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_trace::filter::TraceFilter;
 use jsonrpsee::{
     core::{
         client::{ClientT, SubscriptionClientT},
@@ -25,7 +26,6 @@ use reth_rpc_api::{
     Web3ApiClient,
 };
 use reth_rpc_server_types::RethRpcModule;
-use reth_rpc_types::trace::filter::TraceFilter;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
