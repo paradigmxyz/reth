@@ -39,7 +39,7 @@ thread_local! {
         ));
 }
 
-/// Tx compressor creator
+/// Fn creates as many tx compressors as times its called. It is meant to be used in no-std config
 pub fn create_tx_compressor() -> RefCell<Compressor<'static>> {
     RefCell::new(
         Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
@@ -47,7 +47,7 @@ pub fn create_tx_compressor() -> RefCell<Compressor<'static>> {
     )
 }
 
-/// Tx decompressor creator
+/// Fn creates as many tx decompressors as times its called. It is meant to be used in no-std config
 pub fn create_tx_decompressor() -> RefCell<ReusableDecompressor> {
     RefCell::new(ReusableDecompressor::new(
         Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
@@ -55,7 +55,7 @@ pub fn create_tx_decompressor() -> RefCell<ReusableDecompressor> {
     ))
 }
 
-/// Receipt compressor creator
+/// Fn creates as many receipt compressors as times its called. It is meant to be used in no-std config
 pub fn create_receipt_compressor() -> RefCell<Compressor<'static>> {
     RefCell::new(
         Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
@@ -63,7 +63,7 @@ pub fn create_receipt_compressor() -> RefCell<Compressor<'static>> {
     )
 }
 
-/// Receipt decompressor creator
+/// Fn creates as many receipt decompressors as times its called. It is meant to be used in no-std config
 pub fn create_receipt_decompressor() -> RefCell<ReusableDecompressor> {
     RefCell::new(ReusableDecompressor::new(
         Decompressor::with_dictionary(RECEIPT_DICTIONARY)
