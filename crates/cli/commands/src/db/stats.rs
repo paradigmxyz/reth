@@ -263,13 +263,11 @@ impl Command {
 
                 let block_range =
                     SegmentRangeInclusive::new(first_ranges.0.start(), last_ranges.0.end());
-                let tx_range = first_ranges
-                    .1
-                    .zip(last_ranges.1)
-                    .map(|(first, last)| SegmentRangeInclusive::new(first.start(), last.end()))
-                    .or_else(|| {
-                        last_ranges.1.map(|last| SegmentRangeInclusive::new(0, last.end()))
-                    });
+
+                let tx_range = {
+                    let start = ranges.iter().find_map(|(_, tx_range)|  tx_range.map(|r| r.start())).unwrap_or_default();
+                    last_ranges.1.map(|last| SegmentRangeInclusive::new(start, last.end()))
+                };
 
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
