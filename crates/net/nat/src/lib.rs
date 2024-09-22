@@ -16,7 +16,6 @@ pub mod net_if;
 
 pub use net_if::{NetInterfaceError, DEFAULT_NET_IF_NAME};
 
-use reqwest::StatusCode;
 use std::{
     fmt,
     future::{poll_fn, Future},
@@ -193,7 +192,10 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
         NatResolver::NetIf => match resolve_net_if_ip(DEFAULT_NET_IF_NAME).inspect_err(|err| {
-            debug!(target: "net::nat", "Failed to resolve network interface IP: {}", err);
+            debug!(target: "net::nat",
+                 %err,
+                "Failed to resolve network interface IP"
+            );
         }) {
             Ok(ip) => Some(ip),
             Err(_) => None,
