@@ -70,6 +70,7 @@ reth-rpc-types-compat.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-trace.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
