@@ -8291,6 +8291,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-nippy-jar",
  "reth-node-types",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
