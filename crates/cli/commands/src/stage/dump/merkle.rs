@@ -12,7 +12,7 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory, ProviderFactory};
 use reth_prune::PruneModes;
 use reth_stages::{
     stages::{
@@ -73,7 +73,7 @@ fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
     let (from, to) = range;
-    let provider = db_tool.provider_factory.provider_rw()?;
+    let provider = db_tool.provider_factory.database_provider_rw()?;
 
     let unwind = UnwindInput {
         unwind_to: from,
@@ -150,7 +150,7 @@ fn dry_run<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     from: u64,
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
-    let provider = output_provider_factory.provider_rw()?;
+    let provider = output_provider_factory.database_provider_rw()?;
 
     let mut stage = MerkleStage::Execution {
         // Forces updating the root instead of calculating from scratch

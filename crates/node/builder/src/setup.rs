@@ -32,7 +32,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
     max_block: Option<BlockNumber>,
-    static_file_producer: StaticFileProducer<N>,
+    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     executor: Executor,
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<N>>
@@ -78,7 +78,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     max_block: Option<u64>,
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
-    static_file_producer: StaticFileProducer<N>,
+    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     executor: Executor,
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<N>>

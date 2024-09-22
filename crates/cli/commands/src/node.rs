@@ -135,7 +135,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> No
     /// closure.
     pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
@@ -312,24 +312,6 @@ mod tests {
 
         let db_path = data_dir.db();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
-    }
-
-    #[test]
-    fn parse_dev() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["reth", "--dev"]);
-        let chain = reth_chainspec::DEV.clone();
-        assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-        assert_eq!(
-            cmd.chain.paris_block_and_final_difficulty,
-            chain.paris_block_and_final_difficulty
-        );
-        assert_eq!(cmd.chain.hardforks, chain.hardforks);
-
-        assert!(cmd.rpc.http);
-        assert!(cmd.network.discovery.disable_discovery);
-
-        assert!(cmd.dev.dev);
     }
 
     #[test]

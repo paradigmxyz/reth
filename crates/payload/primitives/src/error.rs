@@ -1,7 +1,8 @@
 //! Error types emitted by types or implementations of this crate.
 
+use alloy_primitives::B256;
 use reth_errors::{ProviderError, RethError};
-use reth_primitives::{revm_primitives::EVMError, B256};
+use reth_primitives::revm_primitives::EVMError;
 use reth_transaction_pool::BlobStoreError;
 use tokio::sync::oneshot;
 
@@ -14,6 +15,12 @@ pub enum PayloadBuilderError {
     /// An oneshot channels has been closed.
     #[error("sender has been dropped")]
     ChannelClosed,
+    /// If there's no payload to resolve.
+    #[error("missing payload")]
+    MissingPayload,
+    /// Build cancelled
+    #[error("build outcome cancelled")]
+    BuildOutcomeCancelled,
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),

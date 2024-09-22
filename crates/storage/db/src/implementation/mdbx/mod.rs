@@ -476,13 +476,14 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
+    use alloy_primitives::{Address, B256, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, ShardedKey},
         table::{Encode, Table},
     };
     use reth_libmdbx::Error;
-    use reth_primitives::{Account, Address, Header, StorageEntry, B256, U256};
+    use reth_primitives::{Account, Header, StorageEntry};
     use reth_primitives_traits::IntegerList;
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;

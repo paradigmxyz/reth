@@ -1,10 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{
-    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
+    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned,
 };
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -76,10 +77,11 @@ impl FromIterator<PooledTransactionsElement> for PooledTransactions {
 #[cfg(test)]
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
+    use alloy_primitives::{hex, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
+    use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_primitives::{
-        hex, PooledTransactionsElement, Signature, Transaction, TransactionSigned, TxEip1559,
-        TxKind, TxLegacy, U256,
+        PooledTransactionsElement, Signature, Transaction, TransactionSigned, TxEip1559, TxLegacy,
     };
     use std::str::FromStr;
 
@@ -283,7 +285,7 @@ mod tests {
                     nonce: 26u64,
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
-                    gas_limit: 21000,
+                    gas_limit: MIN_TRANSACTION_GAS as u128,
                     to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
@@ -422,7 +424,7 @@ mod tests {
                     nonce: 26u64,
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
-                    gas_limit: 21000,
+                    gas_limit: MIN_TRANSACTION_GAS as u128,
                     to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),

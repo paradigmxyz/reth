@@ -1,13 +1,14 @@
 //! Handler that can download blocks on demand (e.g. from the network).
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
+use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
+use reth_primitives::{SealedBlock, SealedBlockWithSenders};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
@@ -163,8 +164,9 @@ where
 
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
-        self.metrics.active_block_downloads.set(self.inflight_full_block_requests.len() as f64);
-        // TODO: full block range metrics
+        let blocks = self.inflight_full_block_requests.len() +
+            self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
+        self.metrics.active_block_downloads.set(blocks as f64);
     }
 
     /// Adds a pending event to the FIFO queue.

@@ -6,13 +6,10 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
-    transaction::WithEncoded,
-    BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals,
+    transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
 /// Re-export for use in downstream arguments.
 pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
@@ -24,7 +21,6 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
     convert_block_to_payload_field_v2,
 };
-use revm::primitives::HandlerCfg;
 use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
@@ -106,6 +102,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
     }
+<<<<<<< HEAD
 
     fn cfg_and_block_env(
         &self,
@@ -159,6 +156,8 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
 
         (cfg_with_handler_cfg, block_env)
     }
+=======
+>>>>>>> origin/main
 }
 
 /// Contains the built payload.

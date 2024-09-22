@@ -1,6 +1,8 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
-use alloy_primitives::Log;
+use alloy_primitives::{
+    b256, hex_literal::hex, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
+};
 use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -18,7 +20,10 @@ use revm::{
 use std::str::FromStr;
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: SealedBlock) {
+pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
+    provider: &DatabaseProviderRW<DB, Spec>,
+    g: SealedBlock,
+) {
     let n = g.number;
     let h = B256::ZERO;
     let tx = provider;

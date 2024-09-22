@@ -7,13 +7,11 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
-
-pub mod constants;
 
 mod base;
 mod base_sepolia;
+pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
@@ -39,10 +37,8 @@ mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
-    use reth_ethereum_forks::{
-        EthereumHardfork, ForkCondition, ForkHash, ForkId, Head, OptimismHardfork,
-        OptimismHardforks,
-    };
+    use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
+    use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
 
     use crate::*;
 

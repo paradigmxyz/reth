@@ -1,7 +1,8 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
 use alloy_primitives::B256;
-use reth_chainspec::{ChainSpec, OptimismHardfork};
+use reth_chainspec::ChainSpec;
+use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::ReceiptWithBloom;
 use reth_trie_common::root::ordered_trie_root_with_encoder;
 
@@ -172,9 +173,7 @@ mod tests {
                                 Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")))
                             },
                         ],
-                        #[cfg(feature = "optimism")]
                         deposit_nonce: None,
-                        #[cfg(feature = "optimism")]
                         deposit_receipt_version: None,
                     },
                     bloom: Bloom(hex!("00000000000000000000200000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000002000000000020000000000000000000000000000000000000000000000000000000000000000020000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000040000000000004000000000080000000000000000000000000000000000000000000000000000008000000000000080020000000000000000000000000002000000000000000000000000000080000000000").into()),

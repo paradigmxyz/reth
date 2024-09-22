@@ -1,3 +1,4 @@
+use alloy_primitives::B256;
 use reth_chainspec::ChainSpec;
 use reth_network_p2p::test_utils::TestFullBlockClient;
 use reth_primitives::{alloy_primitives::Sealable, BlockBody, SealedHeader, B256};

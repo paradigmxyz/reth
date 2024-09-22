@@ -4,9 +4,10 @@
 use std::sync::Arc;
 
 use alloy_network::AnyNetwork;
+use alloy_primitives::U256;
 use derive_more::Deref;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
-use reth_primitives::{BlockNumberOrTag, U256};
+use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -21,6 +22,8 @@ use reth_tasks::{
     TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::Mutex;
+
+use crate::eth::EthTxBuilder;
 
 /// `Eth` API implementation.
 ///
@@ -56,6 +59,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
+        max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
@@ -69,6 +73,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap,
+            max_simulate_blocks,
             eth_proof_window,
             blocking_task_pool,
             fee_history_cache,
@@ -90,7 +95,7 @@ where
 {
     /// Creates a new, shareable instance.
     pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Self>,
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
@@ -106,6 +111,7 @@ where
             ctx.cache.clone(),
             ctx.new_gas_price_oracle(),
             ctx.config.rpc_gas_cap,
+            ctx.config.rpc_max_simulate_blocks,
             ctx.config.eth_proof_window,
             blocking_task_pool,
             ctx.new_fee_history_cache(),
@@ -123,7 +129,9 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
+    // todo: replace with alloy_network::Ethereum
     type NetworkTypes = AnyNetwork;
+    type TransactionCompat = EthTxBuilder;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
@@ -155,16 +163,22 @@ where
     }
 }
 
-impl<N, Network> BuilderProvider<N> for EthApi<N::Provider, N::Pool, Network, N::Evm>
+impl<N> BuilderProvider<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 where
     N: FullNodeComponents,
-    Network: Send + Sync + Clone + 'static,
 {
-    type Ctx<'a> =
-        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<
+        N::Provider,
+        N::Pool,
+        N::Evm,
+        N::Network,
+        TaskExecutor,
+        N::Provider,
+        Self,
+    >;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self::with_spawner(ctx))
+        Box::new(Self::with_spawner)
     }
 }
 
@@ -185,6 +199,8 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     gas_oracle: GasPriceOracle<Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
+    /// Maximum number of blocks for `eth_simulateV1`.
+    max_simulate_blocks: u64,
     /// The maximum number of blocks into the past for generating state proofs.
     eth_proof_window: u64,
     /// The block number at which the node started
@@ -217,6 +233,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
+        max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
@@ -243,6 +260,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap: gas_cap.into().into(),
+            max_simulate_blocks,
             eth_proof_window,
             starting_block,
             task_spawner: Box::new(task_spawner),
@@ -304,6 +322,12 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
         self.gas_cap
     }
 
+    /// Returns the `max_simulate_blocks`.
+    #[inline]
+    pub const fn max_simulate_blocks(&self) -> u64 {
+        self.max_simulate_blocks
+    }
+
     /// Returns a handle to the gas oracle.
     #[inline]
     pub const fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
@@ -349,11 +373,13 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{B256, U64};
+    use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, B256, U64};
+    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
@@ -362,8 +388,9 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
-    use reth_rpc_server_types::constants::{DEFAULT_ETH_PROOF_WINDOW, DEFAULT_PROOF_PERMITS};
-    use reth_rpc_types::FeeHistory;
+    use reth_rpc_server_types::constants::{
+        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
+    };
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -382,8 +409,8 @@ mod tests {
     >(
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
-        let evm_config = EthEvmConfig::default();
-        let cache = EthStateCache::spawn(provider.clone(), Default::default(), evm_config);
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let cache = EthStateCache::spawn(provider.clone(), Default::default(), evm_config.clone());
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 
@@ -395,6 +422,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             gas_cap,
+            DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,

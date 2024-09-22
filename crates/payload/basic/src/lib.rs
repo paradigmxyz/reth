@@ -9,17 +9,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
-    PayloadJobGenerator,
+    database::CachedReads, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
 };
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -27,10 +27,7 @@ use reth_provider::{
 use reth_revm::state_change::post_block_withdrawals_balance_increments;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::{
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Database, State,
-};
+use revm::{Database, State};
 use std::{
     fmt,
     future::Future,
@@ -673,10 +670,6 @@ impl Drop for Cancelled {
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
 pub struct PayloadConfig<Attributes> {
-    /// Pre-configured block environment.
-    pub initialized_block_env: BlockEnv,
-    /// Configuration for the environment.
-    pub initialized_cfg: CfgEnvWithHandlerCfg,
     /// The parent block.
     pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
@@ -699,24 +692,13 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub fn new(
+    pub const fn new(
         parent_block: Arc<SealedBlock>,
         extra_data: Bytes,
         attributes: Attributes,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
-            attributes.cfg_and_block_env(&chain_spec, &parent_block);
-
-        Self {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            extra_data,
-            attributes,
-            chain_spec,
-        }
+        Self { parent_block, extra_data, attributes, chain_spec }
     }
 
     /// Returns the payload id.

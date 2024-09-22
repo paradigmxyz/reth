@@ -66,7 +66,7 @@ async fn main() -> eyre::Result<()> {
         .with_noop_pool()
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
-        .with_evm_config(EthEvmConfig::default())
+        .with_evm_config(EthEvmConfig::new(spec))
         .with_events(TestCanonStateSubscriptions::default());
 
     // Pick which namespaces to expose.

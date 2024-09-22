@@ -81,8 +81,8 @@ pub mod tx_fetcher {
 
     /* ==================== RETRIES ==================== */
 
-    /// Default maximum request retires per [`TxHash`](reth_primitives::TxHash). Note, this is
-    /// reset should the [`TxHash`](reth_primitives::TxHash) re-appear in an announcement after it
+    /// Default maximum request retires per [`TxHash`](alloy_primitives::TxHash). Note, this is
+    /// reset should the [`TxHash`](alloy_primitives::TxHash) re-appear in an announcement after it
     /// has been evicted from the hashes pending fetch cache, i.e. the counter is restarted. If
     /// this happens, it is likely a very popular transaction, that should and can indeed be
     /// fetched hence this behaviour is favourable.

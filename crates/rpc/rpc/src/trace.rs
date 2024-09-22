@@ -1,5 +1,17 @@
 use std::{collections::HashSet, sync::Arc};
 
+use alloy_primitives::{Bytes, B256, U256};
+use alloy_rpc_types::{
+    state::{EvmOverrides, StateOverride},
+    BlockOverrides, Index,
+};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_trace::{
+    filter::TraceFilter,
+    opcode::{BlockOpcodeGas, TransactionOpcodeGas},
+    parity::*,
+    tracerequest::TraceCallRequest,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -7,7 +19,7 @@ use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{BlockId, Bytes, Header, B256, U256};
+use reth_primitives::{BlockId, Header};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
@@ -16,16 +28,6 @@ use reth_rpc_eth_api::{
     FromEthApiError,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
-use reth_rpc_types::{
-    state::{EvmOverrides, StateOverride},
-    trace::{
-        filter::TraceFilter,
-        opcode::{BlockOpcodeGas, TransactionOpcodeGas},
-        parity::*,
-        tracerequest::TraceCallRequest,
-    },
-    BlockOverrides, Index, TransactionRequest,
-};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::{CacheDB, DatabaseCommit},

@@ -2,6 +2,7 @@ use crate::{
     BlockIdReader, BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
     RequestsProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_models::StoredBlockBodyIndices;
 use reth_primitives::{

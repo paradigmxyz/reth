@@ -4,11 +4,9 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
     ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
 };
+use alloc::vec::Vec;
 use alloy_eips::eip7685::Encodable7685;
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Calculate a transaction root.
 ///
@@ -65,9 +63,12 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec
-            .is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Canyon, timestamp)
+    if chain_spec
+        .is_fork_active_at_timestamp(reth_optimism_forks::OptimismHardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(
+            reth_optimism_forks::OptimismHardfork::Canyon,
+            timestamp,
+        )
     {
         let receipts = receipts
             .iter()

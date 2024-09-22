@@ -1,12 +1,14 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, traits::KeepPayloadJobAlive, EthBuiltPayload,
-    EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
-    PayloadJobGenerator,
+    traits::KeepPayloadJobAlive, EthBuiltPayload, EthPayloadBuilderAttributes,
+    PayloadBuilderHandle, PayloadBuilderService, PayloadJob, PayloadJobGenerator,
 };
-use reth_payload_primitives::PayloadTypes;
-use reth_primitives::{Block, U256};
+
+use alloy_primitives::U256;
+use reth_chain_state::ExecutedBlock;
+use reth_payload_primitives::{PayloadBuilderError, PayloadTypes};
+use reth_primitives::Block;
 use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
@@ -86,7 +88,7 @@ impl PayloadJob for TestPayloadJob {
             self.attr.payload_id(),
             Block::default().seal_slow(),
             U256::ZERO,
-            None,
+            Some(ExecutedBlock::default()),
         ))
     }
 

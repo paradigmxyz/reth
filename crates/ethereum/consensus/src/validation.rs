@@ -1,4 +1,4 @@
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
@@ -8,7 +8,7 @@ use reth_primitives::{
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution(
+pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::{
     engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
@@ -25,7 +26,7 @@ use reth_primitives::SealedHeader;
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-    ExecutionOutcome, ProviderFactory,
+    ExecutionOutcome,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -37,6 +38,12 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
+
+use crate::{
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
 
 type DatabaseEnv = TempDatabase<DE>;
 
@@ -390,21 +397,17 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let tree = Arc::new(ShareableBlockchainTree::new(
-            BlockchainTree::new(
-                externals,
-                BlockchainTreeConfig::new(1, 2, 3, 2),
-                PruneModes::default(),
-            )
-            .expect("failed to create tree"),
+            BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
+                .expect("failed to create tree"),
         ));
-        let sealed = self.base_config.chain_spec.genesis_header().seal_slow();
+        let sealed = self.base_config.chain_spec.genesis_header().clone().seal_slow();
         let (header, seal) = sealed.into_parts();
         let genesis_block = SealedHeader::new(header, seal);
 
         let blockchain_provider =
             BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
 
-        let pruner = Pruner::<_, ProviderFactory<_>>::new(
+        let pruner = Pruner::new_with_factory(
             provider_factory.clone(),
             vec![],
             5,

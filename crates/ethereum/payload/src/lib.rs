@@ -21,17 +21,17 @@ use reth_evm::{
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
         pre_block_blockhashes_contract_call,
     },
-    ConfigureEvm,
+    ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
-use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
-};
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
@@ -63,16 +63,30 @@ impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     }
 }
 
-impl Default for EthereumPayloadBuilder {
-    fn default() -> Self {
-        Self::new(EthEvmConfig::default())
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<EthPayloadBuilderAttributes>,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: config.attributes.timestamp(),
+            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
+            prev_randao: config.attributes.prev_randao(),
+        };
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
 }
 
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -83,7 +97,8 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload(self.evm_config.clone(), args)
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
     }
 
     fn build_empty_payload(
@@ -100,7 +115,8 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        default_ethereum_payload(self.evm_config.clone(), args)?
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -115,9 +131,11 @@ where
 pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -127,15 +145,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
@@ -336,7 +346,7 @@ where
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
+    db.merge_transitions(BundleRetention::Reverts);
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),

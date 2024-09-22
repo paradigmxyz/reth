@@ -1,19 +1,24 @@
 //! Optimism payload builder implementation.
 
-use crate::{
-    error::OptimismPayloadBuilderError,
-    payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
-};
+use std::sync::Arc;
+
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{EthereumHardforks, OptimismHardfork};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
+use reth_chainspec::EthereumHardforks;
+use reth_evm::{
+    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
+    NextBlockEnvAttributes,
+};
 use reth_execution_types::ExecutionOutcome;
-use reth_payload_builder::error::PayloadBuilderError;
+use reth_optimism_forks::OptimismHardfork;
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, Block, Header,
-    IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    constants::BEACON_NONCE,
+    eip4844::calculate_excess_blob_gas,
+    proofs,
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -26,17 +31,21 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
-use std::sync::Arc;
 use tracing::{debug, trace, warn};
+
+use crate::{
+    error::OptimismPayloadBuilderError,
+    payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
+};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
-    compute_pending_block: bool,
+    pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
-    evm_config: EvmConfig,
+    pub evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
@@ -61,13 +70,32 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
+impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvmEnv<Header = Header>,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    pub fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: config.attributes.timestamp(),
+            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
+            prev_randao: config.attributes.prev_randao(),
+        };
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+    }
+}
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -76,7 +104,14 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        optimism_payload(self.evm_config.clone(), args, self.compute_pending_block)
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        optimism_payload(
+            self.evm_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            self.compute_pending_block,
+        )
     }
 
     fn on_missing_payload(
@@ -104,7 +139,8 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        optimism_payload(self.evm_config.clone(), args, false)?
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -122,10 +158,12 @@ where
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -135,15 +173,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, attributes, chain_spec, extra_data } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
@@ -403,7 +433,7 @@ where
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
+    db.merge_transitions(BundleRetention::Reverts);
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
@@ -414,7 +444,7 @@ where
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
-            chain_spec.as_ref(),
+            &chain_spec,
             attributes.payload_attributes.timestamp,
         )
         .expect("Number is in range");

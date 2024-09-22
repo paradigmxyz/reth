@@ -1,6 +1,6 @@
 use crate::{MessageValidationKind, PayloadAttributes};
-use reth_primitives::B256;
-use reth_rpc_types::engine::ExecutionPayload;
+use alloy_primitives::B256;
+use alloy_rpc_types::engine::ExecutionPayload;
 
 /// Either an [`ExecutionPayload`] or a types that implements the [`PayloadAttributes`] trait.
 #[derive(Debug)]
@@ -30,7 +30,7 @@ where
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::Withdrawal>> {
+    pub fn withdrawals(&self) -> Option<&Vec<alloy_rpc_types::Withdrawal>> {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),

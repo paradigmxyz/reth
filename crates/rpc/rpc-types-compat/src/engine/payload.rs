@@ -1,10 +1,10 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+use alloy_primitives::{B256, U256};
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
-    proofs::{self},
-    Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
+    proofs, Block, Header, Request, SealedBlock, TransactionSigned, Withdrawals,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -24,7 +24,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
 
     let transactions = payload
         .transactions
-        .into_iter()
+        .iter()
         .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
@@ -49,7 +49,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         base_fee_per_gas: Some(
             payload
                 .base_fee_per_gas
-                .uint_try_to()
+                .try_into()
                 .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
         ),
         blob_gas_used: None,
@@ -447,7 +447,7 @@ mod tests {
         block_to_payload_v3, try_into_block, try_payload_v3_to_block, try_payload_v4_to_block,
         validate_block_hash,
     };
-    use reth_primitives::{b256, hex, Bytes, U256};
+    use alloy_primitives::{b256, hex, Bytes, U256};
     use reth_rpc_types::{
         engine::{CancunPayloadFields, ExecutionPayloadV3, ExecutionPayloadV4},
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,

@@ -5,12 +5,17 @@ use crate::{
     headers::client::{HeadersClient, SingleHeaderRequest},
     BlockClient,
 };
+use alloy_primitives::B256;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
+<<<<<<< HEAD
 use reth_primitives::{
     alloy_primitives::Sealable, BlockBody, GotExpected, Header, SealedBlock, SealedHeader, B256,
 };
+=======
+use reth_primitives::{BlockBody, GotExpected, Header, SealedBlock, SealedHeader};
+>>>>>>> origin/main
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},

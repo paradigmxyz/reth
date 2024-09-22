@@ -2,10 +2,12 @@
 //! network.
 
 use alloy_dyn_abi::TypedData;
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_rpc_types::{BlockNumberOrTag, TransactionInfo};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
-    TxHash, TxKind, B256, U256,
+    BlockId, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
@@ -17,13 +19,12 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, BlockNumberOrTag, TransactionInfo, TransactionRequest,
     TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
+use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
@@ -137,7 +138,7 @@ pub trait EthTransactions: LoadTransaction {
     fn transaction_receipt(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<AnyTransactionReceipt>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadReceipt + 'static,
     {
@@ -207,7 +208,10 @@ pub trait EthTransactions: LoadTransaction {
                         base_fee: base_fee_per_gas.map(u128::from),
                         index: Some(index as u64),
                     };
-                    return Ok(Some(from_recovered_with_block_context(tx, tx_info)))
+
+                    return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
+                        tx, tx_info,
+                    )))
                 }
             }
 
@@ -223,7 +227,7 @@ pub trait EthTransactions: LoadTransaction {
         include_pending: bool,
     ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadState,
+        Self: LoadBlock + LoadState + FullEthApiTypes,
     {
         async move {
             // Check the pool first
@@ -232,7 +236,7 @@ pub trait EthTransactions: LoadTransaction {
                     LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered(transaction)));
+                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction)));
                 }
             }
 
@@ -283,7 +287,9 @@ pub trait EthTransactions: LoadTransaction {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context(tx, tx_info)
+                            from_recovered_with_block_context::<Self::TransactionCompat>(
+                                tx, tx_info,
+                            )
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id).into())
@@ -352,7 +358,7 @@ pub trait EthTransactions: LoadTransaction {
             };
 
             if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err());
+                return Err(SignError::NoAccount.into_eth_err())
             }
 
             // set nonce if not already set before
@@ -605,7 +611,7 @@ pub trait EthTransactions: LoadTransaction {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction: SpawnBlocking {
+pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
     /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
     /// supported transaction type.
     type Pool: TransactionPool;

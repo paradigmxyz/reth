@@ -7,9 +7,10 @@ use crate::{
 use alloy_primitives::BlockNumber;
 use futures::FutureExt;
 use reth_errors::RethResult;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::static_file::HighestStaticFiles;
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::{
+    BlockReader, DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+};
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -20,17 +21,22 @@ use tracing::trace;
 ///
 /// This type controls the [`StaticFileProducer`].
 #[derive(Debug)]
-pub struct StaticFileHook<N: NodeTypesWithDB> {
+pub struct StaticFileHook<Provider> {
     /// The current state of the `static_file_producer`.
-    state: StaticFileProducerState<N>,
+    state: StaticFileProducerState<Provider>,
     /// The type that can spawn the `static_file_producer` task.
     task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl<N: ProviderNodeTypes> StaticFileHook<N> {
+impl<Provider> StaticFileHook<Provider>
+where
+    Provider: StaticFileProviderFactory
+        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>
+        + 'static,
+{
     /// Create a new instance
     pub fn new(
-        static_file_producer: StaticFileProducer<N>,
+        static_file_producer: StaticFileProducer<Provider>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self { state: StaticFileProducerState::Idle(Some(static_file_producer)), task_spawner }
@@ -128,7 +134,12 @@ impl<N: ProviderNodeTypes> StaticFileHook<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EngineHook for StaticFileHook<N> {
+impl<Provider> EngineHook for StaticFileHook<Provider>
+where
+    Provider: StaticFileProviderFactory
+        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>
+        + 'static,
+{
     fn name(&self) -> &'static str {
         "StaticFile"
     }
@@ -164,9 +175,9 @@ impl<N: ProviderNodeTypes> EngineHook for StaticFileHook<N> {
 /// [`StaticFileProducerState::Idle`] means that the static file producer is currently idle.
 /// [`StaticFileProducerState::Running`] means that the static file producer is currently running.
 #[derive(Debug)]
-enum StaticFileProducerState<N: NodeTypesWithDB> {
+enum StaticFileProducerState<Provider> {
     /// [`StaticFileProducer`] is idle.
-    Idle(Option<StaticFileProducer<N>>),
+    Idle(Option<StaticFileProducer<Provider>>),
     /// [`StaticFileProducer`] is running and waiting for a response
-    Running(oneshot::Receiver<StaticFileProducerWithResult<N>>),
+    Running(oneshot::Receiver<StaticFileProducerWithResult<Provider>>),
 }

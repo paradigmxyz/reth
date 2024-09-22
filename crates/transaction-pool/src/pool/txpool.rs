@@ -132,6 +132,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns the currently tracked block values
     pub const fn block_info(&self) -> BlockInfo {
         BlockInfo {
+            block_gas_limit: self.all_transactions.block_gas_limit,
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
             pending_basefee: self.all_transactions.pending_fees.base_fee,
@@ -236,6 +237,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will also apply updates to the pool based on the new base fee
     pub fn set_block_info(&mut self, info: BlockInfo) {
         let BlockInfo {
+            block_gas_limit,
             last_seen_block_hash,
             last_seen_block_number,
             pending_basefee,
@@ -244,6 +246,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.last_seen_block_hash = last_seen_block_hash;
         self.all_transactions.last_seen_block_number = last_seen_block_number;
         let basefee_ordering = self.update_basefee(pending_basefee);
+
+        self.all_transactions.block_gas_limit = block_gas_limit;
 
         if let Some(blob_fee) = pending_blob_fee {
             self.update_blob_fee(blob_fee, basefee_ordering)
@@ -553,7 +557,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                     )),
                     InsertErr::Overdraft { transaction } => Err(PoolError::new(
                         *transaction.hash(),
-                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft),
+                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft {
+                            cost: transaction.cost(),
+                            balance: on_chain_balance,
+                        }),
                     )),
                     InsertErr::TxTypeConflict { transaction } => Err(PoolError::new(
                         *transaction.hash(),
@@ -945,6 +952,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             max_account_slots: config.max_account_slots,
             price_bumps: config.price_bumps,
             local_transactions_config: config.local_transactions_config.clone(),
+            minimal_protocol_basefee: config.minimal_protocol_basefee,
+            block_gas_limit: config.gas_limit,
             ..Default::default()
         }
     }
@@ -996,6 +1005,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Updates the block specific info
     fn set_block_info(&mut self, block_info: BlockInfo) {
         let BlockInfo {
+            block_gas_limit,
             last_seen_block_hash,
             last_seen_block_number,
             pending_basefee,
@@ -1006,6 +1016,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         self.pending_fees.base_fee = pending_basefee;
         self.metrics.base_fee.set(pending_basefee as f64);
+
+        self.block_gas_limit = block_gas_limit;
 
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_fees.blob_fee = pending_blob_fee;

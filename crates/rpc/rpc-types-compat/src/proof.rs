@@ -1,6 +1,6 @@
 //! Compatibility functions for rpc proof related types.
 
-use reth_rpc_types::{
+use alloy_rpc_types::{
     serde_helpers::JsonStorageKey, EIP1186AccountProofResponse, EIP1186StorageProof,
 };
 use reth_trie_common::{AccountProof, StorageProof};

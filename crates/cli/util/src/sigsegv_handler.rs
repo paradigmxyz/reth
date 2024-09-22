@@ -44,16 +44,14 @@ macro_rules! raw_errln {
 /// Signal handler installed for SIGSEGV
 extern "C" fn print_stack_trace(_: libc::c_int) {
     const MAX_FRAMES: usize = 256;
-    // Reserve data segment so we don't have to malloc in a signal handler, which might fail
-    // in incredibly undesirable and unexpected ways due to e.g. the allocator deadlocking
-    static mut STACK_TRACE: [*mut libc::c_void; MAX_FRAMES] = [ptr::null_mut(); MAX_FRAMES];
+    let mut stack_trace: [*mut libc::c_void; MAX_FRAMES] = [ptr::null_mut(); MAX_FRAMES];
     let stack = unsafe {
         // Collect return addresses
-        let depth = libc::backtrace(STACK_TRACE.as_mut_ptr(), MAX_FRAMES as i32);
+        let depth = libc::backtrace(stack_trace.as_mut_ptr(), MAX_FRAMES as i32);
         if depth == 0 {
             return
         }
-        &STACK_TRACE.as_slice()[0..(depth as _)]
+        &stack_trace[0..depth as usize]
     };
 
     // Just a stack trace is cryptic. Explain what we're doing.

@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
-    DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_PROOF_PERMITS,
+    DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,8 @@ pub struct EthConfig {
     ///
     /// Defaults to [`RPC_DEFAULT_GAS_CAP`]
     pub rpc_gas_cap: u64,
+    /// Max number of blocks for `eth_simulateV1`.
+    pub rpc_max_simulate_blocks: u64,
     ///
     /// Sets TTL for stale filters
     pub stale_filter_ttl: Duration,
@@ -62,6 +64,7 @@ impl Default for EthConfig {
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            rpc_max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
@@ -103,6 +106,12 @@ impl EthConfig {
     /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
     pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
+        self
+    }
+
+    /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
+    pub const fn rpc_max_simulate_blocks(mut self, max_blocks: u64) -> Self {
+        self.rpc_max_simulate_blocks = max_blocks;
         self
     }
 
