@@ -798,7 +798,7 @@ where
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 where
-    Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
+    Self: BlockReader + ReceiptProviderIdExt,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
         match id {
