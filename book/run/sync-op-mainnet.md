@@ -18,6 +18,8 @@ $ op-reth node --chain optimism --datadir op-mainnet --debug.tip 0x098f87b75c8b8
 
 ## Full bootstrap (not recommended)
 
+**Not recommended for now**: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node.
+
 ### Import state 
 
 To sync OP mainnet, the Bedrock datadir needs to be imported to use as starting point.

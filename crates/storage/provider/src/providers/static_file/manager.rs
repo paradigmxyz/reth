@@ -638,6 +638,7 @@ impl StaticFileProvider {
         // range.
         //
         // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
+        // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
         if provider.chain_spec().chain() == Chain::optimism_mainnet() &&
             provider
                 .block_number(b256!(
