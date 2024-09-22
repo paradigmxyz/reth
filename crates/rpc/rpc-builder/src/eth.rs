@@ -7,6 +7,7 @@ use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, EthApiBuilderCtx, EthConfig, EthStateCache,
 };
 use reth_tasks::TaskSpawner;
+use reth_transaction_pool::TransactionPool;
 
 /// Alias for `eth` namespace API builder.
 pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
@@ -28,7 +29,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-    Pool: Send + Sync + Clone + 'static,
+    Pool: Send + Sync + Clone + TransactionPool + 'static,
     Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: EthApiTypes + 'static,
@@ -96,6 +97,7 @@ where
             Box::new(ctx.executor.clone()),
             api.tx_resp_builder().clone(),
         );
+        filter.spawn_watch_reorgs(ctx.events.clone());
 
         let pubsub = EthPubSub::with_spawner(
             ctx.provider.clone(),
