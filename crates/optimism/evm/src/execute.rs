@@ -544,7 +544,7 @@ mod tests {
         let l1_block_contract_account =
             Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
 
-        let mut l1_block_storage = HashMap::new();
+        let mut l1_block_storage = HashMap::with_capacity(4);
         // base fee
         l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
         // l1 fee overhead

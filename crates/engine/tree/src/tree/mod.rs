@@ -2736,11 +2736,12 @@ mod tests {
         }
 
         fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-            let mut blocks_by_hash = HashMap::new();
+            let mut blocks_by_hash = HashMap::with_capacity(blocks.len());
             let mut blocks_by_number = BTreeMap::new();
-            let mut state_by_hash = HashMap::new();
+            let mut state_by_hash = HashMap::with_capacity(blocks.len());
             let mut hash_by_number = BTreeMap::new();
-            let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::new();
+            let mut parent_to_child: HashMap<B256, HashSet<B256>> =
+                HashMap::with_capacity(blocks.len());
             let mut parent_hash = B256::ZERO;
 
             for block in &blocks {
