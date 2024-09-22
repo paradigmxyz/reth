@@ -26,7 +26,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::net_if::resolve_net_if_ip;
 #[cfg(feature = "serde")]
@@ -192,12 +192,11 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
-        NatResolver::NetIf => match resolve_net_if_ip(DEFAULT_NET_IF_NAME) {
+        NatResolver::NetIf => match resolve_net_if_ip(DEFAULT_NET_IF_NAME).inspect_err(|err| {
+            debug!(target: "net::nat", "Failed to resolve network interface IP: {}", err);
+        }) {
             Ok(ip) => Some(ip),
-            Err(err) => {
-                error!("Failed to resolve network interface IP: {}", err);
-                None
-            }
+            Err(_) => None,
         },
         NatResolver::None => None,
     }
@@ -205,12 +204,13 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
 
 async fn resolve_external_ip() -> Option<IpAddr> {
     let futures = EXTERNAL_IP_APIS.iter().copied().map(resolve_external_ip_url_res).map(Box::pin);
-    match futures_util::future::select_ok(futures).await {
+    match futures_util::future::select_ok(futures).await.inspect_err(|_| {
+        debug!(target: "net::nat",
+                external_ip_apis=?EXTERNAL_IP_APIS,
+                "Failed to resolve external IP from any API");
+    }) {
         Ok((ip, _)) => Some(ip),
-        Err(_) => {
-            error!("Failed to resolve external IP from any of: {:?}", EXTERNAL_IP_APIS);
-            None
-        }
+        Err(_) => None,
     }
 }
 
@@ -220,17 +220,7 @@ async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
 
 async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
     let response = reqwest::get(url).await.ok()?;
-    let response = match response.error_for_status() {
-        Ok(response) => response,
-        Err(err) => {
-            let status = err.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            error!(
-                "HTTP error when attempting to resolve external IP using {}: status code {}",
-                url, status
-            );
-            return None;
-        }
-    };
+    let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
 }
