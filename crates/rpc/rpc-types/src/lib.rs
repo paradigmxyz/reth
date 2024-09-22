@@ -25,11 +25,6 @@ pub use alloy_rpc_types::*;
 // Ethereum specific serde types coming from alloy.
 pub use alloy_serde::*;
 
-pub mod trace {
-    //! RPC types for trace endpoints and inspectors.
-    pub use alloy_rpc_types_trace::*;
-}
-
 // re-export admin
 pub use alloy_rpc_types_admin as admin;
 

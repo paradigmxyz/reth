@@ -10,6 +10,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
@@ -17,10 +18,7 @@ use reth::{
     builder::NodeHandle,
     cli::Cli,
     primitives::{Address, IntoRecoveredTransaction},
-    rpc::{
-        compat::transaction::transaction_to_call_request,
-        types::trace::{parity::TraceType, tracerequest::TraceCallRequest},
-    },
+    rpc::compat::transaction::transaction_to_call_request,
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;

@@ -2931,6 +2931,7 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-types-trace",
  "clap",
  "futures-util",
  "reth",
@@ -8382,6 +8383,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
+ "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
  "async-trait",
  "derive_more",
@@ -8442,6 +8444,7 @@ dependencies = [
  "alloy-rpc-types-anvil",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
+ "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
  "jsonrpsee",
  "reth-engine-primitives",
@@ -8458,6 +8461,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
  "futures",
  "jsonrpsee",
  "jsonrpsee-http-client",
@@ -8477,6 +8481,7 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
  "clap",
  "http",
  "jsonrpsee",
@@ -8676,7 +8681,6 @@ dependencies = [
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-trace",
  "alloy-serde",
  "arbitrary",
  "jsonrpsee-types",
