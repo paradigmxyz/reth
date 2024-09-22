@@ -158,13 +158,8 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         block_env.gas_limit = U256::from(header.gas_limit());
 
         // EIP-4844 excess blob gas of this block, introduced in Cancun
-<<<<<<< HEAD
-        if let Some(excess_blob_gas) = header.excess_blob_gas {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas as u64);
-=======
         if let Some(excess_blob_gas) = header.excess_blob_gas() {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
->>>>>>> origin/main
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas as u64);
         }
     }
 

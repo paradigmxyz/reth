@@ -3,14 +3,10 @@
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-<<<<<<< HEAD
 use reth_primitives::{
     alloy_primitives::Sealable, proofs, Block, Bytes, SealedBlock, SealedHeader, TransactionSigned,
     Withdrawals, U256,
 };
-=======
-use reth_primitives::{proofs, Block, SealedBlock, TransactionSigned, Withdrawals};
->>>>>>> origin/main
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };

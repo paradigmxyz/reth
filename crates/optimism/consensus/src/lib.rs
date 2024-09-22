@@ -9,13 +9,8 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-<<<<<<< HEAD
 use alloy_primitives::{B64, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardforks};
-=======
-use alloy_primitives::U256;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
->>>>>>> origin/main
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,

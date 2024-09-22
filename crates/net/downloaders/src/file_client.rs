@@ -12,14 +12,10 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-<<<<<<< HEAD
 use reth_primitives::{
     alloy_primitives::Sealable, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header,
     SealedHeader, B256,
 };
-=======
-use reth_primitives::{BlockBody, Header, SealedHeader};
->>>>>>> origin/main
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;

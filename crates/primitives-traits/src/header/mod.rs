@@ -7,9 +7,6 @@ pub use error::HeaderError;
 #[cfg(any(test, feature = "test-utils", feature = "arbitrary"))]
 pub mod test_utils;
 
-<<<<<<< HEAD
-pub use alloy_consensus::Header;
-=======
 use alloy_consensus::constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
 use alloy_eips::{
     calc_next_block_base_fee, eip1559::BaseFeeParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS,
@@ -591,4 +588,3 @@ impl BlockHeader for Header {
         self.excess_blob_gas
     }
 }
->>>>>>> origin/main
