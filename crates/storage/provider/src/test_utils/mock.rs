@@ -18,11 +18,9 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    alloy_primitives::Sealable, keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber,
-    BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, GotExpected, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    Withdrawals, B256, U256,
+    alloy_primitives::Sealable, Account, Block, BlockWithSenders, Bytecode, GotExpected, Header,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{

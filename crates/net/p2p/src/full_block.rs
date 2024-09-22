@@ -10,7 +10,7 @@ use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
 use reth_primitives::{
-    alloy_primitives::Sealable, BlockBody, GotExpected, Header, SealedBlock, SealedHeader, B256,
+    alloy_primitives::Sealable, BlockBody, GotExpected, Header, SealedBlock, SealedHeader,
 };
 use std::{
     cmp::Reverse,

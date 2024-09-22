@@ -20,10 +20,9 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    alloy_primitives::Sealable, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
-    BlockNumHash, BlockNumber, BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header,
+    alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

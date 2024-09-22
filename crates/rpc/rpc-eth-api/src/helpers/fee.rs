@@ -180,8 +180,8 @@ pub trait EthFees: LoadFee {
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
-                                header.gas_used,
-                                header.base_fee_per_gas.unwrap_or_default(),
+                                header.gas_used as u64,
+                                header.base_fee_per_gas.unwrap_or_default() as u64,
                                 &transactions,
                                 &receipts,
                             )

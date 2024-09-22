@@ -12,9 +12,8 @@ use reth_primitives::{
     alloy_primitives::Sealable,
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    Address, BlockNumber, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-    TxEip1559, B256, U256,
+    Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -140,7 +139,7 @@ impl TestBlockBuilder {
         let header = Header {
             number,
             parent_hash,
-            gas_used: transactions.len() as u128 * MIN_TRANSACTION_GAS,
+            gas_used: transactions.len() as u128 * MIN_TRANSACTION_GAS as u128,
             gas_limit: self.chain_spec.max_gas_limit.into(),
             mix_hash: B256::random(),
             base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),

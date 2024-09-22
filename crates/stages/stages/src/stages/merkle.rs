@@ -1,10 +1,7 @@
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
-use reth_db_api::{
-    database::Database,
-    transaction::{DbTx, DbTxMut},
-};
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_primitives::{alloy_primitives::Sealable, BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,

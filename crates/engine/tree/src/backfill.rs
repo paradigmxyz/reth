@@ -235,7 +235,7 @@ mod tests {
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{alloy_primitives::Sealable, BlockNumber, Header, SealedHeader, B256};
+    use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader};
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;

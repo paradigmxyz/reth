@@ -6,12 +6,7 @@ use alloy_rpc_types::{
     Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, SealedHeader,
-    Withdrawals, B256, U256,
-};
-use reth_rpc_types::{
-    Block, Block as PrimitiveBlock, BlockError, BlockTransactions, BlockTransactionsKind,
-    BlockWithSenders, Header, Header as PrimitiveHeader, WithOtherFields, Withdrawals,
+    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, SealedHeader, Withdrawals,
 };
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};

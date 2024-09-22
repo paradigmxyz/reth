@@ -18,7 +18,7 @@ use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     alloy_primitives::Sealable, BlockNumberOrTag, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned,
+    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -114,10 +114,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let latest = latest.seal_slow();
+        let sealed = latest.seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let latest = SealedHeader::new(header, seal);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            block_gas_limit: latest.gas_limit,
+            block_gas_limit: latest.gas_limit as u64,
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
@@ -404,7 +406,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        block_gas_limit: tip.gas_limit,
+                        block_gas_limit: tip.gas_limit as u64,
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee as u64,

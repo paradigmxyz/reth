@@ -280,7 +280,7 @@ pub fn build_block<T: TransactionCompat>(
         timestamp: block_env.timestamp.to(),
         base_fee_per_gas: Some(block_env.basefee.to()),
         gas_limit: block_env.gas_limit.to(),
-        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>(),
+        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>() as u128,
         blob_gas_used: Some(0),
         parent_hash,
         receipts_root: calculate_receipt_root(&receipts),

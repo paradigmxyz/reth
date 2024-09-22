@@ -268,7 +268,7 @@ mod tests {
     fn test_invalid_gas_limit_increase_exceeding_limit() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(
-            (parent.gas_limit + parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR + 1) as u64,
+            (parent.gas_limit + parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR as u128 + 1) as u64,
         );
 
         assert_eq!(
@@ -297,7 +297,7 @@ mod tests {
     fn test_invalid_gas_limit_decrease_exceeding_limit() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(
-            (parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1) as u64,
+            (parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR as u128 - 1) as u64,
         );
 
         assert_eq!(

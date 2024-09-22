@@ -19,10 +19,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    alloy_primitives::Sealable, BlockHashOrNumber, BlockNumber, GotExpected, Header, SealedHeader,
-    B256,
-};
+use reth_primitives::{alloy_primitives::Sealable, GotExpected, Header, SealedHeader};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},

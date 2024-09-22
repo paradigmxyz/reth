@@ -10,7 +10,7 @@
 #![cfg(feature = "optimism")]
 
 use alloy_primitives::{B64, U256};
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardforks};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
