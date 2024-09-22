@@ -2712,6 +2712,7 @@ name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-rpc-types",
  "eyre",
  "reth",
  "reth-basic-payload-builder",
@@ -2750,6 +2751,7 @@ dependencies = [
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-types",
  "clap",
  "futures-util",
  "reth",
@@ -2809,6 +2811,7 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-types",
  "eyre",
  "reth-chainspec",
  "reth-db",
@@ -6644,6 +6647,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-provider",
+ "alloy-rpc-types",
  "auto_impl",
  "eyre",
  "futures",
@@ -8106,6 +8110,7 @@ name = "reth-optimism-rpc"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "derive_more",
  "jsonrpsee-types",
@@ -8128,7 +8133,6 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
- "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
@@ -8381,6 +8385,7 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
@@ -8442,6 +8447,7 @@ dependencies = [
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-rpc-types-anvil",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-eth",
@@ -8462,6 +8468,7 @@ name = "reth-rpc-api-testing-util"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
  "futures",
@@ -8470,7 +8477,6 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-eth-api",
- "reth-rpc-types",
  "serde_json",
  "similar-asserts",
  "tokio",
@@ -8482,6 +8488,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-network",
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
  "clap",
@@ -8570,6 +8577,7 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
  "async-trait",
