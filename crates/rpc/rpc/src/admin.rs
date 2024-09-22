@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use alloy_genesis::ChainConfig;
+use alloy_rpc_types_admin::{
+    EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
+    Ports, ProtocolInfo,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
@@ -10,10 +14,6 @@ use reth_network_types::PeerKind;
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
-use reth_rpc_types::admin::{
-    EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
-    Ports, ProtocolInfo,
-};
 
 /// `admin` API implementation.
 ///

@@ -21,6 +21,7 @@ reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
+alloy-serde.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
