@@ -24,7 +24,9 @@ use reth_rpc_types::{
     debug::ExecutionWitness,
     state::EvmOverrides,
     trace::geth::{
-        call::FlatCallFrame, BlockTraceResult, FlatCallConfig, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult
+        call::FlatCallFrame, BlockTraceResult, FlatCallConfig, FourByteFrame, 
+        GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions, 
+        GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult
     },
     Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
 };
