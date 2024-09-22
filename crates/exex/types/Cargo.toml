@@ -18,6 +18,7 @@ reth-provider.workspace = true
 
 # reth
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 # misc
 serde = { workspace = true, optional = true }
