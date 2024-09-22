@@ -389,12 +389,33 @@ where
                         return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        let falt_config = tracer_config
-                            .into_flat_config()
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config)
+                        );
+
+                        // TODO: check if this is the right way to pull out tx_hash
+                        let tx_hash = _transaction_context.and_then(|ctx| ctx.tx_hash).unwrap_or_default();
+
+                        let res = self.eth_api().spawn_trace_transaction_in_block_with_inspector(
+                            tx_hash,
+                            inspector,
+                            move |tx_info, inspector, _, _| {
+                                let traces =
+                                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                                Ok(traces)
+                            },
+                        ).await?.ok_or_else(|| EthApiError::TransactionNotFound)?;
+
+                        // Now `res` is the unwrapped value, not an Option
+
+                        // Transform the collected data into a FlatCallFrame
+                        let frame = FlatCallFrame::from(res);
+
+                        return Ok((frame.into(), Default::default()))
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -688,7 +709,7 @@ where
     /// Note: this does not apply any state overrides if they're configured in the `opts`.
     ///
     /// Caution: this is blocking and should be performed on a blocking task.
-    fn trace_transaction(
+    async fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
@@ -768,17 +789,25 @@ where
                             TracingInspectorConfig::from_flat_call_config(&flat_call_config)
                         );
 
-                        self.eth_api().spawn_trace_transaction_in_block_with_inspector(hash, inspector, f);
+                        // TODO: check if this is the right way to pull out tx_hash
+                        let tx_hash = _transaction_context.and_then(|ctx| ctx.tx_hash).unwrap_or_default();
 
-                        let (res, env) = self.eth_api().inspectddd(db, env, &mut inspector)?;
+                        let res = self.eth_api().spawn_trace_transaction_in_block_with_inspector(
+                            tx_hash,
+                            inspector,
+                            move |tx_info, inspector, _, _| {
+                                let traces =
+                                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                                Ok(traces)
+                            },
+                        ).await?.ok_or_else(|| EthApiError::TransactionNotFound)?;
+
+                        // Now `res` is the unwrapped value, not an Option
 
                         // Transform the collected data into a FlatCallFrame
-                        let frame = inspector
-                            .with_transaction_gas_limit(env.tx.gas_limit)
-                            .into_geth_builder()
-                            .geth_flat_call_traces(&flat_call_config, res.result.gas_used());
+                        let frame = FlatCallFrame::from(res);
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), Default::default()))
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
