@@ -3,6 +3,10 @@
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use alloy_primitives::{hex_literal::hex, Address, Bytes, TxHash, B256, B64, U256, U64};
+use alloy_rpc_types::{
+    Block, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind, SyncStatus, Transaction,
+    TransactionReceipt,
+};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::filter::TraceFilter;
 use jsonrpsee::{
@@ -22,10 +26,6 @@ use reth_rpc_api::{
     Web3ApiClient,
 };
 use reth_rpc_server_types::RethRpcModule;
-use reth_rpc_types::{
-    Block, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind, SyncStatus, Transaction,
-    TransactionReceipt,
-};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;

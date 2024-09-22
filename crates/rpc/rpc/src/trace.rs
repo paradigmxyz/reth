@@ -1,6 +1,10 @@
 use std::{collections::HashSet, sync::Arc};
 
 use alloy_primitives::{Bytes, B256, U256};
+use alloy_rpc_types::{
+    state::{EvmOverrides, StateOverride},
+    BlockOverrides, Index,
+};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
@@ -24,10 +28,6 @@ use reth_rpc_eth_api::{
     FromEthApiError,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
-use reth_rpc_types::{
-    state::{EvmOverrides, StateOverride},
-    BlockOverrides, Index,
-};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::{CacheDB, DatabaseCommit},

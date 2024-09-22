@@ -1,6 +1,7 @@
 //! Helpers for testing trace calls.
 
 use alloy_primitives::{Bytes, TxHash, B256};
+use alloy_rpc_types::Index;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
@@ -11,7 +12,6 @@ use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
-use reth_rpc_types::Index;
 use std::{
     collections::HashSet,
     pin::Pin,

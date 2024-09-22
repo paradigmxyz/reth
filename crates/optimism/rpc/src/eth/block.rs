@@ -1,5 +1,6 @@
 //! Loads and formats OP block RPC response.
 
+use alloy_rpc_types::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -11,7 +12,6 @@ use reth_rpc_eth_api::{
     RpcReceipt,
 };
 use reth_rpc_eth_types::EthStateCache;
-use reth_rpc_types::BlockId;
 
 use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 

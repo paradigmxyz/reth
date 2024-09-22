@@ -1,9 +1,10 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2718::Encodable2718;
+use alloy_rpc_types::{Block, BlockTransactions};
 use reth_node_api::EngineTypes;
 use reth_node_core::{
     primitives::B256,
-    rpc::types::{Block, BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3},
+    rpc::types::{ExecutionPayloadV2, ExecutionPayloadV3},
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;

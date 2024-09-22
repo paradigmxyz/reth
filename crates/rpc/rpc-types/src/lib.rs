@@ -16,11 +16,6 @@ mod eth;
 pub type PeerId = B512;
 
 use alloy_primitives::B512;
-// re-export for convenience
-pub use alloy_rpc_types::serde_helpers;
-
-// Ethereum specific rpc types coming from alloy.
-pub use alloy_rpc_types::*;
 
 // Ethereum specific serde types coming from alloy.
 pub use alloy_serde::*;

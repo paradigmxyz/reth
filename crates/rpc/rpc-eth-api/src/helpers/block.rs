@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use alloy_rpc_types::{Header, Index};
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache};
-use reth_rpc_types::{Header, Index};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
