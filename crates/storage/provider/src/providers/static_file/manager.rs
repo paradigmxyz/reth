@@ -639,11 +639,10 @@ impl StaticFileProvider {
         //
         // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
         // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
+        #[cfg(feature = "optimism")]
         if provider.chain_spec().chain() == Chain::optimism_mainnet() &&
             provider
-                .block_number(b256!(
-                    "bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453"
-                ))?
+                .block_number(reth_optimism_primitives::bedrock::OVM_HEADER_1_HASH)?
                 .is_some()
         {
             info!(target: "reth::cli",
