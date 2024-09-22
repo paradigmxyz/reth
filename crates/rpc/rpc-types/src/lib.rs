@@ -33,9 +33,6 @@ pub mod trace {
 // re-export admin
 pub use alloy_rpc_types_admin as admin;
 
-// re-export mev
-pub use alloy_rpc_types_mev as mev;
-
 // re-export beacon
 #[cfg(feature = "jsonrpsee-types")]
 pub use alloy_rpc_types_beacon as beacon;
