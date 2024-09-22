@@ -8681,8 +8681,6 @@ dependencies = [
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-mev",
- "alloy-rpc-types-trace",
  "alloy-serde",
  "arbitrary",
  "jsonrpsee-types",
