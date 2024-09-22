@@ -23,6 +23,7 @@ reth-tracing.workspace = true
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips.workspace = true
 alloy-provider = { workspace = true, features = ["ws"] }
+alloy-rpc-types.workspace = true
 
 auto_impl.workspace = true
 futures.workspace = true

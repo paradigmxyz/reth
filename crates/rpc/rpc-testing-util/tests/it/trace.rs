@@ -1,5 +1,6 @@
 //! Integration tests for the trace API.
 
+use alloy_rpc_types::{Block, Transaction};
 use alloy_rpc_types_trace::{
     filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
 };
@@ -9,7 +10,6 @@ use jsonrpsee_http_client::HttpClient;
 use reth_primitives::Receipt;
 use reth_rpc_api_testing_util::{debug::DebugApiExt, trace::TraceApiExt, utils::parse_env_url};
 use reth_rpc_eth_api::EthApiClient;
-use reth_rpc_types::{Block, Transaction};
 use std::{collections::HashSet, time::Instant};
 
 /// This is intended to be run locally against a running node.

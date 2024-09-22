@@ -7,6 +7,7 @@ use std::{
 };
 
 use alloy_primitives::{TxHash, B256};
+use alloy_rpc_types::{Block, Transaction};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
     common::TraceResult,
@@ -16,7 +17,6 @@ use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, Receipt};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
-use reth_rpc_types::{Block, Transaction};
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
 const JS_TRACER_TEMPLATE: &str = include_str!("../assets/tracer-template.js");

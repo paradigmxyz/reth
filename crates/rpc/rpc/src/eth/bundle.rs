@@ -101,7 +101,7 @@ where
             .into())
         }
 
-        let block_id: reth_rpc_types::BlockId = state_block_number.into();
+        let block_id: alloy_rpc_types::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 

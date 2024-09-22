@@ -111,7 +111,7 @@ impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> 
 
     fn convert_block_hash(
         &self,
-        hash_or_number: reth_rpc_types::BlockHashOrNumber,
+        hash_or_number: alloy_rpc_types::BlockHashOrNumber,
     ) -> reth_errors::ProviderResult<Option<B256>> {
         self.0.convert_block_hash(hash_or_number)
     }

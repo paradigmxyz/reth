@@ -42,6 +42,7 @@ alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-rpc-types-trace.workspace = true
