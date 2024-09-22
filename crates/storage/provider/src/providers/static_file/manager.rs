@@ -12,7 +12,7 @@ use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNum
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chainspec::{ChainInfo, ChainSpecProvider};
+use reth_chainspec::{Chain, ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -26,6 +26,7 @@ use reth_db_api::{
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_primitives::{
+    b256,
     static_file::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
@@ -632,6 +633,24 @@ impl StaticFileProvider {
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
     {
+        // OVM historical import is broken and does not work with this check. It's importing
+        // duplicated receipts resulting in having more receipts than the expected transaction
+        // range.
+        //
+        // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
+        if provider.chain_spec().chain() == Chain::optimism_mainnet() &&
+            provider
+                .block_number(b256!(
+                    "bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453"
+                ))?
+                .is_some()
+        {
+            info!(target: "reth::cli",
+                "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
+            );
+            return Ok(None)
+        }
+
         info!(target: "reth::cli", "Verifying storage consistency.");
 
         let mut unwind_target: Option<BlockNumber> = None;
