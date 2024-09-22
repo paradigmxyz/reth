@@ -17,7 +17,6 @@ workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
 alloy-rpc-types.workspace = true
 alloy-rpc-types-admin.workspace = true
-alloy-rpc-types-anvil.workspace = true
 alloy-rpc-types-beacon = { workspace = true, optional = true }
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-debug.workspace = true
