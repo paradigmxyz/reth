@@ -1,7 +1,7 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
+use alloy_rpc_types::Block;
 use reqwest::Client;
-use reth_node_core::rpc::types::Block;
 use reth_tracing::tracing::warn;
 use serde::Deserialize;
 use std::time::Duration;

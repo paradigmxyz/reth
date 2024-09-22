@@ -1505,7 +1505,8 @@ mod tests {
                 assert_eq!(*tree.state.block_indices.blocks_to_chain(), block_to_chain);
             }
             if let Some(fork_to_child) = self.fork_to_child {
-                let mut x: HashMap<BlockHash, LinkedHashSet<BlockHash>> = HashMap::new();
+                let mut x: HashMap<BlockHash, LinkedHashSet<BlockHash>> =
+                    HashMap::with_capacity(fork_to_child.len());
                 for (key, hash_set) in fork_to_child {
                     x.insert(key, hash_set.into_iter().collect());
                 }
