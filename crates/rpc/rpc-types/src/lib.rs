@@ -32,9 +32,6 @@ pub use alloy_rpc_types_admin as admin;
 #[cfg(feature = "jsonrpsee-types")]
 pub use alloy_rpc_types_beacon as beacon;
 
-// re-export debug
-pub use alloy_rpc_types_debug as debug;
-
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::error::ToRpcError;
