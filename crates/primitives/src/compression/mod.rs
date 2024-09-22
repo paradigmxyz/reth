@@ -1,7 +1,7 @@
+#[cfg(feature = "std")]
+use std::thread_local;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-#[cfg(feautre = "std")]
-use std::thread_local;
 use zstd::bulk::{Compressor, Decompressor};
 
 /// Compression/Decompression dictionary for `Receipt`.
@@ -11,6 +11,7 @@ pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_diction
 
 // We use `thread_local` compressors and decompressors because dictionaries can be quite big, and
 // zstd-rs recommends to use one context/compressor per thread
+#[cfg(feature = "std")]
 thread_local! {
     /// Thread Transaction compressor.
     pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
