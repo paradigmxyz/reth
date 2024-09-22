@@ -166,8 +166,7 @@ where
         let config = PayloadConfig::new(
             Arc::new(parent_block),
             self.config.extradata.clone(),
-            attributes,
-            Arc::clone(&self.chain_spec),
+            attributes
         );
 
         let until = self.job_deadline(config.attributes.timestamp());
@@ -676,8 +675,6 @@ pub struct PayloadConfig<Attributes> {
     pub extra_data: Bytes,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
-    /// The chain spec.
-    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl<Attributes> PayloadConfig<Attributes> {
@@ -696,9 +693,8 @@ where
         parent_block: Arc<SealedBlock>,
         extra_data: Bytes,
         attributes: Attributes,
-        chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        Self { parent_block, extra_data, attributes, chain_spec }
+        Self { parent_block, extra_data, attributes }
     }
 
     /// Returns the payload id.

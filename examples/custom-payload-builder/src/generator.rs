@@ -84,7 +84,6 @@ where
             Arc::new(parent_block),
             Bytes::default(),
             attributes,
-            Arc::clone(&self.chain_spec),
         );
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),

@@ -312,9 +312,10 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
+        let PayloadConfig { parent_block, extra_data, attributes} = config;
+        // TODO (garwah): How do we instantiate EthEvmConfig as it requires chain spec
         <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(chain_spec.clone())),client,
-                                                                                                                     PayloadConfig { parent_block, extra_data, attributes: attributes.0, chain_spec })
+                                                                                                                     PayloadConfig { parent_block, extra_data, attributes: attributes.0})
     }
 }
 

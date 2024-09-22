@@ -226,7 +226,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 best_block.hash(),
                 payload_attrs,
             )?,
-            provider_factory.chain_spec(),
         );
 
         let args = BuildArguments::new(

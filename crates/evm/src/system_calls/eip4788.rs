@@ -19,7 +19,6 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, B256};
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_beacon_block_root: Option<B256>,
