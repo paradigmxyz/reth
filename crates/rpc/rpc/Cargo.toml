@@ -43,6 +43,7 @@ alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-mev.workspace = true
 alloy-rpc-types-txpool.workspace = true
 revm = { workspace = true, features = [

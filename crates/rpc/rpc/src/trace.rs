@@ -2,6 +2,12 @@ use std::{collections::HashSet, sync::Arc};
 
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_trace::{
+    filter::TraceFilter,
+    opcode::{BlockOpcodeGas, TransactionOpcodeGas},
+    parity::*,
+    tracerequest::TraceCallRequest,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -20,12 +26,6 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
-    trace::{
-        filter::TraceFilter,
-        opcode::{BlockOpcodeGas, TransactionOpcodeGas},
-        parity::*,
-        tracerequest::TraceCallRequest,
-    },
     BlockOverrides, Index,
 };
 use reth_tasks::pool::BlockingTaskGuard;

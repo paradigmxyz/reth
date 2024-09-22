@@ -2,18 +2,16 @@
 
 use alloy_primitives::{Bytes, TxHash, B256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_trace::{
+    filter::TraceFilter,
+    parity::{LocalizedTransactionTrace, TraceResults, TraceType},
+    tracerequest::TraceCallRequest,
+};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
-use reth_rpc_types::{
-    trace::{
-        filter::TraceFilter,
-        parity::{LocalizedTransactionTrace, TraceResults, TraceType},
-        tracerequest::TraceCallRequest,
-    },
-    Index,
-};
+use reth_rpc_types::Index;
 use std::{
     collections::HashSet,
     pin::Pin,
@@ -517,9 +515,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_trace::filter::TraceFilterMode;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
-    use reth_rpc_types::trace::filter::TraceFilterMode;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
 
