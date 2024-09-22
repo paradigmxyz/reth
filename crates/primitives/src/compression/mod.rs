@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
+#[cfg(feautre = "std")]
 use std::thread_local;
 use zstd::bulk::{Compressor, Decompressor};
 
@@ -36,6 +37,38 @@ thread_local! {
             Decompressor::with_dictionary(RECEIPT_DICTIONARY)
                 .expect("failed to initialize receipt decompressor"),
         ));
+}
+
+/// Tx compressor creator
+pub fn create_tx_compressor() -> RefCell<Compressor<'static>> {
+    RefCell::new(
+        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+            .expect("Failed to instantiate tx compressor"),
+    )
+}
+
+/// Tx decompressor creator
+pub fn create_tx_decompressor() -> RefCell<ReusableDecompressor> {
+    RefCell::new(ReusableDecompressor::new(
+        Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
+            .expect("Failed to instantiate tx decompressor"),
+    ))
+}
+
+/// Receipt compressor creator
+pub fn create_receipt_compressor() -> RefCell<Compressor<'static>> {
+    RefCell::new(
+        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+            .expect("Failed to instantiate receipt compressor"),
+    )
+}
+
+/// Receipt decompressor creator
+pub fn create_receipt_decompressor() -> RefCell<ReusableDecompressor> {
+    RefCell::new(ReusableDecompressor::new(
+        Decompressor::with_dictionary(RECEIPT_DICTIONARY)
+            .expect("Failed to instantiate receipt decompressor"),
+    ))
 }
 
 /// Reusable decompressor that uses its own internal buffer.
