@@ -267,8 +267,10 @@ impl Command {
                     .1
                     .zip(last_ranges.1)
                     .map(|(first, last)| SegmentRangeInclusive::new(first.start(), last.end()))
-                    .or_else(|| last_ranges.1.map(|last| SegmentRangeInclusive::new(0, last.end())));
-                    
+                    .or_else(|| {
+                        last_ranges.1.map(|last| SegmentRangeInclusive::new(0, last.end()))
+                    });
+
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
                     .add_cell(Cell::new(format!("{block_range}")))
