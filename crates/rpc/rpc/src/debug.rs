@@ -24,8 +24,7 @@ use reth_rpc_types::{
     debug::ExecutionWitness,
     state::EvmOverrides,
     trace::geth::{
-        BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-        GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
+        call::FlatCallFrame, BlockTraceResult, FlatCallConfig, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult
     },
     Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
 };
@@ -390,6 +389,9 @@ where
                         return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
+                        let falt_config = tracer_config
+                            .into_flat_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         return Err(
                             EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
                         )
@@ -758,9 +760,25 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+                        
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config)
+                        );
+
+                        self.eth_api().spawn_trace_transaction_in_block_with_inspector(hash, inspector, f);
+
+                        let (res, env) = self.eth_api().inspectddd(db, env, &mut inspector)?;
+
+                        // Transform the collected data into a FlatCallFrame
+                        let frame = inspector
+                            .with_transaction_gas_limit(env.tx.gas_limit)
+                            .into_geth_builder()
+                            .geth_flat_call_traces(&flat_call_config, res.result.gas_used());
+
+                        return Ok((frame.into(), res.state))
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
