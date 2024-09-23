@@ -969,8 +969,7 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
                     tx_bits as u8
                 })
             } else {
-                let cell = crate::compression::create_tx_compressor();
-                let mut compressor = cell.borrow_mut();
+                let mut compressor = crate::compression::create_tx_compressor();
                 let tx_bits = self.transaction.to_compact(&mut tmp);
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8
@@ -1007,8 +1006,7 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
                     (transaction, buf)
                 })
             } else {
-                let cell = crate::compression::create_tx_decompressor();
-                let mut decompressor = cell.borrow_mut();
+                let mut decompressor = crate::compression::create_tx_decompressor();
                 let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);

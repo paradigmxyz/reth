@@ -39,37 +39,32 @@ std::thread_local! {
 }
 
 /// Fn creates as many tx compressors per thread as times its called. It is meant to be used in no-std config
-pub fn create_tx_compressor() -> RefCell<Compressor<'static>> {
-    RefCell::new(
-        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
-            .expect("Failed to instantiate tx compressor"),
-    )
+pub fn create_tx_compressor() -> Compressor<'static> {
+    Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+            .expect("Failed to instantiate tx compressor")
 }
 
 /// Fn creates as many tx decompressors per thread as times its called. It is meant to be used in no-std config
-pub fn create_tx_decompressor() -> RefCell<ReusableDecompressor> {
-    RefCell::new(ReusableDecompressor::new(
+pub fn create_tx_decompressor() -> ReusableDecompressor {
+    ReusableDecompressor::new(
         Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
-            .expect("Failed to instantiate tx decompressor"),
-    ))
+        .expect("Failed to instantiate tx decompressor")
+    )
 }
 
 /// Fn creates as many receipt compressors per thread as times its called. It is meant to be used in no-std
 /// config
-pub fn create_receipt_compressor() -> RefCell<Compressor<'static>> {
-    RefCell::new(
-        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
-            .expect("Failed to instantiate receipt compressor"),
-    )
+pub fn create_receipt_compressor() -> Compressor<'static> {
+    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate receipt compressor")
 }
 
 /// Fn creates as many receipt decompressors per thread as times its called. It is meant to be used in no-std
 /// config
-pub fn create_receipt_decompressor() -> RefCell<ReusableDecompressor> {
-    RefCell::new(ReusableDecompressor::new(
+pub fn create_receipt_decompressor() -> ReusableDecompressor {
+    ReusableDecompressor::new(
         Decompressor::with_dictionary(RECEIPT_DICTIONARY)
             .expect("Failed to instantiate receipt decompressor"),
-    ))
+    )
 }
 
 /// Reusable decompressor that uses its own internal buffer.
