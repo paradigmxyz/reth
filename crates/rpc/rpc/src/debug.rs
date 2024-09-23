@@ -21,14 +21,11 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
-    debug::ExecutionWitness,
-    state::EvmOverrides,
-    trace::geth::{
+    debug::ExecutionWitness, state::EvmOverrides, trace::geth::{
         call::FlatCallFrame, BlockTraceResult, FlatCallConfig, FourByteFrame, 
         GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions, 
         GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult
-    },
-    Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
+    }, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo, TransactionRequest
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -409,12 +406,13 @@ where
                                 overrides, 
                                 move |db, env| {
                                     let (res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
-                                    let frame: FlatCallFrame = inspector
+                                    let tx_info = TransactionInfo::default();
+                                    let frame = inspector
                                         .with_transaction_gas_limit(env.tx.gas_limit)
                                         .into_parity_builder()
-                                        .into_localized_transaction_traces(res)
-                                        .pop().ok_or(Eth::Error::from_eth_err)?;
-                                Ok(frame)
+                                        .into_localized_transaction_traces(tx_info)
+                                        .pop();
+                                    Ok(frame)
                             })
                             .await?;
 
