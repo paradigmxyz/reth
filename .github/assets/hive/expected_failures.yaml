@@ -19,7 +19,6 @@ rpc-compat:
   - eth_getBlockByNumber/get-genesis (reth)
   - eth_getBlockByNumber/get-latest (reth)
   - eth_getBlockByNumber/get-safe (reth)
-  - eth_sendRawTransaction/send-blob-tx (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
