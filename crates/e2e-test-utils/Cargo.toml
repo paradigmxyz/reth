@@ -26,7 +26,6 @@ reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
 reth-network-peers.workspace = true
 reth-node-ethereum.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 
 # rpc
