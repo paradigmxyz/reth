@@ -412,6 +412,8 @@ where
             blob_gas_used,
             excess_blob_gas,
             state_root: state_provider.state_root(hashed_state)?,
+            #[cfg(feature = "telos")]
+            telos_block_extension: Default::default(),
         },
         body: transactions,
         ommers: reorg_target.ommers,

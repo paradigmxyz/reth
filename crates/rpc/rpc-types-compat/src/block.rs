@@ -124,6 +124,8 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         excess_blob_gas,
         parent_beacon_block_root,
         requests_root,
+        #[cfg(feature = "telos")]
+        ..
     } = header;
 
     Header {

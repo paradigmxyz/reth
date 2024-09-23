@@ -1,0 +1,21 @@
+[package]
+name = "reth-telos-primitives-traits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-codecs = { workspace = true, features = ["telos"] }
+alloy-primitives.workspace = true
+arbitrary = { workspace = true }
+
+bytes.workspace = true
+modular-bitfield.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

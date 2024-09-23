@@ -19,6 +19,8 @@ use core::mem;
 use reth_codecs::{add_arbitrary_tests, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "telos")]
+use reth_telos_primitives_traits::TelosBlockExtension;
 
 /// Block header
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Compact)]
@@ -96,6 +98,9 @@ pub struct Header {
     ///
     /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
     pub requests_root: Option<B256>,
+    #[cfg(feature = "telos")]
+    /// Telos specific block fields, to be stored in the database but not used for block hash
+    pub telos_block_extension: TelosBlockExtension,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
     pub extra_data: Bytes,
@@ -131,6 +136,8 @@ impl Default for Header {
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_root: None,
+            #[cfg(feature = "telos")]
+            telos_block_extension: Default::default(),
         }
     }
 }
@@ -449,6 +456,8 @@ impl Decodable for Header {
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_root: None,
+            #[cfg(feature = "telos")]
+            telos_block_extension: Default::default(),
         };
         if started_len - buf.len() < rlp_head.payload_length {
             this.base_fee_per_gas = Some(u64::decode(buf)?);
@@ -516,6 +525,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Header {
             parent_beacon_block_root: u.arbitrary()?,
             requests_root: u.arbitrary()?,
             withdrawals_root: u.arbitrary()?,
+            #[cfg(feature = "telos")]
+            telos_block_extension: u.arbitrary()?,
         };
 
         Ok(test_utils::generate_valid_header(

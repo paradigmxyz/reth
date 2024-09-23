@@ -249,6 +249,8 @@ where
             excess_blob_gas,
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             requests_root,
+            #[cfg(feature = "telos")]
+            telos_block_extension: Default::default(),
         };
 
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
@@ -556,6 +558,8 @@ where
         blob_gas_used,
         excess_blob_gas,
         requests_root,
+        #[cfg(feature = "telos")]
+        telos_block_extension: Default::default(),
     };
 
     // seal the block

@@ -96,6 +96,8 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
     //
     // This removes the requirement of the field to be placed last in the struct.
     known_types.extend_from_slice(&["TxKind", "AccessList", "Signature", "CheckpointBlockRange"]);
+    #[cfg(feature = "telos")]
+    known_types.push("TelosBlockExtension");
 
     // let mut handle = FieldListHandler::new(fields);
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));

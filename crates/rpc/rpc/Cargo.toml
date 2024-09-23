@@ -98,4 +98,5 @@ telos = [
     "reth-rpc-types-compat/telos",
     "reth-consensus-common/telos",
     "reth-rpc-engine-api/telos",
+    "reth-rpc-eth-api/telos",
 ]

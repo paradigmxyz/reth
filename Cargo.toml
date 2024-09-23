@@ -115,6 +115,7 @@ members = [
     "crates/storage/storage-api/",
     "crates/tasks/",
     "crates/telos/node",
+    "crates/telos/primitives-traits",
     "crates/telos/rpc",
     "crates/tokio-util/",
     "crates/tracing/",
@@ -397,15 +398,17 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
-    "std",
-    "secp256k1",
-    "blst",
-], default-features = false }
+revm = { path = "../telos-revm/crates/revm", features = ["std", "secp256k1", "blst"], default-features = false }
+#revm = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
+#    "std",
+#    "secp256k1",
+#    "blst",
+#], default-features = false }
 revm-inspectors = { git = "https://github.com/telosnetwork/telos-evm-inspectors", branch = "telos-main" }
-revm-primitives = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
-    "std",
-], default-features = false }
+revm-primitives = { path = "../telos-revm/crates/primitives", features = ["std"], default-features = false}
+#revm-primitives = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
+#    "std",
+#], default-features = false }
 
 # eth
 alloy-chains = "0.1.18"
@@ -568,5 +571,6 @@ test-fuzz = "5"
 # telos
 reth-node-telos = { path = "crates/telos/node" }
 reth-telos-rpc = { path = "crates/telos/rpc" }
+reth-telos-primitives-traits = { path = "crates/telos/primitives-traits" }
 reth-telos-rpc-engine-api = { path = "crates/telos/rpc-engine-api" }
 antelope-client = { git = "https://github.com/telosnetwork/antelope-rs", branch = "finish_table_rows_params" }

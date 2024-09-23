@@ -66,6 +66,8 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
+        #[cfg(feature = "telos")]
+        telos_block_extension: Default::default(),
     };
 
     Ok(Block {

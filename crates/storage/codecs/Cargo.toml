@@ -51,3 +51,6 @@ alloy = [
     "dep:alloy-trie",
     "dep:serde"
 ]
+telos = [
+    "reth-codecs-derive/telos",
+]

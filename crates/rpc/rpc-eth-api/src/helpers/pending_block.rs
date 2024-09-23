@@ -453,6 +453,8 @@ pub trait LoadPendingBlock: EthApiTypes {
             extra_data: Default::default(),
             parent_beacon_block_root,
             requests_root,
+            #[cfg(feature = "telos")]
+            telos_block_extension: Default::default(),
         };
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>

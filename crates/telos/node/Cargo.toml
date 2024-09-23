@@ -58,6 +58,7 @@ telos = [
     "reth-transaction-pool/telos",
     "reth-primitives/telos",
     "reth-stages/telos",
+    "reth-ethereum-engine-primitives/telos",
     "reth/telos",
 ]
 
