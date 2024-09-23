@@ -107,13 +107,13 @@ impl ReceiptsLogPruneConfig {
 #[cfg(test)]
 mod tests {
     use crate::{PruneCheckpoint, PruneMode, PruneSegment};
-    use reth_codecs::{test_bitflag_unused_bits, test_utils::UnusedBits};
+    use reth_codecs::{validate_bitflag_backwards_compat, test_utils::UnusedBits};
 
     #[test]
-    fn test_bitflag_unused_bits() {
-        test_bitflag_unused_bits!(PruneMode, UnusedBits::Zero);
-        test_bitflag_unused_bits!(PruneSegment, UnusedBits::Zero);
+    fn validate_bitflag_backwards_compat() {
+        validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
 
-        test_bitflag_unused_bits!(PruneCheckpoint, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
     }
 }

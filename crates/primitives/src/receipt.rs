@@ -518,11 +518,11 @@ mod tests {
     use super::*;
     use crate::hex_literal::hex;
     use alloy_primitives::{address, b256, bytes};
-    use reth_codecs::{test_bitflag_unused_bits, test_utils::UnusedBits};
+    use reth_codecs::{validate_bitflag_backwards_compat, test_utils::UnusedBits};
 
     #[test]
-    fn test_bitflag_unused_bits() {
-        test_bitflag_unused_bits!(Receipt, UnusedBits::NotZero);
+    fn validate_bitflag_backwards_compat() {
+        validate_bitflag_backwards_compat!(Receipt, UnusedBits::NotZero);
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481

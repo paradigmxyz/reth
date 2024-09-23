@@ -28,8 +28,8 @@
 ///    }
 ///    
 ///    // Change tests
-///    test_bitflag_unused_bits!(T, UnusedBits::Zero);
-///    test_bitflag_unused_bits!(TExtension, UnusedBits::NotZero);
+///    validate_bitflag_backwards_compat!(T, UnusedBits::Zero);
+///    validate_bitflag_backwards_compat!(TExtension, UnusedBits::NotZero);
 /// }   
 /// ```
 ///
@@ -37,7 +37,7 @@
 /// If it becomes `NotZero`, it would break backwards compatibility, so there is not an action item,
 /// and should be handled with care in a case by case scenario.
 #[macro_export]
-macro_rules! test_bitflag_unused_bits {
+macro_rules! validate_bitflag_backwards_compat {
     ($type:ty, $expected_unused_bits:expr) => {
         let actual_unused_bits = <$type>::bitflag_unused_bits();
 
@@ -64,7 +64,7 @@ macro_rules! test_bitflag_unused_bits {
 
 /// Whether there are zero or more unused bits on `Compact` bitflag struct.
 ///
-/// To be used with [`test_bitflag_unused_bits`].
+/// To be used with [`validate_bitflag_backwards_compat`].
 #[derive(Debug)]
 pub enum UnusedBits {
     /// Zero

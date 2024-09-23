@@ -79,11 +79,11 @@ pub struct StoredBlockWithdrawals {
 #[cfg(test)]
 mod tests {
     use crate::StoredBlockBodyIndices;
-    use reth_codecs::{test_bitflag_unused_bits, test_utils::UnusedBits};
+    use reth_codecs::{validate_bitflag_backwards_compat, test_utils::UnusedBits};
 
     #[test]
-    fn test_bitflag_unused_bits() {
-        test_bitflag_unused_bits!(StoredBlockBodyIndices, UnusedBits::Zero);
+    fn validate_bitflag_backwards_compat() {
+        validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);
     }
 
     #[test]

@@ -22,22 +22,22 @@ mod tests {
             },
             withdrawal::Withdrawal,
         },
-        test_bitflag_unused_bits,
+        validate_bitflag_backwards_compat,
         test_utils::UnusedBits,
     };
 
     #[test]
-    fn test_bitflag_unused_bits() {
-        test_bitflag_unused_bits!(Header, UnusedBits::Zero);
-        test_bitflag_unused_bits!(TxEip2930, UnusedBits::Zero);
+    fn validate_bitflag_backwards_compat() {
+        validate_bitflag_backwards_compat!(Header, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(TxEip2930, UnusedBits::Zero);
 
-        test_bitflag_unused_bits!(Authorization, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(GenesisAccountRef<'_>, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(GenesisAccount, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(TxEip1559, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(TxEip4844, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(TxEip7702, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(TxLegacy, UnusedBits::NotZero);
-        test_bitflag_unused_bits!(Withdrawal, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(Authorization, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(GenesisAccountRef<'_>, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(GenesisAccount, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(TxEip1559, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(TxEip4844, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(TxEip7702, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(TxLegacy, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(Withdrawal, UnusedBits::NotZero);
     }
 }
