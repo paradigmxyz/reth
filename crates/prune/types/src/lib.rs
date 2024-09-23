@@ -103,3 +103,17 @@ impl ReceiptsLogPruneConfig {
         Ok(lowest.map(|lowest| lowest.max(pruned_block)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{PruneCheckpoint, PruneMode, PruneSegment};
+    use reth_codecs::{test_bitflag_unused_bits, test_utils::UnusedBits};
+
+    #[test]
+    fn test_bitflag_unused_bits() {
+        test_bitflag_unused_bits!(PruneMode, UnusedBits::Zero);
+        test_bitflag_unused_bits!(PruneSegment, UnusedBits::Zero);
+
+        test_bitflag_unused_bits!(PruneCheckpoint, UnusedBits::NotZero);
+    }
+}

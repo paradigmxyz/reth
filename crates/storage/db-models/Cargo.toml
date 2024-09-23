@@ -33,7 +33,7 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest-arbitrary-interop.workspace = true

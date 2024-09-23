@@ -22,6 +22,7 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
 arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true

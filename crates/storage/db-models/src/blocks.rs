@@ -79,6 +79,12 @@ pub struct StoredBlockWithdrawals {
 #[cfg(test)]
 mod tests {
     use crate::StoredBlockBodyIndices;
+    use reth_codecs::{test_bitflag_unused_bits, test_utils::UnusedBits};
+
+    #[test]
+    fn test_bitflag_unused_bits() {
+        test_bitflag_unused_bits!(StoredBlockBodyIndices, UnusedBits::Zero);
+    }
 
     #[test]
     fn block_indices() {

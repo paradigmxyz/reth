@@ -68,7 +68,7 @@ proptest = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 reth-chainspec.workspace = true
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 
 assert_matches.workspace = true

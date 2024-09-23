@@ -21,6 +21,7 @@ bytes.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true

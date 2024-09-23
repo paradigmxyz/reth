@@ -22,7 +22,7 @@ pub enum UnusedBits {
 }
 
 impl UnusedBits {
-    pub fn not_zero(&self) -> bool {
+    pub const fn not_zero(&self) -> bool {
         matches!(self, Self::NotZero)
     }
 }

@@ -386,6 +386,18 @@ stage_unit_checkpoints!(
 mod tests {
     use super::*;
     use rand::Rng;
+    use reth_codecs::{test_bitflag_unused_bits, test_utils::UnusedBits};
+
+    #[test]
+    fn test_bitflag_unused_bits() {
+        test_bitflag_unused_bits!(EntitiesCheckpoint, UnusedBits::Zero);
+        test_bitflag_unused_bits!(CheckpointBlockRange, UnusedBits::Zero);
+        test_bitflag_unused_bits!(StageUnitCheckpoint, UnusedBits::Zero);
+
+        test_bitflag_unused_bits!(AccountHashingCheckpoint, UnusedBits::NotZero);
+        test_bitflag_unused_bits!(StorageHashingCheckpoint, UnusedBits::NotZero);
+        test_bitflag_unused_bits!(StageCheckpoint, UnusedBits::NotZero);
+    }
 
     #[test]
     fn merkle_checkpoint_roundtrip() {
