@@ -7457,6 +7457,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-tracing",
  "reth-trie",
+ "serde",
  "serde_json",
 ]
 
