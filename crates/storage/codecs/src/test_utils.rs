@@ -32,7 +32,7 @@
 ///    validate_bitflag_backwards_compat!(TExtension, UnusedBits::NotZero);
 /// }   
 /// ```
-///
+/// 
 /// ### 2. `Zero` -> `NotZero`
 /// If it becomes `NotZero`, it would break backwards compatibility, so there is not an action item,
 /// and should be handled with care in a case by case scenario.

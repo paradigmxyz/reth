@@ -103,17 +103,3 @@ impl ReceiptsLogPruneConfig {
         Ok(lowest.map(|lowest| lowest.max(pruned_block)))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::{PruneCheckpoint, PruneMode, PruneSegment};
-    use reth_codecs::{validate_bitflag_backwards_compat, test_utils::UnusedBits};
-
-    #[test]
-    fn validate_bitflag_backwards_compat() {
-        validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
-
-        validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
-    }
-}

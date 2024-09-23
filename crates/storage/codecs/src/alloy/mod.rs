@@ -14,7 +14,7 @@ mod tests {
     use crate::{
         alloy::{
             authorization_list::Authorization,
-            genesis_account::{GenesisAccount, GenesisAccountRef},
+            genesis_account::{GenesisAccount, GenesisAccountRef, StorageEntries, StorageEntry},
             header::Header,
             transaction::{
                 eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
@@ -22,14 +22,16 @@ mod tests {
             },
             withdrawal::Withdrawal,
         },
-        validate_bitflag_backwards_compat,
         test_utils::UnusedBits,
+        validate_bitflag_backwards_compat,
     };
 
     #[test]
     fn validate_bitflag_backwards_compat() {
         validate_bitflag_backwards_compat!(Header, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(TxEip2930, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(StorageEntries, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(StorageEntry, UnusedBits::Zero);
 
         validate_bitflag_backwards_compat!(Authorization, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(GenesisAccountRef<'_>, UnusedBits::NotZero);

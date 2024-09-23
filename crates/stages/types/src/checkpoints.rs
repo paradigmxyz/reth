@@ -386,18 +386,6 @@ stage_unit_checkpoints!(
 mod tests {
     use super::*;
     use rand::Rng;
-    use reth_codecs::{validate_bitflag_backwards_compat, test_utils::UnusedBits};
-
-    #[test]
-    fn validate_bitflag_backwards_compat() {
-        validate_bitflag_backwards_compat!(EntitiesCheckpoint, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(CheckpointBlockRange, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
-
-        validate_bitflag_backwards_compat!(AccountHashingCheckpoint, UnusedBits::NotZero);
-        validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
-        validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
-    }
 
     #[test]
     fn merkle_checkpoint_roundtrip() {

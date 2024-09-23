@@ -42,14 +42,14 @@ pub(crate) struct GenesisAccount {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct StorageEntries {
+pub(crate) struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct StorageEntry {
+pub(crate) struct StorageEntry {
     key: B256,
     value: B256,
 }

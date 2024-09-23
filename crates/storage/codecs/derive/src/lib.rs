@@ -30,8 +30,8 @@ mod compact;
 /// encoding, such as `bool`, `Option<T>`, or other small types.
 ///
 /// ### Bit Sizes for Fields:
-/// The amount of bits used to store a field size is determined by the field's type. For specific types,
-/// a fixed number of bits is allocated (from `fn get_bit_size`):
+/// The amount of bits used to store a field size is determined by the field's type. For specific
+/// types, a fixed number of bits is allocated (from `fn get_bit_size`):
 /// - `bool`, `Option<T>`, `TransactionKind`, `Signature`: **1 bit**
 /// - `TxType`: **2 bits**
 /// - `u64`, `BlockNumber`, `TxNumber`, `ChainId`, `NumTransactions`: **4 bits**
