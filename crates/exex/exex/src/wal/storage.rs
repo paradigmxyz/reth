@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
-    ops::{Bound, ControlFlow, RangeBounds},
+    ops::{Bound, ControlFlow, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
 };
 
@@ -22,8 +22,8 @@ use reth_tracing::tracing::debug;
 pub(super) struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
-    min_id: Option<u64>,
-    max_id: Option<u64>,
+    pub(super) min_id: Option<u64>,
+    pub(super) max_id: Option<u64>,
 }
 
 impl Storage {
@@ -59,68 +59,8 @@ impl Storage {
             .ok_or_eyre(format!("failed to parse file name: {filename}"))
     }
 
-    pub(super) const fn max_id(&self) -> Option<u64> {
-        self.max_id
-    }
-
-    /// Truncates the underlying file from the given byte offset (inclusive) to the end of the file.
-    ///
-    /// 1. Creates a new file and copies all notifications starting from the offset (inclusive) to
-    ///    the end of the original file.
-    /// 2. Renames the new file to the original file.
-    ///
-    /// # Returns
-    ///
-    /// The old and new underlying file sizes in bytes
-    pub(super) fn truncate_from_file_id(&mut self, from_id: u64) -> eyre::Result<usize> {
-        let mut removed_files = 0;
-        let to_id = self.max_id.unwrap_or(u64::MAX);
-        for id in from_id..=to_id {
-            let file_path = self.file_path(id);
-            match reth_fs_util::remove_file(&file_path) {
-                Ok(()) => removed_files += 1,
-                Err(reth_fs_util::FsPathError::RemoveFile { source, .. })
-                    if source.kind() == std::io::ErrorKind::NotFound && self.max_id.is_none() =>
-                {
-                    break
-                }
-                Err(err) => return Err(err.into()),
-            }
-        }
-
-        self.min_id = Some(from_id);
-
-        Ok(removed_files)
-    }
-
-    /// Truncates the underlying file to the given byte offset (exclusive).
-    ///
-    /// # Returns
-    ///
-    /// Notifications that were removed.
-    pub(super) fn truncate_to_file_id(
-        &mut self,
-        to_id: u64,
-    ) -> eyre::Result<Vec<ExExNotification>> {
-        let removed_notifications =
-            self.iter_notifications(to_id..).collect::<eyre::Result<Vec<_>>>()?;
-
-        for (id, _) in &removed_notifications {
-            reth_fs_util::remove_file(self.file_path(*id))?;
-        }
-
-        self.max_id = to_id.checked_sub(1);
-
-        Ok(removed_notifications.into_iter().map(|(_, notification)| notification).collect())
-    }
-
-    pub(super) fn iter_notifications(
-        &self,
-        range: impl RangeBounds<u64>,
-    ) -> Box<dyn Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_> {
-        let Some((min_id, max_id)) = self.min_id.zip(self.max_id) else {
-            return Box::new(std::iter::empty())
-        };
+    fn adjust_file_range(&self, range: impl RangeBounds<u64>) -> Option<RangeInclusive<u64>> {
+        let (min_id, max_id) = self.min_id.zip(self.max_id)?;
 
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
@@ -133,9 +73,51 @@ impl Storage {
             Bound::Unbounded => max_id,
         };
 
+        Some(start..=end)
+    }
+
+    pub(super) fn remove_notifications(
+        &mut self,
+        selector: RemoveNotificationsSelector,
+    ) -> eyre::Result<Vec<ExExNotification>> {
+        let range = match selector {
+            RemoveNotificationsSelector::FromFileId(from_file_id) => {
+                self.adjust_file_range(from_file_id..)
+            }
+            RemoveNotificationsSelector::ToFileId(to_file_id) => {
+                self.adjust_file_range(..to_file_id)
+            }
+        };
+        let Some(range) = range else { return Ok(Vec::new()) };
+
+        let removed_notifications =
+            self.iter_notifications(range).collect::<eyre::Result<Vec<_>>>()?;
+
+        for (id, _) in &removed_notifications {
+            debug!(?id, "Removing notification from the storage");
+            reth_fs_util::remove_file(self.file_path(*id))?;
+        }
+
+        match selector {
+            RemoveNotificationsSelector::FromFileId(from_file_id) => {
+                self.max_id = from_file_id.checked_sub(1)
+            }
+            RemoveNotificationsSelector::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
+        };
+
+        Ok(removed_notifications.into_iter().map(|(_, notification)| notification).collect())
+    }
+
+    pub(super) fn iter_notifications(
+        &self,
+        range: impl RangeBounds<u64>,
+    ) -> Box<dyn Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_> {
+        let Some(range) = self.adjust_file_range(range) else {
+            return Box::new(std::iter::empty())
+        };
+
         Box::new(
-            (start..=end)
-                .map(move |id| self.read_notification(id).map(|notification| (id, notification))),
+            range.map(move |id| self.read_notification(id).map(|notification| (id, notification))),
         )
     }
 
@@ -165,6 +147,11 @@ impl Storage {
 
         Ok(file_id)
     }
+}
+
+pub(super) enum RemoveNotificationsSelector {
+    FromFileId(u64),
+    ToFileId(u64),
 }
 
 fn write_notification(w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {

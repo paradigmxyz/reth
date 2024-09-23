@@ -46,19 +46,19 @@ impl BlockCache {
         let first_entry = self.0.first_entry()?;
         let key = *first_entry.key();
         let blocks = first_entry.into_mut();
-        let last_block = blocks.pop_back().unwrap();
+        let first_block = blocks.pop_front().unwrap();
         if blocks.is_empty() {
             self.0.remove(&key);
         }
 
-        Some((key, last_block))
+        Some((key, first_block))
     }
 
     pub(super) fn pop_back(&mut self) -> Option<(u64, CachedBlock)> {
         let last_entry = self.0.last_entry()?;
         let key = *last_entry.key();
         let blocks = last_entry.into_mut();
-        let last_block = blocks.pop_front().unwrap();
+        let last_block = blocks.pop_back().unwrap();
         if blocks.is_empty() {
             self.0.remove(&key);
         }
