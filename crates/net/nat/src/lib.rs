@@ -191,29 +191,30 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
-        NatResolver::NetIf => match resolve_net_if_ip(DEFAULT_NET_IF_NAME).inspect_err(|err| {
-            debug!(target: "net::nat",
-                 %err,
-                "Failed to resolve network interface IP"
-            );
-        }) {
-            Ok(ip) => Some(ip),
-            Err(_) => None,
-        },
+        NatResolver::NetIf => resolve_net_if_ip(DEFAULT_NET_IF_NAME)
+            .inspect_err(|err| {
+                debug!(target: "net::nat",
+                     %err,
+                    "Failed to resolve network interface IP"
+                );
+            })
+            .ok(),
         NatResolver::None => None,
     }
 }
 
 async fn resolve_external_ip() -> Option<IpAddr> {
     let futures = EXTERNAL_IP_APIS.iter().copied().map(resolve_external_ip_url_res).map(Box::pin);
-    match futures_util::future::select_ok(futures).await.inspect_err(|_| {
-        debug!(target: "net::nat",
+    futures_util::future::select_ok(futures)
+        .await
+        .inspect_err(|err| {
+            debug!(target: "net::nat",
+            ?err,
                 external_ip_apis=?EXTERNAL_IP_APIS,
                 "Failed to resolve external IP from any API");
-    }) {
-        Ok((ip, _)) => Some(ip),
-        Err(_) => None,
-    }
+        })
+        .ok()
+        .map(|(ip, _)| ip)
 }
 
 async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
