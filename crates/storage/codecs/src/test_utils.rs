@@ -15,8 +15,8 @@
 ///
 /// **Goal:**
 ///
-/// --
-///    ```rust
+///    ```rust,ignore
+/// {
 ///    struct T {
 ///        // ... other fields
 ///        ext: Option<TExtension>
@@ -30,8 +30,8 @@
 ///    // Change tests
 ///    test_bitflag_unused_bits!(T, UnusedBits::Zero);
 ///    test_bitflag_unused_bits!(TExtension, UnusedBits::NotZero);
-///    ```
-/// --
+/// }   
+/// ```
 ///
 /// ### 2. `Zero` -> `NotZero`
 /// If it becomes `NotZero`, it would break backwards compatibility, so there is not an action item,
