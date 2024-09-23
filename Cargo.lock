@@ -9023,6 +9023,7 @@ dependencies = [
  "reth-primitives-traits",
  "revm-primitives",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
