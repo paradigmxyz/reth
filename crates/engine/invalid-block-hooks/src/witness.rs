@@ -16,6 +16,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
+    state_change::post_block_balance_increments,
     DatabaseCommit, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
@@ -113,6 +114,17 @@ where
         }
 
         drop(evm);
+
+        // use U256::MAX here for difficulty, because fetching it is annoying
+        // NOTE: This is not mut because we are not doing the DAO irregular state change here
+        let balance_increments = post_block_balance_increments(
+            self.provider.chain_spec().as_ref(),
+            &block.block.clone().unseal(),
+            U256::MAX,
+        );
+
+        // increment balances
+        db.increment_balances(balance_increments)?;
 
         // Merge all state transitions
         db.merge_transitions(BundleRetention::Reverts);
