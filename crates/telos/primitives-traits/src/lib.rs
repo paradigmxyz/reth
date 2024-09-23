@@ -1,4 +1,3 @@
-use alloy_primitives::private::proptest::collection::vec;
 use alloy_primitives::U256;
 use arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
