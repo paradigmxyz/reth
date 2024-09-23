@@ -328,7 +328,6 @@ impl TreeState {
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
         // that the only blocks removed, are canonical blocks less than the upper bound
-        // finalized_num.take_if(|finalized| *finalized > upper_bound);
         let finalized_num_hash = finalized_num_hash.map(|mut finalized| {
             if upper_bound.number < finalized.number {
                 finalized = upper_bound;
