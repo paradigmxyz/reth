@@ -398,28 +398,14 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_flat_call_config(&flat_call_config)
                         );
-
-                        // TODO: check if this is the right way to pull out tx_hash
-                        let tx_hash = _transaction_context.and_then(|ctx| ctx.tx_hash).unwrap_or_default();
-
-                        let res = self
-                            .inner
-                            .eth_api().spawn_trace_transaction_in_block_with_inspector(
-                            tx_hash,
-                            inspector,
-                            move |tx_info, inspector, _, _| {
-                                let traces =
-                                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                                Ok(traces)
-                            },
-                        ).await?.ok_or_else(|| EthApiError::TransactionNotFound)?;
-
+                        
                         // Now `res` is the unwrapped value, not an Option
+                        let res = None;
 
                         // Transform the collected data into a FlatCallFrame
                         let frame = FlatCallFrame::from(res);
 
-                        return Ok((frame.into(), Default::default()))
+                        return Ok(frame)
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -713,7 +699,7 @@ where
     /// Note: this does not apply any state overrides if they're configured in the `opts`.
     ///
     /// Caution: this is blocking and should be performed on a blocking task.
-    fn trace_transaction(
+    async fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
@@ -785,9 +771,33 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+                        
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config)
+                        );
+
+                        // TODO: check if this is the right way to pull out tx_hash
+                        let tx_hash = _transaction_context.and_then(|ctx| ctx.tx_hash).unwrap_or_default();
+
+                        let res = self.eth_api().spawn_trace_transaction_in_block_with_inspector(
+                            tx_hash,
+                            inspector,
+                            move |tx_info, inspector, _, _| {
+                                let traces =
+                                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                                Ok(traces)
+                            },
+                        ).await?.ok_or_else(|| EthApiError::TransactionNotFound)?;
+
+                        // Now `res` is the unwrapped value, not an Option
+
+                        // Transform the collected data into a FlatCallFrame
+                        let frame = FlatCallFrame::from(res);
+
+                        return Ok((frame.into(), Default::default()))
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
