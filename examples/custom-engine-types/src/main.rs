@@ -23,7 +23,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use alloy_genesis::Genesis;
-use alloy_rpc_types::Withdrawal;
+use alloy_rpc_types::{
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
+    },
+    Withdrawal,
+};
 use reth::{
     api::PayloadTypes,
     builder::{
@@ -57,13 +63,6 @@ use reth_payload_builder::{
     PayloadBuilderService,
 };
 use reth_primitives::{Address, Withdrawals, B256};
-use reth_rpc_types::{
-    engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
-    },
-    ExecutionPayloadV1,
-};
 use reth_tracing::{RethTracer, Tracer};
 
 /// A custom payload attributes type.
