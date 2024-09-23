@@ -275,6 +275,7 @@ where
             Box::new(ctx.task_executor().clone()),
             client,
             EngineCapabilities::default(),
+            ctx.components().engine_validator().clone(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
