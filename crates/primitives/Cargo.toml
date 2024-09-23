@@ -116,7 +116,7 @@ optimism = [
     "reth-codecs?/optimism",
     "dep:reth-optimism-chainspec",
     "dep:op-alloy-consensus",
-    "reth-optimism-forks",
+    "dep:reth-optimism-forks",
 ]
 alloy-compat = [
     "dep:alloy-rpc-types",
