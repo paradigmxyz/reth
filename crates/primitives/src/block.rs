@@ -115,8 +115,8 @@ mod block_rlp {
 
     #[derive(RlpDecodable)]
     #[rlp(trailing)]
-    struct Helper {
-        header: Header,
+    struct Helper<H> {
+        header: H,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
         withdrawals: Option<Withdrawals>,
@@ -125,18 +125,34 @@ mod block_rlp {
 
     #[derive(RlpEncodable)]
     #[rlp(trailing)]
-    struct HelperRef<'a> {
-        header: &'a Header,
+    struct HelperRef<'a, H> {
+        header: &'a H,
         transactions: &'a Vec<TransactionSigned>,
         ommers: &'a Vec<Header>,
         withdrawals: Option<&'a Withdrawals>,
         requests: Option<&'a Requests>,
     }
 
-    impl<'a> From<&'a Block> for HelperRef<'a> {
+    impl<'a> From<&'a Block> for HelperRef<'a, Header> {
         fn from(block: &'a Block) -> Self {
             let Block { header, body: BlockBody { transactions, ommers, withdrawals, requests } } =
                 block;
+            Self {
+                header,
+                transactions,
+                ommers,
+                withdrawals: withdrawals.as_ref(),
+                requests: requests.as_ref(),
+            }
+        }
+    }
+
+    impl<'a> From<&'a SealedBlock> for HelperRef<'a, SealedHeader> {
+        fn from(block: &'a SealedBlock) -> Self {
+            let SealedBlock {
+                header,
+                body: BlockBody { transactions, ommers, withdrawals, requests },
+            } = block;
             Self {
                 header,
                 transactions,
@@ -154,14 +170,33 @@ mod block_rlp {
         }
     }
 
+    impl Decodable for SealedBlock {
+        fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+            let Helper { header, transactions, ommers, withdrawals, requests } = Helper::decode(b)?;
+            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals, requests } })
+        }
+    }
+
     impl Encodable for Block {
         fn length(&self) -> usize {
-            let helper: HelperRef<'_> = self.into();
+            let helper: HelperRef<'_, _> = self.into();
             helper.length()
         }
 
         fn encode(&self, out: &mut dyn bytes::BufMut) {
-            let helper: HelperRef<'_> = self.into();
+            let helper: HelperRef<'_, _> = self.into();
+            helper.encode(out)
+        }
+    }
+
+    impl Encodable for SealedBlock {
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
+        }
+
+        fn encode(&self, out: &mut dyn bytes::BufMut) {
+            let helper: HelperRef<'_, _> = self.into();
             helper.encode(out)
         }
     }
@@ -277,20 +312,7 @@ impl BlockWithSenders {
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    Deref,
-    DerefMut,
-    RlpEncodable,
-    RlpDecodable,
-)]
-#[rlp(trailing)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlock {
     /// Locked block header.
     #[deref]
