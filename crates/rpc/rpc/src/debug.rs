@@ -699,7 +699,7 @@ where
     /// Note: this does not apply any state overrides if they're configured in the `opts`.
     ///
     /// Caution: this is blocking and should be performed on a blocking task.
-    async fn trace_transaction(
+    fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
