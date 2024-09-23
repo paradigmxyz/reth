@@ -11,6 +11,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
 
@@ -128,9 +129,16 @@ where
                 input.nodes.extend_ref(&this.trie_updates);
                 input.state.extend_ref(&this.state);
                 input.prefix_sets.extend(std::mem::take(&mut this.prefix_sets));
-                this.pending_state_root = Some(Box::pin(
-                    AsyncStateRoot::new(view, task_pool, input).incremental_root_with_updates(),
-                ));
+                let (tx, rx) = oneshot::channel();
+                rayon::spawn(|| {
+                    let result = futures::executor::block_on(async move {
+                        AsyncStateRoot::new(view, task_pool, input)
+                            .incremental_root_with_updates()
+                            .await
+                    });
+                    let _ = tx.send(result);
+                });
+                this.pending_state_root = Some(Box::pin(async move { rx.await.unwrap() }));
                 continue
             }
 
