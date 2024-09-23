@@ -398,12 +398,24 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_flat_call_config(&flat_call_config)
                         );
-                        
-                        // Now `res` is the unwrapped value, not an Option
-                        let res = None;
 
-                        // Transform the collected data into a FlatCallFrame
-                        let frame = FlatCallFrame::from(res);
+                        let frame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(
+                                call, 
+                                at, 
+                                overrides, 
+                                move |db, env| {
+                                    let (res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
+                                    let frame: FlatCallFrame = inspector
+                                        .with_transaction_gas_limit(env.tx.gas_limit)
+                                        .into_parity_builder()
+                                        .into_localized_transaction_traces(res)
+                                        .pop().ok_or(Eth::Error::from_eth_err)?;
+                                Ok(frame)
+                            })
+                            .await?;
 
                         return Ok(frame)
                     }
