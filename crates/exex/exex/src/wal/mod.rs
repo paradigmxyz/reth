@@ -143,7 +143,7 @@ impl Wal {
         // Remove notifications from the storage.
         let removed_notifications = self
             .storage
-            .remove_notifications(RemoveNotificationsRange::FromFileId(remove_from_file_id))?;
+            .take_notifications(RemoveNotificationsRange::FromFileId(remove_from_file_id))?;
         debug!(removed_notifications = ?removed_notifications.len(), "WAL was rolled back");
 
         Ok(Some((lowest_removed_block.expect("qed"), removed_notifications)))
@@ -208,8 +208,7 @@ impl Wal {
         // Remove notifications from the storage.
         let removed_notifications = self
             .storage
-            .remove_notifications(RemoveNotificationsRange::ToFileId(remove_to_file_id))?
-            .len();
+            .remove_notifications(RemoveNotificationsRange::ToFileId(remove_to_file_id))?;
         debug!(?removed_notifications, "WAL was finalized");
 
         Ok(())

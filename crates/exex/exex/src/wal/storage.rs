@@ -8,6 +8,7 @@ use std::{
 use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
 use reth_tracing::tracing::debug;
+use tracing::instrument;
 
 /// The underlying WAL storage backed by a directory of files.
 ///
@@ -71,8 +72,52 @@ impl Storage {
         Some(start..=end)
     }
 
+    /// Removes notification for the given file ID from the storage.
+    #[instrument(target = "exex::wal::storage", skip(self))]
+    fn remove_notification(&self, file_id: u64) {
+        match reth_fs_util::remove_file(self.file_path(file_id)) {
+            Ok(()) => debug!("Notification was removed from the storage"),
+            Err(err) => debug!(?err, "Failed to remove notification from the storage"),
+        }
+    }
+
     /// Removes notifications from the storage according to the given range.
+    ///
+    /// # Returns
+    ///
+    /// Number of removed notifications.
     pub(super) fn remove_notifications(
+        &mut self,
+        range: RemoveNotificationsRange,
+    ) -> eyre::Result<usize> {
+        let adjusted_range = match range {
+            RemoveNotificationsRange::FromFileId(from_file_id) => {
+                self.adjust_file_range(from_file_id..)
+            }
+            RemoveNotificationsRange::ToFileId(to_file_id) => self.adjust_file_range(..to_file_id),
+        };
+        let Some(adjusted_range) = adjusted_range else { return Ok(0) };
+
+        for id in adjusted_range.clone() {
+            self.remove_notification(id);
+        }
+
+        match range {
+            RemoveNotificationsRange::FromFileId(from_file_id) => {
+                self.max_id = from_file_id.checked_sub(1)
+            }
+            RemoveNotificationsRange::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
+        };
+
+        Ok(adjusted_range.count())
+    }
+
+    /// Removes notifications from the storage according to the given range.
+    ///
+    /// # Returns
+    ///
+    /// Notifications that were removed.
+    pub(super) fn take_notifications(
         &mut self,
         range: RemoveNotificationsRange,
     ) -> eyre::Result<Vec<ExExNotification>> {
@@ -84,12 +129,11 @@ impl Storage {
         };
         let Some(adjusted_range) = adjusted_range else { return Ok(Vec::new()) };
 
-        let removed_notifications =
+        let notifications =
             self.iter_notifications(adjusted_range).collect::<eyre::Result<Vec<_>>>()?;
 
-        for (id, _) in &removed_notifications {
-            debug!(?id, "Removing notification from the storage");
-            reth_fs_util::remove_file(self.file_path(*id))?;
+        for (id, _) in &notifications {
+            self.remove_notification(*id);
         }
 
         match range {
@@ -99,7 +143,7 @@ impl Storage {
             RemoveNotificationsRange::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
         };
 
-        Ok(removed_notifications.into_iter().map(|(_, notification)| notification).collect())
+        Ok(notifications.into_iter().map(|(_, notification)| notification).collect())
     }
 
     pub(super) fn iter_notifications(
