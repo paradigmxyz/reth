@@ -13,19 +13,7 @@
 mod eth;
 
 /// Alias for a peer identifier
-pub type PeerId = B512;
-
-use alloy_primitives::B512;
-
-// Ethereum specific serde types coming from alloy.
-pub use alloy_serde::*;
-
-// re-export admin
-pub use alloy_rpc_types_admin as admin;
-
-// re-export beacon
-#[cfg(feature = "jsonrpsee-types")]
-pub use alloy_rpc_types_beacon as beacon;
+pub type PeerId = alloy_primitives::B512;
 
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
@@ -38,9 +26,3 @@ pub use eth::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
 };
-
-/// Optimism specific rpc types.
-pub mod optimism {
-    pub use op_alloy_rpc_types::*;
-    pub use op_alloy_rpc_types_engine::*;
-}

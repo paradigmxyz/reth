@@ -1,3 +1,7 @@
+use op_alloy_rpc_types_engine::{
+    OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
+    OptimismPayloadAttributes,
+};
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
     payload::{
@@ -9,14 +13,7 @@ use reth_node_api::{
 };
 use reth_optimism_forks::OptimismHardfork;
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
-use reth_rpc_types::{
-    engine::ExecutionPayloadEnvelopeV2,
-    optimism::{
-        OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
-        OptimismPayloadAttributes,
-    },
-    ExecutionPayloadV1,
-};
+use reth_rpc_types::{engine::ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
