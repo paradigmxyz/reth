@@ -816,7 +816,7 @@ where
             + EthTransactions<
                 NetworkTypes: alloy_network::Network<
                     TransactionResponse = reth_rpc_types::WithOtherFields<
-                        reth_rpc_types::Transaction,
+                        alloy_rpc_types::Transaction,
                     >,
                 >,
             >,

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -30,7 +31,6 @@ use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_rpc_types::BlockNumberOrTag;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};

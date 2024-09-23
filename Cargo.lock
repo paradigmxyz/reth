@@ -2712,6 +2712,7 @@ name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-rpc-types",
  "eyre",
  "reth",
  "reth-basic-payload-builder",
@@ -2750,6 +2751,7 @@ dependencies = [
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-types",
  "clap",
  "futures-util",
  "reth",
@@ -2809,6 +2811,7 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-types",
  "eyre",
  "reth-chainspec",
  "reth-db",
@@ -2931,6 +2934,7 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-types-trace",
  "clap",
  "futures-util",
  "reth",
@@ -6643,6 +6647,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-provider",
+ "alloy-rpc-types",
  "auto_impl",
  "eyre",
  "futures",
@@ -7547,6 +7552,7 @@ dependencies = [
  "serde_with",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7719,6 +7725,7 @@ name = "reth-node-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "aquamarine",
  "eyre",
  "fdlimit",
@@ -7763,7 +7770,6 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
- "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "reth-tasks",
@@ -8104,6 +8110,8 @@ name = "reth-optimism-rpc"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-eth",
  "derive_more",
  "jsonrpsee-types",
  "op-alloy-consensus",
@@ -8125,7 +8133,6 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
- "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
@@ -8140,6 +8147,7 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
  "futures-util",
  "metrics",
@@ -8149,7 +8157,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "revm",
  "tokio",
  "tokio-stream",
@@ -8161,13 +8168,14 @@ name = "reth-payload-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "async-trait",
+ "op-alloy-rpc-types-engine",
  "pin-project",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
  "reth-primitives",
- "reth-rpc-types",
  "reth-transaction-pool",
  "serde",
  "thiserror",
@@ -8180,9 +8188,9 @@ dependencies = [
 name = "reth-payload-validator"
 version = "1.0.7"
 dependencies = [
+ "alloy-rpc-types",
  "reth-chainspec",
  "reth-primitives",
- "reth-rpc-types",
  "reth-rpc-types-compat",
 ]
 
@@ -8377,6 +8385,12 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
+ "alloy-rpc-types-debug",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-mev",
+ "alloy-rpc-types-trace",
+ "alloy-rpc-types-txpool",
  "async-trait",
  "derive_more",
  "futures",
@@ -8433,6 +8447,13 @@ dependencies = [
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-anvil",
+ "alloy-rpc-types-debug",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-mev",
+ "alloy-rpc-types-trace",
+ "alloy-rpc-types-txpool",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -8447,13 +8468,15 @@ name = "reth-rpc-api-testing-util"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
  "futures",
  "jsonrpsee",
  "jsonrpsee-http-client",
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-eth-api",
- "reth-rpc-types",
  "serde_json",
  "similar-asserts",
  "tokio",
@@ -8465,6 +8488,9 @@ version = "1.0.7"
 dependencies = [
  "alloy-network",
  "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
  "clap",
  "http",
  "jsonrpsee",
@@ -8551,6 +8577,9 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-mev",
  "async-trait",
  "auto_impl",
  "dyn-clone",
@@ -8587,6 +8616,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types",
+ "alloy-rpc-types-eth",
  "alloy-sol-types",
  "derive_more",
  "futures",
@@ -8658,13 +8688,8 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
- "alloy-rpc-types-anvil",
  "alloy-rpc-types-beacon",
- "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-mev",
- "alloy-rpc-types-trace",
- "alloy-rpc-types-txpool",
  "alloy-serde",
  "arbitrary",
  "jsonrpsee-types",

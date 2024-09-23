@@ -1,7 +1,7 @@
-use jsonrpsee::proc_macros::rpc;
-use reth_rpc_types::mev::{
+use alloy_rpc_types_mev::{
     SendBundleRequest, SendBundleResponse, SimBundleOverrides, SimBundleResponse,
 };
+use jsonrpsee::proc_macros::rpc;
 
 /// Mev rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "mev"))]

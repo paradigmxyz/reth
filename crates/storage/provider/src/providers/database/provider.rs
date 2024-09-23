@@ -2844,7 +2844,8 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
-        let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> = HashMap::new();
+        let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> =
+            HashMap::with_capacity(hashed_storages.len());
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);

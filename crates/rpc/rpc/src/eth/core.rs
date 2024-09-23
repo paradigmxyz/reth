@@ -374,6 +374,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{B256, U64};
+    use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
@@ -390,7 +391,6 @@ mod tests {
     use reth_rpc_server_types::constants::{
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
-    use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};

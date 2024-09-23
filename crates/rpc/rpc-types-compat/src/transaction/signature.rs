@@ -1,6 +1,6 @@
 use alloy_primitives::U256;
+use alloy_rpc_types::{Parity, Signature};
 use reth_primitives::{Signature as PrimitiveSignature, TxType};
-use reth_rpc_types::{Parity, Signature};
 
 /// Creates a new rpc signature from a legacy [primitive
 /// signature](reth_primitives::Signature), using the give chain id to compute the signature's
