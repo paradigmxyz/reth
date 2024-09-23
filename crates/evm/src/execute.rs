@@ -32,10 +32,7 @@ pub trait Executor<DB> {
     /// # Returns
     /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
-}
 
-/// An Executor that operates on the EVM
-pub trait EvmExecutor<DB>: Executor<DB> {
     /// Executes the EVM with the given input and accepts a witness closure that is invoked with the
     /// EVM state after execution.
     fn execute_with_state_witness<F>(
@@ -189,6 +186,17 @@ mod tests {
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
+        }
+
+        fn execute_with_state_witness<F>(
+            self,
+            _: Self::Input<'_>,
+            _: F,
+        ) -> Result<Self::Output, Self::Error>
+        where
+            F: FnMut(&State<DB>),
+        {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }

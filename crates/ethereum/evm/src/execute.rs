@@ -11,7 +11,7 @@ use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, BlockValidationError, EvmExecutor, Executor, ProviderError,
+        BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::{
         apply_beacon_root_contract_call, apply_blockhashes_contract_call,
@@ -374,17 +374,11 @@ where
 
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
-}
 
-impl<EvmConfig, DB> EvmExecutor<DB> for EthBlockExecutor<EvmConfig, DB>
-where
-    EvmConfig: ConfigureEvm<Header = Header>,
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
     fn execute_with_state_witness<F>(
         mut self,
         input: Self::Input<'_>,
-        mut witness: F,
+        witness: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
@@ -398,60 +392,7 @@ where
         witness(&self.state);
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
-    // let BlockExecutionInput { block, total_difficulty } = input;
-    // let EthExecuteOutput { receipts, requests, gas_used } =
-    //     self.executor.execute_without_verification(block, total_difficulty)?;
-    //
-    // // NOTE: we need to merge keep the reverts for the bundle retention
-    // self.executor.state.merge_transitions(BundleRetention::Reverts);
-    //
-    // // now, ensure each account from the state is included in the bundle state
-    // let mut bundle_state = self.executor.state.take_bundle();
-    // for (address, account) in self.executor.state.cache.accounts {
-    //     // convert all slots, insert all slots
-    //     let account_info = account.account_info();
-    //     let account_storage = account.account.map(|a| a.storage).unwrap_or_default();
-    //
-    //     match bundle_state.state.entry(address) {
-    //         Entry::Vacant(entry) => {
-    //             // we have to add the entire account here
-    //             let extracted_storage = account_storage
-    //                 .into_iter()
-    //                 .map(|(k, v)| {
-    //                     (k, StorageSlot { previous_or_original_value: v, present_value: v })
-    //                 })
-    //                 .collect();
-    //
-    //             let bundle_account = BundleAccount {
-    //                 info: account_info.clone(),
-    //                 original_info: account_info,
-    //                 storage: extracted_storage,
-    //                 status: account.status,
-    //             };
-    //             entry.insert(bundle_account);
-    //         }
-    //         Entry::Occupied(mut entry) => {
-    //             // only add slots that are unchanged
-    //             let current_account = entry.get_mut();
-    //
-    //             // iterate over all storage slots, checking keys that are not in the bundle
-    //             // state
-    //             for (k, v) in account_storage {
-    //                 if let Entry::Vacant(storage_entry) = current_account.storage.entry(k) {
-    //                     storage_entry.insert(StorageSlot {
-    //                         previous_or_original_value: v,
-    //                         present_value: v,
-    //                     });
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    //
-    // Ok(BlockExecutionOutput { state: bundle_state, receipts, requests, gas_used })
-    // }
 }
-
 /// An executor for a batch of blocks.
 ///
 /// State changes are tracked until the executor is finalized.

@@ -8,7 +8,7 @@ use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, BlockValidationError, EvmExecutor, Executor, ProviderError,
+        BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
@@ -359,17 +359,11 @@ where
             gas_used,
         })
     }
-}
 
-impl<EvmConfig, DB> EvmExecutor<DB> for OpBlockExecutor<EvmConfig, DB>
-where
-    EvmConfig: ConfigureEvm<Header = Header>,
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
     fn execute_with_state_witness<F>(
         mut self,
         input: Self::Input<'_>,
-        mut witness: F,
+        witness: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
