@@ -209,12 +209,13 @@ impl ConfigureEvm for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ExecutionOutcome;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Genesis, Header, BASE_MAINNET, KECCAK_EMPTY,
+        Genesis, Header, BASE_MAINNET, KECCAK_EMPTY, SealedBlockWithSenders, Receipt, Receipts, TxType
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
