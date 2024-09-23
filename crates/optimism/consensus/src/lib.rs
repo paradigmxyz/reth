@@ -124,7 +124,7 @@ impl Consensus for OptimismBeaconConsensus {
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         // Check ommers hash
-        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
+        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
         if block.header.ommers_hash != ommers_hash {
             return Err(ConsensusError::BodyOmmersHashDiff(
                 GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),

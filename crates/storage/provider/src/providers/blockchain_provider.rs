@@ -1509,7 +1509,7 @@ mod tests {
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
-            .map(|block| block.body.iter())
+            .map(|block| block.body.transactions.iter())
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
@@ -1834,11 +1834,11 @@ mod tests {
         // First in memory block ommers should be found
         assert_eq!(
             provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
         assert_eq!(
             provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
 
         // A random hash should return None as the block number is not found
@@ -2787,7 +2787,7 @@ mod tests {
                         shainghai_timestamp
                     )?
                     .unwrap(),
-                block.withdrawals.unwrap(),
+                block.body.withdrawals.unwrap(),
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
@@ -2797,7 +2797,7 @@ mod tests {
 
         assert_eq!(
             Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.withdrawals.clone().unwrap().pop(),
+            canonical_block.body.withdrawals.clone().unwrap().pop(),
             "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
         );
 
@@ -2994,11 +2994,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
 
         let block_number = in_memory_block.number;
@@ -3006,11 +3006,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
 
         Ok(())
@@ -3030,8 +3030,8 @@ mod tests {
 
         for block in blocks {
             let block_number = block.number as usize;
-            for (txn_number, _) in block.body.iter().enumerate() {
-                let txn_hash = block.body.get(txn_number).unwrap().hash();
+            for (txn_number, _) in block.body.transactions.iter().enumerate() {
+                let txn_hash = block.body.transactions.get(txn_number).unwrap().hash();
                 let txn_id = provider.transaction_id(txn_hash)?.unwrap();
                 assert_eq!(
                     provider.receipt(txn_id)?.unwrap(),
@@ -3273,11 +3273,11 @@ mod tests {
 
         assert_eq!(
             provider.requests_by_block(database_block.number.into(), prague_timestamp,)?,
-            database_block.requests.clone()
+            database_block.body.requests.clone()
         );
         assert_eq!(
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
-            in_memory_block.requests.clone()
+            in_memory_block.body.requests.clone()
         );
 
         Ok(())
@@ -3904,7 +3904,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3918,7 +3918,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -3971,7 +3971,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -4014,8 +4014,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the in-memory blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], in_memory_blocks[0].body);
-        assert_eq!(result[1], in_memory_blocks[1].body);
+        assert_eq!(result[0], in_memory_blocks[0].body.transactions);
+        assert_eq!(result[1], in_memory_blocks[1].body.transactions);
 
         // Database
         // Define a block range entirely within database blocks
@@ -4027,8 +4027,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the database blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body);
-        assert_eq!(result[1], database_blocks[1].body);
+        assert_eq!(result[0], database_blocks[0].body.transactions);
+        assert_eq!(result[1], database_blocks[1].body.transactions);
 
         Ok(())
     }
@@ -4056,7 +4056,7 @@ mod tests {
         // Ensure the transactions match the expected transactions in the database
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], database_blocks[0].body.transactions[0].clone().into());
-        assert_eq!(result[1], database_blocks[0].body[1].clone().into());
+        assert_eq!(result[1], database_blocks[0].body.transactions[1].clone().into());
 
         // Define an empty range that should return no transactions
         let start_tx_num = u64::MAX;

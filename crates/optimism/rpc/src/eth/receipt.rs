@@ -300,7 +300,7 @@ impl OpReceiptBuilder {
 mod test {
     use alloy_primitives::hex;
     use reth_optimism_chainspec::OP_MAINNET;
-    use reth_primitives::Block;
+    use reth_primitives::{Block, BlockBody};
 
     use super::*;
 
@@ -349,7 +349,10 @@ mod test {
             TransactionSigned::decode_enveloped(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let block = Block { body: [tx_0, tx_1.clone()].to_vec(), ..Default::default() };
+        let block = Block {
+            body: BlockBody { transactions: [tx_0, tx_1.clone()].to_vec(), ..Default::default() },
+            ..Default::default()
+        };
 
         let l1_block_info =
             reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");

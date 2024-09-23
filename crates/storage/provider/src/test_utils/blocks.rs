@@ -1,15 +1,13 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
-use alloy_primitives::{
-    b256, hex_literal::hex, Address, BlockNumber, Bytes, Log, Parity, Sealable, TxKind, B256, U256,
-};
+use alloy_primitives::{Log, Parity, Sealable};
 use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
     alloy_primitives, b256, hex_literal::hex, Account, Address, BlockBody, BlockNumber, Bytes,
-    Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader, Signature,
-    Transaction, TransactionSigned, TxKind, TxLegacy, TxType, Withdrawal, Withdrawals, B256, U256,
+    Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, Signature, Transaction,
+    TransactionSigned, TxKind, TxLegacy, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{
@@ -161,10 +159,7 @@ pub fn genesis() -> SealedBlock {
             Header { number: 0, difficulty: U256::from(1), ..Default::default() },
             B256::ZERO,
         ),
-        body: vec![],
-        ommers: vec![],
-        withdrawals: Some(Withdrawals::default()),
-        requests: Some(Requests::default()),
+        body: Default::default(),
     }
 }
 
@@ -232,7 +227,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     );
 
     let mut block = TEST_BLOCK.clone();
-    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    block.body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
@@ -297,7 +292,7 @@ fn block2(
 
     let mut block = TEST_BLOCK.clone();
 
-    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    block.body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
@@ -364,7 +359,7 @@ fn block3(
     let state_root = bundle_state_root(&extended);
 
     let mut block = TEST_BLOCK.clone();
-    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    block.body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
@@ -457,7 +452,7 @@ fn block4(
     let state_root = bundle_state_root(&extended);
 
     let mut block = TEST_BLOCK.clone();
-    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    block.body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
@@ -545,7 +540,7 @@ fn block5(
     let state_root = bundle_state_root(&extended);
 
     let mut block = TEST_BLOCK.clone();
-    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    block.body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
