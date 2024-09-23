@@ -17,7 +17,7 @@ reth-codecs.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie = { workspace = true, features = ["serde"] }
+alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 revm-primitives.workspace = true
@@ -26,7 +26,7 @@ bytes.workspace = true
 derive_more.workspace = true
 serde.workspace = true
 itertools.workspace = true
-nybbles = { workspace = true, features = ["serde", "rlp"] }
+nybbles = { workspace = true, features = ["rlp"] }
 
 # `test-utils` feature
 hash-db = { version = "=0.15.2", optional = true }
@@ -45,4 +45,8 @@ test-utils = ["dep:plain_hasher", "dep:hash-db", "arbitrary"]
 arbitrary = [
     "alloy-trie/arbitrary",
     "dep:arbitrary",
+]
+serde = [
+    "alloy-trie/serde",
+    "nybbles/serde",
 ]

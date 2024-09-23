@@ -66,7 +66,7 @@ criterion.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "reth-trie-common/serde"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
 
 [[bench]]
