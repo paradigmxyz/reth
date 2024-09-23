@@ -12,8 +12,8 @@ use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     Transaction, TransactionInfo,
 };
+use alloy_serde::WithOtherFields;
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
-use reth_rpc_types::WithOtherFields;
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.

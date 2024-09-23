@@ -10,6 +10,7 @@ use alloy_rpc_types::{
     },
     FilteredParams, Header, Log, Transaction,
 };
+use alloy_serde::WithOtherFields;
 use futures::StreamExt;
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
@@ -20,7 +21,6 @@ use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, FullEthApiTypes, RpcTransaction};
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_rpc_types::WithOtherFields;
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};

@@ -3,13 +3,13 @@ use alloy_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
 use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
-use reth_rpc_types::JsonStorageKey;
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
