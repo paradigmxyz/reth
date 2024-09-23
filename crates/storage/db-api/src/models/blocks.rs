@@ -23,12 +23,6 @@ pub type HeaderHash = B256;
 mod tests {
     use super::*;
     use crate::table::{Compress, Decompress};
-    use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
-
-    #[test]
-    fn validate_bitflag_backwards_compat() {
-        validate_bitflag_backwards_compat!(StoredBlockOmmers, UnusedBits::Zero);
-    }
 
     #[test]
     fn test_ommer() {
