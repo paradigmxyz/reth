@@ -32,7 +32,6 @@ reth-tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
-alloy-eips.workspace = true
 
 ## async
 futures.workspace = true

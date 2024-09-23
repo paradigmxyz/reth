@@ -809,12 +809,11 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::BlockNumHash;
     use alloy_primitives::B256;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{Block, Header, SealedBlockWithSenders};
+    use reth_primitives::{Block, BlockNumHash, Header, SealedBlockWithSenders};
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
         BlockWriter, Chain,

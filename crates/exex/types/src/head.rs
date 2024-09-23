@@ -1,4 +1,4 @@
-use reth_primitives::BlockNumHash;
+use alloy_eips::BlockNumHash;
 
 /// A head of the ExEx. It determines the highest block committed to the internal ExEx state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
