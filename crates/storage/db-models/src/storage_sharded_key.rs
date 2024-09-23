@@ -1,10 +1,7 @@
 //! Storage sharded key
-use crate::{
-    table::{Decode, Encode},
-    DatabaseError,
-};
 use alloy_primitives::{Address, BlockNumber, B256};
 use derive_more::AsRef;
+use reth_codecs::{Decode, DecodeError, Encode};
 use serde::{Deserialize, Serialize};
 
 use super::ShardedKey;
@@ -61,13 +58,12 @@ impl Encode for StorageShardedKey {
 }
 
 impl Decode for StorageShardedKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
         let value = value.as_ref();
         let tx_num_index = value.len() - 8;
 
-        let highest_tx_number = u64::from_be_bytes(
-            value[tx_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
-        );
+        let highest_tx_number =
+            u64::from_be_bytes(value[tx_num_index..].try_into().map_err(|_| DecodeError)?);
         let address = Address::decode(&value[..20])?;
         let storage_key = B256::decode(&value[20..52])?;
 

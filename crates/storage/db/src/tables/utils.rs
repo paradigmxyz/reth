@@ -15,8 +15,8 @@ where
 {
     Ok((
         match kv.0 {
-            Cow::Borrowed(k) => Decode::decode(k)?,
-            Cow::Owned(k) => Decode::decode(k)?,
+            Cow::Borrowed(k) => Decode::decode(k).map_err(|_| DatabaseError::Decode)?,
+            Cow::Owned(k) => Decode::decode(k).map_err(|_| DatabaseError::Decode)?,
         },
         match kv.1 {
             Cow::Borrowed(v) => Decompress::decompress(v)?,
