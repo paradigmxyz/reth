@@ -363,7 +363,7 @@ where
     fn execute_with_state_witness<F>(
         mut self,
         input: Self::Input<'_>,
-        witness: F,
+        mut witness: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
