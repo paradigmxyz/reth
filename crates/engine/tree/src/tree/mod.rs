@@ -592,8 +592,7 @@ where
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
         let persistence_state = PersistenceState {
-            last_persisted_block_hash: header.hash(),
-            last_persisted_block_number: best_block_number,
+            last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
             remove_above_state: VecDeque::new(),
         };
@@ -1118,8 +1117,8 @@ where
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
-                debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block_number, "Removing blocks using persistence task");
-                if new_tip_num < self.persistence_state.last_persisted_block_number {
+                debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+                if new_tip_num < self.persistence_state.last_persisted_block.number {
                     debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
                     let (tx, rx) = oneshot::channel();
                     let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
@@ -1286,7 +1285,7 @@ where
 
         self.state.tree_state.remove_until(
             backfill_height,
-            self.persistence_state.last_persisted_block_hash,
+            self.persistence_state.last_persisted_block.hash,
             backfill_num_hash,
         );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
@@ -1424,7 +1423,7 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block_number;
+        let min_block = self.persistence_state.last_persisted_block.number;
         self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
             self.config.persistence_threshold()
     }
@@ -1435,7 +1434,7 @@ where
     fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
-        let last_persisted_number = self.persistence_state.last_persisted_block_number;
+        let last_persisted_number = self.persistence_state.last_persisted_block.number;
 
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
@@ -1470,10 +1469,10 @@ where
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)?;
+        self.remove_before(self.persistence_state.last_persisted_block.number, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-            number: self.persistence_state.last_persisted_block_number,
-            hash: self.persistence_state.last_persisted_block_hash,
+            number: self.persistence_state.last_persisted_block.number,
+            hash: self.persistence_state.last_persisted_block.hash,
         });
         Ok(())
     }
@@ -1903,7 +1902,7 @@ where
         let BlockNumHash { number: new_num, hash: new_hash } =
             new.first().map(|block| block.block.num_hash())?;
 
-        match new_num.cmp(&self.persistence_state.last_persisted_block_number) {
+        match new_num.cmp(&self.persistence_state.last_persisted_block.number) {
             Ordering::Greater => {
                 // new number is above the last persisted block so the reorg can be performed
                 // entirely in memory
@@ -1912,7 +1911,7 @@ where
             Ordering::Equal => {
                 // new number is the same, if the hash is the same then we should not need to remove
                 // any blocks
-                (self.persistence_state.last_persisted_block_hash != new_hash).then_some(new_num)
+                (self.persistence_state.last_persisted_block.hash != new_hash).then_some(new_num)
             }
             Ordering::Less => {
                 // this means we are below the last persisted block and must remove on disk blocks
@@ -2520,7 +2519,7 @@ where
 
         self.state.tree_state.remove_until(
             upper_bound,
-            self.persistence_state.last_persisted_block_hash,
+            self.persistence_state.last_persisted_block.hash,
             num,
         );
         Ok(())
@@ -2542,17 +2541,13 @@ pub enum AdvancePersistenceError {
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 pub struct PersistenceState {
-    /// Hash of the last block persisted.
+    /// Hash and number of the last block persisted.
     ///
-    /// A `None` value means no persistence task has been completed yet.
-    last_persisted_block_hash: B256,
+    /// This tracks the chain height that is persisted on disk
+    last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     rx: Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant)>,
-    /// The last persisted block number.
-    ///
-    /// This tracks the chain height that is persisted on disk
-    last_persisted_block_number: u64,
     /// The block above which blocks should be removed from disk, because there has been an on disk
     /// reorg.
     remove_above_state: VecDeque<u64>,
@@ -2573,7 +2568,7 @@ impl PersistenceState {
     /// Sets the `remove_above_state`, to the new tip number specified, only if it is less than the
     /// current `last_persisted_block_number`.
     fn schedule_removal(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, prev_remove_state=?self.remove_above_state, last_persisted_block_number=?self.last_persisted_block_number, "Scheduling removal");
+        debug!(target: "engine::tree", ?new_tip_num, prev_remove_state=?self.remove_above_state, last_persisted_block=?self.last_persisted_block, "Scheduling removal");
         self.remove_above_state.push_back(new_tip_num);
     }
 
@@ -2581,8 +2576,8 @@ impl PersistenceState {
     fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
         trace!(target: "engine::tree", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
         self.rx = None;
-        self.last_persisted_block_number = last_persisted_block_number;
-        self.last_persisted_block_hash = last_persisted_block_hash;
+        self.last_persisted_block =
+            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
     }
 }
 
@@ -3514,7 +3509,7 @@ mod tests {
         test_harness = test_harness.with_blocks(blocks.clone());
 
         let last_persisted_block_number = 3;
-        test_harness.tree.persistence_state.last_persisted_block_number =
+        test_harness.tree.persistence_state.last_persisted_block.number =
             last_persisted_block_number;
 
         let persistence_threshold = 4;
