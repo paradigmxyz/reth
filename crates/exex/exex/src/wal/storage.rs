@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Write},
-    ops::{Bound, RangeBounds, RangeInclusive},
+    ops::RangeInclusive,
     path::{Path, PathBuf},
 };
 
@@ -18,8 +18,6 @@ use tracing::instrument;
 pub(super) struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
-    pub(super) min_id: Option<u64>,
-    pub(super) max_id: Option<u64>,
 }
 
 impl Storage {
@@ -28,20 +26,7 @@ impl Storage {
     pub(super) fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
         reth_fs_util::create_dir_all(&path)?;
 
-        let (mut min_id, mut max_id) = (None, None);
-
-        for entry in reth_fs_util::read_dir(&path)? {
-            let entry = entry?;
-            let file_name = entry.file_name();
-            let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
-
-            min_id = min_id.map_or(Some(file_id), |min_id: u64| Some(min_id.min(file_id)));
-            max_id = max_id.map_or(Some(file_id), |max_id: u64| Some(max_id.max(file_id)));
-        }
-
-        debug!(?min_id, ?max_id, "Initialized WAL storage");
-
-        Ok(Self { path: path.as_ref().to_path_buf(), min_id, max_id })
+        Ok(Self { path: path.as_ref().to_path_buf() })
     }
 
     fn file_path(&self, id: u64) -> PathBuf {
@@ -55,23 +40,6 @@ impl Storage {
             .ok_or_eyre(format!("failed to parse file name: {filename}"))
     }
 
-    fn adjust_file_range(&self, range: impl RangeBounds<u64>) -> Option<RangeInclusive<u64>> {
-        let (min_id, max_id) = self.min_id.zip(self.max_id)?;
-
-        let start = match range.start_bound() {
-            Bound::Included(start) => *start,
-            Bound::Excluded(start) => *start + 1,
-            Bound::Unbounded => min_id,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(end) => *end,
-            Bound::Excluded(end) => *end - 1,
-            Bound::Unbounded => max_id,
-        };
-
-        Some(start..=end)
-    }
-
     /// Removes notification for the given file ID from the storage.
     #[instrument(target = "exex::wal::storage", skip(self))]
     fn remove_notification(&self, file_id: u64) {
@@ -81,35 +49,36 @@ impl Storage {
         }
     }
 
+    /// Returns the range of file IDs in the storage.
+    ///
+    /// If there are no files in the storage, returns `None`.
+    pub(super) fn files_range(&self) -> eyre::Result<Option<RangeInclusive<u64>>> {
+        let mut min_id = None;
+        let mut max_id = None;
+
+        for entry in reth_fs_util::read_dir(&self.path)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
+
+            min_id = min_id.map_or(Some(file_id), |min_id: u64| Some(min_id.min(file_id)));
+            max_id = max_id.map_or(Some(file_id), |max_id: u64| Some(max_id.max(file_id)));
+        }
+
+        Ok(min_id.zip(max_id).map(|(min_id, max_id)| min_id..=max_id))
+    }
+
     /// Removes notifications from the storage according to the given range.
     ///
     /// # Returns
     ///
     /// Number of removed notifications.
-    pub(super) fn remove_notifications(
-        &mut self,
-        range: RemoveNotificationsRange,
-    ) -> eyre::Result<usize> {
-        let adjusted_range = match range {
-            RemoveNotificationsRange::FromFileId(from_file_id) => {
-                self.adjust_file_range(from_file_id..)
-            }
-            RemoveNotificationsRange::ToFileId(to_file_id) => self.adjust_file_range(..to_file_id),
-        };
-        let Some(adjusted_range) = adjusted_range else { return Ok(0) };
-
-        for id in adjusted_range.clone() {
+    pub(super) fn remove_notifications(&self, range: RangeInclusive<u64>) -> eyre::Result<usize> {
+        for id in range.clone() {
             self.remove_notification(id);
         }
 
-        match range {
-            RemoveNotificationsRange::FromFileId(from_file_id) => {
-                self.max_id = from_file_id.checked_sub(1)
-            }
-            RemoveNotificationsRange::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
-        };
-
-        Ok(adjusted_range.count())
+        Ok(range.count())
     }
 
     /// Removes notifications from the storage according to the given range.
@@ -118,45 +87,23 @@ impl Storage {
     ///
     /// Notifications that were removed.
     pub(super) fn take_notifications(
-        &mut self,
-        range: RemoveNotificationsRange,
+        &self,
+        range: RangeInclusive<u64>,
     ) -> eyre::Result<Vec<ExExNotification>> {
-        let adjusted_range = match range {
-            RemoveNotificationsRange::FromFileId(from_file_id) => {
-                self.adjust_file_range(from_file_id..)
-            }
-            RemoveNotificationsRange::ToFileId(to_file_id) => self.adjust_file_range(..to_file_id),
-        };
-        let Some(adjusted_range) = adjusted_range else { return Ok(Vec::new()) };
-
-        let notifications =
-            self.iter_notifications(adjusted_range).collect::<eyre::Result<Vec<_>>>()?;
+        let notifications = self.iter_notifications(range).collect::<eyre::Result<Vec<_>>>()?;
 
         for (id, _) in &notifications {
             self.remove_notification(*id);
         }
-
-        match range {
-            RemoveNotificationsRange::FromFileId(from_file_id) => {
-                self.max_id = from_file_id.checked_sub(1)
-            }
-            RemoveNotificationsRange::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
-        };
 
         Ok(notifications.into_iter().map(|(_, notification)| notification).collect())
     }
 
     pub(super) fn iter_notifications(
         &self,
-        range: impl RangeBounds<u64>,
-    ) -> Box<dyn Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_> {
-        let Some(range) = self.adjust_file_range(range) else {
-            return Box::new(std::iter::empty())
-        };
-
-        Box::new(
-            range.map(move |id| self.read_notification(id).map(|notification| (id, notification))),
-        )
+        range: RangeInclusive<u64>,
+    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
+        range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
     }
 
     /// Reads the notification from the file with the given id.
@@ -170,28 +117,18 @@ impl Storage {
 
     /// Writes the notification to the file with the given id.
     pub(super) fn write_notification(
-        &mut self,
+        &self,
+        file_id: u64,
         notification: &ExExNotification,
-    ) -> eyre::Result<u64> {
-        let file_id = self.max_id.map_or(0, |id| id + 1);
-        self.min_id = self.min_id.map_or(Some(file_id), |min_id| Some(min_id.min(file_id)));
-        self.max_id = self.max_id.map_or(Some(file_id), |max_id| Some(max_id.max(file_id)));
-
+    ) -> eyre::Result<()> {
         debug!(?file_id, "Writing notification to WAL");
 
         let file_path = self.file_path(file_id);
         let mut file = File::create_new(&file_path)?;
         write_notification(&mut file, notification)?;
 
-        Ok(file_id)
+        Ok(())
     }
-}
-
-pub(super) enum RemoveNotificationsRange {
-    /// Remove notifications starting from the given file ID, inclusive.
-    FromFileId(u64),
-    /// Remove notifications up to the given file ID, exclusive.
-    ToFileId(u64),
 }
 
 fn write_notification(w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
@@ -220,7 +157,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let temp_dir = tempfile::tempdir()?;
-        let mut storage = Storage::new(&temp_dir)?;
+        let storage = Storage::new(&temp_dir)?;
 
         let old_block = random_block(&mut rng, 0, Default::default())
             .seal_with_senders()
@@ -235,8 +172,9 @@ mod tests {
         };
 
         // Do a round trip serialization and deserialization
-        storage.write_notification(&notification)?;
-        let deserialized_notification = storage.read_notification(0)?;
+        let file_id = 0;
+        storage.write_notification(file_id, &notification)?;
+        let deserialized_notification = storage.read_notification(file_id)?;
         assert_eq!(deserialized_notification, notification);
 
         Ok(())
