@@ -27,6 +27,8 @@ impl PayloadTypes for OptimismEngineTypes {
 }
 
 impl EngineTypes for OptimismEngineTypes {
+    type ChainSpec = ChainSpec;
+
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
