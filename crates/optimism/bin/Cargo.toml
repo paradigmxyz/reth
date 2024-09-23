@@ -30,7 +30,6 @@ tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-node-optimism/asm-keccak"]
 
-optimism = ["reth-optimism-cli/optimism", "reth-node-optimism/optimism"]
 
 [[bin]]
 name = "op-reth"
