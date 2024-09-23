@@ -1,6 +1,6 @@
 use crate::{
-    BlockIdReader, BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
@@ -161,7 +161,7 @@ pub trait BlockReader:
 /// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the block should be done using the type's `BlockReader` methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
+pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Returns the block with matching tag from the database
     ///
     /// Returns `None` if block is not found.
