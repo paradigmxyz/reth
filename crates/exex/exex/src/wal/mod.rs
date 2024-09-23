@@ -14,7 +14,8 @@ use storage::{RemoveNotificationsRange, Storage};
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
 ///
 /// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
-/// represented by [`BlockCache`].
+/// represented by [`BlockCache`]. The role of the block cache is to avoid walking the WAL directory
+/// and decoding notifications every time we want to rollback/finalize the WAL.
 ///
 /// The expected mode of operation is as follows:
 /// 1. On every new canonical chain notification, call [`Wal::commit`].
@@ -40,8 +41,7 @@ impl Wal {
         Ok(wal)
     }
 
-    /// Clears the block cache and fills it with the notifications from the [`Storage`], up to the
-    /// given offset in bytes, not inclusive.
+    /// Fills the block cache with the notifications from the storage.
     #[instrument(target = "exex::wal", skip(self))]
     fn fill_block_cache(&mut self) -> eyre::Result<()> {
         for entry in self.storage.iter_notifications(..) {
