@@ -6,7 +6,7 @@ use alloy_rpc_types::{
     Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals,
+    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, SealedHeader, Withdrawals,
 };
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
@@ -137,14 +137,14 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         receipts_root,
         withdrawals_root,
         number,
-        gas_used: gas_used as u128,
-        gas_limit: gas_limit as u128,
+        gas_used,
+        gas_limit,
         extra_data,
         logs_bloom,
         timestamp,
         difficulty,
         mix_hash: Some(mix_hash),
-        nonce: Some(nonce.to_be_bytes().into()),
+        nonce: Some(nonce),
         base_fee_per_gas: base_fee_per_gas.map(u128::from),
         blob_gas_used: blob_gas_used.map(u128::from),
         excess_blob_gas: excess_blob_gas.map(u128::from),
@@ -163,7 +163,7 @@ fn from_block_with_transactions<T>(
     transactions: BlockTransactions<T>,
 ) -> Block<T> {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-    let mut header = from_primitive_with_hash(block.header.seal(block_hash));
+    let mut header = from_primitive_with_hash(SealedHeader::new(block.header, block_hash));
     header.total_difficulty = Some(total_difficulty);
 
     let withdrawals = header
@@ -179,7 +179,7 @@ fn from_block_with_transactions<T>(
 /// an Uncle from its header.
 pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
     let hash = header.hash_slow();
-    let rpc_header = from_primitive_with_hash(header.clone().seal(hash));
+    let rpc_header = from_primitive_with_hash(SealedHeader::new(header.clone(), hash));
     let uncle_block = PrimitiveBlock { header, ..Default::default() };
     let size = Some(U256::from(uncle_block.length()));
     Block {
