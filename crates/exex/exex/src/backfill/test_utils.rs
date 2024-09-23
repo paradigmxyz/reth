@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use alloy_primitives::{b256, Address, TxKind, U256};
 use eyre::OptionExt;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_evm::execute::{
@@ -7,8 +8,8 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{
-    b256, constants::ETH_TO_WEI, Address, Block, BlockWithSenders, Genesis, GenesisAccount, Header,
-    Receipt, Requests, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
+    constants::ETH_TO_WEI, Block, BlockWithSenders, Genesis, GenesisAccount, Header, Receipt,
+    Requests, SealedBlockWithSenders, Transaction, TxEip2930,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
@@ -98,8 +99,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
-            gas_limit: MIN_TRANSACTION_GAS,
-            gas_used: MIN_TRANSACTION_GAS,
+            gas_limit: MIN_TRANSACTION_GAS.into(),
+            gas_used: MIN_TRANSACTION_GAS.into(),
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(
@@ -128,8 +129,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,
-            gas_limit: MIN_TRANSACTION_GAS,
-            gas_used: MIN_TRANSACTION_GAS,
+            gas_limit: MIN_TRANSACTION_GAS.into(),
+            gas_used: MIN_TRANSACTION_GAS.into(),
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(

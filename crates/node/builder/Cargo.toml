@@ -50,7 +50,7 @@ reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
-reth-rpc.workspace = true
+reth-rpc = { workspace = true, features = ["js-tracer"] }
 reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-tasks.workspace = true

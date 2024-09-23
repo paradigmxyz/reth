@@ -5,12 +5,13 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use alloy_primitives::BlockNumber;
 use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;

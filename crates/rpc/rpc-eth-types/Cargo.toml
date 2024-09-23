@@ -32,10 +32,12 @@ reth-trie.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
+alloy-rpc-types-eth.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
 alloy-rpc-types.workspace = true
+alloy-serde.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true

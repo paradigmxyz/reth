@@ -154,12 +154,12 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas &&
+            if transaction.gas_limit() > block_available_gas as u64 &&
                 (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
+                    block_available_gas: block_available_gas as u64,
                 }
                 .into())
             }
@@ -204,7 +204,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used();
+            cumulative_gas_used += result.gas_used() as u128;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -212,7 +212,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
-                cumulative_gas_used,
+                cumulative_gas_used: cumulative_gas_used as u64,
                 logs: result.into_logs(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -226,7 +226,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used))
+        Ok((receipts, cumulative_gas_used as u64))
     }
 }
 
@@ -530,6 +530,7 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
+    use reth_optimism_chainspec::optimism_deposit_tx_signature;
     use reth_primitives::{
         Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
@@ -544,7 +545,7 @@ mod tests {
         let l1_block_contract_account =
             Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
 
-        let mut l1_block_storage = HashMap::new();
+        let mut l1_block_storage = HashMap::with_capacity(4);
         // base fee
         l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
         // l1 fee overhead
@@ -607,7 +608,7 @@ mod tests {
                 to: addr.into(),
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
@@ -617,7 +618,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS as u128,
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let provider = executor_provider(chain_spec);
@@ -691,7 +692,7 @@ mod tests {
                 to: addr.into(),
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
@@ -701,7 +702,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS as u128,
                 ..Default::default()
             }),
-            Signature::optimism_deposit_tx_signature(),
+            optimism_deposit_tx_signature(),
         );
 
         let provider = executor_provider(chain_spec);

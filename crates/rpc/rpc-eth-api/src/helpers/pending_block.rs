@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -30,7 +31,6 @@ use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_rpc_types::BlockNumberOrTag;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -443,14 +443,14 @@ pub trait LoadPendingBlock: EthApiTypes {
             logs_bloom,
             timestamp: block_env.timestamp.to::<u64>(),
             mix_hash: block_env.prevrandao.unwrap_or_default(),
-            nonce: BEACON_NONCE,
-            base_fee_per_gas: Some(base_fee),
+            nonce: BEACON_NONCE.into(),
+            base_fee_per_gas: Some(base_fee.into()),
             number: block_number,
-            gas_limit: block_gas_limit,
+            gas_limit: block_gas_limit.into(),
             difficulty: U256::ZERO,
-            gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas: block_env.get_blob_excess_gas(),
+            gas_used: cumulative_gas_used.into(),
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
             extra_data: Default::default(),
             parent_beacon_block_root,
             requests_root,

@@ -661,7 +661,7 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let eth = EthHandlers::builder(
+        let eth = EthHandlers::bootstrap(
             provider.clone(),
             pool.clone(),
             network.clone(),
@@ -670,8 +670,7 @@ where
             executor.clone(),
             events.clone(),
             eth_api_builder,
-        )
-        .build();
+        );
 
         Self {
             provider,
@@ -815,8 +814,8 @@ where
         EthApi: TraceExt
             + EthTransactions<
                 NetworkTypes: alloy_network::Network<
-                    TransactionResponse = reth_rpc_types::WithOtherFields<
-                        reth_rpc_types::Transaction,
+                    TransactionResponse = alloy_serde::WithOtherFields<
+                        alloy_rpc_types::Transaction,
                     >,
                 >,
             >,
