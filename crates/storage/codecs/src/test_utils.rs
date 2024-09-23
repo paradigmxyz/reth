@@ -67,9 +67,9 @@ macro_rules! validate_bitflag_backwards_compat {
 /// To be used with [`validate_bitflag_backwards_compat`].
 #[derive(Debug)]
 pub enum UnusedBits {
-    /// Zero
+    /// Zero bits available for a new field.
     Zero,
-    /// NotZero
+    /// Bits available for a new field.
     NotZero,
 }
 
