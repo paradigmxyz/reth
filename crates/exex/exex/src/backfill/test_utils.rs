@@ -99,8 +99,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
-            gas_limit: MIN_TRANSACTION_GAS,
-            gas_used: MIN_TRANSACTION_GAS,
+            gas_limit: MIN_TRANSACTION_GAS.into(),
+            gas_used: MIN_TRANSACTION_GAS.into(),
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(
@@ -129,8 +129,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,
-            gas_limit: MIN_TRANSACTION_GAS,
-            gas_used: MIN_TRANSACTION_GAS,
+            gas_limit: MIN_TRANSACTION_GAS.into(),
+            gas_used: MIN_TRANSACTION_GAS.into(),
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(

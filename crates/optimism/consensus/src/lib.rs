@@ -9,7 +9,7 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use alloy_primitives::U256;
+use alloy_primitives::{B64, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -85,7 +85,7 @@ impl Consensus for OptimismBeaconConsensus {
         let is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
 
         if is_post_merge {
-            if header.nonce != 0 {
+            if header.nonce != B64::ZERO {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
