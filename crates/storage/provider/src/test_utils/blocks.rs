@@ -1,13 +1,12 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
 use alloy_primitives::{
-    b256, hex_literal::hex, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
+    b256, hex_literal::hex, Address, BlockNumber, Bytes, Log, Parity, Sealable, TxKind, B256, U256,
 };
 use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
-    alloy_primitives::{self, Parity},
     Account, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader,
     Signature, Transaction, TransactionSigned, TxLegacy, TxType, Withdrawal, Withdrawals,
 };
@@ -155,8 +154,10 @@ impl Default for BlockchainTestData {
 /// Genesis block
 pub fn genesis() -> SealedBlock {
     SealedBlock {
-        header: Header { number: 0, difficulty: U256::from(1), ..Default::default() }
-            .seal(B256::ZERO),
+        header: SealedHeader::new(
+            Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+            B256::ZERO,
+        ),
         body: vec![],
         ommers: vec![],
         withdrawals: Some(Withdrawals::default()),
@@ -233,7 +234,9 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
-    block.header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    block.header = SealedHeader::new(header, seal);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] }, execution_outcome)
 }
@@ -297,7 +300,9 @@ fn block2(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    block.header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    block.header = SealedHeader::new(header, seal);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
@@ -362,7 +367,9 @@ fn block3(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    block.header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    block.header = SealedHeader::new(header, seal);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
@@ -453,7 +460,9 @@ fn block4(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    block.header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    block.header = SealedHeader::new(header, seal);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
@@ -539,7 +548,9 @@ fn block5(
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    block.header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    block.header = SealedHeader::new(header, seal);
 
     (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }

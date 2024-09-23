@@ -752,7 +752,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         for ((main_block_number, header), (_, header_hash), (_, tx)) in
             izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
         {
-            let header = header.seal(header_hash);
+            let header = SealedHeader::new(header, header_hash);
 
             let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
 
@@ -1248,7 +1248,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         for ((main_block_number, header), (_, header_hash), (_, tx)) in
             izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
         {
-            let header = header.seal(header_hash);
+            let header = SealedHeader::new(header, header_hash);
 
             let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
 
@@ -1530,7 +1530,7 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> HeaderProvider
                     let hash = self
                         .block_hash(number)?
                         .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-                    Ok(Some(header.seal(hash)))
+                    Ok(Some(SealedHeader::new(header, hash)))
                 } else {
                     Ok(None)
                 }
@@ -1554,7 +1554,7 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> HeaderProvider
                     let hash = self
                         .block_hash(number)?
                         .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-                    let sealed = header.seal(hash);
+                    let sealed = SealedHeader::new(header, hash);
                     if !predicate(&sealed) {
                         break
                     }
@@ -1938,8 +1938,10 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
                                 index,
                                 block_hash,
                                 block_number,
-                                base_fee: header.base_fee_per_gas,
-                                excess_blob_gas: header.excess_blob_gas,
+                                base_fee: header.base_fee_per_gas.map(|base_fee| base_fee as u64),
+                                excess_blob_gas: header
+                                    .excess_blob_gas
+                                    .map(|excess_blob| excess_blob as u64),
                                 timestamp: header.timestamp,
                             };
 

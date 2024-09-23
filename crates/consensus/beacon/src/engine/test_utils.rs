@@ -1,6 +1,10 @@
 #![allow(missing_docs)]
-
-use alloy_primitives::{BlockNumber, B256};
+use crate::{
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -18,6 +22,7 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
+use reth_primitives::SealedHeader;
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
@@ -33,12 +38,6 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
-
-use crate::{
-    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
-    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
 
 type DatabaseEnv = TempDatabase<DE>;
 
@@ -395,7 +394,9 @@ where
             BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
                 .expect("failed to create tree"),
         ));
-        let genesis_block = self.base_config.chain_spec.genesis_header().clone().seal_slow();
+        let sealed = self.base_config.chain_spec.genesis_header().clone().seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let genesis_block = SealedHeader::new(header, seal);
 
         let blockchain_provider =
             BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);

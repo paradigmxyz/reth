@@ -815,7 +815,7 @@ where
         EthApi: TraceExt
             + EthTransactions<
                 NetworkTypes: alloy_network::Network<
-                    TransactionResponse = reth_rpc_types::WithOtherFields<
+                    TransactionResponse = alloy_serde::WithOtherFields<
                         alloy_rpc_types::Transaction,
                     >,
                 >,
