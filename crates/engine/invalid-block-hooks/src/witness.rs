@@ -257,14 +257,14 @@ where
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        File::create_new(&path)?.write_all(diff.to_string().as_bytes())?;
+        File::create(&path)?.write_all(diff.to_string().as_bytes())?;
 
         Ok(path)
     }
 
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        File::create_new(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
+        File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
 
         Ok(path)
     }
