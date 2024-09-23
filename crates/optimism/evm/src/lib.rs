@@ -209,9 +209,10 @@ impl ConfigureEvm for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ExecutionOutcome;
+    use reth_execution_types::ExecutionOutcome;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec};
+    use reth_execution_types::Chain;
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
@@ -223,7 +224,7 @@ mod tests {
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
-    use std::{collections::HashSet, sync::Arc};
+    use std::{collections::HashSet, sync::Arc, collections::BTreeMap};
 
     fn test_evm_config() -> OptimismEvmConfig {
         OptimismEvmConfig::new(BASE_MAINNET.clone())
@@ -570,6 +571,8 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
         };
 
         // Create another random receipt object, receipt2
@@ -578,6 +581,8 @@ mod tests {
             cumulative_gas_used: 1325345,
             logs: vec![],
             success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
