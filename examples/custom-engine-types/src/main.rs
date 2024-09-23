@@ -17,7 +17,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -33,7 +33,7 @@ use alloy_rpc_types::{
 use reth::{
     api::PayloadTypes,
     builder::{
-        components::{ComponentsBuilder, PayloadServiceBuilder},
+        components::{ComponentsBuilder, EngineValidatorBuilder, PayloadServiceBuilder},
         node::{NodeTypes, NodeTypesWithEngine},
         BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
@@ -48,7 +48,8 @@ use reth_basic_payload_builder::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-    validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
+    validate_version_specific_fields, EngineTypes, EngineValidator, PayloadAttributes,
+    PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -93,23 +94,6 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
-    }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())?;
-
-        // custom validation logic - ensure that the custom field is not zero
-        if self.custom == 0 {
-            return Err(EngineObjectValidationError::invalid_params(
-                CustomError::CustomFieldIsNotZero,
-            ))
-        }
-
-        Ok(())
     }
 }
 
@@ -167,19 +151,61 @@ impl PayloadTypes for CustomEngineTypes {
 }
 
 impl EngineTypes for CustomEngineTypes {
-    type ChainSpec = ChainSpec;
-
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
+}
 
+/// Custom engine validator
+#[derive(Debug, Clone)]
+pub struct CustomEngineValidator {
+    chain_spec: Arc<ChainSpec>,
+}
+
+impl<T> EngineValidator<T> for CustomEngineValidator
+where
+    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes>,
+{
     fn validate_version_specific_fields(
-        chain_spec: &ChainSpec,
+        &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, T::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(&self.chain_spec, version, payload_or_attrs)
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &T::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_version_specific_fields(&self.chain_spec, version, attributes.into())?;
+
+        // custom validation logic - ensure that the custom field is not zero
+        if attributes.custom == 0 {
+            return Err(EngineObjectValidationError::invalid_params(
+                CustomError::CustomFieldIsNotZero,
+            ))
+        }
+
+        Ok(())
+    }
+}
+
+/// Custom engine validator builder
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct CustomEngineValidatorBuilder;
+
+impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
+where
+    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>>,
+{
+    type Validator = CustomEngineValidator;
+
+    async fn build_validator(self, ctx: &BuilderContext<N>) -> eyre::Result<Self::Validator> {
+        Ok(CustomEngineValidator { chain_spec: ctx.chain_spec() })
     }
 }
 
@@ -212,6 +238,7 @@ where
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
+        CustomEngineValidatorBuilder,
     >;
     type AddOns = EthereumAddOns;
 
@@ -223,6 +250,7 @@ where
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
+            .engine_validator(CustomEngineValidatorBuilder::default())
     }
 }
 

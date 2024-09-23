@@ -39,7 +39,7 @@ pub struct EthereumEngineValidator {
 
 impl EthereumEngineValidator {
     /// Instantiates a new validator.
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
@@ -57,8 +57,7 @@ impl EngineTypes for EthEngineTypes {
     type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
 }
 
-impl<Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>> EngineValidator<Types>
-    for EthereumEngineValidator
+impl<Types> EngineValidator<Types> for EthereumEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
 {

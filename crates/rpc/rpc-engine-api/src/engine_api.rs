@@ -948,7 +948,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
     use reth_chainspec::MAINNET;
-    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;
     use reth_provider::test_utils::MockEthProvider;
@@ -960,9 +960,15 @@ mod tests {
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn setup_engine_api(
-    ) -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes, NoopTransactionPool>)
-    {
+    fn setup_engine_api() -> (
+        EngineApiTestHandle,
+        EngineApi<
+            Arc<MockEthProvider>,
+            EthEngineTypes,
+            NoopTransactionPool,
+            EthereumEngineValidator,
+        >,
+    ) {
         let client = ClientVersionV1 {
             code: ClientCode::RH,
             name: "Reth".to_string(),
@@ -985,6 +991,7 @@ mod tests {
             task_executor,
             client,
             EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec.clone()),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)

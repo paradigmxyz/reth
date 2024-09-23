@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
@@ -50,6 +50,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         Box::<TokioTaskExecutor>::default(),
         client,
         EngineCapabilities::default(),
+        EthereumEngineValidator::new(MAINNET.clone()),
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()

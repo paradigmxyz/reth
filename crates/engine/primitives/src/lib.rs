@@ -51,8 +51,7 @@ pub trait EngineValidator<Types: EngineTypes>: Clone + Send + Sync + Unpin + 'st
         payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError>;
 
-    /// Ensures that the payload attributes are valid for the given [`ChainSpec`] and
-    /// [`EngineApiMessageVersion`].
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,

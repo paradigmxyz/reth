@@ -320,7 +320,7 @@ where
     }
 }
 
-/// A basic ethereum payload service.
+/// Builder for [`EthereumEngineValidator`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct EthereumEngineValidatorBuilder;

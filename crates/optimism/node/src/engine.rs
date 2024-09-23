@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use op_alloy_rpc_types_engine::{
     OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
     OptimismPayloadAttributes,
@@ -9,7 +11,7 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    EngineTypes, EngineValidator,
+    validate_version_specific_fields, EngineTypes, EngineValidator,
 };
 use reth_optimism_forks::OptimismHardfork;
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
@@ -20,9 +22,17 @@ use reth_rpc_types::{engine::ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 #[non_exhaustive]
 pub struct OptimismEngineTypes;
 
+/// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
 pub struct OptimismEngineValidator {
     chain_spec: Arc<ChainSpec>,
+}
+
+impl OptimismEngineValidator {
+    /// Instantiates a new validator.
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { chain_spec }
+    }
 }
 
 impl PayloadTypes for OptimismEngineTypes {
@@ -32,8 +42,6 @@ impl PayloadTypes for OptimismEngineTypes {
 }
 
 impl EngineTypes for OptimismEngineTypes {
-    type ChainSpec = ChainSpec;
-
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
@@ -82,23 +90,24 @@ pub fn validate_withdrawals_presence(
     Ok(())
 }
 
-impl EngineValidator for OptimismEngineValidator {
-    type Types = OptimismEngineTypes;
-
+impl<Types> EngineValidator<Types> for OptimismEngineValidator
+where
+    Types: EngineTypes<PayloadAttributes = OptimismPayloadAttributes>,
+{
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, OptimismPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
-            chain_spec,
+            &self.chain_spec,
             version,
             payload_or_attrs.message_validation_kind(),
             payload_or_attrs.timestamp(),
             payload_or_attrs.withdrawals().is_some(),
         )?;
         validate_parent_beacon_block_root_presence(
-            chain_spec,
+            &self.chain_spec,
             version,
             payload_or_attrs.message_validation_kind(),
             payload_or_attrs.timestamp(),
@@ -111,9 +120,9 @@ impl EngineValidator for OptimismEngineValidator {
         version: EngineApiMessageVersion,
         attributes: &OptimismPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(self.chain_spec, version, self.into())?;
+        validate_version_specific_fields(&self.chain_spec, version, attributes.into())?;
 
-        if self.gas_limit.is_none() {
+        if attributes.gas_limit.is_none() {
             return Err(EngineObjectValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
             ))
