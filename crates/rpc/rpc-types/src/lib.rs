@@ -12,9 +12,6 @@
 #[allow(hidden_glob_reexports)]
 mod eth;
 
-/// Alias for a peer identifier
-pub type PeerId = alloy_primitives::B512;
-
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::error::ToRpcError;

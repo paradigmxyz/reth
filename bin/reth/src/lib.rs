@@ -151,9 +151,11 @@ pub mod rpc {
         pub use reth_rpc_builder::*;
     }
 
-    /// Re-exported from `reth_rpc_types`.
+    /// Re-exported from `alloy_rpc_types`.
     pub mod types {
-        pub use reth_rpc_types::*;
+        /// Alias for a peer identifier
+        pub type PeerId = reth_primitives::B512;
+        pub use alloy_rpc_types::*;
     }
 
     /// Re-exported from `reth_rpc_server_types`.
