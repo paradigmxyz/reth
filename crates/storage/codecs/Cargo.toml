@@ -61,3 +61,4 @@ alloy = [
     "dep:serde"
 ]
 optimism = ["alloy", "dep:op-alloy-consensus"]
+test-utils = []
