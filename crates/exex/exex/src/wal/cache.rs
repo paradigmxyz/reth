@@ -42,6 +42,11 @@ impl BlockCache {
         self.0.last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
     }
 
+    /// Removes the notification with the given file ID.
+    pub(super) fn remove_notification(&mut self, key: u64) -> Option<VecDeque<CachedBlock>> {
+        self.0.remove(&key)
+    }
+
     /// Pops the first block from the cache. If it resulted in the whole file entry being empty,
     /// it will also remove the file entry.
     pub(super) fn pop_front(&mut self) -> Option<(u64, CachedBlock)> {

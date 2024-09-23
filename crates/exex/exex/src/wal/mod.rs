@@ -95,8 +95,8 @@ impl Wal {
         &mut self,
         to_block: BlockNumHash,
     ) -> eyre::Result<Option<(BlockNumHash, Vec<ExExNotification>)>> {
-        // First, pop items from the cache until we find the notification with the specified block.
-        // When found, save the file ID of that notification.
+        // First, pop items from the back of the cache until we find the notification with the
+        // specified block. When found, save the file ID of that notification.
         let mut remove_from_file_id = None;
         let mut lowest_removed_block = None;
         while let Some((file_id, block)) = self.block_cache.pop_back() {
@@ -132,19 +132,12 @@ impl Wal {
         // If the specified block is still not found, we can't do anything and just return. The
         // cache was empty.
         let Some(remove_from_file_id) = remove_from_file_id else {
-            debug!("No blocks were truncated");
+            debug!("No blocks were rolled back");
             return Ok(None)
         };
 
-        // Remove notifications from the cache starting from the end, and down to the file ID
-        // with the specified block, inclusive.
-        while let Some((file_id, _)) = self.block_cache.back() {
-            if file_id < remove_from_file_id {
-                break
-            }
-
-            self.block_cache.pop_back();
-        }
+        // Remove the rest of the block cache entries for the file ID that we found.
+        self.block_cache.remove_notification(remove_from_file_id);
         debug!(?remove_from_file_id, "Block cache was rolled back");
 
         // Remove notifications from the storage.
