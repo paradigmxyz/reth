@@ -394,7 +394,8 @@ where
                         let flat_call_config = tracer_config
                             .into_flat_call_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
-                        
+
+                 
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_flat_call_config(&flat_call_config)
                         );
