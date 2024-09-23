@@ -13,7 +13,7 @@ pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_diction
 thread_local! {
     /// Thread Transaction compressor.
     pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-        Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
+        Compressor::with_dictionary(1, TRANSACTION_DICTIONARY)
             .expect("failed to initialize transaction compressor"),
     );
 
@@ -26,7 +26,7 @@ thread_local! {
 
     /// Thread receipt compressor.
     pub static RECEIPT_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+        Compressor::with_dictionary(1, RECEIPT_DICTIONARY)
             .expect("failed to initialize receipt compressor"),
     );
 
