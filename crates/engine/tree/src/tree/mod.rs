@@ -2336,7 +2336,7 @@ where
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
         if canonical.is_none() {
-            canonical = self.provider.header(&hash)?.map(|header| header.seal(hash));
+            canonical = self.provider.header(&hash)?.map(|header| SealedHeader::new(header, hash));
         }
 
         Ok(canonical)
@@ -2597,6 +2597,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_primitives::alloy_primitives::Sealable;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;
@@ -2701,7 +2702,9 @@ mod tests {
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
-            let header = chain_spec.genesis_header().clone().seal_slow();
+            let sealed = chain_spec.genesis_header().clone().seal_slow();
+            let (header, seal) = sealed.into_parts();
+            let header = SealedHeader::new(header, seal);
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
 
