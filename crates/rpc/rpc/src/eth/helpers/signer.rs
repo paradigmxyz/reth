@@ -103,7 +103,7 @@ impl EthSigner for DevSigner {
 mod tests {
     use std::str::FromStr;
 
-    use alloy_primitives::U256;
+    use alloy_primitives::{Parity, U256};
 
     use super::*;
 
@@ -185,19 +185,19 @@ mod tests {
         let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
         let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
-        let expected = Signature {
-            r: U256::from_str_radix(
+        let expected = Signature::new(
+            U256::from_str_radix(
                 "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
                 16,
             )
             .unwrap(),
-            s: U256::from_str_radix(
+            U256::from_str_radix(
                 "5e585a2f4882ec3228a9303244798b47a9102e4be72f48159d890c73e4511d79",
                 16,
             )
             .unwrap(),
-            odd_y_parity: false,
-        };
+            Parity::Parity(false),
+        );
         assert_eq!(sig, expected)
     }
 
@@ -206,19 +206,19 @@ mod tests {
         let message = b"Test message";
         let signer = build_signer();
         let sig = signer.sign(Address::default(), message).await.unwrap();
-        let expected = Signature {
-            r: U256::from_str_radix(
+        let expected = Signature::new(
+            U256::from_str_radix(
                 "54313da7432e4058b8d22491b2e7dbb19c7186c35c24155bec0820a8a2bfe0c1",
                 16,
             )
             .unwrap(),
-            s: U256::from_str_radix(
+            U256::from_str_radix(
                 "687250f11a3d4435004c04a4cb60e846bc27997271d67f21c6c8170f17a25e10",
                 16,
             )
             .unwrap(),
-            odd_y_parity: true,
-        };
+            Parity::Parity(true),
+        );
         assert_eq!(sig, expected)
     }
 }

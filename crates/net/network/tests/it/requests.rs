@@ -16,7 +16,8 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{
-    Block, BlockBody, Header, Signature, Transaction, TransactionSigned, TxEip2930,
+    alloy_primitives::Parity, Block, BlockBody, Header, Signature, Transaction, TransactionSigned,
+    TxEip2930,
 };
 use reth_provider::test_utils::MockEthProvider;
 
@@ -32,7 +33,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
-    let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
+    let signature = Signature::new(U256::default(), U256::default(), Parity::Parity(true));
 
     TransactionSigned::from_transaction_and_signature(request, signature)
 }

@@ -28,7 +28,7 @@ async fn test_large_tx_req() {
 
             let ts = TransactionSigned {
                 hash: Default::default(),
-                signature: Signature::default(),
+                signature: Signature::test_signature(),
                 transaction: tx.clone().into(),
             };
             tx.set_hash(ts.recalculate_hash());

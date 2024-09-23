@@ -1443,7 +1443,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1465,7 +1465,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1487,7 +1487,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1511,7 +1511,7 @@ mod tests {
             blob_versioned_hashes: vec![B256::default()],
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1535,7 +1535,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());

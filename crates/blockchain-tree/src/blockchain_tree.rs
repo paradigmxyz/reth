@@ -1571,7 +1571,7 @@ mod tests {
                     max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                     ..Default::default()
                 }),
-                Signature::default(),
+                Signature::test_signature(),
             )
             .with_signer(signer)
         };
