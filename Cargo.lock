@@ -7360,6 +7360,7 @@ dependencies = [
 name = "reth-exex"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures",
  "metrics",
@@ -7423,8 +7424,8 @@ dependencies = [
 name = "reth-exex-types"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
- "reth-primitives",
  "reth-provider",
  "serde",
 ]
