@@ -5,7 +5,7 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
-use std::{fmt, future::Future, marker::PhantomData};
+use std::{fmt, future::Future};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
@@ -56,7 +56,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             components_builder,
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcAddOns { _eth_api: PhantomData::<()>, hooks: RpcHooks::default() },
+                rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
             },
         }
@@ -180,7 +180,7 @@ where
             components_builder,
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcAddOns { _eth_api: PhantomData::<AO::EthApi>, hooks: RpcHooks::default() },
+                rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
             },
         }
