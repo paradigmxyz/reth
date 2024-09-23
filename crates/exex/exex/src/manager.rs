@@ -1,6 +1,7 @@
 use crate::{
     BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight, StreamBackfillJob,
 };
+use alloy_primitives::{BlockNumber, U256};
 use eyre::OptionExt;
 use futures::{Stream, StreamExt};
 use metrics::Gauge;
@@ -8,7 +9,6 @@ use reth_chainspec::Head;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumber, U256};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
@@ -809,10 +809,11 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{Block, BlockNumHash, Header, SealedBlockWithSenders, B256};
+    use reth_primitives::{Block, BlockNumHash, Header, SealedBlockWithSenders};
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
         BlockWriter, Chain,
