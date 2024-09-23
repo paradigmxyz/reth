@@ -9,7 +9,7 @@ use cache::BlockCache;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
-use storage::{RemoveNotificationsSelector, Storage};
+use storage::{RemoveNotificationsRange, Storage};
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
 ///
@@ -150,7 +150,7 @@ impl Wal {
         // Remove notifications from the storage.
         let removed_notifications = self
             .storage
-            .remove_notifications(RemoveNotificationsSelector::FromFileId(remove_from_file_id))?;
+            .remove_notifications(RemoveNotificationsRange::FromFileId(remove_from_file_id))?;
         debug!(removed_notifications = ?removed_notifications.len(), "WAL was rolled back");
 
         Ok(Some((lowest_removed_block.expect("qed"), removed_notifications)))
@@ -215,7 +215,7 @@ impl Wal {
         // Remove notifications from the storage.
         let removed_notifications = self
             .storage
-            .remove_notifications(RemoveNotificationsSelector::ToFileId(remove_to_file_id))?
+            .remove_notifications(RemoveNotificationsRange::ToFileId(remove_to_file_id))?
             .len();
         debug!(?removed_notifications, "WAL was finalized");
 

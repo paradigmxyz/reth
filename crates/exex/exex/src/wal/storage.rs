@@ -71,34 +71,32 @@ impl Storage {
         Some(start..=end)
     }
 
-    /// Removes notifications from the storage according to the given selector.
+    /// Removes notifications from the storage according to the given range.
     pub(super) fn remove_notifications(
         &mut self,
-        selector: RemoveNotificationsSelector,
+        range: RemoveNotificationsRange,
     ) -> eyre::Result<Vec<ExExNotification>> {
-        let range = match selector {
-            RemoveNotificationsSelector::FromFileId(from_file_id) => {
+        let adjusted_range = match range {
+            RemoveNotificationsRange::FromFileId(from_file_id) => {
                 self.adjust_file_range(from_file_id..)
             }
-            RemoveNotificationsSelector::ToFileId(to_file_id) => {
-                self.adjust_file_range(..to_file_id)
-            }
+            RemoveNotificationsRange::ToFileId(to_file_id) => self.adjust_file_range(..to_file_id),
         };
-        let Some(range) = range else { return Ok(Vec::new()) };
+        let Some(adjusted_range) = adjusted_range else { return Ok(Vec::new()) };
 
         let removed_notifications =
-            self.iter_notifications(range).collect::<eyre::Result<Vec<_>>>()?;
+            self.iter_notifications(adjusted_range).collect::<eyre::Result<Vec<_>>>()?;
 
         for (id, _) in &removed_notifications {
             debug!(?id, "Removing notification from the storage");
             reth_fs_util::remove_file(self.file_path(*id))?;
         }
 
-        match selector {
-            RemoveNotificationsSelector::FromFileId(from_file_id) => {
+        match range {
+            RemoveNotificationsRange::FromFileId(from_file_id) => {
                 self.max_id = from_file_id.checked_sub(1)
             }
-            RemoveNotificationsSelector::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
+            RemoveNotificationsRange::ToFileId(to_file_id) => self.min_id = Some(to_file_id),
         };
 
         Ok(removed_notifications.into_iter().map(|(_, notification)| notification).collect())
@@ -145,7 +143,7 @@ impl Storage {
     }
 }
 
-pub(super) enum RemoveNotificationsSelector {
+pub(super) enum RemoveNotificationsRange {
     /// Remove notifications from the given file ID, inclusive.
     FromFileId(u64),
     /// Remove notifications up to the given file ID, exclusive.
