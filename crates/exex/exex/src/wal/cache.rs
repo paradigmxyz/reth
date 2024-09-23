@@ -3,19 +3,19 @@ use std::collections::{BTreeMap, VecDeque};
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 
-/// The block cache of the WAL. Acts as a FIFO queue with a specified maximum size.
+/// The block cache of the WAL. Acts as a mapping of `File ID -> List of Blocks`.
 ///
 /// For each notification written to the WAL, there will be an entry per block written to
-/// the cache with the same file offset as the notification in the file. I.e. for each
-/// notification, there may be multiple blocks in the cache.
+/// the cache with the same file ID. I.e. for each notification, there may be multiple blocks in the
+/// cache.
 ///
-/// This cache is needed to avoid walking the file every time we want to find a notification
-/// corresponding to a block.
+/// This cache is needed to avoid walking the WAL directory every time we want to find a
+/// notification corresponding to a block.
 #[derive(Debug)]
 pub(super) struct BlockCache(BTreeMap<u64, VecDeque<CachedBlock>>);
 
 impl BlockCache {
-    /// Creates a new instance of [`BlockCache`] with the given maximum capacity.
+    /// Creates a new instance of [`BlockCache`].
     pub(super) const fn new() -> Self {
         Self(BTreeMap::new())
     }
@@ -42,6 +42,8 @@ impl BlockCache {
         self.0.last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
     }
 
+    /// Pops the first block from the cache. If it resulted in the whole file entry being empty,
+    /// it will also remove the file entry.
     pub(super) fn pop_front(&mut self) -> Option<(u64, CachedBlock)> {
         let first_entry = self.0.first_entry()?;
         let key = *first_entry.key();
@@ -54,6 +56,8 @@ impl BlockCache {
         Some((key, first_block))
     }
 
+    /// Pops the last block from the cache. If it resulted in the whole file entry being empty,
+    /// it will also remove the file entry.
     pub(super) fn pop_back(&mut self) -> Option<(u64, CachedBlock)> {
         let last_entry = self.0.last_entry()?;
         let key = *last_entry.key();
@@ -66,14 +70,12 @@ impl BlockCache {
         Some((key, last_block))
     }
 
-    /// Appends a block to the back of the cache.
-    ///
-    /// If the cache is full, the oldest block is removed from the front.
+    /// Appends a block to the back of the specified file entry.
     pub(super) fn insert(&mut self, file_id: u64, block: CachedBlock) {
         self.0.entry(file_id).or_default().push_back(block);
     }
 
-    /// Inserts the blocks from the notification into the cache with the given file offset.
+    /// Inserts the blocks from the notification into the cache with the given file ID.
     ///
     /// First, inserts the reverted blocks (if any), then the committed blocks (if any).
     pub(super) fn insert_notification_blocks_with_file_id(

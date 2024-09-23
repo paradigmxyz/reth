@@ -9,15 +9,10 @@ use eyre::OptionExt;
 use reth_exex_types::ExExNotification;
 use reth_tracing::tracing::debug;
 
-/// The underlying WAL storage backed by a file.
+/// The underlying WAL storage backed by a directory of files.
 ///
-/// Each notification is written without any delimiters and structured as follows:
-/// ```text
-/// +--------------------------+----------------------------------+
-/// | little endian u32 length | MessagePack-encoded notification |
-/// +--------------------------+----------------------------------+
-/// ```
-/// The length is the length of the MessagePack-encoded notification in bytes.
+/// Each notification is represented by a single file that contains a MessagePack-encoded
+/// notification.
 #[derive(Debug)]
 pub(super) struct Storage {
     /// The path to the WAL file.
@@ -151,9 +146,9 @@ impl Storage {
 }
 
 pub(super) enum RemoveNotificationsSelector {
-    /// Remove notifications from the given file id, inclusive.
+    /// Remove notifications from the given file ID, inclusive.
     FromFileId(u64),
-    /// Remove notifications up to the given file id, exclusive.
+    /// Remove notifications up to the given file ID, exclusive.
     ToFileId(u64),
 }
 

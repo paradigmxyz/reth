@@ -11,16 +11,10 @@ use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
 use storage::{RemoveNotificationsSelector, Storage};
 
-/// The maximum number of blocks to cache.
-///
-/// [`cache::CachedBlock`] has a size of `u64 + u64 + B256` which is 384 bits. 384 bits * 1 million
-/// = 48 megabytes.
-const MAX_CACHED_BLOCKS: usize = 1_000_000;
-
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
 ///
-/// WAL is backed by a binary file represented by [`Storage`] and a block cache represented by
-/// [`BlockCache`].
+/// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
+/// represented by [`BlockCache`].
 ///
 /// The expected mode of operation is as follows:
 /// 1. On every new canonical chain notification, call [`Wal::commit`].
@@ -43,7 +37,6 @@ impl Wal {
     pub(crate) fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self { storage: Storage::new(directory)?, block_cache: BlockCache::new() };
         wal.fill_block_cache()?;
-
         Ok(wal)
     }
 
@@ -72,24 +65,15 @@ impl Wal {
     }
 
     /// Commits the notification to WAL.
-    #[instrument(target = "exex::wal", skip_all)]
+    #[instrument(target = "exex::wal", fields(
+        reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
+        committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
+    ))]
     pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
-        let reverted_chain = notification.reverted_chain();
-        let committed_chain = notification.committed_chain();
-
-        debug!(
-            reverted_block_range = ?reverted_chain.as_ref().map(|chain| chain.range()),
-            committed_block_range = ?committed_chain.as_ref().map(|chain| chain.range()),
-            "Writing notification to WAL"
-        );
+        debug!("Writing notification to WAL");
         let file_id = self.storage.write_notification(notification)?;
 
-        debug!(
-            ?file_id,
-            reverted_block_range = ?reverted_chain.as_ref().map(|chain| chain.range()),
-            committed_block_range = ?committed_chain.as_ref().map(|chain| chain.range()),
-            "Inserting notification blocks into the block cache"
-        );
+        debug!(?file_id, "Inserting notification blocks into the block cache");
         self.block_cache.insert_notification_blocks_with_file_id(file_id, notification);
 
         Ok(())
@@ -111,6 +95,8 @@ impl Wal {
         &mut self,
         to_block: BlockNumHash,
     ) -> eyre::Result<Option<(BlockNumHash, Vec<ExExNotification>)>> {
+        // First, pop items from the cache until we find the notification with the specified block.
+        // When found, save the file ID of that notification.
         let mut remove_from_file_id = None;
         let mut lowest_removed_block = None;
         while let Some((file_id, block)) = self.block_cache.pop_back() {
@@ -143,26 +129,31 @@ impl Wal {
             remove_from_file_id = Some(file_id);
         }
 
-        let result = if let Some(remove_from_file_id) = remove_from_file_id {
-            while let Some((file_id, _)) = self.block_cache.back() {
-                if file_id != remove_from_file_id {
-                    break
-                }
-
-                self.block_cache.pop_back();
-            }
-
-            let removed_notifications = self.storage.remove_notifications(
-                RemoveNotificationsSelector::FromFileId(remove_from_file_id),
-            )?;
-            debug!(removed_notifications = ?removed_notifications.len(), "WAL was rolled back");
-            Some((lowest_removed_block.expect("qed"), removed_notifications))
-        } else {
+        // If the specified block is still not found, we can't do anything and just return. The
+        // cache was empty.
+        let Some(remove_from_file_id) = remove_from_file_id else {
             debug!("No blocks were truncated");
-            None
+            return Ok(None)
         };
 
-        Ok(result)
+        // Remove notifications from the cache starting from the end, and down to the file ID
+        // with the specified block, inclusive.
+        while let Some((file_id, _)) = self.block_cache.back() {
+            if file_id < remove_from_file_id {
+                break
+            }
+
+            self.block_cache.pop_back();
+        }
+        debug!(?remove_from_file_id, "Block cache was rolled back");
+
+        // Remove notifications from the storage.
+        let removed_notifications = self
+            .storage
+            .remove_notifications(RemoveNotificationsSelector::FromFileId(remove_from_file_id))?;
+        debug!(removed_notifications = ?removed_notifications.len(), "WAL was rolled back");
+
+        Ok(Some((lowest_removed_block.expect("qed"), removed_notifications)))
     }
 
     /// Finalizes the WAL to the given block, inclusive.
@@ -173,7 +164,9 @@ impl Wal {
     ///    notification includes both finalized and non-finalized blocks, it will not be removed.
     #[instrument(target = "exex::wal", skip(self))]
     pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
-        // First, walk cache to find the file id of the notification with the finalized block.
+        // First, walk cache to find the file ID of the notification with the finalized block and
+        // save the file ID with the last unfinalized block. Do not remove any notifications
+        // yet.
         let mut unfinalized_from_file_id = None;
         {
             let mut block_cache = self.block_cache.iter().peekable();
@@ -209,19 +202,21 @@ impl Wal {
             return Ok(())
         };
 
+        // Remove notifications from the storage from the beginning up to the unfinalized block, not
+        // inclusive.
         while let Some((file_id, _)) = self.block_cache.front() {
             if file_id == remove_to_file_id {
                 break
             }
             self.block_cache.pop_front();
         }
+        debug!(?remove_to_file_id, "Block cache was finalized");
 
-        // Truncate the storage to the unfinalized block.
+        // Remove notifications from the storage.
         let removed_notifications = self
             .storage
             .remove_notifications(RemoveNotificationsSelector::ToFileId(remove_to_file_id))?
             .len();
-
         debug!(?removed_notifications, "WAL was finalized");
 
         Ok(())
