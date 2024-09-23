@@ -160,6 +160,7 @@ telos = [
     "reth-evm/telos",
     "reth-execution-types/telos",
     "reth-node-core/telos",
+    "reth-node-builder/telos",
     "reth-payload-builder/telos",
     "reth-provider/telos",
     "reth-revm/telos",
