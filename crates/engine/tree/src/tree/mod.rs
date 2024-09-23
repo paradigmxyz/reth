@@ -320,7 +320,7 @@ impl TreeState {
     /// same behavior as if the `finalized_num` were `Some(upper_bound)`.
     pub(crate) fn remove_until(
         &mut self,
-        upper_bound: BlockNumber,
+        upper_bound: BlockNumHash,
         last_persisted_hash: B256,
         finalized_num_hash: Option<BlockNumHash>,
     ) {
@@ -328,10 +328,11 @@ impl TreeState {
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
         // that the only blocks removed, are canonical blocks less than the upper bound
-        // finalized_num.take_if(|finalized| *finalized > upper_bound);
         let finalized_num_hash = finalized_num_hash.map(|mut finalized| {
-            finalized.number = finalized.number.min(upper_bound);
-            debug!(target: "engine::tree", ?finalized, "Adjusted upper bound");
+            if upper_bound.number < finalized.number {
+                finalized = upper_bound;
+                debug!(target: "engine::tree", ?finalized, "Adjusted upper bound");
+            }
             finalized
         });
 
@@ -342,7 +343,7 @@ impl TreeState {
         // * remove all canonical blocks below the upper bound
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
-        self.remove_canonical_until(upper_bound, last_persisted_hash);
+        self.remove_canonical_until(upper_bound.number, last_persisted_hash);
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
@@ -1284,7 +1285,8 @@ where
             .map(|hash| BlockNumHash { hash, number: backfill_height });
 
         self.state.tree_state.remove_until(
-            backfill_height,
+            backfill_num_hash
+                .expect("after backfill the block target hash should be present in the db"),
             self.persistence_state.last_persisted_block.hash,
             backfill_num_hash,
         );
@@ -1469,7 +1471,7 @@ where
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(self.persistence_state.last_persisted_block.number, finalized)?;
+        self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
@@ -2506,7 +2508,7 @@ where
     /// Canonical blocks below the upper bound will still be removed.
     pub(crate) fn remove_before(
         &mut self,
-        upper_bound: BlockNumber,
+        upper_bound: BlockNumHash,
         finalized_hash: Option<B256>,
     ) -> ProviderResult<()> {
         // first fetch the finalized block number and then call the remove_before method on
@@ -3266,7 +3268,11 @@ mod tests {
         tree_state.set_canonical_head(last.block.num_hash());
 
         // inclusive bound, so we should remove anything up to and including 2
-        tree_state.remove_until(2, start_num_hash.hash, Some(blocks[1].block.num_hash()));
+        tree_state.remove_until(
+            BlockNumHash::new(2, blocks[1].block.hash()),
+            start_num_hash.hash,
+            Some(blocks[1].block.num_hash()),
+        );
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
@@ -3312,7 +3318,11 @@ mod tests {
         tree_state.set_canonical_head(last.block.num_hash());
 
         // we should still remove everything up to and including 2
-        tree_state.remove_until(2, start_num_hash.hash, None);
+        tree_state.remove_until(
+            BlockNumHash::new(2, blocks[1].block.hash()),
+            start_num_hash.hash,
+            None,
+        );
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
@@ -3358,7 +3368,11 @@ mod tests {
         tree_state.set_canonical_head(last.block.num_hash());
 
         // we have no forks so we should still remove anything up to and including 2
-        tree_state.remove_until(2, start_num_hash.hash, Some(blocks[0].block.num_hash()));
+        tree_state.remove_until(
+            BlockNumHash::new(2, blocks[1].block.hash()),
+            start_num_hash.hash,
+            Some(blocks[0].block.num_hash()),
+        );
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
@@ -3640,8 +3654,10 @@ mod tests {
             .fcu_to(base_chain.last().unwrap().block().hash(), ForkchoiceStatus::Valid)
             .await;
 
-        // extend main chain but don't insert the blocks
-        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 10);
+        // extend main chain with enough blocks to trigger pipeline run but don't insert them
+        let main_chain = test_harness
+            .block_builder
+            .create_fork(base_chain[0].block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 10);
 
         let main_chain_last_hash = main_chain.last().unwrap().hash();
         test_harness.send_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
@@ -3649,10 +3665,16 @@ mod tests {
         test_harness.check_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
 
         // create event for backfill finished
+        let backfill_finished_block_number = MIN_BLOCKS_FOR_PIPELINE_RUN + 1;
         let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
-            block_number: MIN_BLOCKS_FOR_PIPELINE_RUN + 1,
+            block_number: backfill_finished_block_number,
         });
 
+        let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
+        // add block to mock provider to enable persistence clean up.
+        test_harness
+            .provider
+            .add_block(backfill_tip_block.hash(), backfill_tip_block.block.unseal());
         test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -3674,7 +3696,10 @@ mod tests {
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
-                assert_eq!(total_blocks, (main_chain.len() - 1) as u64);
+                assert_eq!(
+                    total_blocks,
+                    (main_chain.len() - backfill_finished_block_number as usize - 1) as u64
+                );
                 assert_eq!(initial_hash, main_chain.last().unwrap().parent_hash);
             }
             _ => panic!("Unexpected event: {:#?}", event),
