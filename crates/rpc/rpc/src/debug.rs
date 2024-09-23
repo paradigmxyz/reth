@@ -1,10 +1,14 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
-use alloy_rpc_types::{state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo};
+use alloy_rpc_types::{
+    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
+};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::geth::{
-    call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult
+    call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType,
+    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    NoopFrame, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -391,27 +395,24 @@ where
                             .into_flat_call_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_flat_call_config(&flat_call_config)
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
                         );
 
                         let frame: FlatCallFrame = self
                             .inner
                             .eth_api
-                            .spawn_with_call_at(
-                                call, 
-                                at, 
-                                overrides, 
-                                move |db, env| {
-                                    let (_res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
-                                    let tx_info = TransactionInfo::default();
-                                    let frame = inspector
-                                        .with_transaction_gas_limit(env.tx.gas_limit)
-                                        .into_parity_builder()
-                                        .into_localized_transaction_traces(tx_info)
-                                        .pop().unwrap();
-                                    Ok(frame)
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (_res, env) =
+                                    this.eth_api().inspect(db, env, &mut inspector)?;
+                                let tx_info = TransactionInfo::default();
+                                let frame = inspector
+                                    .with_transaction_gas_limit(env.tx.gas_limit)
+                                    .into_parity_builder()
+                                    .into_localized_transaction_traces(tx_info)
+                                    .pop()
+                                    .unwrap();
+                                Ok(frame)
                             })
                             .await?;
 
@@ -785,31 +786,42 @@ where
                             .into_flat_call_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_flat_call_config(&flat_call_config)
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
                         );
-                        
+
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
 
                         let tx_info = TransactionInfo {
                             hash: {
                                 #[cfg(not(feature = "js-tracer"))]
-                                { _transaction_context.unwrap().tx_hash }
+                                {
+                                    _transaction_context.unwrap().tx_hash
+                                }
                                 #[cfg(feature = "js-tracer")]
-                                { transaction_context.unwrap().tx_hash }
+                                {
+                                    transaction_context.unwrap().tx_hash
+                                }
                             },
                             index: {
                                 #[cfg(not(feature = "js-tracer"))]
-                                { _transaction_context.unwrap().tx_index.map(|index| index as u64) }
+                                {
+                                    _transaction_context.unwrap().tx_index.map(|index| index as u64)
+                                }
                                 #[cfg(feature = "js-tracer")]
-                                { transaction_context.unwrap().tx_index.map(|index| index as u64) }
+                                {
+                                    transaction_context.unwrap().tx_index.map(|index| index as u64)
+                                }
                             },
                             block_hash: {
                                 #[cfg(not(feature = "js-tracer"))]
-                                { _transaction_context.unwrap().block_hash }
+                                {
+                                    _transaction_context.unwrap().block_hash
+                                }
                                 #[cfg(feature = "js-tracer")]
-                                { transaction_context.unwrap().block_hash }
+                                {
+                                    transaction_context.unwrap().block_hash
+                                }
                             },
                             block_number: Some(env.block.number.try_into().unwrap_or_default()),
                             base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
@@ -818,8 +830,8 @@ where
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
                             .into_localized_transaction_traces(tx_info)
-                            .pop().unwrap();
-
+                            .pop()
+                            .unwrap();
 
                         return Ok((frame.into(), res.state));
                     }
