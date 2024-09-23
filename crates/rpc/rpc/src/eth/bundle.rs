@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::{keccak256, U256};
+use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
@@ -11,7 +12,6 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{FromEthApiError, FromEvmError};
-use reth_rpc_types::mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
@@ -101,7 +101,7 @@ where
             .into())
         }
 
-        let block_id: reth_rpc_types::BlockId = state_block_number.into();
+        let block_id: alloy_rpc_types::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 

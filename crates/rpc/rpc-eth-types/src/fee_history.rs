@@ -7,6 +7,7 @@ use std::{
 };
 
 use alloy_primitives::B256;
+use alloy_rpc_types::TxGasAndReward;
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -19,7 +20,6 @@ use reth_primitives::{
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     Receipt, SealedBlock, TransactionSigned,
 };
-use reth_rpc_types::TxGasAndReward;
 use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
@@ -361,16 +361,16 @@ impl FeeHistoryEntry {
     /// Note: This does not calculate the rewards for the block.
     pub fn new(block: &SealedBlock) -> Self {
         Self {
-            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
+            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default() as u64,
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),
             blob_gas_used_ratio: block.blob_gas_used() as f64 /
                 reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
-            excess_blob_gas: block.excess_blob_gas,
-            blob_gas_used: block.blob_gas_used,
-            gas_used: block.gas_used,
+            excess_blob_gas: block.excess_blob_gas.map(|excess_blob| excess_blob as u64),
+            blob_gas_used: block.blob_gas_used.map(|block_gas| block_gas as u64),
+            gas_used: block.gas_used as u64,
             header_hash: block.hash(),
-            gas_limit: block.gas_limit,
+            gas_limit: block.gas_limit as u64,
             rewards: Vec::new(),
             timestamp: block.timestamp,
         }

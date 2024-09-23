@@ -19,6 +19,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-rpc.workspace = true
 reth-rpc-layer.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-payload-primitives.workspace = true
 reth-provider.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
@@ -34,6 +35,7 @@ jsonrpsee.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true

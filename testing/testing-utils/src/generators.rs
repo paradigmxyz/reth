@@ -3,7 +3,7 @@
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, BlockNumber, Bytes, Sealable, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
@@ -96,7 +96,9 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    header.seal_slow()
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    SealedHeader::new(header, seal)
 }
 
 /// Generates a random legacy [Transaction].
@@ -195,20 +197,24 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     });
     let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
+    let sealed = Header {
+        parent_hash: block_params.parent.unwrap_or_default(),
+        number,
+        gas_used: total_gas.into(),
+        gas_limit: total_gas.into(),
+        transactions_root,
+        ommers_hash,
+        base_fee_per_gas: Some(rng.gen::<u64>().into()),
+        requests_root,
+        withdrawals_root,
+        ..Default::default()
+    }
+    .seal_slow();
+
+    let (header, seal) = sealed.into_parts();
+
     SealedBlock {
-        header: Header {
-            parent_hash: block_params.parent.unwrap_or_default(),
-            number,
-            gas_used: total_gas,
-            gas_limit: total_gas,
-            transactions_root,
-            ommers_hash,
-            base_fee_per_gas: Some(rng.gen()),
-            requests_root,
-            withdrawals_root,
-            ..Default::default()
-        }
-        .seal_slow(),
+        header: SealedHeader::new(header, seal),
         body: transactions,
         ommers,
         withdrawals: withdrawals.map(Withdrawals::new),

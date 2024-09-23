@@ -5,13 +5,12 @@ use crate::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader};
 use std::{collections::HashMap, sync::Arc};
 
 /// A headers+bodies client implementation that does nothing.
@@ -131,10 +130,9 @@ impl TestFullBlockClient {
     pub fn highest_block(&self) -> Option<SealedBlock> {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
-                self.bodies
-                    .lock()
-                    .get(hash)
-                    .map(|body| SealedBlock::new(header.clone().seal(*hash), body.clone()))
+                self.bodies.lock().get(hash).map(|body| {
+                    SealedBlock::new(SealedHeader::new(header.clone(), *hash), body.clone())
+                })
             },
         )
     }

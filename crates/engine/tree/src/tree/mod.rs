@@ -4,6 +4,8 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockNumber, B256, U256};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -21,11 +23,10 @@ use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256, U256,
+    Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
@@ -492,12 +493,10 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     payload_builder: PayloadBuilderHandle<T>,
     /// Configuration settings.
     config: TreeConfig,
-    /// An invalid block hook.
-    invalid_block_hook: Box<dyn InvalidBlockHook>,
-    /// Temporary flag to disable parallel state root.
-    parallel_state_root_enabled: bool,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
+    /// An invalid block hook.
+    invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
 impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
@@ -517,9 +516,8 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
-            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
-            .field("parallel_state_root_enabled", &self.parallel_state_root_enabled)
             .field("metrics", &self.metrics)
+            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
             .finish()
     }
 }
@@ -562,10 +560,9 @@ where
             canonical_in_memory_state,
             payload_builder,
             config,
+            metrics: Default::default(),
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
-            parallel_state_root_enabled: false,
-            metrics: Default::default(),
         }
     }
 
@@ -2109,15 +2106,18 @@ where
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk2, InsertBlockErrorKindTwo> {
+        debug!(target: "engine::tree", block=?block.num_hash(), "Inserting new block into tree");
         if self.block_by_hash(block.hash())?.is_some() {
             return Ok(InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid))
         }
 
         let start = Instant::now();
 
+        trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         self.validate_block(&block)?;
 
+        trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash, "Fetching block state provider");
         let Some(state_provider) = self.state_provider(block.parent_hash)? else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
@@ -2147,6 +2147,7 @@ where
             return Err(e.into())
         }
 
+        trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block_number = block.number;
@@ -2159,8 +2160,8 @@ where
             .metrics
             .executor
             .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
-        debug!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
+        trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2177,6 +2178,7 @@ where
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
+        trace!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Calculating block state root");
         let root_time = Instant::now();
         let mut state_root_result = None;
 
@@ -2186,13 +2188,13 @@ where
         // we are computing in parallel, because we initialize a different database transaction
         // per thread and it might end up with a different view of the database.
         let persistence_in_progress = self.persistence_state.in_progress();
-        if self.parallel_state_root_enabled && !persistence_in_progress {
+        if !persistence_in_progress {
             state_root_result = match self
                 .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(ProviderError::ConsistentView(error)) => {
-                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                    debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
                     None
                 }
                 Err(error) => return Err(error.into()),
@@ -2202,7 +2204,7 @@ where
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
         } else {
-            debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
 
@@ -2254,6 +2256,7 @@ where
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
+        debug!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Finished inserting block");
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
@@ -2333,7 +2336,7 @@ where
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
         if canonical.is_none() {
-            canonical = self.provider.header(&hash)?.map(|header| header.seal(hash));
+            canonical = self.provider.header(&hash)?.map(|header| SealedHeader::new(header, hash));
         }
 
         Ok(canonical)
@@ -2587,13 +2590,14 @@ impl PersistenceState {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
+    use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::Bytes;
+    use reth_primitives::alloy_primitives::Sealable;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;
@@ -2698,7 +2702,9 @@ mod tests {
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
-            let header = chain_spec.genesis_header().clone().seal_slow();
+            let sealed = chain_spec.genesis_header().clone().seal_slow();
+            let (header, seal) = sealed.into_parts();
+            let header = SealedHeader::new(header, seal);
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
 
@@ -2733,11 +2739,12 @@ mod tests {
         }
 
         fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-            let mut blocks_by_hash = HashMap::new();
+            let mut blocks_by_hash = HashMap::with_capacity(blocks.len());
             let mut blocks_by_number = BTreeMap::new();
-            let mut state_by_hash = HashMap::new();
+            let mut state_by_hash = HashMap::with_capacity(blocks.len());
             let mut hash_by_number = BTreeMap::new();
-            let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::new();
+            let mut parent_to_child: HashMap<B256, HashSet<B256>> =
+                HashMap::with_capacity(blocks.len());
             let mut parent_hash = B256::ZERO;
 
             for block in &blocks {

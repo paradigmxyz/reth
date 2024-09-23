@@ -153,7 +153,6 @@ pub struct NetworkArgs {
     /// Name of network interface used to communicate with peers.
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
-    #[cfg(not(target_os = "windows"))]
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
 }
@@ -161,7 +160,6 @@ pub struct NetworkArgs {
 impl NetworkArgs {
     /// Returns the resolved IP address.
     pub fn resolved_addr(&self) -> IpAddr {
-        #[cfg(not(target_os = "windows"))]
         if let Some(ref if_name) = self.net_if {
             let if_name = if if_name.is_empty() { DEFAULT_NET_IF_NAME } else { if_name };
             return match reth_net_nat::net_if::resolve_net_if_ip(if_name) {

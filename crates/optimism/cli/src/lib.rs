@@ -123,7 +123,7 @@ where
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
@@ -173,5 +173,30 @@ where
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let guard = self.logs.init_tracing()?;
         Ok(guard)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use clap::Parser;
+    use reth_cli_commands::NodeCommand;
+    use reth_optimism_chainspec::OP_DEV;
+
+    #[test]
+    fn parse_dev() {
+        let cmd: NodeCommand = NodeCommand::parse_from(["op-reth", "--dev"]);
+        let chain = OP_DEV.clone();
+        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
+        assert_eq!(cmd.chain.hardforks, chain.hardforks);
+
+        assert!(cmd.rpc.http);
+        assert!(cmd.network.discovery.disable_discovery);
+
+        assert!(cmd.dev.dev);
     }
 }

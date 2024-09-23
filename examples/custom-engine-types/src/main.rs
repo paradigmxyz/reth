@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use alloy_genesis::Genesis;
+use alloy_rpc_types::Withdrawal;
 use reth::{
     api::PayloadTypes,
     builder::{
@@ -52,7 +53,7 @@ use reth_node_ethereum::{
     EthEvmConfig,
 };
 use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
+    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
     PayloadBuilderService,
 };
 use reth_primitives::{Address, Withdrawals, B256};
@@ -61,7 +62,7 @@ use reth_rpc_types::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
         PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
-    ExecutionPayloadV1, Withdrawal,
+    ExecutionPayloadV1,
 };
 use reth_tracing::{RethTracer, Tracer};
 

@@ -1,13 +1,14 @@
 //! Handler that can download blocks on demand (e.g. from the network).
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
+use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
+use reth_primitives::{SealedBlock, SealedBlockWithSenders};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
@@ -308,7 +309,7 @@ mod tests {
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::Header;
+    use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader};
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
@@ -327,12 +328,14 @@ mod tests {
             );
 
             let client = TestFullBlockClient::default();
-            let header = Header {
+            let sealed = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: chain_spec.max_gas_limit.into(),
                 ..Default::default()
             }
             .seal_slow();
+            let (header, seal) = sealed.into_parts();
+            let header = SealedHeader::new(header, seal);
 
             insert_headers_into_client(&client, header, 0..total_blocks);
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
