@@ -7,6 +7,7 @@ use std::{
 };
 
 use alloy_primitives::B256;
+use alloy_rpc_types::TxGasAndReward;
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -19,7 +20,6 @@ use reth_primitives::{
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     Receipt, SealedBlock, TransactionSigned,
 };
-use reth_rpc_types::TxGasAndReward;
 use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 use tracing::trace;

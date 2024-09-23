@@ -1,3 +1,5 @@
+//! Hard forks of optimism protocol.
+
 use alloc::{boxed::Box, format, string::String, vec};
 use core::{
     any::Any,
@@ -7,10 +9,9 @@ use core::{
 
 use alloy_chains::Chain;
 use alloy_primitives::U256;
+use reth_ethereum_forks::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-use crate::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
 hardfork!(
     /// The name of an optimism hardfork.
@@ -334,6 +335,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
@@ -346,5 +349,28 @@ mod tests {
             OptimismHardfork::base_mainnet_activation_block(OptimismHardfork::Canyon),
             Some(9101527)
         );
+    }
+
+    #[test]
+    fn check_op_hardfork_from_str() {
+        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe"];
+        let expected_hardforks = [
+            OptimismHardfork::Bedrock,
+            OptimismHardfork::Regolith,
+            OptimismHardfork::Canyon,
+            OptimismHardfork::Ecotone,
+            OptimismHardfork::Fjord,
+            OptimismHardfork::Granite,
+        ];
+
+        let hardforks: Vec<OptimismHardfork> =
+            hardfork_str.iter().map(|h| OptimismHardfork::from_str(h).unwrap()).collect();
+
+        assert_eq!(hardforks, expected_hardforks);
+    }
+
+    #[test]
+    fn check_nonexistent_hardfork_from_str() {
+        assert!(OptimismHardfork::from_str("not a hardfork").is_err());
     }
 }

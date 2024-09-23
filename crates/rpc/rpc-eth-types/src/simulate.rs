@@ -1,6 +1,11 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_rpc_types::{
+    simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    Block, BlockTransactionsKind,
+};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     logs_bloom,
@@ -9,11 +14,8 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types::{
-    simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    Block, BlockTransactionsKind, ToRpcError, TransactionRequest, WithOtherFields,
-};
-use reth_rpc_types_compat::block::from_block;
+use reth_rpc_types::ToRpcError;
+use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{db::CacheDB, Database};
@@ -168,7 +170,7 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_block(
+pub fn build_block<T: TransactionCompat>(
     results: Vec<(Address, ExecutionResult)>,
     transactions: Vec<TransactionSigned>,
     block_env: &BlockEnv,
@@ -176,7 +178,7 @@ pub fn build_block(
     total_difficulty: U256,
     full_transactions: bool,
     db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
-) -> Result<SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>, EthApiError> {
+) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
     let mut receipts = Vec::new();
@@ -222,7 +224,7 @@ pub fn build_block(
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
-                        reth_rpc_types::Log {
+                        alloy_rpc_types::Log {
                             inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(transaction_index as u64),
@@ -297,6 +299,6 @@ pub fn build_block(
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, total_difficulty, txs_kind, None)?;
+    let block = from_block::<T>(block, total_difficulty, txs_kind, None)?;
     Ok(SimulatedBlock { inner: block, calls })
 }
