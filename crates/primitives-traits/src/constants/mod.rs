@@ -58,7 +58,7 @@ pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
 /// Minimum gas limit allowed for transactions.
-pub const MINIMUM_GAS_LIMIT: u64 = 5000;
+pub const MINIMUM_GAS_LIMIT: u128 = 5000;
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.

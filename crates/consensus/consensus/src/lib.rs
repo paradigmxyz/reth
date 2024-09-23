@@ -128,9 +128,9 @@ pub enum ConsensusError {
     #[display("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
     HeaderGasUsedExceedsGasLimit {
         /// The gas used in the block header.
-        gas_used: u64,
+        gas_used: u128,
         /// The gas limit in the block header.
-        gas_limit: u64,
+        gas_limit: u128,
     },
 
     /// Error when block gas used doesn't match expected value
@@ -353,9 +353,9 @@ pub enum ConsensusError {
     #[display("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
-        parent_gas_limit: u64,
+        parent_gas_limit: u128,
         /// The child gas limit.
-        child_gas_limit: u64,
+        child_gas_limit: u128,
     },
 
     /// Error indicating that the child gas limit is below the minimum allowed limit.
@@ -366,16 +366,16 @@ pub enum ConsensusError {
     )]
     GasLimitInvalidMinimum {
         /// The child gas limit.
-        child_gas_limit: u64,
+        child_gas_limit: u128,
     },
 
     /// Error when the child gas limit exceeds the maximum allowed decrease.
     #[display("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
     GasLimitInvalidDecrease {
         /// The parent gas limit.
-        parent_gas_limit: u64,
+        parent_gas_limit: u128,
         /// The child gas limit.
-        child_gas_limit: u64,
+        child_gas_limit: u128,
     },
 
     /// Error when the block timestamp is in the past compared to the parent timestamp.

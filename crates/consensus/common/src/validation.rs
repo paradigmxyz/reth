@@ -16,8 +16,8 @@ use reth_primitives::{
 pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> {
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
-            gas_used: header.gas_used as u64,
-            gas_limit: header.gas_limit as u64,
+            gas_used: header.gas_used,
+            gas_limit: header.gas_limit,
         })
     }
     Ok(())

@@ -189,7 +189,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
         let ommers = (0..2)
             .map(|_| {
                 let mut header = Header::arbitrary(u)?;
-                header.gas_limit = (header.gas_limit as u64).into();
                 header.gas_used = (header.gas_used as u64).into();
                 header.base_fee_per_gas = header
                     .base_fee_per_gas
@@ -654,7 +653,6 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
         let ommers = (0..2)
             .map(|_| {
                 let mut header = Header::arbitrary(u)?;
-                header.gas_limit = (header.gas_limit as u64).into();
                 header.gas_used = (header.gas_used as u64).into();
                 header.base_fee_per_gas = header
                     .base_fee_per_gas
