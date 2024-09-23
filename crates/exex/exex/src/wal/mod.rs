@@ -99,9 +99,8 @@ impl Wal {
     ///
     /// 1. Walks the WAL from the end and searches for the first notification where committed chain
     ///    contains a block with the same number and hash as `to_block`.
-    /// 2. If the notification is found, truncates the WAL to the offset of the notification. It
-    ///    means that if the notification contains both given block and blocks before it, the whole
-    ///    notification will be truncated.
+    /// 2. If the notification is found, truncates the WAL. It means that if the found notification
+    ///    contains both given block and blocks before it, the whole notification will be truncated.
     ///
     /// # Returns
     ///
@@ -168,11 +167,10 @@ impl Wal {
 
     /// Finalizes the WAL to the given block, inclusive.
     ///
-    /// 1. Finds an offset of the notification with first unfinalized block (first notification
-    ///    containing a committed block higher than `to_block`). If the notificatin includes both
-    ///    finalized and non-finalized blocks, the offset will include this notification (i.e.
-    ///    consider this notification unfinalized and don't remove it).
-    /// 2. Truncates the storage from the offset of the notification, not inclusive.
+    /// 1. Finds a notification with first unfinalized block (first notification containing a
+    ///    committed block higher than `to_block`).
+    /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
+    ///    notification includes both finalized and non-finalized blocks, it will not be removed.
     #[instrument(target = "exex::wal", skip(self))]
     pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the file id of the notification with the finalized block.

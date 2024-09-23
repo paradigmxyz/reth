@@ -1,7 +1,7 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
-    ops::{Bound, ControlFlow, RangeBounds, RangeInclusive},
+    io::{Read, Write},
+    ops::{Bound, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
 };
 
@@ -76,6 +76,7 @@ impl Storage {
         Some(start..=end)
     }
 
+    /// Removes notifications from the storage according to the given selector.
     pub(super) fn remove_notifications(
         &mut self,
         selector: RemoveNotificationsSelector,
@@ -121,7 +122,7 @@ impl Storage {
         )
     }
 
-    /// Reads the notification from the underlying file at the given offset.
+    /// Reads the notification from the file with the given id.
     pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<ExExNotification> {
         debug!(?file_id, "Reading notification from WAL");
 
@@ -130,7 +131,7 @@ impl Storage {
         read_notification(&mut file)
     }
 
-    /// Writes the notification to the end of the underlying file.
+    /// Writes the notification to the file with the given id.
     pub(super) fn write_notification(
         &mut self,
         notification: &ExExNotification,
@@ -150,7 +151,9 @@ impl Storage {
 }
 
 pub(super) enum RemoveNotificationsSelector {
+    /// Remove notifications from the given file id, inclusive.
     FromFileId(u64),
+    /// Remove notifications up to the given file id, exclusive.
     ToFileId(u64),
 }
 
