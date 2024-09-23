@@ -397,7 +397,7 @@ where
                             TracingInspectorConfig::from_flat_call_config(&flat_call_config)
                         );
 
-                        let frame = self
+                        let frame: FlatCallFrame= self
                             .inner
                             .eth_api
                             .spawn_with_call_at(
@@ -411,12 +411,12 @@ where
                                         .with_transaction_gas_limit(env.tx.gas_limit)
                                         .into_parity_builder()
                                         .into_localized_transaction_traces(tx_info)
-                                        .pop();
+                                        .pop().unwrap();
                                     Ok(frame)
                             })
                             .await?;
 
-                        return Ok(frame)
+                        return Ok(frame.into());
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
