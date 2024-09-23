@@ -580,7 +580,8 @@ pub trait EthTransactions: LoadTransaction {
                 .sign(account, &message)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .to_hex_bytes())
+                .as_bytes()
+                .into())
         }
     }
 
@@ -590,7 +591,8 @@ pub trait EthTransactions: LoadTransaction {
             .find_signer(&account)?
             .sign_typed_data(account, data)
             .map_err(Self::Error::from_eth_err)?
-            .to_hex_bytes())
+            .as_bytes()
+            .into())
     }
 
     /// Returns the signer for the given account, if found in configured signers.

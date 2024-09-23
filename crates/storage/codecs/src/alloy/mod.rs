@@ -4,6 +4,7 @@ mod genesis_account;
 mod header;
 mod log;
 mod request;
+mod signature;
 mod transaction;
 mod trie;
 mod txkind;

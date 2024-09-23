@@ -262,7 +262,7 @@ mod tests {
             is_system_transaction: false,
             input: Default::default(),
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
         let signed_recovered =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);

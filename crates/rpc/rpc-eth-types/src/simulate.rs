@@ -1,6 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_primitives::Parity;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     Block, BlockTransactionsKind,
@@ -134,7 +135,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature =
-            Signature { odd_y_parity: false, r: Default::default(), s: Default::default() };
+            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
