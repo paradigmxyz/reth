@@ -6654,6 +6654,7 @@ dependencies = [
  "reqwest",
  "reth-node-api",
  "reth-node-core",
+ "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-types",
