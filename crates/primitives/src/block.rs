@@ -7,7 +7,7 @@ pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
 use alloy_primitives::Sealable;
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
@@ -30,10 +30,7 @@ prop_compose! {
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
-)]
-#[rlp(trailing)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref)]
 pub struct Block {
     /// Block header.
     #[deref]
@@ -110,6 +107,63 @@ impl Block {
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() + self.body.size()
+    }
+}
+
+mod block_rlp {
+    use super::*;
+
+    #[derive(RlpDecodable)]
+    #[rlp(trailing)]
+    struct Helper {
+        header: Header,
+        transactions: Vec<TransactionSigned>,
+        ommers: Vec<Header>,
+        withdrawals: Option<Withdrawals>,
+        requests: Option<Requests>,
+    }
+
+    #[derive(RlpEncodable)]
+    #[rlp(trailing)]
+    struct HelperRef<'a> {
+        header: &'a Header,
+        transactions: &'a Vec<TransactionSigned>,
+        ommers: &'a Vec<Header>,
+        withdrawals: Option<&'a Withdrawals>,
+        requests: Option<&'a Requests>,
+    }
+
+    impl<'a> From<&'a Block> for HelperRef<'a> {
+        fn from(block: &'a Block) -> Self {
+            let Block { header, body: BlockBody { transactions, ommers, withdrawals, requests } } =
+                block;
+            Self {
+                header,
+                transactions,
+                ommers,
+                withdrawals: withdrawals.as_ref(),
+                requests: requests.as_ref(),
+            }
+        }
+    }
+
+    impl Decodable for Block {
+        fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+            let Helper { header, transactions, ommers, withdrawals, requests } = Helper::decode(b)?;
+            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals, requests } })
+        }
+    }
+
+    impl Encodable for Block {
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_> = self.into();
+            helper.length()
+        }
+
+        fn encode(&self, out: &mut dyn bytes::BufMut) {
+            let helper: HelperRef<'_> = self.into();
+            helper.encode(out)
+        }
     }
 }
 
