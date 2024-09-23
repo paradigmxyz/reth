@@ -52,7 +52,6 @@ default = ["std"]
 optimism = [
     "serde",
     "dep:op-alloy-rpc-types",
-    "reth-optimism-forks",
 ]
 std = []
 arbitrary = [
