@@ -40,9 +40,3 @@ tracing.workspace = true
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
-
-[features]
-optimism = [
-# TODO: FULL REMOVE THIS FEATURE FROM RETH-OPTIMISM-CONSENSUS
-    "reth-optimism-consensus/optimism"
-]
