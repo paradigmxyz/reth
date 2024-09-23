@@ -153,8 +153,6 @@ pub mod rpc {
 
     /// Re-exported from `alloy_rpc_types`.
     pub mod types {
-        /// Alias for a peer identifier
-        pub type PeerId = reth_primitives::B512;
         pub use alloy_rpc_types::*;
     }
 
