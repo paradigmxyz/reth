@@ -404,7 +404,7 @@ where
                                 at, 
                                 overrides, 
                                 move |db, env| {
-                                    let (res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
+                                    let (_res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
                                     let tx_info = TransactionInfo::default();
                                     let frame = inspector
                                         .with_transaction_gas_limit(env.tx.gas_limit)
