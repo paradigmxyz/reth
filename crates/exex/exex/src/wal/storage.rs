@@ -188,7 +188,7 @@ impl Storage {
 }
 
 pub(super) enum RemoveNotificationsRange {
-    /// Remove notifications from the given file ID, inclusive.
+    /// Remove notifications starting from the given file ID, inclusive.
     FromFileId(u64),
     /// Remove notifications up to the given file ID, exclusive.
     ToFileId(u64),
