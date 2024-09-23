@@ -130,7 +130,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                             base_block
                                 .header
                                 .next_block_base_fee(base_fee_params)
-                                .unwrap_or_default() as u128
+                                .unwrap_or_default()
                         };
                         block_env.basefee = U256::from(base_fee);
                     } else {

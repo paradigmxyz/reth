@@ -1271,7 +1271,7 @@ impl HeaderProvider for StaticFileProvider {
             |cursor, number| {
                 Ok(cursor
                     .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-                    .map(|(header, hash)| header.seal(hash)))
+                    .map(|(header, hash)| SealedHeader::new(header, hash)))
             },
             predicate,
         )

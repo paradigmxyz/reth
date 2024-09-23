@@ -1,6 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_primitives::Parity;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     Block, BlockTransactionsKind,
@@ -134,7 +135,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature =
-            Signature { odd_y_parity: false, r: Default::default(), s: Default::default() };
+            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
@@ -280,7 +281,7 @@ pub fn build_block<T: TransactionCompat>(
         timestamp: block_env.timestamp.to(),
         base_fee_per_gas: Some(block_env.basefee.to()),
         gas_limit: block_env.gas_limit.to(),
-        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>(),
+        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>() as u128,
         blob_gas_used: Some(0),
         parent_hash,
         receipts_root: calculate_receipt_root(&receipts),

@@ -119,7 +119,6 @@ optimism = [
     "reth-optimism-forks",
 ]
 alloy-compat = [
-    "reth-primitives-traits/alloy-compat",
     "dep:alloy-rpc-types",
     "dep:alloy-serde",
     "dep:op-alloy-rpc-types",

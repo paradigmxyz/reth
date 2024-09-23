@@ -20,8 +20,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -69,7 +69,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
-                Ok(Self::with_latest(database, header.seal(best.best_hash))?)
+                Ok(Self::with_latest(database, SealedHeader::new(header, best.best_hash))?)
             }
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
@@ -1279,20 +1279,34 @@ where
                 Ok(self.canonical_in_memory_state.get_finalized_header())
             }
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
-            BlockNumberOrTag::Earliest => {
-                self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
-            }
+            BlockNumberOrTag::Earliest => self.header_by_number(0)?.map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            ),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
-            BlockNumberOrTag::Number(num) => {
-                self.header_by_number(num)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
-            }
+            BlockNumberOrTag::Number(num) => self.header_by_number(num)?.map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            ),
         }
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| h.seal_slow()),
+            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| {
+                let sealed = h.seal_slow();
+                let (header, seal) = sealed.into_parts();
+                SealedHeader::new(header, seal)
+            }),
         })
     }
 
@@ -3744,7 +3758,10 @@ mod tests {
             index: 0,
             block_hash: in_memory_blocks[0].header.hash(),
             block_number: in_memory_blocks[0].header.number,
-            base_fee: in_memory_blocks[0].header.base_fee_per_gas,
+            base_fee: in_memory_blocks[0]
+                .header
+                .base_fee_per_gas
+                .map(|base_fee_per_gas| base_fee_per_gas as u64),
             excess_blob_gas: None,
             timestamp: in_memory_blocks[0].header.timestamp,
         };
@@ -3772,7 +3789,10 @@ mod tests {
             index: 0,
             block_hash: database_blocks[0].header.hash(),
             block_number: database_blocks[0].header.number,
-            base_fee: database_blocks[0].header.base_fee_per_gas,
+            base_fee: database_blocks[0]
+                .header
+                .base_fee_per_gas
+                .map(|base_fee_per_gas| base_fee_per_gas as u64),
             excess_blob_gas: None,
             timestamp: database_blocks[0].header.timestamp,
         };
