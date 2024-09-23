@@ -71,7 +71,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool> {
 impl<Provider, EngineT, Pool> EngineApi<Provider, EngineT, Pool>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    EngineT: EngineTypes,
+    EngineT: EngineTypes<ChainSpec = ChainSpec>,
     Pool: TransactionPool + 'static,
 {
     /// Create new instance of [`EngineApi`].
@@ -622,7 +622,7 @@ where
 impl<Provider, EngineT, Pool> EngineApiServer<EngineT> for EngineApi<Provider, EngineT, Pool>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    EngineT: EngineTypes,
+    EngineT: EngineTypes<ChainSpec = ChainSpec>,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `engine_newPayloadV1`
