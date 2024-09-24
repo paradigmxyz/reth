@@ -12,7 +12,7 @@ use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNum
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chainspec::{Chain, ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -632,14 +632,23 @@ impl StaticFileProvider {
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
     {
-        // OVM chain contains duplicate transactions, so is inconsistent by default since reth db
-        // not designed for duplicate transactions (see <https://github.com/paradigmxyz/reth/blob/v1.0.3/crates/optimism/primitives/src/bedrock_import.rs>). Undefined behaviour for queries
-        // to OVM chain is also in op-erigon.
-        if provider.chain_spec().chain() == Chain::optimism_mainnet() {
+        // OVM historical import is broken and does not work with this check. It's importing
+        // duplicated receipts resulting in having more receipts than the expected transaction
+        // range.
+        //
+        // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
+        // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
+        #[cfg(feature = "optimism")]
+        if reth_chainspec::EthChainSpec::chain(&provider.chain_spec()) ==
+            reth_chainspec::Chain::optimism_mainnet() &&
+            provider
+                .block_number(reth_optimism_primitives::bedrock::OVM_HEADER_1_HASH)?
+                .is_some()
+        {
             info!(target: "reth::cli",
                 "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
             );
-            return Ok(None);
+            return Ok(None)
         }
 
         info!(target: "reth::cli", "Verifying storage consistency.");
