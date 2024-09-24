@@ -1,11 +1,14 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
-use alloy_rpc_types::{state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext};
+use alloy_rpc_types::{
+    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
+};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
+    call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType,
+    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    NoopFrame, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -388,9 +391,32 @@ where
                         return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
+                        );
+
+                        let frame: FlatCallFrame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (_res, env) =
+                                    this.eth_api().inspect(db, env, &mut inspector)?;
+                                let tx_info = TransactionInfo::default();
+                                let frame: FlatCallFrame = inspector
+                                    .with_transaction_gas_limit(env.tx.gas_limit)
+                                    .into_parity_builder()
+                                    .into_localized_transaction_traces(tx_info)
+                                    .pop()
+                                    .unwrap();
+                                Ok(frame)
+                            })
+                            .await?;
+
+                        return Ok(frame.into());
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -689,8 +715,7 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
-        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
+        transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -756,9 +781,31 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
+                        );
+
+                        let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
+
+                        let tx_info = TransactionInfo {
+                            hash: transaction_context.unwrap().tx_hash,
+                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
+                            block_hash: transaction_context.unwrap().block_hash,
+                            block_number: Some(env.block.number.try_into().unwrap_or_default()),
+                            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
+                        };
+                        let frame: FlatCallFrame = inspector
+                            .with_transaction_gas_limit(env.tx.gas_limit)
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info)
+                            .pop()
+                            .unwrap();
+
+                        return Ok((frame.into(), res.state));
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
