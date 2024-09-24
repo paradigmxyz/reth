@@ -1,3 +1,4 @@
+use reth_blockchain_tree::metrics::TreeMetrics;
 use reth_evm::metrics::ExecutorMetrics;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
@@ -13,6 +14,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) executor: ExecutorMetrics,
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
+    /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
+    pub(crate) tree: TreeMetrics,
 }
 
 /// Metrics for the `EngineApi`.

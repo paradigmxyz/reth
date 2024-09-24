@@ -5,26 +5,6 @@ use reth_metrics::{
 };
 use std::time::{Duration, Instant};
 
-/// Metrics for the entire blockchain tree
-#[derive(Metrics)]
-#[metrics(scope = "blockchain_tree")]
-pub struct TreeMetrics {
-    /// Total number of sidechains (not including the canonical chain)
-    pub sidechains: Gauge,
-    /// The highest block number in the canonical chain
-    pub canonical_chain_height: Gauge,
-    /// The number of reorgs
-    pub reorgs: Counter,
-    /// The latest reorg depth
-    pub latest_reorg_depth: Gauge,
-    /// Longest sidechain height
-    pub longest_sidechain_height: Gauge,
-    /// The number of times cached trie updates were used for insert.
-    pub trie_updates_insert_cached: Counter,
-    /// The number of times trie updates were recomputed for insert.
-    pub trie_updates_insert_recomputed: Counter,
-}
-
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree.block_buffer")]
@@ -63,6 +43,26 @@ impl MakeCanonicalDurationsRecorder {
         self.current_metrics.record(action, duration);
         self.latest = Some(elapsed);
     }
+}
+
+/// Metrics for the entire blockchain tree
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree")]
+pub struct TreeMetrics {
+    /// Total number of sidechains (not including the canonical chain)
+    pub sidechains: Gauge,
+    /// The highest block number in the canonical chain
+    pub canonical_chain_height: Gauge,
+    /// The number of reorgs
+    pub reorgs: Counter,
+    /// The latest reorg depth
+    pub latest_reorg_depth: Gauge,
+    /// Longest sidechain height
+    pub longest_sidechain_height: Gauge,
+    /// The number of times cached trie updates were used for insert.
+    pub trie_updates_insert_cached: Counter,
+    /// The number of times trie updates were recomputed for insert.
+    pub trie_updates_insert_recomputed: Counter,
 }
 
 /// Represents actions for making a canonical chain.

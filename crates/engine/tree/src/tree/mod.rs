@@ -1291,6 +1291,7 @@ where
             backfill_num_hash,
         );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+        self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
 
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
@@ -1955,6 +1956,9 @@ where
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
+
+        // Update metrics based on new tip
+        self.metrics.tree.canonical_chain_height.set(tip.number as f64);
 
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
