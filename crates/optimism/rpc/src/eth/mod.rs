@@ -14,7 +14,7 @@ use std::{fmt, sync::Arc};
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::Optimism;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
@@ -110,12 +110,12 @@ where
 impl<N> EthApiSpec for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
     fn provider(
         &self,
-    ) -> impl ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader
+    ) -> impl ChainSpecProvider<ChainSpec: EthereumHardforks> + BlockNumReader + StageCheckpointReader
     {
         self.inner.provider()
     }
@@ -160,12 +160,12 @@ where
 impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
     fn provider(
         &self,
-    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec> {
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> {
         self.inner.provider()
     }
 
@@ -188,10 +188,12 @@ where
 impl<N> LoadState for OpEthApi<N>
 where
     Self: Send + Sync + Clone,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
+    fn provider(
+        &self,
+    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> {
         self.inner.provider()
     }
 

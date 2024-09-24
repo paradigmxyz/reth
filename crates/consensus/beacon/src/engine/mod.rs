@@ -946,7 +946,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(safe.header.seal(safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
         }
         Ok(())
     }
@@ -967,7 +967,8 @@ where
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
             self.blockchain.finalize_block(finalized.number)?;
-            self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
+            self.blockchain
+                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
         }
         Ok(())
     }
@@ -2861,7 +2862,7 @@ mod tests {
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
-            block2.withdrawals = None;
+            block2.body.withdrawals = None;
             block2.header.parent_hash = block1.hash();
             block2.header.base_fee_per_gas = Some(100);
             block2.header.difficulty = U256::ZERO;

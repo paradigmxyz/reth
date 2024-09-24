@@ -2,8 +2,8 @@
 
 use alloy_network::{AnyNetwork, Network};
 use alloy_rpc_types::{Transaction, TransactionInfo};
+use alloy_serde::WithOtherFields;
 use reth_primitives::{Address, TransactionSignedEcRecovered, TxKind};
-use reth_rpc_types::WithOtherFields;
 use reth_rpc_types_compat::{
     transaction::{from_primitive_signature, GasPrice},
     TransactionCompat,

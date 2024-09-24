@@ -7,7 +7,7 @@ use futures::StreamExt;
 use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
 use reth_network_api::PeersInfo;
-use reth_primitives::{TransactionSigned, TxLegacy};
+use reth_primitives::{Signature, TransactionSigned, TxLegacy};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 
@@ -131,7 +131,10 @@ async fn test_sending_invalid_transactions() {
             value: Default::default(),
             input: Default::default(),
         };
-        let tx = TransactionSigned::from_transaction_and_signature(tx.into(), Default::default());
+        let tx = TransactionSigned::from_transaction_and_signature(
+            tx.into(),
+            Signature::test_signature(),
+        );
         peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
     }
 

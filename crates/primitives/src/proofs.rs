@@ -55,7 +55,7 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
 #[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
-    chain_spec: &reth_chainspec::ChainSpec,
+    chain_spec: impl reth_chainspec::Hardforks,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -63,6 +63,7 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
+
     if chain_spec
         .is_fork_active_at_timestamp(reth_optimism_forks::OptimismHardfork::Regolith, timestamp) &&
         !chain_spec.is_fork_active_at_timestamp(
@@ -123,7 +124,7 @@ mod tests {
         let block_rlp = &mut data.as_slice();
         let block: Block = Block::decode(block_rlp).unwrap();
 
-        let tx_root = calculate_transaction_root(&block.body);
+        let tx_root = calculate_transaction_root(&block.body.transactions);
         assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
@@ -155,8 +156,8 @@ mod tests {
         // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/amountIs0.json
         let data = &hex!("f90238f90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0046119afb1ab36aaa8f66088677ed96cd62762f6d3e65642898e189fbe702d51a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a048a703da164234812273ea083e4ec3d09d028300cd325b46a6a75402e5a7ab95c0c0d9d8808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b80");
         let block: Block = Block::decode(&mut data.as_slice()).unwrap();
-        assert!(block.withdrawals.is_some());
-        let withdrawals = block.withdrawals.as_ref().unwrap();
+        assert!(block.body.withdrawals.is_some());
+        let withdrawals = block.body.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 1);
         let withdrawals_root = calculate_withdrawals_root(withdrawals);
         assert_eq!(block.withdrawals_root, Some(withdrawals_root));
@@ -165,8 +166,8 @@ mod tests {
         // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndex.json
         let data = &hex!("f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0ccf7b62d616c2ad7af862d67b9dcd2119a90cebbff8c3cd1e5d7fc99f8755774a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a0a95b9a7b58a6b3cb4001eb0be67951c5517141cb0183a255b5cae027a7b10b36c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710");
         let block: Block = Block::decode(&mut data.as_slice()).unwrap();
-        assert!(block.withdrawals.is_some());
-        let withdrawals = block.withdrawals.as_ref().unwrap();
+        assert!(block.body.withdrawals.is_some());
+        let withdrawals = block.body.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 4);
         let withdrawals_root = calculate_withdrawals_root(withdrawals);
         assert_eq!(block.withdrawals_root, Some(withdrawals_root));

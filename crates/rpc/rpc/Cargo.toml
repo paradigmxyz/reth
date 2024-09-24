@@ -48,6 +48,8 @@ alloy-rpc-types-debug.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-mev.workspace = true
 alloy-rpc-types-txpool.workspace = true
+alloy-rpc-types-admin.workspace = true
+alloy-serde.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",

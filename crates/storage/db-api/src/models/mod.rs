@@ -305,7 +305,7 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Account, Header, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
+    use reth_primitives::{Account, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
@@ -329,7 +329,6 @@ mod tests {
         assert_eq!(CompactU64::bitflag_encoded_bytes(), 1);
         assert_eq!(EntitiesCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(ExecutionCheckpoint::bitflag_encoded_bytes(), 0);
-        assert_eq!(Header::bitflag_encoded_bytes(), 4);
         assert_eq!(HeadersCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(IndexHistoryCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
@@ -358,7 +357,6 @@ mod tests {
         assert_eq!(CompactU64::bitflag_encoded_bytes(), 1);
         assert_eq!(EntitiesCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(ExecutionCheckpoint::bitflag_encoded_bytes(), 0);
-        assert_eq!(Header::bitflag_encoded_bytes(), 4);
         assert_eq!(HeadersCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(IndexHistoryCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);

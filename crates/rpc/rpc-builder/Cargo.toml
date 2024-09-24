@@ -28,12 +28,12 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth-primitives.workspace = true
 
 # ethereum
 alloy-network.workspace = true
 alloy-rpc-types.workspace = true
+alloy-serde.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

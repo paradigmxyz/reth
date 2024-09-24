@@ -33,6 +33,7 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     let l1_info_tx_data = block
         .body
+        .transactions
         .first()
         .ok_or_else(|| OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not find l1 block info tx in the L2 block".to_string(),
@@ -299,7 +300,7 @@ where
 mod tests {
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OptimismHardforks;
-    use reth_primitives::TransactionSigned;
+    use reth_primitives::{BlockBody, TransactionSigned};
 
     use super::*;
 
@@ -312,10 +313,7 @@ mod tests {
         let l1_info_tx = TransactionSigned::decode_enveloped(&mut bytes.as_ref()).unwrap();
         let mock_block = Block {
             header: Header::default(),
-            body: vec![l1_info_tx],
-            ommers: Vec::default(),
-            withdrawals: None,
-            requests: None,
+            body: BlockBody { transactions: vec![l1_info_tx], ..Default::default() },
         };
 
         let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
@@ -341,7 +339,10 @@ mod tests {
         const TX: [u8; 251] = hex!("7ef8f8a0a539eb753df3b13b7e386e147d45822b67cb908c9ddc5618e3dbaa22ed00850b94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e2000000558000c5fc50000000000000000000000006605a89f00000000012a10d90000000000000000000000000000000000000000000000000000000af39ac3270000000000000000000000000000000000000000000000000000000d5ea528d24e582fa68786f080069bdbfe06a43f8e67bfd31b8e4d8a8837ba41da9a82a54a0000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
 
         let tx = TransactionSigned::decode_enveloped(&mut TX.as_slice()).unwrap();
-        let block = Block { body: vec![tx], ..Default::default() };
+        let block = Block {
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+            ..Default::default()
+        };
 
         // expected l1 block info
         let expected_l1_base_fee = U256::from_be_bytes(hex!(

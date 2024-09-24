@@ -9,7 +9,7 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use alloy_primitives::U256;
+use alloy_primitives::{B64, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -85,7 +85,7 @@ impl Consensus for OptimismBeaconConsensus {
         let is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
 
         if is_post_merge {
-            if header.nonce != 0 {
+            if header.nonce != B64::ZERO {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
@@ -124,7 +124,7 @@ impl Consensus for OptimismBeaconConsensus {
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         // Check ommers hash
-        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
+        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
         if block.header.ommers_hash != ommers_hash {
             return Err(ConsensusError::BodyOmmersHashDiff(
                 GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
