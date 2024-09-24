@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use super::setup;
-use reth_chainspec::ChainSpec;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,

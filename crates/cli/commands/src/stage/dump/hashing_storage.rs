@@ -2,11 +2,10 @@ use std::sync::Arc;
 
 use super::setup;
 use eyre::Result;
-use reth_chainspec::ChainSpec;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},

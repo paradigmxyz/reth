@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
@@ -20,7 +20,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{

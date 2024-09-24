@@ -2,7 +2,7 @@
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_provider::BlockHashReader;

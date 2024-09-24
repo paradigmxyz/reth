@@ -3,11 +3,11 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use alloy_primitives::B256;
 use clap::Parser;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
 use reth_db_common::init::init_from_state_dump;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 
 use std::{fs::File, io::BufReader, path::PathBuf};

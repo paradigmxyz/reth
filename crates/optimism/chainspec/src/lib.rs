@@ -27,7 +27,9 @@ pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
 use derive_more::{Constructor, Deref, Into};
-use reth_chainspec::{BaseFeeParams, ChainSpec, DepositContract, EthChainSpec};
+use reth_chainspec::{
+    BaseFeeParams, ChainSpec, DepositContract, EthChainSpec, EthereumHardforks, Hardforks,
+};
 use reth_primitives_traits::Header;
 
 /// OP stack chain spec type.
@@ -78,6 +80,28 @@ impl EthChainSpec for OpChainSpec {
 
     fn max_gas_limit(&self) -> u64 {
         self.inner.max_gas_limit()
+    }
+}
+
+impl Hardforks for OpChainSpec {
+    fn fork<H: reth_chainspec::Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+        self.inner.fork(fork)
+    }
+
+    fn forks_iter(
+        &self,
+    ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
+        self.inner.forks_iter()
+    }
+}
+
+impl EthereumHardforks for OpChainSpec {
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.inner.final_paris_total_difficulty(block_number)
+    }
+
+    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.inner.get_final_paris_total_difficulty()
     }
 }
 

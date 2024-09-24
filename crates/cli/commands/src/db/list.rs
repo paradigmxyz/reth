@@ -2,12 +2,11 @@ use super::tui::DbListTUI;
 use alloy_primitives::hex;
 use clap::Parser;
 use eyre::WrapErr;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_db::{DatabaseEnv, RawValue, TableViewer, Tables};
 use reth_db_api::{database::Database, table::Table};
 use reth_db_common::{DbTool, ListFilter};
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
-use reth_provider::providers::ProviderNodeTypes;
 use std::{cell::RefCell, sync::Arc};
 use tracing::error;
 

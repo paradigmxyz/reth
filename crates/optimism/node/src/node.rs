@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
@@ -129,7 +128,7 @@ pub struct OptimismExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for OptimismExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type EVM = OptimismEvmConfig;
     type Executor = OpExecutorProvider<Self::EVM>;
@@ -138,10 +137,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
-        let evm_config =
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() }));
-        let executor = OpExecutorProvider::new(chain_spec, evm_config.clone());
+        let evm_config = OptimismEvmConfig::new(ctx.chain_spec());
+        let executor = OpExecutorProvider::new(ctx.chain_spec(), evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -157,7 +154,7 @@ pub struct OptimismPoolBuilder;
 
 impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -256,7 +253,7 @@ impl OptimismPayloadBuilder {
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>>
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
         >,
         Pool: TransactionPool + Unpin + 'static,
         Evm: ConfigureEvm<Header = Header>,
@@ -292,7 +289,7 @@ impl OptimismPayloadBuilder {
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
     >,
     Pool: TransactionPool + Unpin + 'static,
 {
@@ -320,7 +317,7 @@ pub struct OptimismNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn build_network(
@@ -377,7 +374,7 @@ pub struct OptimismConsensusBuilder;
 
 impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 
@@ -397,7 +394,7 @@ pub struct OptimismEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
     Node: FullNodeTypes<Types = Types>,
     OptimismEngineValidator: EngineValidator<Types::Engine>,
 {

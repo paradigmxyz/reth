@@ -1,6 +1,5 @@
 use alloy_primitives::BlockHash;
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_db::{
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,

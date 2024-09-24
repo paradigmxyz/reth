@@ -2,7 +2,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;

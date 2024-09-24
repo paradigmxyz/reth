@@ -6,7 +6,7 @@ use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;

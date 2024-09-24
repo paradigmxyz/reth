@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_evm::execute::BlockExecutorProvider;
