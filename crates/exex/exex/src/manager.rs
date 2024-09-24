@@ -854,7 +854,10 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
-        ForkChoiceStream::new(watch::channel(None).1)
+        let (tx, rx) = watch::channel(None);
+        // Do not drop the sender, otherwise the receiver will always return an error
+        std::mem::forget(tx);
+        ForkChoiceStream::new(rx)
     }
 
     #[tokio::test]
