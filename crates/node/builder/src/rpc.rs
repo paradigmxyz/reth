@@ -190,6 +190,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         TaskExecutor,
         Node::Provider,
         EthApi,
+        Node::Executor,
     >,
 }
 
@@ -205,6 +206,7 @@ where
         TaskExecutor,
         Node::Provider,
         EthApi,
+        Node::Executor,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -314,6 +316,7 @@ where
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config().clone())
+        .with_block_executor(node.block_executor().clone())
         .build_with_auth_server(module_config, engine_api, EthApi::eth_api_builder());
 
     let mut registry = RpcRegistry { registry };
