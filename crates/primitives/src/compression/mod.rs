@@ -38,13 +38,13 @@ std::thread_local! {
         ));
 }
 
-/// Fn creates as many tx compressors per thread as times its called. It is meant to be used in no-std config
+/// Fn creates tx [`Compressor`]
 pub fn create_tx_compressor() -> Compressor<'static> {
     Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
             .expect("Failed to instantiate tx compressor")
 }
 
-/// Fn creates as many tx decompressors per thread as times its called. It is meant to be used in no-std config
+/// Fn creates tx [`Decompressor`]
 pub fn create_tx_decompressor() -> ReusableDecompressor {
     ReusableDecompressor::new(
         Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
@@ -52,14 +52,12 @@ pub fn create_tx_decompressor() -> ReusableDecompressor {
     )
 }
 
-/// Fn creates as many receipt compressors per thread as times its called. It is meant to be used in no-std
-/// config
+/// Fn creates receipt [`Compressor`]
 pub fn create_receipt_compressor() -> Compressor<'static> {
     Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate receipt compressor")
 }
 
-/// Fn creates as many receipt decompressors per thread as times its called. It is meant to be used in no-std
-/// config
+/// Fn creates receipt [`Decompressor`]
 pub fn create_receipt_decompressor() -> ReusableDecompressor {
     ReusableDecompressor::new(
         Decompressor::with_dictionary(RECEIPT_DICTIONARY)
