@@ -159,7 +159,7 @@ impl ExExHandle {
         }
     }
 
-    /// Finalizes the ExEx and its [WAL](`Wal`) with the given finalized header.
+    /// Finalizes the [WAL](`Wal`) with the given finalized header.
     fn finalize(&mut self, finalized_header: &SealedHeader) -> eyre::Result<()> {
         self.wal.finalize((finalized_header.number, finalized_header.hash()).into())
     }
