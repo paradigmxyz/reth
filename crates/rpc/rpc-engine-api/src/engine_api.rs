@@ -6,7 +6,7 @@ use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_engine_primitives::{EngineTypes, EngineValidator};
 use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
@@ -43,11 +43,11 @@ const MAX_BLOB_LIMIT: usize = 128;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator> {
-    inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator>>,
+pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
+    inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>>,
 }
 
-struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator> {
+struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
@@ -70,12 +70,14 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator> {
     validator: Validator,
 }
 
-impl<Provider, EngineT, Pool, Validator> EngineApi<Provider, EngineT, Pool, Validator>
+impl<Provider, EngineT, Pool, Validator, ChainSpec>
+    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Create new instance of [`EngineApi`].
     #[allow(clippy::too_many_arguments)]
@@ -616,13 +618,14 @@ where
 }
 
 #[async_trait]
-impl<Provider, EngineT, Pool, Validator> EngineApiServer<EngineT>
-    for EngineApi<Provider, EngineT, Pool, Validator>
+impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -932,8 +935,8 @@ where
     }
 }
 
-impl<Provider, EngineT, Pool, Validator> std::fmt::Debug
-    for EngineApi<Provider, EngineT, Pool, Validator>
+impl<Provider, EngineT, Pool, Validator, ChainSpec> std::fmt::Debug
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
 {
@@ -947,7 +950,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
-    use reth_chainspec::MAINNET;
+    use reth_chainspec::{ChainSpec, MAINNET};
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;
@@ -967,6 +970,7 @@ mod tests {
             EthEngineTypes,
             NoopTransactionPool,
             EthereumEngineValidator,
+            ChainSpec,
         >,
     ) {
         let client = ClientVersionV1 {

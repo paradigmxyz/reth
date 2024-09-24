@@ -3,7 +3,7 @@ use alloc::{boxed::Box, string::ToString};
 
 use crate::ConfigureEvm;
 use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
@@ -19,7 +19,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultA
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_beacon_block_root: Option<B256>,
@@ -51,7 +51,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
+/// chain spec, EVM.
 ///
 /// Note: this does not commit the state changes to the database, it only transact the call.
 ///
@@ -126,16 +126,16 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
+/// chain spec, EVM.
 ///
 /// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
 ///
 /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
-pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
+pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
-    chain_spec: &Spec,
+    chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_beacon_block_root: Option<B256>,
@@ -145,11 +145,10 @@ where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
-    Spec: EthereumHardforks,
 {
     if let Some(res) = transact_beacon_root_contract_call(
         evm_config,
-        chain_spec,
+        &chain_spec,
         block_timestamp,
         block_number,
         parent_beacon_block_root,
