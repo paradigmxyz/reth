@@ -38,6 +38,7 @@ revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
 alloy-rpc-types.workspace = true
 alloy-serde.workspace = true
+alloy-eips.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true

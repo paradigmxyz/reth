@@ -4,6 +4,7 @@
 use crate::{
     AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
 };
+use alloy_eips::eip1559::calc_next_block_base_fee;
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -15,7 +16,6 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
-    basefee::calc_next_block_base_fee,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,

@@ -8593,6 +8593,7 @@ name = "reth-rpc-eth-api"
 version = "1.0.7"
 dependencies = [
  "alloy-dyn-abi",
+ "alloy-eips",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -8633,6 +8634,7 @@ name = "reth-rpc-eth-types"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-eth",
