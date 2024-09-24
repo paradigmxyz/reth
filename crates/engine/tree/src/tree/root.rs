@@ -203,22 +203,25 @@ where
                 }
             }
 
-            if let StateRootTaskState::Idle(multiproof, _) = &mut this.task_state {
-                debug!(target: "engine::root", accounts_len = this.state.accounts.len(), "Spawning state root task");
-                let view = this.consistent_view.clone();
-                let input = this.input.clone();
-                let multiproof = std::mem::take(multiproof);
-                let state = std::mem::take(&mut this.state);
-                let (tx, rx) = oneshot::channel();
-                rayon::spawn(|| {
-                    let result = calculate_state_root_from_proofs(view, input, multiproof, state);
-                    let _ = tx.send(result);
-                });
-                this.task_state = StateRootTaskState::Pending(
-                    Default::default(),
-                    Box::pin(async move { rx.await.unwrap() }),
-                );
-                continue
+            if !this.state.is_empty() {
+                if let StateRootTaskState::Idle(multiproof, _) = &mut this.task_state {
+                    debug!(target: "engine::root", accounts_len = this.state.accounts.len(), "Spawning state root task");
+                    let view = this.consistent_view.clone();
+                    let input = this.input.clone();
+                    let multiproof = std::mem::take(multiproof);
+                    let state = std::mem::take(&mut this.state);
+                    let (tx, rx) = oneshot::channel();
+                    rayon::spawn(|| {
+                        let result =
+                            calculate_state_root_from_proofs(view, input, multiproof, state);
+                        let _ = tx.send(result);
+                    });
+                    this.task_state = StateRootTaskState::Pending(
+                        Default::default(),
+                        Box::pin(async move { rx.await.unwrap() }),
+                    );
+                    continue
+                }
             }
 
             return Poll::Pending
