@@ -31,19 +31,6 @@ pub use reth_rpc_types::{
 #[non_exhaustive]
 pub struct EthEngineTypes;
 
-/// Validator for the ethereum engine API.
-#[derive(Debug, Clone)]
-pub struct EthereumEngineValidator {
-    chain_spec: Arc<ChainSpec>,
-}
-
-impl EthereumEngineValidator {
-    /// Instantiates a new validator.
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
-    }
-}
-
 impl PayloadTypes for EthEngineTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
@@ -55,6 +42,19 @@ impl EngineTypes for EthEngineTypes {
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
+}
+
+/// Validator for the ethereum engine API.
+#[derive(Debug, Clone)]
+pub struct EthereumEngineValidator {
+    chain_spec: Arc<ChainSpec>,
+}
+
+impl EthereumEngineValidator {
+    /// Instantiates a new validator.
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { chain_spec }
+    }
 }
 
 impl<Types> EngineValidator<Types> for EthereumEngineValidator
