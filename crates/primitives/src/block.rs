@@ -110,6 +110,8 @@ impl Block {
     }
 }
 
+/// We need to implement RLP traits manually because we currently don't have a way to flatten
+/// [`BlockBody`] into [`Block`].
 mod block_rlp {
     use super::*;
 
