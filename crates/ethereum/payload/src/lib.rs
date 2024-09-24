@@ -33,7 +33,8 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt,
+    EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
