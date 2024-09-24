@@ -399,6 +399,8 @@ mod tests {
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
 
+        // In case of failure, refer to the documentation of the [`validate_bitflag_backwards_compat`] macro 
+        // for detailed instructions on handling it.
         validate_bitflag_backwards_compat!(Account, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(AccountHashingCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(CheckpointBlockRange, UnusedBits::Zero);

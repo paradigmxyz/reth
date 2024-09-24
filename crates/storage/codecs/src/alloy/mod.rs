@@ -28,6 +28,8 @@ mod tests {
 
     #[test]
     fn validate_bitflag_backwards_compat() {
+        // In case of failure, refer to the documentation of the [`validate_bitflag_backwards_compat`] macro 
+        // for detailed instructions on handling it.
         validate_bitflag_backwards_compat!(Header, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(TxEip2930, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntries, UnusedBits::Zero);
