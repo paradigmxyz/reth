@@ -715,8 +715,7 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
-        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
+        transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -793,36 +792,9 @@ where
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
 
                         let tx_info = TransactionInfo {
-                            hash: {
-                                #[cfg(not(feature = "js-tracer"))]
-                                {
-                                    _transaction_context.unwrap().tx_hash
-                                }
-                                #[cfg(feature = "js-tracer")]
-                                {
-                                    transaction_context.unwrap().tx_hash
-                                }
-                            },
-                            index: {
-                                #[cfg(not(feature = "js-tracer"))]
-                                {
-                                    _transaction_context.unwrap().tx_index.map(|index| index as u64)
-                                }
-                                #[cfg(feature = "js-tracer")]
-                                {
-                                    transaction_context.unwrap().tx_index.map(|index| index as u64)
-                                }
-                            },
-                            block_hash: {
-                                #[cfg(not(feature = "js-tracer"))]
-                                {
-                                    _transaction_context.unwrap().block_hash
-                                }
-                                #[cfg(feature = "js-tracer")]
-                                {
-                                    transaction_context.unwrap().block_hash
-                                }
-                            },
+                            hash: transaction_context.unwrap().tx_hash,
+                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
+                            block_hash: transaction_context.unwrap().block_hash,
                             block_number: Some(env.block.number.try_into().unwrap_or_default()),
                             base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
                         };
