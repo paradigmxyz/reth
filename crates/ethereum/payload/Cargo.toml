@@ -30,5 +30,8 @@ reth-chain-state.workspace = true
 # ethereum
 revm.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 # misc
 tracing.workspace = true

@@ -1,9 +1,11 @@
 //! Contains types required for building a payload.
 
+use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use reth_chain_state::ExecutedBlock;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{Address, BlobTransactionSidecar, SealedBlock, Withdrawals, B256, U256};
+use reth_primitives::{SealedBlock, Withdrawals};
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes, PayloadId,

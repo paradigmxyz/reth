@@ -25,6 +25,7 @@ reth-execution-types.workspace = true
 revm-primitives.workspace = true
 
 # Alloy
+alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 
