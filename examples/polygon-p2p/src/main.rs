@@ -47,11 +47,10 @@ async fn main() {
 
     // The network configuration
     let net_cfg = NetworkConfig::builder(secret_key)
-        .chain_spec(polygon_chain_spec())
         .set_head(head())
         .network_mode(NetworkMode::Work)
         .listener_addr(local_addr)
-        .build(NoopProvider::default());
+        .build(NoopProvider::default(), polygon_chain_spec());
 
     // Set Discv4 lookup interval to 1 second
     let mut discv4_cfg = Discv4ConfigBuilder::default();

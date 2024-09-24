@@ -240,7 +240,6 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
             .apply(|builder| {

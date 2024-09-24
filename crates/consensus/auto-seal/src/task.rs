@@ -87,7 +87,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Engine: EngineTypes,
     Executor: BlockExecutorProvider,
-    ChainSpec: EthChainSpec + EthereumHardforks,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     type Output = ();
 

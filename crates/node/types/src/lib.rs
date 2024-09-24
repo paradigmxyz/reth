@@ -121,7 +121,7 @@ impl<P, C> AnyNodeTypes<P, C> {
 impl<P, C> NodeTypes for AnyNodeTypes<P, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -157,7 +157,7 @@ impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -167,7 +167,7 @@ impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Engine = E;
 }

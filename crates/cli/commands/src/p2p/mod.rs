@@ -100,13 +100,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let net = NetworkConfigBuilder::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
             .external_ip_resolver(self.network.nat)
-            .chain_spec(self.chain.clone())
             .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
                 self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
             })
-            .build_with_noop_provider()
+            .build_with_noop_provider(self.chain)
             .manager()
             .await?;
         let network = net.handle().clone();

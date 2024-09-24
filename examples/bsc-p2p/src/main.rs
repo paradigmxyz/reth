@@ -49,9 +49,8 @@ async fn main() {
 
     // The network configuration
     let mut net_cfg = NetworkConfig::builder(secret_key)
-        .chain_spec(bsc_chain_spec())
         .listener_addr(local_addr)
-        .build_with_noop_provider()
+        .build_with_noop_provider(bsc_chain_spec())
         .set_discovery_v4(
             Discv4ConfigBuilder::default()
                 .add_boot_nodes(boot_nodes())

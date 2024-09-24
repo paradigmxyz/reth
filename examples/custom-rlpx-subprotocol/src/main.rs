@@ -51,7 +51,7 @@ fn main() -> eyre::Result<()> {
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_discovery()
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
-            .build(NoopProvider::default());
+            .build(NoopProvider::default(), node.chain_spec());
 
         // spawn the second network instance
         let subnetwork = NetworkManager::new(net_cfg).await?;

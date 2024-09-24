@@ -550,14 +550,14 @@ where
     /// to any available IP and port.
     pub fn new(client: C) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
-        let config = Self::network_config_builder(secret_key).build(client.clone());
+        let config = Self::network_config_builder(secret_key).build(client.clone(), &*MAINNET);
         Self { config, client, secret_key }
     }
 
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
     /// available IP and port.
     pub fn with_secret_key(client: C, secret_key: SecretKey) -> Self {
-        let config = Self::network_config_builder(secret_key).build(client.clone());
+        let config = Self::network_config_builder(secret_key).build(client.clone(), &*MAINNET);
         Self { config, client, secret_key }
     }
 
@@ -568,7 +568,7 @@ where
         let builder = Self::network_config_builder(secret_key);
         let hello_message =
             HelloMessageWithProtocols::builder(builder.get_peer_id()).protocols(protocols).build();
-        let config = builder.hello_message(hello_message).build(client.clone());
+        let config = builder.hello_message(hello_message).build(client.clone(), &*MAINNET);
 
         Self { config, client, secret_key }
     }
