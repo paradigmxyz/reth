@@ -25,8 +25,6 @@ impl Storage {
     /// it doesn't exist.
     pub(super) fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
         reth_fs_util::create_dir_all(&path)?;
-        println!("path: {:?}", path.as_ref());
-        println!("exists: {:?}", path.as_ref().exists());
 
         Ok(Self { path: path.as_ref().to_path_buf() })
     }

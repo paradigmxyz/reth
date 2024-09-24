@@ -163,7 +163,7 @@ impl Wal {
     #[instrument(target = "exex::wal", skip(self))]
     pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the file ID of the notification with the finalized block and
-        // save the file ID with the last unfinalized block. Do not remove any notifications
+        // save the file ID with the first unfinalized block. Do not remove any notifications
         // yet.
         let mut unfinalized_from_file_id = None;
         {
@@ -176,7 +176,9 @@ impl Wal {
                 {
                     let notification = self.storage.read_notification(file_id)?;
                     if notification.committed_chain().unwrap().blocks().len() == 1 {
-                        unfinalized_from_file_id = block_cache.peek().map(|(file_id, _)| *file_id);
+                        unfinalized_from_file_id = Some(
+                            block_cache.peek().map(|(file_id, _)| *file_id).unwrap_or(u64::MAX),
+                        );
                     } else {
                         unfinalized_from_file_id = Some(file_id);
                     }
