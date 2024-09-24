@@ -28,7 +28,6 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod eip4844;
-pub mod eip7702;
 pub mod genesis;
 pub mod proofs;
 mod receipt;

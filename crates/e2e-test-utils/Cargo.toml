@@ -34,6 +34,7 @@ jsonrpsee.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 futures-util.workspace = true
