@@ -40,7 +40,7 @@ pub fn from_block_with_tx_hashes<T>(
     block_hash: Option<B256>,
 ) -> Block<T> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-    let transactions = block.body.iter().map(|tx| tx.hash()).collect();
+    let transactions = block.body.transactions().map(|tx| tx.hash()).collect();
 
     from_block_with_transactions(
         block.length(),
@@ -68,8 +68,8 @@ pub fn from_block_full<T: TransactionCompat>(
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
     let block_length = block.block.length();
-    let body = std::mem::take(&mut block.block.body);
-    let transactions_with_senders = body.into_iter().zip(block.senders);
+    let transactions = std::mem::take(&mut block.block.body.transactions);
+    let transactions_with_senders = transactions.into_iter().zip(block.senders);
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
@@ -162,14 +162,14 @@ fn from_block_with_transactions<T>(
     total_difficulty: U256,
     transactions: BlockTransactions<T>,
 ) -> Block<T> {
-    let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
+    let uncles = block.body.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let mut header = from_primitive_with_hash(SealedHeader::new(block.header, block_hash));
     header.total_difficulty = Some(total_difficulty);
 
     let withdrawals = header
         .withdrawals_root
         .is_some()
-        .then(|| block.withdrawals.map(Withdrawals::into_inner))
+        .then(|| block.body.withdrawals.map(Withdrawals::into_inner))
         .flatten();
 
     Block { header, uncles, transactions, size: Some(U256::from(block_length)), withdrawals }

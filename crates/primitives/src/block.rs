@@ -7,7 +7,7 @@ pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
 use alloy_primitives::Sealable;
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
@@ -30,22 +30,13 @@ prop_compose! {
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
-)]
-#[rlp(trailing)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref)]
 pub struct Block {
     /// Block header.
     #[deref]
     pub header: Header,
-    /// Transactions in this block.
-    pub body: Vec<TransactionSigned>,
-    /// Ommers/uncles header.
-    pub ommers: Vec<Header>,
-    /// Block withdrawals.
-    pub withdrawals: Option<Withdrawals>,
-    /// Block requests.
-    pub requests: Option<Requests>,
+    /// Block body.
+    pub body: BlockBody,
 }
 
 impl Block {
@@ -53,31 +44,19 @@ impl Block {
     pub fn seal_slow(self) -> SealedBlock {
         let sealed = self.header.seal_slow();
         let (header, seal) = sealed.into_parts();
-        SealedBlock {
-            header: SealedHeader::new(header, seal),
-            body: self.body,
-            ommers: self.ommers,
-            withdrawals: self.withdrawals,
-            requests: self.requests,
-        }
+        SealedBlock { header: SealedHeader::new(header, seal), body: self.body }
     }
 
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     pub fn seal(self, hash: B256) -> SealedBlock {
-        SealedBlock {
-            header: SealedHeader::new(self.header, hash),
-            body: self.body,
-            ommers: self.ommers,
-            withdrawals: self.withdrawals,
-            requests: self.requests,
-        }
+        SealedBlock { header: SealedHeader::new(self.header, hash), body: self.body }
     }
 
     /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>> {
-        TransactionSigned::recover_signers(&self.body, self.body.len())
+        self.body.recover_signers()
     }
 
     /// Transform into a [`BlockWithSenders`].
@@ -105,14 +84,10 @@ impl Block {
         self,
         senders: Vec<Address>,
     ) -> Result<BlockWithSenders, Self> {
-        let senders = if self.body.len() == senders.len() {
+        let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) =
-                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
-            else {
-                return Err(self)
-            };
+            let Some(senders) = self.body.recover_signers() else { return Err(self) };
             senders
         };
 
@@ -128,52 +103,104 @@ impl Block {
         Some(BlockWithSenders { block: self, senders })
     }
 
-    /// Returns whether or not the block contains any blob transactions.
-    #[inline]
-    pub fn has_blob_transactions(&self) -> bool {
-        self.body.iter().any(|tx| tx.is_eip4844())
-    }
-
-    /// Returns whether or not the block contains any EIP-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.body.iter().any(|tx| tx.is_eip7702())
-    }
-
-    /// Returns an iterator over all blob transactions of the block
-    #[inline]
-    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.body.iter().filter(|tx| tx.is_eip4844())
-    }
-
-    /// Returns only the blob transactions, if any, from the block body.
-    #[inline]
-    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.blob_transactions_iter().collect()
-    }
-
-    /// Returns an iterator over all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.blob_transactions_iter()
-            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
-            .flatten()
-    }
-
-    /// Returns all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
-        self.blob_versioned_hashes_iter().collect()
-    }
-
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
     pub fn size(&self) -> usize {
-        self.header.size() +
-            // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+        self.header.size() + self.body.size()
+    }
+}
+
+/// We need to implement RLP traits manually because we currently don't have a way to flatten
+/// [`BlockBody`] into [`Block`].
+mod block_rlp {
+    use super::*;
+
+    #[derive(RlpDecodable)]
+    #[rlp(trailing)]
+    struct Helper<H> {
+        header: H,
+        transactions: Vec<TransactionSigned>,
+        ommers: Vec<Header>,
+        withdrawals: Option<Withdrawals>,
+        requests: Option<Requests>,
+    }
+
+    #[derive(RlpEncodable)]
+    #[rlp(trailing)]
+    struct HelperRef<'a, H> {
+        header: &'a H,
+        transactions: &'a Vec<TransactionSigned>,
+        ommers: &'a Vec<Header>,
+        withdrawals: Option<&'a Withdrawals>,
+        requests: Option<&'a Requests>,
+    }
+
+    impl<'a> From<&'a Block> for HelperRef<'a, Header> {
+        fn from(block: &'a Block) -> Self {
+            let Block { header, body: BlockBody { transactions, ommers, withdrawals, requests } } =
+                block;
+            Self {
+                header,
+                transactions,
+                ommers,
+                withdrawals: withdrawals.as_ref(),
+                requests: requests.as_ref(),
+            }
+        }
+    }
+
+    impl<'a> From<&'a SealedBlock> for HelperRef<'a, SealedHeader> {
+        fn from(block: &'a SealedBlock) -> Self {
+            let SealedBlock {
+                header,
+                body: BlockBody { transactions, ommers, withdrawals, requests },
+            } = block;
+            Self {
+                header,
+                transactions,
+                ommers,
+                withdrawals: withdrawals.as_ref(),
+                requests: requests.as_ref(),
+            }
+        }
+    }
+
+    impl Decodable for Block {
+        fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+            let Helper { header, transactions, ommers, withdrawals, requests } = Helper::decode(b)?;
+            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals, requests } })
+        }
+    }
+
+    impl Decodable for SealedBlock {
+        fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+            let Helper { header, transactions, ommers, withdrawals, requests } = Helper::decode(b)?;
+            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals, requests } })
+        }
+    }
+
+    impl Encodable for Block {
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
+        }
+
+        fn encode(&self, out: &mut dyn bytes::BufMut) {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.encode(out)
+        }
+    }
+
+    impl Encodable for SealedBlock {
+        fn length(&self) -> usize {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.length()
+        }
+
+        fn encode(&self, out: &mut dyn bytes::BufMut) {
+            let helper: HelperRef<'_, _> = self.into();
+            helper.encode(out)
+        }
     }
 }
 
@@ -205,11 +232,13 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
 
         Ok(Self {
             header: u.arbitrary()?,
-            body: transactions,
-            ommers,
-            // for now just generate empty requests, see HACK above
-            requests: u.arbitrary()?,
-            withdrawals: u.arbitrary()?,
+            body: BlockBody {
+                transactions,
+                ommers,
+                // for now just generate empty requests, see HACK above
+                requests: u.arbitrary()?,
+                withdrawals: u.arbitrary()?,
+            },
         })
     }
 }
@@ -228,7 +257,7 @@ pub struct BlockWithSenders {
 impl BlockWithSenders {
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
-        (block.body.len() == senders.len()).then_some(Self { block, senders })
+        (block.body.transactions.len() == senders.len()).then_some(Self { block, senders })
     }
 
     /// Seal the block with a known hash.
@@ -252,24 +281,12 @@ impl BlockWithSenders {
         (self.block, self.senders)
     }
 
-    /// Returns an iterator over all transactions in the block.
-    #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.block.body.iter()
-    }
-
     /// Returns an iterator over all transactions and their sender.
     #[inline]
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.iter())
-    }
-
-    /// Consumes the block and returns the transactions of the block.
-    #[inline]
-    pub fn into_transactions(self) -> Vec<TransactionSigned> {
-        self.block.body
+        self.senders.iter().zip(self.block.body.transactions())
     }
 
     /// Returns an iterator over all transactions in the chain.
@@ -277,7 +294,18 @@ impl BlockWithSenders {
     pub fn into_transactions_ecrecovered(
         self,
     ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
-        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
+        self.block
+            .body
+            .transactions
+            .into_iter()
+            .zip(self.senders)
+            .map(|(tx, sender)| tx.with_signer(sender))
+    }
+
+    /// Consumes the block and returns the transactions of the block.
+    #[inline]
+    pub fn into_transactions(self) -> Vec<TransactionSigned> {
+        self.block.body.transactions
     }
 }
 
@@ -286,41 +314,21 @@ impl BlockWithSenders {
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    Deref,
-    DerefMut,
-    RlpEncodable,
-    RlpDecodable,
-)]
-#[rlp(trailing)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlock {
     /// Locked block header.
     #[deref]
     #[deref_mut]
     pub header: SealedHeader,
-    /// Transactions with signatures.
-    pub body: Vec<TransactionSigned>,
-    /// Ommer/uncle headers
-    pub ommers: Vec<Header>,
-    /// Block withdrawals.
-    pub withdrawals: Option<Withdrawals>,
-    /// Block requests.
-    pub requests: Option<Requests>,
+    /// Block body.
+    pub body: BlockBody,
 }
 
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
-    pub fn new(header: SealedHeader, body: BlockBody) -> Self {
-        let BlockBody { transactions, ommers, withdrawals, requests } = body;
-        Self { header, body: transactions, ommers, withdrawals, requests }
+    pub const fn new(header: SealedHeader, body: BlockBody) -> Self {
+        Self { header, body }
     }
 
     /// Header hash.
@@ -332,27 +340,19 @@ impl SealedBlock {
     /// Splits the sealed block into underlying components
     #[inline]
     pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
-        (self.header, self.body, self.ommers)
+        (self.header, self.body.transactions, self.body.ommers)
     }
 
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
     pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
-        (
-            self.header,
-            BlockBody {
-                transactions: self.body,
-                ommers: self.ommers,
-                withdrawals: self.withdrawals,
-                requests: self.requests,
-            },
-        )
+        (self.header, self.body)
     }
 
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.body.iter().filter(|tx| tx.is_eip4844())
+        self.body.blob_transactions_iter()
     }
 
     /// Returns only the blob transactions, if any, from the block body.
@@ -377,7 +377,7 @@ impl SealedBlock {
 
     /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>> {
-        TransactionSigned::recover_signers(&self.body, self.body.len())
+        self.body.recover_signers()
     }
 
     /// Seal sealed block with recovered transaction senders.
@@ -416,14 +416,10 @@ impl SealedBlock {
         self,
         senders: Vec<Address>,
     ) -> Result<SealedBlockWithSenders, Self> {
-        let senders = if self.body.len() == senders.len() {
+        let senders = if self.body.transactions.len() == senders.len() {
             senders
         } else {
-            let Some(senders) =
-                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
-            else {
-                return Err(self)
-            };
+            let Some(senders) = self.body.recover_signers() else { return Err(self) };
             senders
         };
 
@@ -432,23 +428,13 @@ impl SealedBlock {
 
     /// Unseal the block
     pub fn unseal(self) -> Block {
-        Block {
-            header: self.header.unseal(),
-            body: self.body,
-            ommers: self.ommers,
-            withdrawals: self.withdrawals,
-            requests: self.requests,
-        }
+        Block { header: self.header.unseal(), body: self.body }
     }
 
     /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
     #[inline]
     pub fn size(&self) -> usize {
-        self.header.size() +
-            // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+        self.header.size() + self.body.size()
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -459,13 +445,13 @@ impl SealedBlock {
     /// Returns whether or not the block contains any blob transactions.
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
-        self.body.iter().any(|tx| tx.is_eip4844())
+        self.body.has_blob_transactions()
     }
 
     /// Returns whether or not the block contains any eip-7702 transactions.
     #[inline]
     pub fn has_eip7702_transactions(&self) -> bool {
-        self.body.iter().any(|tx| tx.is_eip7702())
+        self.body.has_eip7702_transactions()
     }
 
     /// Ensures that the transaction root in the block header is valid.
@@ -481,7 +467,7 @@ impl SealedBlock {
     /// Returns `Err(error)` if the transaction root validation fails, providing a `GotExpected`
     /// error containing the calculated and expected roots.
     pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>> {
-        let calculated_root = crate::proofs::calculate_transaction_root(&self.body);
+        let calculated_root = self.body.calculate_tx_root();
 
         if self.header.transactions_root != calculated_root {
             return Err(GotExpected {
@@ -495,7 +481,7 @@ impl SealedBlock {
 
     /// Returns a vector of transactions RLP encoded with [`TransactionSigned::encode_enveloped`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.iter().map(|tx| tx.envelope_encoded()).collect()
+        self.body.transactions().map(|tx| tx.envelope_encoded()).collect()
     }
 }
 
@@ -519,7 +505,7 @@ pub struct SealedBlockWithSenders {
 impl SealedBlockWithSenders {
     /// New sealed block with sender. Return none if len of tx and senders does not match
     pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        (block.body.len() == senders.len()).then_some(Self { block, senders })
+        (block.body.transactions.len() == senders.len()).then_some(Self { block, senders })
     }
 
     /// Split Structure to its components
@@ -538,7 +524,7 @@ impl SealedBlockWithSenders {
     /// Returns an iterator over all transactions in the block.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.block.body.iter()
+        self.block.body.transactions()
     }
 
     /// Returns an iterator over all transactions and their sender.
@@ -546,13 +532,13 @@ impl SealedBlockWithSenders {
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.iter())
+        self.senders.iter().zip(self.block.body.transactions())
     }
 
     /// Consumes the block and returns the transactions of the block.
     #[inline]
     pub fn into_transactions(self) -> Vec<TransactionSigned> {
-        self.block.body
+        self.block.body.transactions
     }
 
     /// Returns an iterator over all transactions in the chain.
@@ -560,7 +546,12 @@ impl SealedBlockWithSenders {
     pub fn into_transactions_ecrecovered(
         self,
     ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
-        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
+        self.block
+            .body
+            .transactions
+            .into_iter()
+            .zip(self.senders)
+            .map(|(tx, sender)| tx.with_signer(sender))
     }
 }
 
@@ -589,10 +580,12 @@ impl BlockBody {
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,
-            body: self.transactions.clone(),
-            ommers: self.ommers.clone(),
-            withdrawals: self.withdrawals.clone(),
-            requests: self.requests.clone(),
+            body: Self {
+                transactions: self.transactions.clone(),
+                ommers: self.ommers.clone(),
+                withdrawals: self.withdrawals.clone(),
+                requests: self.requests.clone(),
+            },
         }
     }
 
@@ -618,6 +611,55 @@ impl BlockBody {
         self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
     }
 
+    /// Recover signer addresses for all transactions in the block body.
+    pub fn recover_signers(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers(&self.transactions, self.transactions.len())
+    }
+
+    /// Returns whether or not the block body contains any blob transactions.
+    #[inline]
+    pub fn has_blob_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip4844())
+    }
+
+    /// Returns whether or not the block body contains any EIP-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip7702())
+    }
+
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.transactions.iter().filter(|tx| tx.is_eip4844())
+    }
+
+    /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.blob_transactions_iter().collect()
+    }
+
+    /// Returns an iterator over all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+
+    /// Returns all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes_iter().collect()
+    }
+
+    /// Returns an iterator over all transactions.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.transactions.iter()
+    }
+
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     pub fn size(&self) -> usize {
@@ -634,10 +676,10 @@ impl BlockBody {
 impl From<Block> for BlockBody {
     fn from(block: Block) -> Self {
         Self {
-            transactions: block.body,
-            ommers: block.ommers,
-            withdrawals: block.withdrawals,
-            requests: block.requests,
+            transactions: block.body.transactions,
+            ommers: block.body.ommers,
+            withdrawals: block.body.withdrawals,
+            requests: block.body.requests,
         }
     }
 }
@@ -837,7 +879,7 @@ mod tests {
     fn block_with_senders() {
         let mut block = Block::default();
         let sender = Address::random();
-        block.body.push(TransactionSigned::default());
+        block.body.transactions.push(TransactionSigned::default());
         assert_eq!(BlockWithSenders::new(block.clone(), vec![]), None);
         assert_eq!(
             BlockWithSenders::new(block.clone(), vec![sender]),

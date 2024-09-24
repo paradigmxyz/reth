@@ -8,7 +8,7 @@ use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockWithSenders, Receipt};
+use reth_primitives::{Block, BlockBody, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -95,7 +95,7 @@ where
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions.len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -105,10 +105,12 @@ where
             let (unsealed_header, hash) = block.header.split();
             let block = Block {
                 header: unsealed_header,
-                body: block.body,
-                ommers: block.ommers,
-                withdrawals: block.withdrawals,
-                requests: block.requests,
+                body: BlockBody {
+                    transactions: block.body.transactions,
+                    ommers: block.body.ommers,
+                    withdrawals: block.body.withdrawals,
+                    requests: block.body.requests,
+                },
             }
             .with_senders_unchecked(senders);
 
@@ -204,7 +206,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.transactions.len(), "Executing block");
 
         let block_execution_output = executor.execute((&block_with_senders, td).into())?;
 

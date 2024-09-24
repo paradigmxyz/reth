@@ -311,8 +311,11 @@ where
         // add reward traces for all blocks
         for block in &blocks {
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
-                let mut traces =
-                    self.extract_reward_traces(&block.header, &block.ommers, base_block_reward);
+                let mut traces = self.extract_reward_traces(
+                    &block.header,
+                    &block.body.ommers,
+                    base_block_reward,
+                );
                 traces.retain(|trace| matcher.matches(&trace.trace));
                 all_traces.extend(traces);
             } else {
@@ -383,7 +386,7 @@ where
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
                 traces.extend(self.extract_reward_traces(
                     &block.header,
-                    &block.ommers,
+                    &block.body.ommers,
                     base_block_reward,
                 ));
             }

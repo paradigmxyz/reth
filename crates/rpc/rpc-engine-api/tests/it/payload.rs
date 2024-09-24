@@ -22,16 +22,14 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     let unsealed = src.unseal();
     let mut transformed: Block = f(unsealed);
     // Recalculate roots
-    transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
-    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
+    transformed.header.transactions_root =
+        proofs::calculate_transaction_root(&transformed.body.transactions);
+    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
     let sealed = transformed.header.seal_slow();
     let (header, seal) = sealed.into_parts();
     block_to_payload(SealedBlock {
         header: SealedHeader::new(header, seal),
         body: transformed.body,
-        ommers: transformed.ommers,
-        withdrawals: transformed.withdrawals,
-        requests: transformed.requests,
     })
 }
 
@@ -47,7 +45,7 @@ fn payload_body_roundtrip() {
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
         assert_eq!(
-            Ok(block.body),
+            Ok(block.body.transactions),
             payload_body
                 .transactions
                 .iter()
@@ -55,7 +53,7 @@ fn payload_body_roundtrip() {
                 .collect::<Result<Vec<_>, _>>(),
         );
         let withdraw = payload_body.withdrawals.map(Withdrawals::new);
-        assert_eq!(block.withdrawals, withdraw);
+        assert_eq!(block.body.withdrawals, withdraw);
     }
 }
 
@@ -115,7 +113,7 @@ fn payload_validation() {
 
     // Non empty ommers
     let block_with_ommers = transform_block(block.clone(), |mut b| {
-        b.ommers.push(random_header(&mut rng, 100, None).unseal());
+        b.body.ommers.push(random_header(&mut rng, 100, None).unseal());
         b
     });
     assert_matches!(

@@ -2862,7 +2862,7 @@ mod tests {
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
-            block2.withdrawals = None;
+            block2.body.withdrawals = None;
             block2.header.parent_hash = block1.hash();
             block2.header.base_fee_per_gas = Some(100);
             block2.header.difficulty = U256::ZERO;

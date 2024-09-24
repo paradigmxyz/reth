@@ -263,11 +263,15 @@ mod tests {
 
         let (deposit_contract_addr, _) = random_eoa_account(&mut rng);
         for block in &blocks {
-            for (txi, transaction) in block.body.iter().enumerate() {
+            for (txi, transaction) in block.body.transactions.iter().enumerate() {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
                     &mut rng,
-                    if txi == (block.body.len() - 1) { Some(deposit_contract_addr) } else { None },
+                    if txi == (block.body.transactions.len() - 1) {
+                        Some(deposit_contract_addr)
+                    } else {
+                        None
+                    },
                     Some(1),
                 ));
                 receipts.push((receipts.len() as u64, receipt));
@@ -277,7 +281,7 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body.len()).sum::<usize>()
+            blocks.iter().map(|block| block.body.transactions.len()).sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -326,7 +330,7 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::Receipts>().unwrap().len(),
-                blocks.iter().map(|block| block.body.len()).sum::<usize>() -
+                blocks.iter().map(|block| block.body.transactions.len()).sum::<usize>() -
                     ((pruned_tx + 1) - unprunable) as usize
             );
 

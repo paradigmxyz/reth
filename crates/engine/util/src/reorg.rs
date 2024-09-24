@@ -10,7 +10,7 @@ use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{system_calls::apply_beacon_root_contract_call, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, Header, Receipt, Receipts,
+    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, Header, Receipt, Receipts,
 };
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
@@ -251,7 +251,7 @@ where
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash;
-    let mut candidate_transactions = next_block.body;
+    let mut candidate_transactions = next_block.body.transactions;
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
@@ -263,7 +263,7 @@ where
 
             depth -= 1;
             previous_hash = reorg_target.parent_hash;
-            candidate_transactions = reorg_target.body;
+            candidate_transactions = reorg_target.body.transactions;
         }
     };
     let reorg_target_parent = provider
@@ -347,7 +347,7 @@ where
     }
     drop(evm);
 
-    if let Some(withdrawals) = &reorg_target.withdrawals {
+    if let Some(withdrawals) = &reorg_target.body.withdrawals {
         state.increment_balances(post_block_withdrawals_balance_increments(
             chain_spec,
             reorg_target.timestamp,
@@ -407,10 +407,12 @@ where
             excess_blob_gas: excess_blob_gas.map(Into::into),
             state_root: state_provider.state_root(hashed_state)?,
         },
-        body: transactions,
-        ommers: reorg_target.ommers,
-        withdrawals: reorg_target.withdrawals,
-        requests: None, // TODO(prague)
+        body: BlockBody {
+            transactions,
+            ommers: reorg_target.body.ommers,
+            withdrawals: reorg_target.body.withdrawals,
+            requests: None, // TODO(prague)
+        },
     }
     .seal_slow();
 

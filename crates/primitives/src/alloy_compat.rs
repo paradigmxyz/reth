@@ -1,9 +1,9 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxLegacy, TxType,
+    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, BlockBody, Signature,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
 };
 use alloc::{string::ToString, vec::Vec};
 use alloy_primitives::{Parity, TxKind};
@@ -19,7 +19,7 @@ impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction
     ) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
-        let body = {
+        let transactions = {
             let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
                 .transactions
             {
@@ -42,12 +42,14 @@ impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction
 
         Ok(Self {
             header: block.header.try_into()?,
-            body,
-            ommers: Default::default(),
-            withdrawals: block.withdrawals.map(Into::into),
-            // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it as
-            // empty.
-            requests: None,
+            body: BlockBody {
+                transactions,
+                ommers: Default::default(),
+                withdrawals: block.withdrawals.map(Into::into),
+                // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it
+                // as empty.
+                requests: None,
+            },
         })
     }
 }

@@ -162,7 +162,7 @@ where
 
         // execute transactions
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
+        let mut receipts = Vec::with_capacity(block.body.transactions.len());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -557,10 +557,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -588,10 +590,12 @@ mod tests {
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
-                        body: vec![],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+                        body: BlockBody {
+                            transactions: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                     },
                     senders: vec![],
                 },
@@ -654,10 +658,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -707,10 +713,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -749,13 +757,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header: header.clone(), body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -776,13 +778,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -835,13 +831,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header: header.clone(), body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -920,13 +910,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -970,13 +954,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1027,13 +1005,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1090,13 +1062,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1144,13 +1110,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1186,13 +1146,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1228,13 +1182,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1319,10 +1267,7 @@ mod tests {
                 (
                     &Block {
                         header,
-                        body: vec![tx],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+                        body: BlockBody { transactions: vec![tx], ..Default::default() },
                     }
                     .with_recovered_senders()
                     .unwrap(),
@@ -1405,15 +1350,9 @@ mod tests {
         // Execute the block and capture the result
         let exec_result = executor.execute(
             (
-                &Block {
-                    header,
-                    body: vec![tx],
-                    ommers: vec![],
-                    withdrawals: None,
-                    requests: None,
-                }
-                .with_recovered_senders()
-                .unwrap(),
+                &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                    .with_recovered_senders()
+                    .unwrap(),
                 U256::ZERO,
             )
                 .into(),
