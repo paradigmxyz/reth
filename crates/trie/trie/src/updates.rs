@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 pub struct TrieUpdates {
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_map"))]
     pub(crate) account_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_set"))]
     pub(crate) removed_nodes: HashSet<Nibbles>,
     pub(crate) storage_tries: HashMap<B256, StorageTrieUpdates>,
 }
@@ -119,6 +120,7 @@ pub struct StorageTrieUpdates {
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_map"))]
     pub(crate) storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed storage trie nodes.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_set"))]
     pub(crate) removed_nodes: HashSet<Nibbles>,
 }
 
@@ -218,6 +220,21 @@ impl StorageTrieUpdates {
             storage_nodes,
         }
     }
+}
+
+/// Serializes any [`HashSet`] that includes [`Nibbles`] elements, by using the hex-encoded packed
+/// representation.
+///
+/// This also sorts the set before serializing.
+#[cfg(feature = "serde")]
+fn serialize_nibbles_set<S>(map: &HashSet<Nibbles>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut storage_nodes =
+        Vec::from_iter(map.iter().map(|elem| reth_primitives::hex::encode(elem.pack())));
+    storage_nodes.sort_unstable();
+    storage_nodes.serialize(serializer)
 }
 
 /// Serializes any [`HashMap`] that uses [`Nibbles`] as keys, by using the hex-encoded packed
