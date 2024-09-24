@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
+    execute::BlockExecutorProvider,
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvmEnv,
 };
@@ -47,16 +48,22 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Provider, Eth> {
-    inner: Arc<DebugApiInner<Provider, Eth>>,
+pub struct DebugApi<Provider, Eth, BlockExecutor> {
+    inner: Arc<DebugApiInner<Provider, Eth, BlockExecutor>>,
 }
 
 // === impl DebugApi ===
 
-impl<Provider, Eth> DebugApi<Provider, Eth> {
+impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor> {
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(provider: Provider, eth: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard });
+    pub fn new(
+        provider: Provider,
+        eth: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        block_executor: BlockExecutor,
+    ) -> Self {
+        let inner =
+            Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard, block_executor });
         Self { inner }
     }
 
@@ -68,7 +75,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
 
 // === impl DebugApi ===
 
-impl<Provider, Eth> DebugApi<Provider, Eth>
+impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
@@ -77,6 +84,7 @@ where
         + EvmEnvProvider
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -852,7 +860,7 @@ where
 }
 
 #[async_trait]
-impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
+impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
@@ -861,6 +869,7 @@ where
         + EvmEnvProvider
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -1239,23 +1248,25 @@ where
     }
 }
 
-impl<Provider, Eth> std::fmt::Debug for DebugApi<Provider, Eth> {
+impl<Provider, Eth, BlockExecutor> std::fmt::Debug for DebugApi<Provider, Eth, BlockExecutor> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Eth> Clone for DebugApi<Provider, Eth> {
+impl<Provider, Eth, BlockExecutor> Clone for DebugApi<Provider, Eth, BlockExecutor> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Provider, Eth> {
+struct DebugApiInner<Provider, Eth, BlockExecutor> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
+    /// block executor for debug & trace apis
+    block_executor: BlockExecutor,
 }
