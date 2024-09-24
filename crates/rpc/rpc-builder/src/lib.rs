@@ -167,7 +167,7 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -842,11 +842,11 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
 where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
-    Provider: ChainSpecProvider<ChainSpec = ChainSpec>,
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     BlockExecutor: BlockExecutorProvider,
 {
     /// Instantiates `AdminApi`
-    pub fn admin_api(&self) -> AdminApi<Network>
+    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
     where
         Network: Peers,
     {
