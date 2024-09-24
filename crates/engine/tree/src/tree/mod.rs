@@ -6,7 +6,6 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256, U256};
-use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -43,7 +42,6 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
 use std::{
@@ -500,8 +498,6 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     metrics: EngineApiMetrics,
     /// An invalid block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
-    /// Blocking task pool.
-    blocking_task_pool: BlockingTaskPool,
 }
 
 impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
@@ -551,9 +547,7 @@ where
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
-        let blocking_task_pool = BlockingTaskPool::new(
-            ThreadPoolBuilder::default().build().expect("failed to build blocking task pool"),
-        );
+
         Self {
             provider,
             executor_provider,
@@ -571,7 +565,6 @@ where
             metrics: Default::default(),
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
-            blocking_task_pool,
         }
     }
 
@@ -2305,12 +2298,11 @@ where
         input.append_ref(hashed_state);
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let blocking_task_pool = self.blocking_task_pool.clone();
 
         rayon::spawn(move || {
             let result: Result<(B256, TrieUpdates), AsyncStateRootError> =
                 futures::executor::block_on(async move {
-                    AsyncStateRoot::new(consistent_view, blocking_task_pool, input)
+                    AsyncStateRoot::new(consistent_view, input)
                         .incremental_root_with_updates()
                         .await
                 });

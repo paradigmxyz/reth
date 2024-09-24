@@ -19,6 +19,7 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tracing::*;
 
 /// Async state root calculator.
