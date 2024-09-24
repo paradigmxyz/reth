@@ -542,7 +542,9 @@ impl CanonicalInMemoryState {
     /// Returns a `TransactionSigned` for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
         for block_state in self.canonical_chain() {
-            if let Some(tx) = block_state.block().block().body.iter().find(|tx| tx.hash() == hash) {
+            if let Some(tx) =
+                block_state.block().block().body.transactions().find(|tx| tx.hash() == hash)
+            {
                 return Some(tx.clone())
             }
         }
@@ -560,7 +562,7 @@ impl CanonicalInMemoryState {
                 .block()
                 .block()
                 .body
-                .iter()
+                .transactions()
                 .enumerate()
                 .find(|(_, tx)| tx.hash() == tx_hash)
             {

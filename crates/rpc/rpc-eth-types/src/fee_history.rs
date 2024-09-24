@@ -89,7 +89,7 @@ impl FeeHistoryCache {
                 &percentiles,
                 fee_history_entry.gas_used,
                 fee_history_entry.base_fee_per_gas,
-                &block.body,
+                &block.body.transactions,
                 &receipts,
             )
             .unwrap_or_default();

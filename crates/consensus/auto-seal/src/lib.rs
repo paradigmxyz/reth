@@ -365,10 +365,12 @@ impl StorageInner {
 
         let block = Block {
             header,
-            body: transactions,
-            ommers: ommers.clone(),
-            withdrawals: withdrawals.clone(),
-            requests: requests.clone(),
+            body: BlockBody {
+                transactions,
+                ommers: ommers.clone(),
+                withdrawals: withdrawals.clone(),
+                requests: requests.clone(),
+            },
         }
         .with_recovered_senders()
         .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
@@ -391,7 +393,7 @@ impl StorageInner {
         // root here
 
         let Block { mut header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers, withdrawals, requests };
+        let body = BlockBody { transactions: body.transactions, ommers, withdrawals, requests };
 
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 

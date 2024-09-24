@@ -151,7 +151,6 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::Block;
     use revm::db::{CacheDB, EmptyDBTyped};
     use revm_primitives::U256;
     use std::marker::PhantomData;
@@ -232,14 +231,6 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let block = Block {
-            header: Default::default(),
-            body: vec![],
-            ommers: vec![],
-            withdrawals: None,
-            requests: None,
-        };
-        let block = BlockWithSenders::new(block, Default::default()).unwrap();
-        let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
+        let _ = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
     }
 }
