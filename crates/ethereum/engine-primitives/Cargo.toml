@@ -21,6 +21,10 @@ reth-rpc-types-compat.workspace = true
 alloy-rlp.workspace = true
 reth-chain-state.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
 # misc
 serde.workspace = true
 sha2.workspace = true

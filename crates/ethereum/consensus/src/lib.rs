@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -18,7 +19,7 @@ use reth_consensus_common::validation::{
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    EMPTY_OMMER_ROOT_HASH,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -232,8 +233,9 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Sealable, B256};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_primitives::{alloy_primitives::Sealable, proofs, B256};
+    use reth_primitives::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = Header { gas_limit: gas_limit.into(), ..Default::default() };

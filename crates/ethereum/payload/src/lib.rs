@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
@@ -33,7 +34,7 @@ use reth_primitives::{
     proofs::{self, calculate_requests_root},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;

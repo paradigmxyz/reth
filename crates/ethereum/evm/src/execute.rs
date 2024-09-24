@@ -5,6 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -20,9 +21,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
-};
+use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Request};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
@@ -478,17 +477,17 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
+    use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        keccak256, public_key_to_address, Account, Block, BlockBody, Transaction, TxKind, TxLegacy,
-        B256,
+        public_key_to_address, Account, Block, BlockBody, Transaction, TxLegacy,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
+    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
