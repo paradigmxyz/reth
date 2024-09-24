@@ -6,10 +6,7 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_chainspec::ChainSpec;
-use reth_node_api::{
-    BuilderProvider, FullNodeComponents, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
-};
+use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
@@ -18,6 +15,7 @@ use reth_node_core::{
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -298,12 +296,12 @@ where
 pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     node: Node,
     engine_api: Engine,
-    config: &NodeConfig<ChainSpec>,
+    config: &NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     jwt_secret: JwtSecret,
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
-    Node: FullNodeComponents<Types: NodeTypesWithDB<ChainSpec = ChainSpec>> + Clone,
+    Node: FullNodeComponents<Types: ProviderNodeTypes> + Clone,
     Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
     EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
 {
