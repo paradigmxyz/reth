@@ -36,7 +36,7 @@ pub struct BlockParams {
 }
 
 /// Used to pass arguments for random block generation function in tests
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockRangeParams {
     /// The parent hash of the block.
     pub parent: Option<B256>,
@@ -48,6 +48,17 @@ pub struct BlockRangeParams {
     pub requests_count: Option<Range<u8>>,
     /// The number of withdrawals in the block.
     pub withdrawals_count: Option<Range<u8>>,
+}
+
+impl Default for BlockRangeParams {
+    fn default() -> Self {
+        Self {
+            parent: None,
+            tx_count: 0..u8::MAX / 2,
+            requests_count: None,
+            withdrawals_count: None,
+        }
+    }
 }
 
 /// Returns a random number generator that can be seeded using the `SEED` environment variable.
