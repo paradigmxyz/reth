@@ -144,7 +144,7 @@ where
             .map_err(|_| OptimismBlockExecutionError::ForceCreate2DeployerFail)?;
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
+        let mut receipts = Vec::with_capacity(block.body.transactions.len());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -468,7 +468,8 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
     use reth_optimism_chainspec::optimism_deposit_tx_signature;
     use reth_primitives::{
-        Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
+        Account, Block, BlockBody, Signature, Transaction, TransactionSigned, TxEip1559,
+        BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -569,10 +570,10 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![tx, tx_deposit],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![tx, tx_deposit],
+                                ..Default::default()
+                            },
                         },
                         senders: vec![addr, addr],
                     },
@@ -653,10 +654,10 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![tx, tx_deposit],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![tx, tx_deposit],
+                                ..Default::default()
+                            },
                         },
                         senders: vec![addr, addr],
                     },

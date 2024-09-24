@@ -16,8 +16,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{
-    alloy_primitives::Parity, Block, BlockBody, Header, Signature, Transaction, TransactionSigned,
-    TxEip2930,
+    alloy_primitives::Parity, Block, Header, Signature, Transaction, TransactionSigned, TxEip2930,
 };
 use reth_provider::test_utils::MockEthProvider;
 
@@ -67,7 +66,7 @@ async fn test_get_body() {
         // Set a new random block to the mock storage and request it via the network
         let block_hash = rng.gen();
         let mut block = Block::default();
-        block.body.push(rng_transaction(&mut rng));
+        block.body.transactions.push(rng_transaction(&mut rng));
 
         mock_provider.add_block(block_hash, block.clone());
 
@@ -76,13 +75,7 @@ async fn test_get_body() {
 
         let blocks = res.unwrap().1;
         assert_eq!(blocks.len(), 1);
-        let expected = BlockBody {
-            transactions: block.body,
-            ommers: block.ommers,
-            withdrawals: None,
-            requests: None,
-        };
-        assert_eq!(blocks[0], expected);
+        assert_eq!(blocks[0], block.body);
     }
 }
 

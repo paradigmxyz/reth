@@ -91,14 +91,8 @@ where
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
     }
 
-    let block = response.unwrap();
-    let block = SealedBlock {
-        header,
-        body: block.transactions,
-        ommers: block.ommers,
-        withdrawals: block.withdrawals,
-        requests: block.requests,
-    };
+    let body = response.unwrap();
+    let block = SealedBlock { header, body };
 
     validate_block_pre_execution(&block, &chain_spec)?;
 

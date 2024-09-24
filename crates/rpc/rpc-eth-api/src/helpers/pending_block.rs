@@ -20,7 +20,7 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
+    Block, BlockBody, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
     SealedHeader, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{
@@ -255,7 +255,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let (withdrawals, withdrawals_root) = match origin {
             PendingBlockEnvOrigin::ActualPending(ref block) => {
-                (block.withdrawals.clone(), block.withdrawals_root)
+                (block.body.withdrawals.clone(), block.withdrawals_root)
             }
             PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
         };
@@ -460,7 +460,10 @@ pub trait LoadPendingBlock: EthApiTypes {
         let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
+        let block = Block {
+            header,
+            body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests },
+        };
         Ok((SealedBlockWithSenders { block: block.seal_slow(), senders }, receipts))
     }
 }

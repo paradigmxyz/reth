@@ -238,7 +238,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let tx_number = lock
             .values()
-            .flat_map(|block| &block.body)
+            .flat_map(|block| &block.body.transactions)
             .position(|tx| tx.hash() == tx_hash)
             .map(|pos| pos as TxNumber);
 
@@ -247,7 +247,8 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         let lock = self.blocks.lock();
-        let transaction = lock.values().flat_map(|block| &block.body).nth(id as usize).cloned();
+        let transaction =
+            lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
 
         Ok(transaction)
     }
@@ -259,7 +260,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let transaction = lock
             .values()
-            .flat_map(|block| &block.body)
+            .flat_map(|block| &block.body.transactions)
             .nth(id as usize)
             .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()));
 
@@ -267,11 +268,9 @@ impl TransactionsProvider for MockEthProvider {
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self
-            .blocks
-            .lock()
-            .iter()
-            .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash() == hash).cloned()))
+        Ok(self.blocks.lock().iter().find_map(|(_, block)| {
+            block.body.transactions.iter().find(|tx| tx.hash() == hash).cloned()
+        }))
     }
 
     fn transaction_by_hash_with_meta(
@@ -280,7 +279,7 @@ impl TransactionsProvider for MockEthProvider {
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
         let lock = self.blocks.lock();
         for (block_hash, block) in lock.iter() {
-            for (index, tx) in block.body.iter().enumerate() {
+            for (index, tx) in block.body.transactions.iter().enumerate() {
                 if tx.hash() == hash {
                     let meta = TransactionMeta {
                         tx_hash: hash,
@@ -308,10 +307,10 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let mut current_tx_number: TxNumber = 0;
         for block in lock.values() {
-            if current_tx_number + (block.body.len() as TxNumber) > id {
+            if current_tx_number + (block.body.transactions.len() as TxNumber) > id {
                 return Ok(Some(block.header.number))
             }
-            current_tx_number += block.body.len() as TxNumber;
+            current_tx_number += block.body.transactions.len() as TxNumber;
         }
         Ok(None)
     }
@@ -320,7 +319,7 @@ impl TransactionsProvider for MockEthProvider {
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        Ok(self.block(id)?.map(|b| b.body))
+        Ok(self.block(id)?.map(|b| b.body.transactions))
     }
 
     fn transactions_by_block_range(
@@ -331,7 +330,7 @@ impl TransactionsProvider for MockEthProvider {
         let mut map = BTreeMap::new();
         for (_, block) in self.blocks.lock().iter() {
             if range.contains(&block.number) {
-                map.insert(block.number, block.body.clone());
+                map.insert(block.number, block.body.transactions.clone());
             }
         }
 
@@ -345,7 +344,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
-            .flat_map(|block| &block.body)
+            .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
                 if range.contains(&(tx_number as TxNumber)) {
@@ -366,7 +365,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
-            .flat_map(|block| &block.body)
+            .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
                 if range.contains(&(tx_number as TxNumber)) {
