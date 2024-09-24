@@ -44,7 +44,8 @@ pub fn validate_header_base_fee<ChainSpec: EthereumHardforks>(
 /// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
 pub fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusError> {
-    let withdrawals = block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
+    let withdrawals =
+        block.body.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
         block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
@@ -84,13 +85,12 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
 /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
 #[inline]
 pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
-    let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
-    let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
-    let header_requests_root =
-        block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+    let requests_root =
+        block.body.calculate_requests_root().ok_or(ConsensusError::BodyRequestsMissing)?;
+    let header_requests_root = block.requests_root.ok_or(ConsensusError::RequestsRootMissing)?;
     if requests_root != *header_requests_root {
         return Err(ConsensusError::BodyRequestsRootDiff(
-            GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+            GotExpected { got: requests_root, expected: header_requests_root }.into(),
         ));
     }
     Ok(())
@@ -107,7 +107,7 @@ pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     // Check ommers hash
-    let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
+    let ommers_hash = block.body.calculate_ommers_root();
     if block.header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
@@ -473,7 +473,7 @@ mod tests {
         parent.timestamp -= 1;
 
         let ommers = Vec::new();
-        let body = Vec::new();
+        let transactions = Vec::new();
 
         let sealed = header.seal_slow();
         let (header, seal) = sealed.into_parts();
@@ -481,10 +481,7 @@ mod tests {
         (
             SealedBlock {
                 header: SealedHeader::new(header, seal),
-                body,
-                ommers,
-                withdrawals: None,
-                requests: None,
+                body: BlockBody { transactions, ommers, withdrawals: None, requests: None },
             },
             parent,
         )
@@ -511,8 +508,7 @@ mod tests {
 
             SealedBlock {
                 header: SealedHeader::new(header, seal),
-                withdrawals: Some(withdrawals),
-                ..Default::default()
+                body: BlockBody { withdrawals: Some(withdrawals), ..Default::default() },
             }
         };
 

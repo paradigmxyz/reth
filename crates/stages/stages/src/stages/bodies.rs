@@ -172,7 +172,7 @@ where
             let block_indices = StoredBlockBodyIndices {
                 first_tx_num: next_tx_num,
                 tx_count: match &response {
-                    BlockResponse::Full(block) => block.body.len() as u64,
+                    BlockResponse::Full(block) => block.body.transactions.len() as u64,
                     BlockResponse::Empty(_) => 0,
                 },
             };
@@ -195,12 +195,12 @@ where
             match response {
                 BlockResponse::Full(block) => {
                     // write transaction block index
-                    if !block.body.is_empty() {
+                    if !block.body.transactions.is_empty() {
                         tx_block_cursor.append(block_indices.last_tx_num(), block.number)?;
                     }
 
                     // Write transactions
-                    for transaction in block.body {
+                    for transaction in block.body.transactions {
                         let appended_tx_number = static_file_producer
                             .append_transaction(next_tx_num, &transaction.into())?;
 
@@ -219,13 +219,15 @@ where
                     }
 
                     // Write ommers if any
-                    if !block.ommers.is_empty() {
-                        ommers_cursor
-                            .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
+                    if !block.body.ommers.is_empty() {
+                        ommers_cursor.append(
+                            block_number,
+                            StoredBlockOmmers { ommers: block.body.ommers },
+                        )?;
                     }
 
                     // Write withdrawals if any
-                    if let Some(withdrawals) = block.withdrawals {
+                    if let Some(withdrawals) = block.body.withdrawals {
                         if !withdrawals.is_empty() {
                             withdrawals_cursor
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
@@ -233,7 +235,7 @@ where
                     }
 
                     // Write requests if any
-                    if let Some(requests) = block.requests {
+                    if let Some(requests) = block.body.requests {
                         if !requests.0.is_empty() {
                             requests_cursor.append(block_number, requests)?;
                         }
@@ -657,15 +659,7 @@ mod tests {
 
         /// A helper to create a collection of block bodies keyed by their hash.
         pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
-            (
-                block.hash(),
-                BlockBody {
-                    transactions: block.body.clone(),
-                    ommers: block.ommers.clone(),
-                    withdrawals: block.withdrawals.clone(),
-                    requests: block.requests.clone(),
-                },
-            )
+            (block.hash(), block.body.clone())
         }
 
         /// A helper struct for running the [`BodyStage`].
@@ -738,7 +732,7 @@ mod tests {
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
-                            tx_count: progress.body.len() as u64,
+                            tx_count: progress.body.transactions.len() as u64,
                         };
 
                         static_file_producer.set_block_range(0..=progress.number);
@@ -762,7 +756,7 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers { ommers: progress.ommers.clone() },
+                                StoredBlockOmmers { ommers: progress.body.ommers.clone() },
                             )?;
                         }
 
@@ -945,13 +939,7 @@ mod tests {
                     } else {
                         let body =
                             this.responses.remove(&header.hash()).expect("requested unknown body");
-                        response.push(BlockResponse::Full(SealedBlock {
-                            header,
-                            body: body.transactions,
-                            ommers: body.ommers,
-                            withdrawals: body.withdrawals,
-                            requests: body.requests,
-                        }));
+                        response.push(BlockResponse::Full(SealedBlock { header, body }));
                     }
 
                     if response.len() as u64 >= this.batch_size {

@@ -327,10 +327,9 @@ where
                         let _ = block_with_senders.send(res.clone());
                     }
                     Either::Right(transaction_tx) => {
-                        let _ = transaction_tx.send(
-                            res.clone()
-                                .map(|maybe_block| maybe_block.map(|block| block.block.body)),
-                        );
+                        let _ = transaction_tx.send(res.clone().map(|maybe_block| {
+                            maybe_block.map(|block| block.block.body.transactions)
+                        }));
                     }
                 }
             }
@@ -369,10 +368,9 @@ where
                         let _ = block_with_senders.send(res.clone());
                     }
                     Either::Right(transaction_tx) => {
-                        let _ = transaction_tx.send(
-                            res.clone()
-                                .map(|maybe_block| maybe_block.map(|block| block.block.body)),
-                        );
+                        let _ = transaction_tx.send(res.clone().map(|maybe_block| {
+                            maybe_block.map(|block| block.block.body.transactions)
+                        }));
                     }
                 }
             }
@@ -447,7 +445,7 @@ where
                         CacheAction::GetBlockTransactions { block_hash, response_tx } => {
                             // check if block is cached
                             if let Some(block) = this.full_block_cache.get(&block_hash) {
-                                let _ = response_tx.send(Ok(Some(block.body.clone())));
+                                let _ = response_tx.send(Ok(Some(block.body.transactions.clone())));
                                 continue
                             }
 

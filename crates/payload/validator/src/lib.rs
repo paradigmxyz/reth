@@ -160,7 +160,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
-        if !shanghai_active && sealed_block.withdrawals.is_some() {
+        if !shanghai_active && sealed_block.body.withdrawals.is_some() {
             // shanghai not active but withdrawals present
             return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
         }

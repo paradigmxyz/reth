@@ -18,7 +18,7 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -514,7 +514,10 @@ where
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests: None };
+    let block = Block {
+        header,
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests: None },
+    };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
