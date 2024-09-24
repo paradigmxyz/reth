@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_map"))]
     pub(crate) account_nodes: HashMap<Nibbles, BranchNodeCompact>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
     pub(crate) storage_tries: HashMap<B256, StorageTrieUpdates>,
@@ -307,7 +308,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_serialize_works() {
+    fn test_serialize_trie_updates_works() {
+        let mut default_updates = TrieUpdates::default();
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates
+            .account_nodes
+            .insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0f]), BranchNodeCompact::default());
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates.storage_tries.insert(B256::default(), StorageTrieUpdates::default());
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+    }
+
+    #[test]
+    fn test_serialize_storage_trie_updates_works() {
         let mut default_updates = StorageTrieUpdates::default();
         let _updates_string = serde_json::to_string(&default_updates).unwrap();
 
