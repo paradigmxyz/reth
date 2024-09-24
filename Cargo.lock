@@ -2696,6 +2696,7 @@ dependencies = [
 name = "example-custom-dev-node"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
  "eyre",
  "futures-util",
  "reth",
@@ -6707,6 +6708,7 @@ dependencies = [
 name = "reth-db-api"
 version = "1.0.7"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "arbitrary",
  "bytes",
@@ -7292,6 +7294,7 @@ name = "reth-evm-ethereum"
 version = "1.0.7"
 dependencies = [
  "alloy-eips",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
  "reth-chainspec",
@@ -7312,6 +7315,7 @@ dependencies = [
 name = "reth-evm-optimism"
 version = "1.0.7"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "reth-chainspec",
  "reth-ethereum-forks",
@@ -7363,6 +7367,7 @@ dependencies = [
 name = "reth-exex"
 version = "1.0.7"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "eyre",
  "futures",
