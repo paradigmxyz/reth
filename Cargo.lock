@@ -6707,6 +6707,7 @@ dependencies = [
 name = "reth-db-api"
 version = "1.0.7"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "arbitrary",
  "bytes",
@@ -8213,7 +8214,6 @@ version = "1.0.7"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",

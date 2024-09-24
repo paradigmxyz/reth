@@ -29,7 +29,6 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 pub mod eip7702;
-pub mod genesis;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -46,7 +45,6 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
     MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };

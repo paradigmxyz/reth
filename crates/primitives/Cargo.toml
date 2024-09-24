@@ -31,7 +31,6 @@ alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
-alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 
 # optimism
