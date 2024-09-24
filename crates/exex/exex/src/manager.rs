@@ -542,6 +542,7 @@ pub struct ExExManager {
     /// The finished height of all `ExEx`'s.
     finished_height: watch::Sender<FinishedExExHeight>,
 
+    /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
 
     /// A handle to the `ExEx` manager.
