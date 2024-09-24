@@ -8,8 +8,9 @@ use alloy_dyn_abi::TypedData;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, B256};
 use alloy_rpc_types_eth::TransactionRequest;
+use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
-use reth_primitives::{sign_message, Signature, TransactionSigned};
+use reth_primitives::{Signature, TransactionSigned};
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
 
@@ -57,8 +58,7 @@ impl DevSigner {
     }
 
     fn sign_hash(&self, hash: B256, account: Address) -> Result<Signature> {
-        let sk = self.get_key(account)?.to_field_bytes();
-        let signature = sign_message(B256::from_slice(sk.as_ref()), hash);
+        let signature = self.get_key(account)?.sign_hash_sync(&hash);
         signature.map_err(|_| SignError::CouldNotSign)
     }
 }

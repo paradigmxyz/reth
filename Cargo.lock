@@ -8407,6 +8407,7 @@ dependencies = [
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
  "alloy-serde",
+ "alloy-signer",
  "alloy-signer-local",
  "async-trait",
  "derive_more",
