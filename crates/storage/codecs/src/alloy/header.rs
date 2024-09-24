@@ -42,7 +42,7 @@ struct HeaderExt {
 }
 
 impl HeaderExt {
-    const fn to_option(self) -> Option<Self> {
+    const fn into_option(self) -> Option<Self> {
         if self.requests_root.is_some() {
             Some(self)
         } else {
@@ -78,7 +78,7 @@ impl Compact for AlloyHeader {
             blob_gas_used: self.blob_gas_used.map(|blob_gas| blob_gas as u64),
             excess_blob_gas: self.excess_blob_gas.map(|excess_blob| excess_blob as u64),
             parent_beacon_block_root: self.parent_beacon_block_root,
-            extra_fields: extra_fields.to_option(),
+            extra_fields: extra_fields.into_option(),
             extra_data: self.extra_data.clone(),
         };
         header.to_compact(buf)
