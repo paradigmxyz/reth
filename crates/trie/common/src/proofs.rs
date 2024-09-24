@@ -89,6 +89,9 @@ impl MultiProof {
             }
         }
     }
+
+    // TODO: implement merge function
+    pub fn merge(&mut self, other: Self) {}
 }
 
 /// The merkle multiproof of storage trie.

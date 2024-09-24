@@ -41,6 +41,7 @@ reth-execution-errors.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
+alloy-trie.workspace = true
 
 revm-primitives.workspace = true
 
@@ -50,6 +51,7 @@ tokio = { workspace = true, features = ["macros", "sync"] }
 tokio-stream.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+itertools.workspace = true
 
 # metrics
 metrics.workspace = true

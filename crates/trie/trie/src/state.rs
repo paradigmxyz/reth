@@ -167,6 +167,11 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, storages }
     }
 
+    /// TODO:
+    pub fn is_empty(&self) -> bool {
+        self.accounts.is_empty() && self.storages.is_empty()
+    }
+
     /// Construct [`TriePrefixSetsMut`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
