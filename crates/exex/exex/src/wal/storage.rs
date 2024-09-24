@@ -131,14 +131,18 @@ impl Storage {
     }
 }
 
-fn write_notification(w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
-    rmp_serde::encode::write(w, notification)?;
+// TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
+
+fn write_notification(mut w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
+    // rmp_serde::encode::write(w, notification)?;
+    serde_json::to_writer(&mut w, notification)?;
     w.flush()?;
     Ok(())
 }
 
 fn read_notification(r: &mut impl Read) -> eyre::Result<ExExNotification> {
-    Ok(rmp_serde::from_read(r)?)
+    // Ok(rmp_serde::from_read(r)?)
+    Ok(serde_json::from_reader(r)?)
 }
 
 #[cfg(test)]
