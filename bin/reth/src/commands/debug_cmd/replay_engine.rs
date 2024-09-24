@@ -53,7 +53,7 @@ pub struct Command<C: ChainSpecParser> {
     interval: u64,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser> Command<C> {
     async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,

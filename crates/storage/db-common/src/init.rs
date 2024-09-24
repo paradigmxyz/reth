@@ -2,7 +2,7 @@
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, B256, U256};
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::tables;
@@ -333,7 +333,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockNumReader
         + BlockHashReader
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider
         + StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
@@ -366,7 +366,7 @@ where
 
     debug!(target: "reth::cli",
         block,
-        chain=%provider_rw.chain_spec().chain,
+        chain=%provider_rw.chain_spec().chain(),
         "Initializing state at block"
     );
 

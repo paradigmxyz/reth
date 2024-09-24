@@ -16,7 +16,10 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use alloy_primitives::{Parity, Signature, U256};
+use std::fmt::Display;
+
+use alloy_genesis::Genesis;
+use alloy_primitives::{Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use dev::OP_DEV;
@@ -24,7 +27,8 @@ pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
 use derive_more::{Constructor, Deref, Into};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{BaseFeeParams, ChainSpec, DepositContract, EthChainSpec};
+use reth_primitives_traits::Header;
 
 /// OP stack chain spec type.
 #[derive(Debug, Clone, Deref, Into, Constructor)]
@@ -37,6 +41,44 @@ pub struct OpChainSpec {
 /// signature.
 pub fn optimism_deposit_tx_signature() -> Signature {
     Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
+}
+
+impl EthChainSpec for OpChainSpec {
+    fn chain(&self) -> alloy_chains::Chain {
+        self.inner.chain()
+    }
+
+    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
+        self.inner.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn deposit_contract(&self) -> Option<&DepositContract> {
+        self.inner.deposit_contract()
+    }
+
+    fn genesis_hash(&self) -> B256 {
+        self.inner.genesis_hash()
+    }
+
+    fn prune_delete_limit(&self) -> usize {
+        self.inner.prune_delete_limit()
+    }
+
+    fn display_hardforks(&self) -> impl Display {
+        self.inner.display_hardforks()
+    }
+
+    fn genesis_header(&self) -> &Header {
+        self.inner.genesis_header()
+    }
+
+    fn genesis(&self) -> &Genesis {
+        self.inner.genesis()
+    }
+
+    fn max_gas_limit(&self) -> u64 {
+        self.inner.max_gas_limit()
+    }
 }
 
 #[cfg(test)]

@@ -55,7 +55,7 @@ pub struct Command<C: ChainSpecParser> {
     skip_node_depth: Option<usize>,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser> Command<C> {
     async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,

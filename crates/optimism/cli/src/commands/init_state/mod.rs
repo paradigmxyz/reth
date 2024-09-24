@@ -35,7 +35,7 @@ pub struct InitStateCommandOp<C: ChainSpecParser> {
     without_ovm: bool,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommandOp<C> {
+impl<C: ChainSpecParser> InitStateCommandOp<C> {
     /// Execute the `init` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,

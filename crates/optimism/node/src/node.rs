@@ -63,7 +63,7 @@ impl OptimismNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -84,7 +84,7 @@ impl OptimismNode {
 impl<N> Node<N> for OptimismNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -107,7 +107,7 @@ where
 
 impl NodeTypes for OptimismNode {
     type Primitives = ();
-    type ChainSpec = ChainSpec;
+    type ChainSpec = OpChainSpec;
 }
 
 impl NodeTypesWithEngine for OptimismNode {

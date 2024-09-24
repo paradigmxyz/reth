@@ -55,10 +55,7 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<
-    Spec: ChainSpecParser<ChainSpec = ChainSpec> = OpChainSpecParser,
-    Ext: clap::Args + fmt::Debug = NoArgs,
-> {
+pub struct Cli<SpeC: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<Spec, Ext>,
@@ -114,7 +111,7 @@ impl Cli {
 
 impl<Spec, Ext> Cli<Spec, Ext>
 where
-    Spec: ChainSpecParser<ChainSpec = ChainSpec>,
+    Spec: ChainSpecParser,
     Ext: clap::Args + fmt::Debug,
 {
     /// Execute the configured cli command.
@@ -123,7 +120,7 @@ where
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir

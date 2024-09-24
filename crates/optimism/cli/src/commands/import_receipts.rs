@@ -46,7 +46,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
+impl<C: ChainSpecParser> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,

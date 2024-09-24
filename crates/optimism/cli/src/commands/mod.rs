@@ -19,10 +19,8 @@ pub mod init_state;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<
-    Spec: ChainSpecParser<ChainSpec = ChainSpec> = OpChainSpecParser,
-    Ext: clap::Args + fmt::Debug = NoArgs,
-> {
+pub enum Commands<SpeC: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
+{
     /// Start the node
     #[command(name = "node")]
     Node(Box<node::NodeCommand<Spec, Ext>>),
