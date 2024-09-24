@@ -148,7 +148,7 @@ where
 {
     if let Some(res) = transact_beacon_root_contract_call(
         evm_config,
-        chain_spec,
+        &chain_spec,
         block_timestamp,
         block_number,
         parent_beacon_block_root,

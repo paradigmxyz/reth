@@ -12,7 +12,7 @@ use alloy_rpc_types::{
 };
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
-use reth_chainspec::MIN_TRANSACTION_GAS;
+use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     basefee::calc_next_block_base_fee,
@@ -782,8 +782,9 @@ pub trait Call: LoadState + SpawnBlocking {
         }
 
         // We can now normalize the highest gas limit to a u64
-        let mut highest_gas_limit: u64 =
-            highest_gas_limit.try_into().unwrap_or(self.provider().chain_spec().max_gas_limit);
+        let mut highest_gas_limit: u64 = highest_gas_limit
+            .try_into()
+            .unwrap_or_else(|_| self.provider().chain_spec().max_gas_limit());
 
         // If the provided gas limit is less than computed cap, use that
         env.tx.gas_limit = env.tx.gas_limit.min(highest_gas_limit);

@@ -152,7 +152,7 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -224,7 +224,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider<ChainSpec: EthereumHardforks> + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -410,7 +410,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
-    Provider: FullRpcProvider<ChainSpec: EthereumHardforks> + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -748,7 +748,7 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
-    Provider: ChainSpecProvider<ChainSpec = ChainSpec>,
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
 {
     /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
@@ -784,7 +784,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
-    Provider: FullRpcProvider<ChainSpec: EthereumHardforks> + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiServer<
@@ -965,7 +965,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
-    Provider: FullRpcProvider<ChainSpec: EthereumHardforks> + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,

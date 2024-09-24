@@ -7,7 +7,7 @@ use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvm, ConfigureEvmEnv,
@@ -50,7 +50,7 @@ pub trait LoadPendingBlock: EthApiTypes {
         &self,
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
            + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
