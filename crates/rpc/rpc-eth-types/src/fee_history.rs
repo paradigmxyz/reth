@@ -6,6 +6,7 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
+use alloy_eips::eip1559::calc_next_block_base_fee;
 use alloy_primitives::B256;
 use alloy_rpc_types::TxGasAndReward;
 use futures::{
@@ -16,7 +17,6 @@ use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives::{
-    basefee::calc_next_block_base_fee,
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     Receipt, SealedBlock, TransactionSigned,
 };
