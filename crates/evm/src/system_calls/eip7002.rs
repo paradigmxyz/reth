@@ -112,8 +112,11 @@ where
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    let ResultAndState { result, .. } =
+    let ResultAndState { result, state } =
         transact_withdrawal_requests_contract_call(evm_config, evm)?;
+
+    // commit the state
+    evm.context.evm.db.commit(state);
 
     let mut data = match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
