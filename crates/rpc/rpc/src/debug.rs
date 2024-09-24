@@ -791,13 +791,9 @@ where
 
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
 
-                        let tx_info = TransactionInfo {
-                            hash: transaction_context.unwrap().tx_hash,
-                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
-                            block_hash: transaction_context.unwrap().block_hash,
-                            block_number: Some(env.block.number.try_into().unwrap_or_default()),
-                            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
-                        };
+                        let tx_info: TransactionInfo = transaction_context
+                            .into()
+                            .with_base_fee(env.block.basefee.try_into().unwrap_or_default());
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
