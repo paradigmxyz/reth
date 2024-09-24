@@ -33,11 +33,14 @@ reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie.workspace = true
+reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
+reth-execution-errors.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
 
 revm-primitives.workspace = true
 

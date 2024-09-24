@@ -2178,6 +2178,7 @@ where
                 input.append(consistent_view.revert_state(block.parent_hash)?);
             }
 
+            let input = Arc::new(input.into_sorted());
             let parent_state_root = parent_block.state_root;
             rayon::spawn(move || {
                 let result: Result<(B256, TrieUpdates), AsyncStateRootError> =
