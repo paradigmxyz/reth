@@ -25,6 +25,8 @@ impl Storage {
     /// it doesn't exist.
     pub(super) fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
         reth_fs_util::create_dir_all(&path)?;
+        println!("path: {:?}", path.as_ref());
+        println!("exists: {:?}", path.as_ref().exists());
 
         Ok(Self { path: path.as_ref().to_path_buf() })
     }
@@ -107,23 +109,25 @@ impl Storage {
     }
 
     /// Reads the notification from the file with the given id.
+    #[instrument(target = "exex::wal::storage", skip(self))]
     pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<ExExNotification> {
-        debug!(?file_id, "Reading notification from WAL");
-
         let file_path = self.file_path(file_id);
+        debug!(?file_path, "Reading notification from WAL");
+
         let mut file = File::open(&file_path)?;
         read_notification(&mut file)
     }
 
     /// Writes the notification to the file with the given id.
+    #[instrument(target = "exex::wal::storage", skip(self, notification))]
     pub(super) fn write_notification(
         &self,
         file_id: u64,
         notification: &ExExNotification,
     ) -> eyre::Result<()> {
-        debug!(?file_id, "Writing notification to WAL");
-
         let file_path = self.file_path(file_id);
+        debug!(?file_path, "Writing notification to WAL");
+
         let mut file = File::create_new(&file_path)?;
         write_notification(&mut file, notification)?;
 

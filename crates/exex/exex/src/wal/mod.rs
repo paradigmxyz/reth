@@ -72,7 +72,6 @@ impl Wal {
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
     pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
-        debug!("Writing notification to WAL");
         let file_id = self.block_cache.back().map_or(0, |block| block.0 + 1);
         self.storage.write_notification(file_id, notification)?;
 
@@ -225,6 +224,17 @@ impl Wal {
         }
 
         Ok(())
+    }
+
+    /// Returns an iterator over all notifications in the WAL.
+    pub(crate) fn iter_notifications(
+        &self,
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+        let Some(range) = self.storage.files_range()? else {
+            return Ok(Box::new(std::iter::empty()))
+        };
+
+        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
 }
 

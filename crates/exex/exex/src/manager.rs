@@ -852,19 +852,20 @@ mod tests {
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
-    fn create_wal() -> Wal {
-        let temp_dir = tempfile::tempdir().unwrap();
-        Wal::new(temp_dir.path()).unwrap()
-    }
-
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         ForkChoiceStream::new(watch::channel(None).1)
     }
 
     #[tokio::test]
     async fn test_delivers_events() {
-        let (mut exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Send an event and check that it's delivered correctly
         event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
@@ -874,8 +875,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_exexs() {
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (exex_handle_1, _, _) = ExExHandle::new(
+            "test_exex_1".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         assert!(!ExExManager::new(vec![], 0, empty_finalized_header_stream()).handle.has_exexs());
 
@@ -886,8 +893,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_capacity() {
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (exex_handle_1, _, _) = ExExHandle::new(
+            "test_exex_1".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         assert!(!ExExManager::new(vec![], 0, empty_finalized_header_stream())
             .handle
@@ -900,8 +913,14 @@ mod tests {
 
     #[test]
     fn test_push_notification() {
-        let (exex_handle, _, _) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (exex_handle, _, _) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Create a mock ExExManager and add the exex_handle to it
         let mut exex_manager =
@@ -947,8 +966,14 @@ mod tests {
 
     #[test]
     fn test_update_capacity() {
-        let (exex_handle, _, _) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (exex_handle, _, _) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Create a mock ExExManager and add the exex_handle to it
         let max_capacity = 5;
@@ -983,8 +1008,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height() {
-        let (exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Check initial block height
         assert!(exex_handle.finished_height.is_none());
@@ -1020,11 +1051,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height_lower() {
+        let temp_dir = tempfile::tempdir().unwrap();
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) =
-            ExExHandle::new("test_exex1".to_string(), Head::default(), (), (), create_wal());
-        let (exex_handle2, event_tx2, _) =
-            ExExHandle::new("test_exex2".to_string(), Head::default(), (), (), create_wal());
+        let (exex_handle1, event_tx1, _) = ExExHandle::new(
+            "test_exex1".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
+        let (exex_handle2, event_tx2, _) = ExExHandle::new(
+            "test_exex2".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Send events to update the block heights of the two handles, with the second being lower
         event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
@@ -1054,11 +1096,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height_greater() {
+        let temp_dir = tempfile::tempdir().unwrap();
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) =
-            ExExHandle::new("test_exex1".to_string(), Head::default(), (), (), create_wal());
-        let (exex_handle2, event_tx2, _) =
-            ExExHandle::new("test_exex2".to_string(), Head::default(), (), (), create_wal());
+        let (exex_handle1, event_tx1, _) = ExExHandle::new(
+            "test_exex1".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
+        let (exex_handle2, event_tx2, _) = ExExHandle::new(
+            "test_exex2".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Assert that the initial block height is `None` for the first `ExExHandle`.
         assert!(exex_handle1.finished_height.is_none());
@@ -1095,8 +1148,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_exex_manager_capacity() {
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (exex_handle_1, _, _) = ExExHandle::new(
+            "test_exex_1".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
@@ -1135,8 +1194,14 @@ mod tests {
 
     #[tokio::test]
     async fn exex_handle_new() {
-        let (mut exex_handle, _, mut notifications) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Check initial state
         assert_eq!(exex_handle.id, "test_exex");
@@ -1178,8 +1243,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_notification_if_finished_height_gt_chain_tip() {
-        let (mut exex_handle, _, mut notifications) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(15);
@@ -1220,8 +1291,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reorged_notification() {
-        let (mut exex_handle, _, mut notifications) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         let notification = ExExNotification::ChainReorged {
             old: Arc::new(Chain::default()),
@@ -1251,8 +1328,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reverted_notification() {
-        let (mut exex_handle, _, mut notifications) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), create_wal());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Head::default(),
+            (),
+            (),
+            Wal::new(temp_dir.path()).unwrap(),
+        );
 
         let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
 
@@ -1275,6 +1358,48 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_exex_wal_finalize() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut wal = Wal::new(temp_dir.path()).unwrap();
+        let block = random_block(&mut generators::rng(), 0, Default::default())
+            .seal_with_senders()
+            .ok_or_eyre("failed to recover senders")?;
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
+        };
+        wal.commit(&notification)?;
+
+        let (tx, rx) = watch::channel(None);
+        let finalized_header_stream = ForkChoiceStream::new(rx);
+
+        let (exex_handle, _, _) =
+            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal);
+
+        let mut exex_manager =
+            std::pin::pin!(ExExManager::new(vec![exex_handle], 1, finalized_header_stream));
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(
+            exex_manager.exex_handles[0]
+                .wal
+                .iter_notifications()?
+                .collect::<eyre::Result<Vec<_>>>()?,
+            [notification]
+        );
+
+        tx.send(Some(block.header.clone()))?;
+
+        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        assert!(exex_manager.exex_handles[0].wal.iter_notifications()?.next().is_none());
+
+        Ok(())
     }
 
     #[tokio::test]
