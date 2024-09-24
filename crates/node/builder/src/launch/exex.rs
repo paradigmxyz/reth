@@ -48,12 +48,11 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         let mut exex_handles = Vec::with_capacity(extensions.len());
         let mut exexes = Vec::with_capacity(extensions.len());
 
-        let wals_directory = config_container
+        let datadir = config_container
             .config
             .datadir
             .clone()
-            .resolve_datadir(config_container.config.chain.chain())
-            .exex_wals();
+            .resolve_datadir(config_container.config.chain.chain());
 
         for (id, exex) in extensions {
             // create a new exex handle
@@ -62,7 +61,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 head,
                 components.provider().clone(),
                 components.block_executor().clone(),
-                Wal::new(wals_directory.join(&id))?,
+                Wal::new(datadir.exex_wal(&id))?,
             );
             exex_handles.push(handle);
 

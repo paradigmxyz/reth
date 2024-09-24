@@ -351,9 +351,9 @@ impl<D> ChainPath<D> {
         self.data_dir().join("invalid_block_hooks")
     }
 
-    /// Returns the path to the ExEx WALs directory for this chain.
-    pub fn exex_wals(&self) -> PathBuf {
-        self.data_dir().join("exex/wals")
+    /// Returns the path to the ExEx WAL directory for this chain.
+    pub fn exex_wal(&self, exex_id: impl AsRef<str>) -> PathBuf {
+        self.data_dir().join("exex").join(exex_id.as_ref()).join("wal")
     }
 }
 
