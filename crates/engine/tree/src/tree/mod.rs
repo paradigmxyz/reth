@@ -2297,19 +2297,7 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        rayon::spawn(move || {
-            let result: Result<(B256, TrieUpdates), AsyncStateRootError> =
-                futures::executor::block_on(async move {
-                    AsyncStateRoot::new(consistent_view, input)
-                        .incremental_root_with_updates()
-                        .await
-                });
-            let _ = tx.send(result);
-        });
-
-        rx.recv()?
+        AsyncStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.

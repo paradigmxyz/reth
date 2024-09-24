@@ -49,7 +49,6 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
-rayon.workspace = true
 tracing.workspace = true
 
 # optional deps for test-utils
