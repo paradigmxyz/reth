@@ -32,8 +32,23 @@ struct Header {
     blob_gas_used: Option<u64>,
     excess_blob_gas: Option<u64>,
     parent_beacon_block_root: Option<B256>,
-    requests_root: Option<B256>,
+    extra_fields: Option<HeaderExt>,
     extra_data: Bytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
+struct HeaderExt {
+    requests_root: Option<B256>,
+}
+
+impl HeaderExt {
+    const fn to_option(self) -> Option<Self> {
+        if self.requests_root.is_some() {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 impl Compact for AlloyHeader {
@@ -41,6 +56,8 @@ impl Compact for AlloyHeader {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
+        let extra_fields = HeaderExt { requests_root: self.requests_root };
+
         let header = Header {
             parent_hash: self.parent_hash,
             ommers_hash: self.ommers_hash,
@@ -61,7 +78,7 @@ impl Compact for AlloyHeader {
             blob_gas_used: self.blob_gas_used.map(|blob_gas| blob_gas as u64),
             excess_blob_gas: self.excess_blob_gas.map(|excess_blob| excess_blob as u64),
             parent_beacon_block_root: self.parent_beacon_block_root,
-            requests_root: self.requests_root,
+            extra_fields: extra_fields.to_option(),
             extra_data: self.extra_data.clone(),
         };
         header.to_compact(buf)
@@ -89,7 +106,7 @@ impl Compact for AlloyHeader {
             blob_gas_used: header.blob_gas_used.map(Into::into),
             excess_blob_gas: header.excess_blob_gas.map(Into::into),
             parent_beacon_block_root: header.parent_beacon_block_root,
-            requests_root: header.requests_root,
+            requests_root: header.extra_fields.and_then(|h| h.requests_root),
             extra_data: header.extra_data,
         };
         (alloy_header, buf)
@@ -103,5 +120,6 @@ mod tests {
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert_eq!(Header::bitflag_encoded_bytes(), 4);
+        assert_eq!(HeaderExt::bitflag_encoded_bytes(), 1);
     }
 }
