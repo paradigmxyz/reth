@@ -406,10 +406,12 @@ where
                                 let (_res, env) =
                                     this.eth_api().inspect(db, env, &mut inspector)?;
                                 let tx_info = TransactionInfo::default();
-                                let frame = inspector
+                                let frame: FlatCallFrame = inspector
                                     .with_transaction_gas_limit(env.tx.gas_limit)
                                     .into_parity_builder()
-                                    .into_localized_transaction_traces(tx_info);
+                                    .into_localized_transaction_traces(tx_info)
+                                    .pop()
+                                    .unwrap();
                                 Ok(frame)
                             })
                             .await?;
@@ -827,7 +829,9 @@ where
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
+                            .into_localized_transaction_traces(tx_info)
+                            .pop()
+                            .unwrap();
 
                         return Ok((frame.into(), res.state));
                     }
