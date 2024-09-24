@@ -62,6 +62,7 @@ pub struct ExExHandle {
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
+    /// The [WAL](`Wal`) instance for this `ExEx`.
     wal: Wal,
 }
 
@@ -671,7 +672,7 @@ impl Future for ExExManager {
         for idx in (0..self.exex_handles.len()).rev() {
             let mut exex = self.exex_handles.swap_remove(idx);
 
-            // it is a logic error for self to ever underflow since the manager manages the
+            // it is a logic error for this to ever underflow since the manager manages the
             // notification IDs
             let notification_index = exex
                 .next_notification_id
