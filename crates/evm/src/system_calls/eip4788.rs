@@ -51,7 +51,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
+/// chain spec, EVM.
 ///
 /// Note: this does not commit the state changes to the database, it only transact the call.
 ///
@@ -126,7 +126,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
+/// chain spec, EVM.
 ///
 /// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.

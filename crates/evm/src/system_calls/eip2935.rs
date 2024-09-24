@@ -52,7 +52,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
-/// [`ChainSpec`], and EVM.
+/// chain specification, and EVM.
 ///
 /// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
@@ -116,7 +116,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
-/// [`ChainSpec`], and EVM and commits the relevant state changes.
+/// chain specification, and EVM and commits the relevant state changes.
 ///
 /// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
