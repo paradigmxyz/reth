@@ -24,6 +24,7 @@ reth-trie-common.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-genesis.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
