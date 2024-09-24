@@ -22,3 +22,6 @@ pub use eth::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
 };
+
+use alloy_primitives as _;
+use alloy_rpc_types as _;

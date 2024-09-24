@@ -8,7 +8,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, B256};
 use alloy_rpc_types_eth::TransactionRequest;
-use alloy_signer::{Signer, SignerSync};
+use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use reth_primitives::{Signature, TransactionSigned};
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
