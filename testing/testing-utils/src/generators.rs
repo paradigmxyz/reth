@@ -9,7 +9,7 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, Header, Log, Receipt, Request, Requests, SealedBlock,
+    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
     SealedHeader, StorageEntry, Transaction, TransactionSigned, TxLegacy, Withdrawal, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
@@ -224,10 +224,12 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
 
     SealedBlock {
         header: SealedHeader::new(header, seal),
-        body: transactions,
-        ommers,
-        withdrawals: withdrawals.map(Withdrawals::new),
-        requests: requests.map(Requests),
+        body: BlockBody {
+            transactions,
+            ommers,
+            withdrawals: withdrawals.map(Withdrawals::new),
+            requests: requests.map(Requests),
+        },
     }
 }
 

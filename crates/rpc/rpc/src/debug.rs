@@ -163,6 +163,7 @@ where
             if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
                 block
                     .body
+                    .transactions
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered()
@@ -173,6 +174,7 @@ where
             } else {
                 block
                     .body
+                    .transactions
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
@@ -507,11 +509,11 @@ where
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or(block.body.len());
+        let num_txs = transaction_index.index().unwrap_or(block.body.transactions.len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
-        if !target_block.is_pending() && num_txs == block.body.len() {
+        if !target_block.is_pending() && num_txs == block.body.transactions.len() {
             at = block.hash();
             replay_block_txs = false;
         }

@@ -12,8 +12,8 @@ use reth_primitives::{
     alloy_primitives::Sealable,
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
+    BlockBody, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -165,10 +165,12 @@ impl TestBlockBuilder {
 
         let block = SealedBlock {
             header: SealedHeader::new(header, seal),
-            body: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
-            ommers: Vec::new(),
-            withdrawals: Some(vec![].into()),
-            requests: None,
+            body: BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+                ommers: Vec::new(),
+                withdrawals: Some(vec![].into()),
+                requests: None,
+            },
         };
 
         SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
@@ -254,6 +256,7 @@ impl TestBlockBuilder {
     pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
         let receipts = block
             .body
+            .transactions
             .iter()
             .enumerate()
             .map(|(idx, tx)| Receipt {
@@ -266,7 +269,7 @@ impl TestBlockBuilder {
 
         let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
 
-        for tx in &block.body {
+        for tx in &block.body.transactions {
             self.signer_execute_account_info.balance -= Self::single_tx_cost();
             bundle_state_builder = bundle_state_builder.state_present_account_info(
                 self.signer,

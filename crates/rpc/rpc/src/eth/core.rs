@@ -379,7 +379,7 @@ mod tests {
     use reth_chainspec::{BaseFeeParams, ChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, BlockNumberOrTag, Header, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
@@ -493,7 +493,10 @@ mod tests {
 
             mock_provider.add_block(
                 hash,
-                Block { header: header.clone(), body: transactions, ..Default::default() },
+                Block {
+                    header: header.clone(),
+                    body: BlockBody { transactions, ..Default::default() },
+                },
             );
             mock_provider.add_header(hash, header);
 

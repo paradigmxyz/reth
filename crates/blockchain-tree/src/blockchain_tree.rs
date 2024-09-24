@@ -1389,8 +1389,8 @@ mod tests {
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
-        Account, Header, Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        TxEip1559, Withdrawals,
+        Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
+        TransactionSignedEcRecovered, TxEip1559, Withdrawals,
     };
     use reth_provider::{
         test_utils::{
@@ -1628,10 +1628,12 @@ mod tests {
             SealedBlockWithSenders::new(
                 SealedBlock {
                     header: SealedHeader::new(header, seal),
-                    body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
-                    ommers: Vec::new(),
-                    withdrawals: Some(Withdrawals::default()),
-                    requests: None,
+                    body: BlockBody {
+                        transactions: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
+                        ommers: Vec::new(),
+                        withdrawals: Some(Withdrawals::default()),
+                        requests: None,
+                    },
                 },
                 body.iter().map(|tx| tx.signer()).collect(),
             )
