@@ -481,7 +481,7 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        public_key_to_address, Account, Block, Transaction, TxLegacy,
+        public_key_to_address, Account, Block, BlockBody, Transaction, TxLegacy,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
