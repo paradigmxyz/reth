@@ -3376,7 +3376,8 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         let mut transactions_elapsed = Duration::default();
         let mut tx_hash_numbers_elapsed = Duration::default();
 
-        for (transaction, sender) in block.block.body.clone().into_iter().zip(block.senders.iter()) {
+        for (transaction, sender) in block.block.body.clone().into_iter().zip(block.senders.iter())
+        {
             let hash = transaction.hash();
 
             if self
