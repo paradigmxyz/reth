@@ -7,11 +7,11 @@ use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
-use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
-        PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
+        NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, Node, PayloadBuilderConfig,
@@ -30,6 +30,7 @@ use reth_transaction_pool::{
 
 use crate::{
     args::RollupArgs,
+    engine::OptimismEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
     OptimismEngineTypes,
 };
@@ -58,6 +59,7 @@ impl OptimismNode {
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
+        OptimismEngineValidatorBuilder,
     >
     where
         Node: FullNodeTypes<
@@ -75,6 +77,7 @@ impl OptimismNode {
             })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
+            .engine_validator(OptimismEngineValidatorBuilder::default())
     }
 }
 
@@ -91,6 +94,7 @@ where
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
+        OptimismEngineValidatorBuilder,
     >;
 
     type AddOns = OptimismAddOns;
@@ -384,5 +388,23 @@ where
         } else {
             Ok(Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec())))
         }
+    }
+}
+
+/// Builder for [`OptimismEngineValidator`].
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct OptimismEngineValidatorBuilder;
+
+impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilder
+where
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
+    OptimismEngineValidator: EngineValidator<Types::Engine>,
+{
+    type Validator = OptimismEngineValidator;
+
+    async fn build_validator(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Validator> {
+        Ok(OptimismEngineValidator::new(ctx.chain_spec()))
     }
 }

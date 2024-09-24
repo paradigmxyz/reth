@@ -9,9 +9,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod payload;
+use std::sync::Arc;
+
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineTypes, EngineValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes, PayloadTypes,
@@ -36,18 +38,42 @@ impl PayloadTypes for EthEngineTypes {
 }
 
 impl EngineTypes for EthEngineTypes {
-    type ChainSpec = ChainSpec;
-
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
+}
 
+/// Validator for the ethereum engine API.
+#[derive(Debug, Clone)]
+pub struct EthereumEngineValidator {
+    chain_spec: Arc<ChainSpec>,
+}
+
+impl EthereumEngineValidator {
+    /// Instantiates a new validator.
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { chain_spec }
+    }
+}
+
+impl<Types> EngineValidator<Types> for EthereumEngineValidator
+where
+    Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
+{
     fn validate_version_specific_fields(
-        chain_spec: &ChainSpec,
+        &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(&self.chain_spec, version, payload_or_attrs)
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &EthPayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_version_specific_fields(&self.chain_spec, version, attributes.into())
     }
 }
