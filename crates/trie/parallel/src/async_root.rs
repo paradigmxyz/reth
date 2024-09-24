@@ -94,7 +94,7 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
             rayon::spawn_fifo(move || {
                 let result = (|| -> Result<_, AsyncStateRootError> {
