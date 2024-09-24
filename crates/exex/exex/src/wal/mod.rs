@@ -1,15 +1,15 @@
 #![allow(dead_code)]
 
 mod cache;
+pub use cache::BlockCache;
 mod storage;
+pub use storage::Storage;
 
 use std::path::Path;
 
-use cache::BlockCache;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
-use storage::Storage;
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
 ///
@@ -71,7 +71,7 @@ impl Wal {
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
-    pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
+    pub fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
         let file_id = self.block_cache.back().map_or(0, |block| block.0 + 1);
         self.storage.write_notification(file_id, notification)?;
 
@@ -93,7 +93,7 @@ impl Wal {
     /// 1. The block number and hash of the lowest removed block.
     /// 2. The notifications that were removed.
     #[instrument(target = "exex::wal", skip(self))]
-    pub(crate) fn rollback(
+    pub fn rollback(
         &mut self,
         to_block: BlockNumHash,
     ) -> eyre::Result<Option<(BlockNumHash, Vec<ExExNotification>)>> {
@@ -161,7 +161,7 @@ impl Wal {
     /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
     ///    notification includes both finalized and non-finalized blocks, it will not be removed.
     #[instrument(target = "exex::wal", skip(self))]
-    pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
+    pub fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the file ID of the notification with the finalized block and
         // save the file ID with the first unfinalized block. Do not remove any notifications
         // yet.

@@ -184,7 +184,7 @@ where
             ctx.configs().clone(),
         )
         .launch()
-        .await;
+        .await?;
 
         // create pipeline
         let network_client = ctx.components().network().fetch_client().await?;

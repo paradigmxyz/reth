@@ -37,12 +37,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     ///
     /// Spawns all extensions and returns the handle to the exex manager if any extensions are
     /// installed.
-    pub async fn launch(self) -> Option<ExExManagerHandle> {
+    pub async fn launch(self) -> eyre::Result<Option<ExExManagerHandle>> {
         let Self { head, extensions, components, config_container } = self;
 
         if extensions.is_empty() {
             // nothing to launch
-            return None
+            return Ok(None)
         }
 
         let mut exex_handles = Vec::with_capacity(extensions.len());
@@ -62,7 +62,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 head,
                 components.provider().clone(),
                 components.block_executor().clone(),
-                Wal::new(wals_directory.join(&id)).unwrap(),
+                Wal::new(wals_directory.join(&id))?,
             );
             exex_handles.push(handle);
 
@@ -128,7 +128,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
 
         info!(target: "reth::cli", "ExEx Manager started");
 
-        Some(exex_manager_handle)
+        Ok(Some(exex_manager_handle))
     }
 }
 
