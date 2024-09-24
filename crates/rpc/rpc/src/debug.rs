@@ -15,7 +15,6 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvmEnv,
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
@@ -34,9 +33,8 @@ use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::{CacheDB, State},
+    db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
-    StateBuilder,
 };
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -622,17 +620,53 @@ where
                 let db = StateProviderDatabase::new(&state_provider);
                 let block_executor = this.inner.block_executor.executor(db);
 
-                let witness = ExecutionWitness::default();
+                let mut hashed_state = HashedPostState::default();
+                let mut keys = HashMap::new();
                 let _ = block_executor
                     .execute_with_state_witness(
                         (&block.clone().unseal(), block.difficulty).into(),
                         |statedb| {
+                            for (address, account) in &statedb.cache.accounts {
+                                let hashed_address = keccak256(address);
+                                hashed_state.accounts.insert(
+                                    hashed_address,
+                                    account.account.as_ref().map(|a| a.info.clone().into()),
+                                );
 
+                                let storage =
+                                    hashed_state.storages.entry(hashed_address).or_insert_with(
+                                        || HashedStorage::new(account.status.was_destroyed()),
+                                    );
+
+                                if let Some(account) = &account.account {
+                                    if include_preimages {
+                                        keys.insert(
+                                            hashed_address,
+                                            alloy_rlp::encode(address).into(),
+                                        );
+                                    }
+
+                                    for (slot, value) in &account.storage {
+                                        let slot = B256::from(*slot);
+                                        let hashed_slot = keccak256(slot);
+                                        storage.storage.insert(hashed_slot, *value);
+
+                                        if include_preimages {
+                                            keys.insert(
+                                                hashed_slot,
+                                                alloy_rlp::encode(slot).into(),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         },
                     )
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(ExecutionWitness { state: HashMap::new(), keys: None })
+                let state =
+                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
+                Ok(ExecutionWitness { state, keys: include_preimages.then_some(keys) })
                 // let evm_config = Call::evm_config(this.eth_api()).clone();
                 // let mut db =
                 //     StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
