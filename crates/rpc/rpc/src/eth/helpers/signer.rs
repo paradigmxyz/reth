@@ -2,19 +2,16 @@
 
 use std::collections::HashMap;
 
+use crate::EthApi;
 use alloy_consensus::TxEnvelope;
 use alloy_dyn_abi::TypedData;
-use alloy_network::{EthereumWallet, TransactionBuilder};
+use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, B256};
-use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer_local::PrivateKeySigner;
 use reth_primitives::{sign_message, Signature, TransactionSigned};
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
-use secp256k1::SecretKey;
-
-use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> AddDevSigners
     for EthApi<Provider, Pool, Network, EvmConfig>
@@ -28,7 +25,7 @@ impl<Provider, Pool, Network, EvmConfig> AddDevSigners
 #[derive(Debug, Clone)]
 pub struct DevSigner {
     addresses: Vec<Address>,
-    accounts: HashMap<Address, SecretKey>,
+    accounts: HashMap<Address, PrivateKeySigner>,
 }
 
 #[allow(dead_code)]
@@ -44,23 +41,24 @@ impl DevSigner {
     pub fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
         let mut signers = Vec::new();
         for _ in 0..num {
-            let (sk, pk) = secp256k1::generate_keypair(&mut rand::thread_rng());
+            let sk = PrivateKeySigner::random_with(&mut rand::thread_rng());
 
-            let address = reth_primitives::public_key_to_address(pk);
+            let address = sk.address();
             let addresses = vec![address];
+
             let accounts = HashMap::from([(address, sk)]);
             signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner>);
         }
         signers
     }
 
-    fn get_key(&self, account: Address) -> Result<&SecretKey> {
+    fn get_key(&self, account: Address) -> Result<&PrivateKeySigner> {
         self.accounts.get(&account).ok_or(SignError::NoAccount)
     }
 
     fn sign_hash(&self, hash: B256, account: Address) -> Result<Signature> {
-        let secret = self.get_key(account)?;
-        let signature = sign_message(B256::from_slice(secret.as_ref()), hash);
+        let sk = self.get_key(account)?.to_field_bytes();
+        let signature = sign_message(B256::from_slice(sk.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
     }
 }
@@ -88,19 +86,16 @@ impl EthSigner for DevSigner {
         address: &Address,
     ) -> Result<TransactionSigned> {
         // create local signer wallet from signing key
-        let sk_bytes = self.accounts.get(address).ok_or(SignError::NoAccount)?.secret_bytes();
-        let wallet =
-            PrivateKeySigner::from_bytes(&sk_bytes.into()).map_err(|_| SignError::NoAccount)?;
-        let signer = EthereumWallet::from(wallet);
+        let signer = self.accounts.get(address).ok_or(SignError::NoAccount)?.clone();
+        let wallet = EthereumWallet::from(signer);
 
         // build and sign transaction with signer
         let txn_envelope: TxEnvelope =
-            request.build(&signer).await.map_err(|_| SignError::InvalidTransactionRequest)?;
+            request.build(&wallet).await.map_err(|_| SignError::InvalidTransactionRequest)?;
 
         // decode transaction into signed transaction type
-        let mut enveloped_tx = Vec::new();
-        txn_envelope.encode(&mut enveloped_tx);
-        let txn_signed = TransactionSigned::decode_enveloped(&mut enveloped_tx.as_ref())
+        let encoded = txn_envelope.encoded_2718();
+        let txn_signed = TransactionSigned::decode_enveloped(&mut encoded.as_ref())
             .map_err(|_| SignError::InvalidTransactionRequest)?;
 
         Ok(txn_signed)
@@ -114,22 +109,17 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Parity, Bytes, U256};
+    use alloy_primitives::{Bytes, Parity, U256};
     use alloy_rpc_types_eth::TransactionInput;
     use revm_primitives::TxKind;
-    use std::str::FromStr;
 
     use super::*;
 
     fn build_signer() -> DevSigner {
-        let secret =
-            SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-                .unwrap();
-        let local_signer = PrivateKeySigner::from_bytes(&secret.secret_bytes().into())
-            .map_err(|_| SignError::NoAccount)
-            .unwrap();
-        let address = local_signer.address();
-        let accounts = HashMap::from([(address, secret)]);
+        let signer: PrivateKeySigner =
+            "4646464646464646464646464646464646464646464646464646464646464646".parse().unwrap();
+        let address = signer.address();
+        let accounts = HashMap::from([(address, signer)]);
         let addresses = vec![address];
         DevSigner { addresses, accounts }
     }

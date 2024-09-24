@@ -8445,7 +8445,6 @@ dependencies = [
  "revm",
  "revm-inspectors",
  "revm-primitives",
- "secp256k1",
  "serde",
  "serde_json",
  "thiserror",

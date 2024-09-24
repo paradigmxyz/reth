@@ -397,7 +397,7 @@ pub trait EthTransactions: LoadTransaction {
             let signers: Vec<_> = self.signers().read().iter().cloned().collect();
             for signer in signers {
                 if signer.is_signer_for(from) {
-                    return match signer.sign_transaction(txn.clone(), from).await {
+                    return match signer.sign_transaction(txn, from).await {
                         Ok(tx) => Ok(tx),
                         Err(e) => Err(e.into_eth_err()),
                     }

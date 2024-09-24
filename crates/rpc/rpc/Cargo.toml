@@ -58,7 +58,7 @@ revm = { workspace = true, features = [
     "optional_no_base_fee",
 ] }
 revm-primitives = { workspace = true, features = ["serde"] }
-secp256k1.workspace = true
+# secp256k1.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
