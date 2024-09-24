@@ -17,4 +17,7 @@ reth-consensus-common.workspace = true
 reth-primitives.workspace = true
 reth-consensus.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 tracing.workspace = true
