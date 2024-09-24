@@ -26,7 +26,7 @@ use storage::Storage;
 /// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
 #[derive(Debug)]
-pub(crate) struct Wal {
+pub struct Wal {
     /// The underlying WAL storage backed by a file.
     storage: Storage,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
@@ -35,7 +35,7 @@ pub(crate) struct Wal {
 
 impl Wal {
     /// Creates a new instance of [`Wal`].
-    pub(crate) fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+    pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self { storage: Storage::new(directory)?, block_cache: BlockCache::new() };
         wal.fill_block_cache()?;
         Ok(wal)

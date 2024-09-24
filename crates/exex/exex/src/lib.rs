@@ -47,6 +47,7 @@ mod manager;
 pub use manager::*;
 
 mod wal;
+pub use wal::*;
 
 // Re-export exex types
 #[doc(inline)]
