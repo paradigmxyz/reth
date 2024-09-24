@@ -39,7 +39,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 /// The type that configures an Ethereum-like node with an engine for consensus.
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes<ChainSpec = Self::ChainSpec>;
+    type Engine: EngineTypes;
 }
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the
@@ -166,7 +166,7 @@ where
 impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes<ChainSpec = C> + Send + Sync + Unpin,
+    E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec,
 {
     type Engine = E;
