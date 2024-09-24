@@ -34,6 +34,9 @@ pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
 
     /// Returns a [`NodeComponentsBuilder`] for the node.
     fn components_builder(&self) -> Self::ComponentsBuilder;
+
+    /// Returns the node add-ons.
+    fn add_ons(&self) -> Self::AddOns;
 }
 
 /// A [`Node`] type builder
@@ -83,6 +86,10 @@ where
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         self.1.clone()
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+       self.1.add_ons()
     }
 }
 

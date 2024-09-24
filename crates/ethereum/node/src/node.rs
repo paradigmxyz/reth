@@ -77,7 +77,8 @@ impl NodeTypesWithEngine for EthereumNode {
 }
 
 /// Add-ons w.r.t. l1 ethereum.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct EthereumAddOns;
 
 impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {
