@@ -56,7 +56,6 @@ where
             pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            ctx.chain_spec().clone(),
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
                 ctx.chain_spec(),
             )),
