@@ -15,7 +15,7 @@ use reth_primitives::SealedHeader;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::VecDeque,
     fmt::Debug,
     future::{poll_fn, Future},
     pin::Pin,
@@ -623,8 +623,7 @@ impl ExExManager {
             .iter_notifications()?
             // Start from the end of the WAL
             .rev()
-            // Convert all notifications into their inverted versions until we find a notification
-            // with only canonical blocks
+            // Collect notifications until we find a notification with only canonical blocks
             .map_while(|entry| {
                 let notification = match entry {
                     Ok(notification) => notification,
@@ -667,6 +666,8 @@ impl ExExManager {
             .skip_while(|entry| {
                 entry.as_ref().map(|notification| notification.is_chain_reverted()).unwrap_or(false)
             })
+            // Convert notifications into their inverted versions
+            .map(|entry| entry.map(ExExNotification::into_inverted))
             .collect::<Vec<_>>();
 
         // Commit all inverted notifications
@@ -913,7 +914,9 @@ mod tests {
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
         BlockWriter, Chain,
     };
-    use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
+    };
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         let (tx, rx) = watch::channel(None);
@@ -1643,5 +1646,58 @@ mod tests {
         assert_eq!(notifications.next().await.transpose()?, Some(notification));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_manager_canonicalize_wal() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut wal = Wal::new(temp_dir.path()).unwrap();
+
+        let provider_factory = create_test_provider_factory();
+
+        let blocks = random_block_range(
+            &mut generators::rng(),
+            0..=4,
+            BlockRangeParams { tx_count: 0..1, ..Default::default() },
+        )
+        .into_iter()
+        .map(|block| block.seal_with_senders().expect("failed to recover sender"))
+        .collect::<Vec<_>>();
+
+        let provider_rw = provider_factory.provider_rw().unwrap();
+        for block in &blocks[..=2] {
+            provider_rw.insert_block(block.clone()).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let notifications = [
+            ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(blocks[0..=1].iter().cloned(), Default::default(), None)),
+            },
+            ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(blocks[2..=3].iter().cloned(), Default::default(), None)),
+            },
+            ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(blocks[4..=4].iter().cloned(), Default::default(), None)),
+            },
+        ];
+        for notification in &notifications {
+            wal.commit(notification).unwrap();
+        }
+
+        let mut manager = ExExManager::new(vec![], 1, wal, empty_finalized_header_stream());
+        manager.canonicalize_wal(provider_factory).unwrap();
+
+        assert_eq!(
+            manager.wal.iter_notifications().unwrap().collect::<eyre::Result<Vec<_>>>().unwrap(),
+            [
+                notifications.to_vec(),
+                vec![
+                    notifications[2].clone().into_inverted(),
+                    notifications[1].clone().into_inverted()
+                ]
+            ]
+            .concat()
+        );
     }
 }
