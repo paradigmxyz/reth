@@ -122,7 +122,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             NoopTransactionPool::default(),
             ctx.task_executor.clone(),
             BasicPayloadJobGeneratorConfig::default(),
-            provider_factory.chain_spec(),
             payload_builder,
         );
 
