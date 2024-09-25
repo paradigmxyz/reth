@@ -624,7 +624,8 @@ pub struct ExExManagerMetrics {
 #[derive(Debug)]
 pub enum ExExAction {
     /// Canonicalize the ExEx with the given head. If the ExEx is not on the canonical chain, the
-    /// notifications for reverting back to the canonical block wil be sent over the given channel.
+    /// notifications for reverting back to the canonical block will be sent over the given
+    /// channel.
     Canonicalize(BlockNumHash, PollSender<ExExNotification>),
 }
 
