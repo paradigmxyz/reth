@@ -33,6 +33,7 @@ reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types.workspace = true

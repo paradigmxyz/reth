@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Sealable};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
@@ -481,7 +482,7 @@ impl SealedBlock {
 
     /// Returns a vector of transactions RLP encoded with [`TransactionSigned::encode_enveloped`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.transactions().map(|tx| tx.envelope_encoded()).collect()
+        self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
     }
 }
 

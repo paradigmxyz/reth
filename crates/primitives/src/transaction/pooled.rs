@@ -15,6 +15,7 @@ use alloy_consensus::{
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
+use alloy_eips::eip2718::{Decodable2718, Eip2718Error};
 use alloy_primitives::Address;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
@@ -242,7 +243,10 @@ impl PooledTransactionsElement {
             } else {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
-                let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(data)?;
+                let typed_tx = TransactionSigned::decode_2718(data).map_err(|err| match err {
+                    Eip2718Error::RlpError(err) => err,
+                    _ => RlpError::Custom("failed to decode EIP-2718 transaction"),
+                })?;
 
                 // because we checked the tx type, we can be sure that the transaction is not a
                 // blob transaction or legacy
@@ -618,7 +622,10 @@ impl Decodable for PooledTransactionsElement {
             } else {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
-                let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+                let typed_tx = TransactionSigned::decode_2718(buf).map_err(|err| match err {
+                    Eip2718Error::RlpError(err) => err,
+                    _ => RlpError::Custom("failed to decode EIP-2718 transaction"),
+                })?;
 
                 // check that the bytes consumed match the payload length
                 let bytes_consumed = remaining_len - buf.len();

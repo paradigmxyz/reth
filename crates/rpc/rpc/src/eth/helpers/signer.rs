@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::EthApi;
 use alloy_consensus::TxEnvelope;
 use alloy_dyn_abi::TypedData;
+use alloy_eips::eip2718::Decodable2718;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, B256};
 use alloy_rpc_types_eth::TransactionRequest;
@@ -95,7 +96,7 @@ impl EthSigner for DevSigner {
 
         // decode transaction into signed transaction type
         let encoded = txn_envelope.encoded_2718();
-        let txn_signed = TransactionSigned::decode_enveloped(&mut encoded.as_ref())
+        let txn_signed = TransactionSigned::decode_2718(&mut encoded.as_ref())
             .map_err(|_| SignError::InvalidTransactionRequest)?;
 
         Ok(txn_signed)

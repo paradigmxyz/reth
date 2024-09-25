@@ -2,6 +2,7 @@
 
 //! Optimism builder support
 
+use alloy_eips::eip2718::{Decodable2718, Eip2718Error};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
@@ -52,7 +53,11 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                TransactionSigned::decode_enveloped(&mut data.as_ref())
+                TransactionSigned::decode_2718(&mut data.as_ref())
+                    .map_err(|err| match err {
+                        Eip2718Error::RlpError(err) => err,
+                        _ => alloy_rlp::Error::Custom("invalid transaction"),
+                    })
                     .map(|tx| WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;

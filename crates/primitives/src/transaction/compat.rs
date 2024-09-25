@@ -11,11 +11,7 @@ pub trait FillTxEnv {
 impl FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         #[cfg(feature = "optimism")]
-        let envelope = {
-            let mut envelope = alloc::vec::Vec::with_capacity(self.length_without_header());
-            self.encode_enveloped(&mut envelope);
-            envelope
-        };
+        let envelope = alloy_eips::eip2718::Encodable2718::encoded_2718(self);
 
         tx_env.caller = sender;
         match self.as_ref() {

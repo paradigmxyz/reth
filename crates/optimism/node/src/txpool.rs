@@ -1,4 +1,5 @@
 //! OP transaction pool types
+use alloy_eips::eip2718::Encodable2718;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
@@ -139,7 +140,7 @@ where
             let l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            valid_tx.transaction().clone().into_consensus().encode_enveloped(&mut encoded);
+            valid_tx.transaction().clone().into_consensus().encode_2718(&mut encoded);
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 &self.chain_spec(),
@@ -229,6 +230,7 @@ pub struct OpL1BlockInfo {
 #[cfg(test)]
 mod tests {
     use crate::txpool::OpTransactionValidator;
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{TxKind, U256};
     use reth::primitives::Signature;
     use reth_chainspec::MAINNET;
@@ -266,7 +268,7 @@ mod tests {
         let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
         let signed_recovered =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
-        let len = signed_recovered.length_without_header();
+        let len = signed_recovered.encode_2718_len();
         let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);
 
