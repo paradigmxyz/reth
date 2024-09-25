@@ -103,8 +103,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");
         // todo(onbjerg): rm magic number
-        let exex_manager =
-            ExExManager::new(exex_handles, 1024, components.provider().finalized_block_stream());
+        let exex_manager = ExExManager::new(
+            components.provider().clone(),
+            exex_handles,
+            1024,
+            components.provider().finalized_block_stream(),
+        );
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
