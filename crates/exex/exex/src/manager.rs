@@ -783,62 +783,8 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
             }
         }
 
-        // drain handle notifications
-        while this.buffer.len() < this.max_capacity {
-            if let Poll::Ready(Some(notification)) = this.handle_rx.poll_recv(cx) {
-                debug!(
-                    committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
-                    reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
-                    "Received new notification"
-                );
-                this.push_notification(notification);
-                continue
-            }
-            break
-        }
-
-        // update capacity
-        this.update_capacity();
-
-        // advance all poll senders
-        let mut min_id = usize::MAX;
-        for idx in (0..this.exex_handles.len()).rev() {
-            let mut exex = this.exex_handles.swap_remove(idx);
-
-            // it is a logic error for this to ever underflow since the manager manages the
-            // notification IDs
-            let notification_index = exex
-                .next_notification_id
-                .checked_sub(this.min_id)
-                .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = this.buffer.get(notification_index) {
-                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
-                    // the channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(err.into()))
-                }
-            }
-            min_id = min_id.min(exex.next_notification_id);
-            this.exex_handles.push(exex);
-        }
-
-        // remove processed buffered notifications
-        debug!(%min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
-        this.min_id = min_id;
-
-        // update capacity
-        this.update_capacity();
-
-        // handle incoming exex events
+        // handle incoming exex actions
         for exex in &mut this.exex_handles {
-            while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(exex_id = %exex.id, ?event, "Received event from exex");
-                exex.metrics.events_sent_total.increment(1);
-                match event {
-                    ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
-                }
-            }
-
             while let Poll::Ready(Some(action)) = exex.actions.poll_recv(cx) {
                 match action {
                     ExExAction::Canonicalize(head, canonicalization_tx) => {
@@ -867,6 +813,66 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
                     if canonicalization_notifications.sender.poll_reserve(cx)?.is_ready() {
                         canonicalization_notifications.sender.send_item(notification?)?;
                     }
+                }
+            }
+        }
+
+        // drain handle notifications
+        while this.buffer.len() < this.max_capacity {
+            if let Poll::Ready(Some(notification)) = this.handle_rx.poll_recv(cx) {
+                debug!(
+                    committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
+                    reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
+                    "Received new notification"
+                );
+                this.push_notification(notification);
+                continue
+            }
+            break
+        }
+
+        // update capacity
+        this.update_capacity();
+
+        // advance all poll senders
+        let mut min_id = usize::MAX;
+        for idx in (0..this.exex_handles.len()).rev() {
+            let mut exex = this.exex_handles.swap_remove(idx);
+
+            if exex.canonicalization_notifications.is_none() {
+                // it is a logic error for this to ever underflow since the manager manages the
+                // notification IDs
+                let notification_index = exex
+                    .next_notification_id
+                    .checked_sub(this.min_id)
+                    .expect("exex expected notification ID outside the manager's range");
+                if let Some(notification) = this.buffer.get(notification_index) {
+                    if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
+                        // the channel was closed, which is irrecoverable for the manager
+                        return Poll::Ready(Err(err.into()))
+                    }
+                }
+            }
+
+            min_id = min_id.min(exex.next_notification_id);
+            this.exex_handles.push(exex);
+        }
+
+        // remove processed buffered notifications
+        debug!(%min_id, "Updating lowest notification id in buffer");
+        this.buffer.retain(|&(id, _)| id >= min_id);
+        this.min_id = min_id;
+
+        // update capacity
+        this.update_capacity();
+
+        // handle incoming exex events
+        for exex in &mut this.exex_handles {
+            while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
+                debug!(exex_id = %exex.id, ?event, "Received event from exex");
+                exex.metrics.events_sent_total.increment(1);
+                match event {
+                    ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
                 }
             }
         }
