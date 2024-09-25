@@ -35,7 +35,7 @@ use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
 use tracing::debug;
-
+use reth_telos_primitives_traits::TelosTxEnv;
 use super::SpawnBlocking;
 
 /// Loads a pending block from database.
@@ -328,7 +328,8 @@ pub trait LoadPendingBlock: EthApiTypes {
             let env = Env::boxed(
                 cfg.cfg_env.clone(),
                 block_env.clone(),
-                Self::evm_config(self).tx_env(&tx),
+                // Telos will never build blocks in reth, using Default below is ok
+                Self::evm_config(self).tx_env(&tx, #[cfg(feature = "telos")] TelosTxEnv::default()),
             );
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
@@ -454,6 +455,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             parent_beacon_block_root,
             requests_root,
             #[cfg(feature = "telos")]
+            // Ok to use Default here, as Telos will never build a block in reth
             telos_block_extension: Default::default(),
         };
 

@@ -46,6 +46,7 @@ use revm::{
     DatabaseCommit, State,
 };
 use tracing::{debug, trace, warn};
+use reth_telos_primitives_traits::TelosTxEnv;
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +251,7 @@ where
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             requests_root,
             #[cfg(feature = "telos")]
+            // Ok to use Default here because Telos will never build a payload in reth
             telos_block_extension: Default::default(),
         };
 
@@ -378,7 +380,8 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            evm_config.tx_env(&tx),
+            // Telos will never build payloads here, so using Default below is OK
+            evm_config.tx_env(&tx, #[cfg(feature = "telos")] TelosTxEnv::default()),
         );
 
         // Configure the environment for the block.
@@ -559,6 +562,7 @@ where
         excess_blob_gas,
         requests_root,
         #[cfg(feature = "telos")]
+        // Ok to use Default here because Telos will never build a payload in reth
         telos_block_extension: Default::default(),
     };
 

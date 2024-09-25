@@ -1083,6 +1083,8 @@ where
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: TelosEngineAPIExtraFields,
     ) -> Result<Either<PayloadStatus, SealedBlock>, BeaconOnNewPayloadError> {
         self.metrics.new_payload_messages.increment(1);
 
@@ -1114,7 +1116,7 @@ where
         let parent_hash = payload.parent_hash();
         let block = match self
             .payload_validator
-            .ensure_well_formed_payload(payload, cancun_fields.into())
+            .ensure_well_formed_payload(payload, cancun_fields.into(), #[cfg(feature = "telos")] telos_extra_fields)
         {
             Ok(block) => block,
             Err(error) => {
@@ -1866,7 +1868,7 @@ where
                             this.on_forkchoice_updated(state, payload_attrs, tx);
                         }
                         BeaconEngineMessage::NewPayload { payload, cancun_fields, tx, #[cfg(feature = "telos")] telos_extra_fields } => {
-                            match this.on_new_payload(payload, cancun_fields) {
+                            match this.on_new_payload(payload, cancun_fields, #[cfg(feature = "telos")] telos_extra_fields.clone().unwrap_or_default()) {
                                 Ok(Either::Right(block)) => {
                                     this.set_blockchain_tree_action(
                                         BlockchainTreeAction::InsertNewPayload { block, tx, #[cfg(feature = "telos")] telos_extra_fields },

@@ -34,7 +34,7 @@ use reth_rpc_types::{
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
-
+use reth_telos_primitives_traits::TelosBlockExtension;
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -134,15 +134,22 @@ pub trait EthCall: Call + LoadPendingBlock {
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
+                    #[cfg(feature = "telos")]
+                    let mut tx_index = 0;
+                    #[cfg(feature = "telos")]
+                    let telos_extension = block.header.telos_block_extension.clone();
                     let transactions = block.into_transactions_ecrecovered().take(num_txs);
                     for tx in transactions {
                         let env = EnvWithHandlerCfg::new_with_cfg_env(
                             cfg.clone(),
                             block_env.clone(),
-                            Call::evm_config(&this).tx_env(&tx),
+                            Call::evm_config(&this).tx_env(&tx, #[cfg(feature = "telos")] telos_extension.tx_env_at(tx_index)),
                         );
                         let (res, _) = this.transact(&mut db, env)?;
                         db.commit(res.state);
+                        #[cfg(feature = "telos")] {
+                            tx_index += 1;
+                        }
                     }
                 }
 
@@ -439,12 +446,15 @@ pub trait Call: LoadState + SpawnBlocking {
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash;
+            #[cfg(feature = "telos")]
+            let telos_block_extension = block.header.telos_block_extension.clone();
             let block_txs = block.into_transactions_ecrecovered();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
+                #[cfg(not(feature = "telos"))]
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(
                     &mut db,
@@ -454,10 +464,20 @@ pub trait Call: LoadState + SpawnBlocking {
                     tx.hash,
                 )?;
 
+                #[cfg(feature = "telos")]
+                let index = this.replay_transactions_until(
+                    &mut db,
+                    cfg.clone(),
+                    block_env.clone(),
+                    block_txs,
+                    tx.hash,
+                    &telos_block_extension,
+                )?;
+
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(&tx),
+                    Call::evm_config(&this).tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(index as u64)),
                 );
 
                 let (res, _) = this.transact(&mut db, env)?;
@@ -482,6 +502,8 @@ pub trait Call: LoadState + SpawnBlocking {
         block_env: BlockEnv,
         transactions: impl IntoIterator<Item = TransactionSignedEcRecovered>,
         target_tx_hash: B256,
+        #[cfg(feature = "telos")]
+        telos_extension: &TelosBlockExtension,
     ) -> Result<usize, Self::Error>
     where
         DB: DatabaseRef,
@@ -498,7 +520,7 @@ pub trait Call: LoadState + SpawnBlocking {
             }
 
             let sender = tx.signer();
-            self.evm_config().fill_tx_env(evm.tx_mut(), &tx.into_signed(), sender);
+            self.evm_config().fill_tx_env(evm.tx_mut(), &tx.into_signed(), sender, #[cfg(feature = "telos")] telos_extension.tx_env_at(index as u64));
             evm.transact_commit().map_err(Self::Error::from_evm_err)?;
             index += 1;
         }

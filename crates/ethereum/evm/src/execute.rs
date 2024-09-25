@@ -207,7 +207,7 @@ where
                 .into())
             }
 
-            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender, #[cfg(feature = "telos")] block.header.telos_block_extension.tx_env_at(tx_index));
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {

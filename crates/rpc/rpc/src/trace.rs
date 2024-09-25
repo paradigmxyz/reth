@@ -1,5 +1,5 @@
 use std::{collections::HashSet, sync::Arc};
-
+use std::hash::Hash;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -8,7 +8,7 @@ use reth_consensus_common::calc::{
 };
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{BlockId, Bytes, Header, B256, U256};
-use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{
@@ -16,16 +16,12 @@ use reth_rpc_eth_api::{
     FromEthApiError,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
-use reth_rpc_types::{
-    state::{EvmOverrides, StateOverride},
-    trace::{
-        filter::TraceFilter,
-        opcode::{BlockOpcodeGas, TransactionOpcodeGas},
-        parity::*,
-        tracerequest::TraceCallRequest,
-    },
-    BlockOverrides, Index, TransactionRequest,
-};
+use reth_rpc_types::{state::{EvmOverrides, StateOverride}, trace::{
+    filter::TraceFilter,
+    opcode::{BlockOpcodeGas, TransactionOpcodeGas},
+    parity::*,
+    tracerequest::TraceCallRequest,
+}, BlockHashOrNumber, BlockOverrides, Index, TransactionRequest};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::{CacheDB, DatabaseCommit},
@@ -36,6 +32,7 @@ use revm_inspectors::{
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use reth_telos_primitives_traits::TelosTxEnv;
 
 /// `trace` API implementation.
 ///
@@ -120,10 +117,17 @@ where
 
         let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
 
+        #[cfg(feature = "telos")]
+        let telox_tx_env = self.provider()
+                            .block(BlockHashOrNumber::Hash(block_id.unwrap_or_default().as_block_hash().unwrap()))
+                            .unwrap().unwrap() // TODO: Fix this
+                            .header
+                            .telos_block_extension
+                            .tx_env_at(0);
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block,
-            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction()),
+            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction(), #[cfg(feature = "telos")] telox_tx_env),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);

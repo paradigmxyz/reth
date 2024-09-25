@@ -60,6 +60,7 @@ mod config;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 
 /// Keeps track of the state of the tree.
 ///
@@ -593,6 +594,8 @@ where
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: TelosEngineAPIExtraFields
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine", "invoked new payload");
         self.metrics.new_payload_messages.increment(1);
@@ -625,7 +628,7 @@ where
         let parent_hash = payload.parent_hash();
         let block = match self
             .payload_validator
-            .ensure_well_formed_payload(payload, cancun_fields.into())
+            .ensure_well_formed_payload(payload, cancun_fields.into(), telos_extra_fields)
         {
             Ok(block) => block,
             Err(error) => {
@@ -956,8 +959,8 @@ where
                                     error!("Failed to send event: {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx, #[cfg(feature = "telos")] telos_extra_fields: _} => {
-                                let output = self.on_new_payload(payload, cancun_fields);
+                            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx, #[cfg(feature = "telos")] telos_extra_fields} => {
+                                let output = self.on_new_payload(payload, cancun_fields, #[cfg(feature = "telos")] telos_extra_fields.unwrap_or_default());
                                 if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
                                     reth_beacon_consensus::BeaconOnNewPayloadError::Internal(
                                         Box::new(e),

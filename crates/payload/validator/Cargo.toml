@@ -17,3 +17,9 @@ reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
+
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
+[features]
+telos = ["dep:reth-telos-rpc-engine-api"]

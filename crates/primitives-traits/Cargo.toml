@@ -62,6 +62,7 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-arbitrary-interop",
+    "reth-telos-primitives-traits/arbitrary",
 ]
 alloy-compat = ["alloy-rpc-types-eth"]
 telos = [

@@ -20,7 +20,7 @@ use reth_codecs::{add_arbitrary_tests, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "telos")]
-use reth_telos_primitives_traits::TelosBlockExtension;
+use reth_telos_primitives_traits::{GasPrice, Revision, TelosBlockExtension};
 
 /// Block header
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Compact)]
@@ -360,6 +360,52 @@ impl Header {
         }
 
         length
+    }
+
+    #[cfg(feature = "telos")]
+    /// Creates a clone of the header, adding Telos block extension fields
+    pub fn clone_with_telos(&self,
+                            parent_telos_extension: TelosBlockExtension,
+                            gas_price_change: Option<(u64, U256)>,
+                            revision_change: Option<(u64, u64)>) -> Self {
+        let gas_price_change = if let Some(gas_price_change) = gas_price_change {
+            Some(gas_price_change)
+        } else {
+            None
+        };
+
+        let revision_change = if let Some(revision_change) = revision_change {
+            Some(revision_change)
+        } else {
+            None
+        };
+
+        Self {
+            parent_hash: self.parent_hash,
+            ommers_hash: self.ommers_hash,
+            beneficiary: self.beneficiary,
+            state_root: self.state_root,
+            transactions_root: self.transactions_root,
+            receipts_root: self.receipts_root,
+            logs_bloom: self.logs_bloom,
+            difficulty: self.difficulty,
+            number: self.number,
+            gas_limit: self.gas_limit,
+            gas_used: self.gas_used,
+            timestamp: self.timestamp,
+            extra_data: self.extra_data.clone(),
+            mix_hash: self.mix_hash,
+            nonce: self.nonce,
+            base_fee_per_gas: self.base_fee_per_gas,
+            withdrawals_root: self.withdrawals_root,
+            blob_gas_used: self.blob_gas_used,
+            excess_blob_gas: self.excess_blob_gas,
+            parent_beacon_block_root: self.parent_beacon_block_root,
+            requests_root: self.requests_root,
+            telos_block_extension: TelosBlockExtension::from_parent_and_changes(
+                &parent_telos_extension, gas_price_change, revision_change
+            ),
+        }
     }
 }
 

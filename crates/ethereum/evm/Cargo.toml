@@ -30,6 +30,7 @@ alloy-sol-types.workspace = true
 
 # telos
 reth-telos-rpc-engine-api = { workspace = true, optional = true }
+reth-telos-primitives-traits = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -43,4 +44,5 @@ default = ["std"]
 std = []
 telos = [
     "dep:reth-telos-rpc-engine-api",
+    "dep:reth-telos-primitives-traits",
 ]

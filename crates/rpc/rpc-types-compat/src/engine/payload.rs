@@ -13,6 +13,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV2, ExecutionPayloadV1, ExecutionPayloadV2,
     ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
 };
+use reth_telos_primitives_traits::TelosBlockExtension;
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
 pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
@@ -67,7 +68,11 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         difficulty: Default::default(),
         nonce: Default::default(),
         #[cfg(feature = "telos")]
-        telos_block_extension: Default::default(),
+        telos_block_extension: TelosBlockExtension::from_parent_and_changes(
+            &TelosBlockExtension::default(),
+            None,
+            None,
+        ),
     };
 
     Ok(Block {

@@ -289,8 +289,6 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             basefee: basefee.map(U256::from).unwrap_or_default(),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
-            #[cfg(feature = "telos")]
-            telos_block_extension: parent.telos_block_extension.to_child(),
         };
 
         (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)

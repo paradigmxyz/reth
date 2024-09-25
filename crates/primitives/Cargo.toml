@@ -59,6 +59,8 @@ zstd = { workspace = true, features = ["experimental"], optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 
+reth-telos-primitives-traits = { workspace = true, optional = true }
+
 [dev-dependencies]
 # eth
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
@@ -111,6 +113,8 @@ alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "d
 test-utils = ["reth-primitives-traits/test-utils"]
 telos = [
     "reth-chainspec/telos",
+    "reth-codecs/telos",
+    "dep:reth-telos-primitives-traits",
     "reth-primitives-traits/telos",
     "revm-primitives/telos",
 ]

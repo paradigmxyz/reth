@@ -22,11 +22,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
-use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
-};
+use reth_provider::{BlockExecutionWriter, BlockNumReader, BlockReader, BlockWriter, CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 #[cfg(not(feature = "telos"))]
@@ -41,6 +37,7 @@ use std::{
     sync::Arc,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+use reth_revm::interpreter::instructions::system::gas;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A Tree of chains.
@@ -803,6 +800,50 @@ where
             Err(err) => return Err(InsertBlockError::new(block.block, err)),
             _ => {}
         }
+
+        #[cfg(feature = "telos")]
+        let parent_telos_ext;
+        #[cfg(feature = "telos")]
+        let mut gas_price_change;
+        #[cfg(feature = "telos")]
+        let mut revision_number_change;
+        #[cfg(feature = "telos")]
+        {
+            gas_price_change = None;
+            revision_number_change = None;
+            if let Some(telos_extra_fields) = telos_extra_fields.as_ref() {
+                gas_price_change = telos_extra_fields.gasprice_changes;
+                revision_number_change = telos_extra_fields.revision_changes;
+            }
+            let parent_hash = block.block.header.parent_hash;
+            let provider = self.externals.provider_factory.provider();
+            let block_by_hash = provider.unwrap().block_by_hash(parent_hash);
+            if let Some(block_by_hash) = block_by_hash.unwrap() {
+                parent_telos_ext = block_by_hash.header.telos_block_extension;
+            } else {
+                let sidechain_block = self.sidechain_block_by_hash(parent_hash);
+                if let Some(sidechain_block) = sidechain_block {
+                    parent_telos_ext = sidechain_block.header.telos_block_extension.clone();
+                } else {
+                    panic!("Parent block not found");
+                }
+            }
+        }
+        #[cfg(feature = "telos")]
+        let block = SealedBlockWithSenders {
+            block: SealedBlock {
+                header: SealedHeader::new(block.block.header.clone_with_telos(
+                    parent_telos_ext,
+                    gas_price_change,
+                    revision_number_change,
+                ), block.block.header.hash()),
+                body: block.block.body.clone(),
+                ommers: block.block.ommers.clone(),
+                withdrawals: block.block.withdrawals.clone(),
+                requests: block.block.requests.clone(),
+            },
+            senders: block.senders,
+        };
 
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {

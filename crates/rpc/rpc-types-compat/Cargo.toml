@@ -18,9 +18,12 @@ reth-trie-common.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
 
+# telos
+reth-telos-primitives-traits = { workspace = true, optional = true }
+
 [dev-dependencies]
 serde_json.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism"]
-telos = []
+telos = ["dep:reth-telos-primitives-traits"]

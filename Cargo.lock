@@ -7110,7 +7110,7 @@ dependencies = [
  "reth-revm",
  "reth-tasks",
  "reth-transaction-pool",
- "revm 14.0.0",
+ "revm",
  "tokio",
  "tracing",
 ]
@@ -7273,7 +7273,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-storage-api",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -7871,6 +7871,7 @@ dependencies = [
  "reth-stages-api",
  "reth-static-file",
  "reth-tasks",
+ "reth-telos-rpc-engine-api 1.0.6",
  "reth-tracing",
  "reth-trie",
  "thiserror",
@@ -7898,9 +7899,10 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types 1.0.6",
  "reth-rpc-types-compat",
+ "reth-telos-primitives-traits",
  "reth-telos-rpc-engine-api 1.0.6",
  "reth-trie",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "serde",
  "serde_json",
  "tokio",
@@ -8009,7 +8011,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-rpc-types 1.0.6",
  "reth-rpc-types-compat",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "serde",
  "serde_json",
  "sha2 0.10.8",
@@ -8064,9 +8066,10 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-provider",
  "reth-revm",
+ "reth-telos-primitives-traits",
  "reth-transaction-pool",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "tracing",
 ]
 
@@ -8094,9 +8097,10 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-prune-types",
  "reth-storage-errors 1.0.6",
+ "reth-telos-primitives-traits",
  "reth-telos-rpc-engine-api 1.0.6",
- "revm 14.0.0",
- "revm-primitives 9.0.0",
+ "revm",
+ "revm-primitives",
 ]
 
 [[package]]
@@ -8113,9 +8117,10 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-prune-types",
  "reth-revm",
+ "reth-telos-primitives-traits",
  "reth-telos-rpc-engine-api 1.0.6",
  "reth-testing-utils",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "secp256k1",
  "serde_json",
 ]
@@ -8134,8 +8139,8 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-prune-types",
  "reth-revm",
- "revm 14.0.0",
- "revm-primitives 9.0.0",
+ "revm",
+ "revm-primitives",
  "thiserror",
  "tracing",
 ]
@@ -8152,7 +8157,7 @@ dependencies = [
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors 1.0.6",
- "revm-primitives 9.0.0",
+ "revm-primitives",
 ]
 
 [[package]]
@@ -8165,7 +8170,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-primitives 1.0.6",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "serde",
 ]
 
@@ -8892,7 +8897,7 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-transaction-pool",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "sha2 0.10.8",
  "thiserror",
  "tracing",
@@ -8926,7 +8931,7 @@ dependencies = [
  "reth-rpc-types 1.0.6",
  "reth-tasks",
  "reth-transaction-pool",
- "revm 14.0.0",
+ "revm",
  "serde_json",
  "thiserror",
  "tokio",
@@ -8948,7 +8953,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types 1.0.6",
  "reth-transaction-pool",
- "revm 14.0.0",
+ "revm",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -8978,6 +8983,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-rpc-types 1.0.6",
  "reth-rpc-types-compat",
+ "reth-telos-rpc-engine-api 1.0.6",
 ]
 
 [[package]]
@@ -9012,8 +9018,9 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-primitives-traits 1.0.6",
  "reth-static-file-types 1.0.6",
+ "reth-telos-primitives-traits",
  "reth-trie-common 1.0.6",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "secp256k1",
  "serde",
  "serde_json",
@@ -9048,7 +9055,7 @@ dependencies = [
  "reth-primitives-traits 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
  "reth-static-file-types 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
  "reth-trie-common 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
- "revm-primitives 9.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm-primitives",
  "secp256k1",
  "serde",
  "tempfile",
@@ -9076,7 +9083,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs 1.0.6",
  "reth-telos-primitives-traits",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "roaring",
  "serde",
  "serde_json",
@@ -9099,7 +9106,7 @@ dependencies = [
  "derive_more 1.0.0",
  "modular-bitfield",
  "reth-codecs 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
- "revm-primitives 9.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm-primitives",
  "roaring",
  "serde",
 ]
@@ -9141,7 +9148,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
- "revm 14.0.0",
+ "revm",
  "strum",
  "tempfile",
  "tokio",
@@ -9210,7 +9217,7 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors 1.0.6",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
 ]
 
 [[package]]
@@ -9254,12 +9261,13 @@ dependencies = [
  "reth-rpc-types 1.0.6",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-telos-primitives-traits",
  "reth-testing-utils",
  "reth-transaction-pool",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "revm-inspectors",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "secp256k1",
  "serde",
  "serde_json",
@@ -9409,12 +9417,13 @@ dependencies = [
  "reth-rpc-types 1.0.6",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-telos-primitives-traits",
  "reth-telos-rpc-engine-api 1.0.6",
  "reth-transaction-pool",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "revm-inspectors",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "tokio",
  "tracing",
 ]
@@ -9445,9 +9454,9 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
- "revm 14.0.0",
+ "revm",
  "revm-inspectors",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "schnellru",
  "serde",
  "serde_json",
@@ -9536,6 +9545,7 @@ dependencies = [
  "alloy-rpc-types",
  "reth-primitives 1.0.6",
  "reth-rpc-types 1.0.6",
+ "reth-telos-primitives-traits",
  "reth-trie-common 1.0.6",
  "serde_json",
 ]
@@ -9780,7 +9790,7 @@ version = "1.0.6"
 dependencies = [
  "reth-primitives 1.0.6",
  "reth-storage-errors 1.0.6",
- "revm 14.0.0",
+ "revm",
  "serde",
 ]
 
@@ -9791,7 +9801,7 @@ source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b46ef
 dependencies = [
  "reth-primitives 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
  "reth-storage-errors 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
- "revm 14.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm",
  "serde",
 ]
 
@@ -9858,7 +9868,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
- "revm 14.0.0",
+ "revm",
  "rustc-hash 2.0.0",
  "schnellru",
  "serde",
@@ -9892,7 +9902,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors 1.0.6",
  "reth-trie-common 1.0.6",
- "revm 14.0.0",
+ "revm",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -9922,7 +9932,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "reth-codecs 1.0.6",
  "reth-primitives-traits 1.0.6",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "serde",
  "test-fuzz",
  "toml",
@@ -9944,7 +9954,7 @@ dependencies = [
  "nybbles",
  "reth-codecs 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
  "reth-primitives-traits 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
- "revm-primitives 9.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm-primitives",
  "serde",
 ]
 
@@ -9972,7 +9982,7 @@ dependencies = [
  "reth-storage-errors 1.0.6",
  "reth-trie",
  "reth-trie-common 1.0.6",
- "revm 14.0.0",
+ "revm",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -10012,26 +10022,13 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "14.0.0"
-dependencies = [
- "auto_impl",
- "cfg-if",
- "dyn-clone",
- "revm-interpreter 10.0.0",
- "revm-precompile 11.0.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "revm"
-version = "14.0.0"
 source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#4320edb66a623d3652b2d54d99bc35d28bc63d3a"
 dependencies = [
  "auto_impl",
  "cfg-if",
  "dyn-clone",
- "revm-interpreter 10.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
- "revm-precompile 11.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm-interpreter",
+ "revm-precompile",
  "serde",
  "serde_json",
 ]
@@ -10048,7 +10045,7 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "colorchoice",
- "revm 14.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm",
  "serde_json",
  "thiserror",
 ]
@@ -10056,23 +10053,16 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "10.0.0"
-dependencies = [
- "revm-primitives 9.0.0",
- "serde",
-]
-
-[[package]]
-name = "revm-interpreter"
-version = "10.0.0"
 source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#4320edb66a623d3652b2d54d99bc35d28bc63d3a"
 dependencies = [
- "revm-primitives 9.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
+ "revm-primitives",
  "serde",
 ]
 
 [[package]]
 name = "revm-precompile"
 version = "11.0.0"
+source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#4320edb66a623d3652b2d54d99bc35d28bc63d3a"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -10081,48 +10071,11 @@ dependencies = [
  "k256",
  "once_cell",
  "p256",
- "revm-primitives 9.0.0",
+ "revm-primitives",
  "ripemd",
  "secp256k1",
  "sha2 0.10.8",
  "substrate-bn",
-]
-
-[[package]]
-name = "revm-precompile"
-version = "11.0.0"
-source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#4320edb66a623d3652b2d54d99bc35d28bc63d3a"
-dependencies = [
- "aurora-engine-modexp",
- "blst",
- "c-kzg",
- "cfg-if",
- "k256",
- "once_cell",
- "revm-primitives 9.0.0 (git+https://github.com/telosnetwork/telos-revm?branch=telos-main)",
- "ripemd",
- "secp256k1",
- "sha2 0.10.8",
- "substrate-bn",
-]
-
-[[package]]
-name = "revm-primitives"
-version = "9.0.0"
-dependencies = [
- "alloy-eips",
- "alloy-primitives 0.8.0",
- "auto_impl",
- "bitflags 2.6.0",
- "bitvec",
- "c-kzg",
- "cfg-if",
- "dyn-clone",
- "enumn",
- "hashbrown 0.14.5",
- "hex",
- "reth-telos-primitives-traits",
- "serde",
 ]
 
 [[package]]

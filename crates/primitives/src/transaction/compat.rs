@@ -3,15 +3,16 @@ use revm_primitives::{AuthorizationList, TxEnv};
 
 #[cfg(all(not(feature = "std"), feature = "optimism"))]
 use alloc::vec::Vec;
+use reth_telos_primitives_traits::TelosTxEnv;
 
 /// Implements behaviour to fill a [`TxEnv`] from another transaction.
 pub trait FillTxEnv {
     /// Fills [`TxEnv`] with an [`Address`] and transaction.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address, #[cfg(feature = "telos")] telos_tx_env: TelosTxEnv);
 }
 
 impl FillTxEnv for TransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address, #[cfg(feature = "telos")] telos_tx_env: TelosTxEnv) {
         #[cfg(feature = "optimism")]
         let envelope = {
             let mut envelope = Vec::with_capacity(self.length_without_header());
@@ -19,6 +20,10 @@ impl FillTxEnv for TransactionSigned {
             envelope
         };
 
+        #[cfg(feature = "telos")] {
+            tx_env.fixed_gas_price = telos_tx_env.gas_price;
+            tx_env.revision_number = telos_tx_env.revision;
+        }
         tx_env.caller = sender;
         match self.as_ref() {
             Transaction::Legacy(tx) => {

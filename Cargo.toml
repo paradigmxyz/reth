@@ -398,17 +398,15 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { path = "../telos-revm/crates/revm", features = ["std", "secp256k1", "blst"], default-features = false }
-#revm = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
-#    "std",
-#    "secp256k1",
-#    "blst",
-#], default-features = false }
+revm = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
+    "std",
+    "secp256k1",
+    "blst",
+], default-features = false }
 revm-inspectors = { git = "https://github.com/telosnetwork/telos-evm-inspectors", branch = "telos-main" }
-revm-primitives = { path = "../telos-revm/crates/primitives", features = ["std"], default-features = false}
-#revm-primitives = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
-#    "std",
-#], default-features = false }
+revm-primitives = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
+    "std",
+], default-features = false }
 
 # eth
 alloy-chains = "0.1.18"

@@ -186,6 +186,9 @@ pub trait Trace: LoadState {
 
             let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
 
+            #[cfg(feature = "telos")]
+            let telos_block_extension = block.header.telos_block_extension.clone();
+
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash;
@@ -195,6 +198,7 @@ pub trait Trace: LoadState {
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
+                #[cfg(not(feature = "telos"))]
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(
                     &mut db,
@@ -204,10 +208,21 @@ pub trait Trace: LoadState {
                     tx.hash,
                 )?;
 
+                #[cfg(feature = "telos")]
+                let tx_index = this.replay_transactions_until(
+                    &mut db,
+                    cfg.clone(),
+                    block_env.clone(),
+                    block_txs,
+                    tx.hash,
+                    #[cfg(feature = "telos")]
+                    &telos_block_extension,
+                )?;
+
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(&tx),
+                    Call::evm_config(&this).tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(tx_index as u64)),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
@@ -295,6 +310,8 @@ pub trait Trace: LoadState {
                 return Ok(Some(Vec::new()))
             }
 
+            #[cfg(feature = "telos")]
+            let telos_block_extension = block.header.telos_block_extension.clone();
             // replay all transactions of the block
             self.spawn_tracing(move |this| {
                 // we need to get the state of the parent block because we're replaying this block
@@ -325,7 +342,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(&tx);
+                        let tx_env = Trace::evm_config(&this).tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(idx as u64));
                         (tx_info, tx_env)
                     })
                     .peekable();

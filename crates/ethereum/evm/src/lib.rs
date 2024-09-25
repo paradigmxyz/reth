@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
+use reth_telos_primitives_traits::TelosTxEnv;
 
 pub mod execute;
 
@@ -61,8 +62,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.handler_cfg.spec_id = spec_id;
     }
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        transaction.fill_tx_env(tx_env, sender);
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address, #[cfg(feature = "telos")] telos_tx_env: TelosTxEnv) {
+        transaction.fill_tx_env(tx_env, sender, #[cfg(feature = "telos")] telos_tx_env);
     }
 
     fn fill_tx_env_system_contract_call(

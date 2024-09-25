@@ -13,6 +13,7 @@ use reth_primitives::SealedBlock;
 use reth_rpc_types::{engine::MaybeCancunPayloadFields, ExecutionPayload, PayloadError};
 use reth_rpc_types_compat::engine::payload::try_into_block;
 use std::sync::Arc;
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 
 /// Execution payload validator.
 #[derive(Clone, Debug)]
@@ -112,6 +113,8 @@ impl ExecutionPayloadValidator {
         &self,
         payload: ExecutionPayload,
         cancun_fields: MaybeCancunPayloadFields,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: TelosEngineAPIExtraFields,
     ) -> Result<SealedBlock, PayloadError> {
         let expected_hash = payload.block_hash();
 

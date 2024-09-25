@@ -9,13 +9,15 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
-reth-codecs = { workspace = true, features = ["telos"] }
-alloy-primitives.workspace = true
-arbitrary = { workspace = true }
-
+arbitrary = { workspace = true, optional = true }
+alloy-primitives = { workspace = true }
 bytes.workspace = true
 modular-bitfield.workspace = true
+reth-codecs = { workspace = true }
 serde.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+arbitrary = ["dep:arbitrary"]

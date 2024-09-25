@@ -42,6 +42,7 @@ use revm_inspectors::tracing::{
 use revm_primitives::{keccak256, HashMap};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use reth_telos_primitives_traits::TelosBlockExtension;
 
 /// `debug` API implementation.
 ///
@@ -90,6 +91,8 @@ where
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
+        #[cfg(feature = "telos")]
+        telos_block_extension: &TelosBlockExtension,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         if transactions.is_empty() {
             // nothing to trace
@@ -98,6 +101,7 @@ where
 
         // replay all transactions of the block
         let this = self.clone();
+        let telos_block_extension = telos_block_extension.clone();
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let block_hash = at.as_block_hash();
@@ -111,7 +115,7 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            Call::evm_config(this.eth_api()).tx_env(&tx),
+                            Call::evm_config(this.eth_api()).tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(index as u64)),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -157,6 +161,13 @@ where
         // we trace on top the block's parent block
         let parent = block.parent_hash;
 
+        #[cfg(feature = "telos")]
+        let telos_block_extension = self
+                                .inner.provider
+                                .block_by_hash(parent.into())
+                                .unwrap().unwrap()  // TODO: this better
+                                .header.telos_block_extension.to_child();
+
         // Depending on EIP-2 we need to recover the transactions differently
         let transactions =
             if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
@@ -181,7 +192,7 @@ where
                     .collect::<Result<Vec<_>, Eth::Error>>()?
             };
 
-        self.trace_block(parent.into(), transactions, cfg, block_env, opts).await
+        self.trace_block(parent.into(), transactions, cfg, block_env, opts, #[cfg(feature = "telos")] &telos_block_extension).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -206,6 +217,7 @@ where
         // we need to get the state of the parent block because we're replaying this block on top of
         // its parent block's state
         let state_at = block.parent_hash;
+        let telos_block_extension = &block.header.telos_block_extension.clone();
 
         self.trace_block(
             state_at.into(),
@@ -213,6 +225,8 @@ where
             cfg,
             block_env,
             opts,
+            #[cfg(feature = "telos")]
+            telos_block_extension
         )
         .await
     }
@@ -229,6 +243,7 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
+        let telos_block_extension = block.header.telos_block_extension.clone();
         let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
@@ -252,13 +267,15 @@ where
                     block_env.clone(),
                     block_txs,
                     tx.hash,
+                    #[cfg(feature = "telos")]
+                    &telos_block_extension
                 )?;
 
                 let env = EnvWithHandlerCfg {
                     env: Env::boxed(
                         cfg.cfg_env.clone(),
                         block_env,
-                        Call::evm_config(this.eth_api()).tx_env(&tx),
+                        Call::evm_config(this.eth_api()).tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(index as u64)),
                     ),
                     handler_cfg: cfg.handler_cfg,
                 };
@@ -469,6 +486,7 @@ where
 
         let opts = opts.unwrap_or_default();
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let telos_block_extension = block.header.telos_block_extension.clone();
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
@@ -501,18 +519,25 @@ where
                     // to be replayed
                     let transactions = block.into_transactions_ecrecovered().take(num_txs);
 
+                    #[cfg(feature = "telos")]
+                    let mut tx_index = 0;
+
                     // Execute all transactions until index
                     for tx in transactions {
                         let env = EnvWithHandlerCfg {
                             env: Env::boxed(
                                 cfg.cfg_env.clone(),
                                 block_env.clone(),
-                                Call::evm_config(this.eth_api()).tx_env(&tx),
+                                Call::evm_config(this.eth_api()).tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(tx_index)),
                             ),
                             handler_cfg: cfg.handler_cfg,
                         };
                         let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
                         db.commit(res.state);
+                        #[cfg(feature = "telos")]
+                        {
+                            tx_index += 1;
+                        }
                     }
                 }
 
@@ -573,6 +598,8 @@ where
             self.inner.eth_api.block_with_senders(block_id.into()),
         )?;
         let block = maybe_block.ok_or(EthApiError::UnknownBlockNumber)?;
+        #[cfg(feature = "telos")]
+        let telos_block_extension = block.header.telos_block_extension.clone();
 
         let this = self.clone();
 
@@ -606,6 +633,9 @@ where
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
 
+                #[cfg(feature = "telos")]
+                let mut tx_index = 0;
+
                 // Re-execute all of the transactions in the block to load all touched accounts into
                 // the cache DB.
                 for tx in block.into_transactions_ecrecovered() {
@@ -613,7 +643,7 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            evm_config.tx_env(&tx),
+                            evm_config.tx_env(&tx, #[cfg(feature = "telos")] telos_block_extension.tx_env_at(tx_index)),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
