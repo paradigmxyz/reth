@@ -4,6 +4,7 @@ use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, 
 use alloy_eips::eip7702::SignedAuthorization;
 
 use alloy_consensus::SignableTransaction;
+use alloy_eips::eip2930::AccessList;
 use alloy_primitives::Parity;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -15,8 +16,6 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
-
-pub use access_list::{AccessList, AccessListItem, AccessListResult};
 
 pub use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
