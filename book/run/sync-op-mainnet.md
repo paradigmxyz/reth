@@ -3,7 +3,7 @@
 To sync OP mainnet, bedrock state needs to be imported as a starting point. There are currently two ways:
 
 * Minimal bootstrap **(recommended)**: only state snapshot at Bedrock block is imported without any OVM historical data.
-* Full bootstrap: state, blocks and receipts are imported.
+* Full bootstrap **(not recommended)**: state, blocks and receipts are imported. *Not recommended for now: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node
 
 ## Minimal bootstrap (recommended)
 
@@ -16,7 +16,9 @@ $ op-reth node --chain optimism --datadir op-mainnet --debug.tip 0x098f87b75c8b8
 ```
 
 
-## Full bootstrap
+## Full bootstrap (not recommended)
+
+**Not recommended for now**: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node.
 
 ### Import state 
 
