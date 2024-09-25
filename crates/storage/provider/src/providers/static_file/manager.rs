@@ -1137,14 +1137,14 @@ impl StaticFileProvider {
         Ok(data)
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Returns `static_files` directory
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Returns `static_files` transaction index
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
     }
