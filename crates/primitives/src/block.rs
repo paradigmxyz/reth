@@ -480,7 +480,8 @@ impl SealedBlock {
         Ok(())
     }
 
-    /// Returns a vector of transactions RLP encoded with [`TransactionSigned::encode_enveloped`].
+    /// Returns a vector of transactions RLP encoded with
+    /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
     }
