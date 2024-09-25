@@ -130,14 +130,14 @@ impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
 {
-    type ComponentsBuilder = ComponentsBuilder<
+    type Components = NodeComponents<
         N,
-        TestPoolBuilder,
-        EthereumPayloadBuilder,
-        EthereumNetworkBuilder,
-        TestExecutorBuilder,
-        TestConsensusBuilder,
-        EthereumEngineValidatorBuilder,
+        TestPool,
+        PayloadBuilderHandle<N::Engine>,
+        NetworkHandle,
+        (EthEvmConfig, MockExecutorProvider),
+        Arc<TestConsensus>,
+        EthereumEngineValidator,
     >;
     type AddOns = EthereumAddOns;
 
@@ -159,12 +159,12 @@ pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 /// boot the testing environment
 pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
-    <<TestNode as Node<
+    <TestNode as Node<
         FullNodeTypesAdapter<
             NodeTypesWithDBAdapter<TestNode, TmpDB>,
             BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
         >,
-    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
+    >>::Components,
 >;
 /// An [`ExExContext`] using the [`Adapter`] type.
 pub type TestExExContext = ExExContext<Adapter>;

@@ -89,14 +89,14 @@ where
     Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
     N: FullNodeTypes<Types = Types>,
 {
-    type ComponentsBuilder = ComponentsBuilder<
+    type Components = NodeComponents<
         N,
-        EthereumPoolBuilder,
-        EthereumPayloadBuilder,
-        EthereumNetworkBuilder,
-        EthereumExecutorBuilder,
-        EthereumConsensusBuilder,
-        EthereumEngineValidatorBuilder,
+        EthTransactionPool<N::Provider, DiskFileBlobStore>,
+        PayloadBuilderHandle<N::Engine>,
+        NetworkHandle,
+        EthExecutorProvider<EthEvmConfig>,
+        Arc<dyn reth_consensus::Consensus>,
+        EthereumEngineValidator,
     >;
 
     type AddOns = EthereumAddOns;

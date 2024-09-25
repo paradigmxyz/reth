@@ -52,10 +52,7 @@ pub async fn setup<N>(
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec = ChainSpec>,
-    N::ComponentsBuilder: NodeComponentsBuilder<
-        TmpNodeAdapter<N>,
-        Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
-    >,
+    N::Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     N::AddOns: NodeAddOns<
         Adapter<N>,
         EthApi: FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
@@ -116,12 +113,8 @@ type TmpNodeAdapter<N> = FullNodeTypesAdapter<
     BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>,
 >;
 
-type Adapter<N> = NodeAdapter<
-    RethFullAdapter<TmpDB, N>,
-    <<N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
-        RethFullAdapter<TmpDB, N>,
-    >>::Components,
->;
+type Adapter<N> =
+    NodeAdapter<RethFullAdapter<TmpDB, N>, <N as Node<TmpNodeAdapter<N>>>::Components>;
 
 /// Type alias for a type of `NodeHelper`
 pub type NodeHelperType<N, AO> = NodeTestContext<Adapter<N>, AO>;
