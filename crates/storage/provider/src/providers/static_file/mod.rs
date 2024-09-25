@@ -65,8 +65,9 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
         static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        BlockHash, Header, Receipt, TransactionSignedNoHash,
+        BlockHash, Header, Receipt, TransactionSignedNoHash, TxNumber,
     };
+    use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{fmt::Debug, fs, ops::Range, path::Path};
 
@@ -204,6 +205,14 @@ mod tests {
                 "block mismatch",
             )?;
 
+            if let Some(id) = expected_tip {
+                assert_eyre(
+                    sf_rw.header_by_number(id)?.map(|h| h.number),
+                    expected_tip,
+                    "header mismatch",
+                )?;
+            }
+
             // Validate the number of files remaining in the directory
             assert_eyre(
                 fs::read_dir(static_dir)?.count(),
@@ -304,17 +313,22 @@ mod tests {
             mut tx_count: u64,
             next_tx_num: &mut u64,
         ) {
+            let mut receipt = Receipt::default();
+            let mut tx = TransactionSignedNoHash::default();
+
             for block in block_range.clone() {
                 writer.increment_block(block).unwrap();
 
                 // Append transaction/receipt if there's still a transaction count to append
                 if tx_count > 0 {
                     if segment.is_receipts() {
-                        writer.append_receipt(*next_tx_num, &Receipt::default()).unwrap();
+                        // Used as ID for validation
+                        receipt.cumulative_gas_used = *next_tx_num;
+                        writer.append_receipt(*next_tx_num, &receipt).unwrap();
                     } else {
-                        writer
-                            .append_transaction(*next_tx_num, &TransactionSignedNoHash::default())
-                            .unwrap();
+                        // Used as ID for validation
+                        tx.transaction.set_nonce(*next_tx_num);
+                        writer.append_transaction(*next_tx_num, &tx).unwrap();
                     }
                     *next_tx_num += 1;
                     tx_count -= 1;
@@ -376,10 +390,19 @@ mod tests {
                 expected_tx_range.as_ref()
             );
         });
+
+        // Ensure transaction index
+        let tx_index = sf_rw.tx_index().read();
+        let expected_tx_index =
+            vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
+        assert_eq!(
+            tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+            (!expected_tx_index.is_empty()).then_some(expected_tx_index),
+            "tx index mismatch",
+        );
     }
 
     #[test]
-    #[ignore]
     fn test_tx_based_truncation() {
         let segments = [StaticFileSegment::Transactions, StaticFileSegment::Receipts];
         let blocks_per_file = 10; // Number of blocks per file
@@ -387,14 +410,16 @@ mod tests {
         let file_set_count = 3; // Number of sets of files to create
         let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
 
+        #[allow(clippy::too_many_arguments)]
         fn prune_and_validate(
             sf_rw: &StaticFileProvider,
             static_dir: impl AsRef<Path>,
             segment: StaticFileSegment,
             prune_count: u64,
             last_block: u64,
-            expected_tx_tip: u64,
+            expected_tx_tip: Option<u64>,
             expected_file_count: i32,
+            expected_tx_index: Vec<(TxNumber, SegmentRangeInclusive)>,
         ) -> eyre::Result<()> {
             let mut writer = sf_rw.latest_writer(segment)?;
 
@@ -412,11 +437,25 @@ mod tests {
                 Some(last_block),
                 "block mismatch",
             )?;
-            assert_eyre(
-                sf_rw.get_highest_static_file_tx(segment),
-                Some(expected_tx_tip),
-                "tx mismatch",
-            )?;
+            assert_eyre(sf_rw.get_highest_static_file_tx(segment), expected_tx_tip, "tx mismatch")?;
+
+            // Verify that transactions and receipts are returned correctly. Uses
+            // cumulative_gas_used & nonce as ids.
+            if let Some(id) = expected_tx_tip {
+                if segment.is_receipts() {
+                    assert_eyre(
+                        expected_tx_tip,
+                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
+                        "tx mismatch",
+                    )?;
+                } else {
+                    assert_eyre(
+                        expected_tx_tip,
+                        sf_rw.transaction_by_id(id)?.map(|t| t.nonce()),
+                        "tx mismatch",
+                    )?;
+                }
+            }
 
             // Ensure the file count has reduced as expected
             assert_eyre(
@@ -424,6 +463,15 @@ mod tests {
                 expected_file_count as usize,
                 "file count mismatch",
             )?;
+
+            // Ensure that the inner tx index (max_tx -> block range) is as expected
+            let tx_index = sf_rw.tx_index().read();
+            assert_eyre(
+                tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+                (!expected_tx_index.is_empty()).then_some(expected_tx_index),
+                "tx index mismatch",
+            )?;
+
             Ok(())
         }
 
@@ -442,26 +490,46 @@ mod tests {
             let highest_tx = sf_rw.get_highest_static_file_tx(segment).unwrap();
 
             // Test cases
-            // [prune_count, last_block, expected_tx_tip, expected_file_count)
+            // [prune_count, last_block, expected_tx_tip, expected_file_count, expected_tx_index)
             let test_cases = vec![
                 // Case 0: 20..=29 has only one tx. Prune the only tx of the block range.
                 // It ensures that the file is not deleted even though there are no rows, since the
                 // `last_block` which is passed to the prune method is the first
                 // block of the range.
-                (1, blocks_per_file * 2, highest_tx - 1, initial_file_count),
+                (
+                    1,
+                    blocks_per_file * 2,
+                    Some(highest_tx - 1),
+                    initial_file_count,
+                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                ),
                 // Case 1: 10..=19 has no txs. There are no txes in the whole block range, but want
                 // to unwind to block 9. Ensures that the 20..=29 and 10..=19 files
                 // are deleted.
-                (0, blocks_per_file - 1, highest_tx - 1, files_per_range + 1), // includes lockfile
+                (
+                    0,
+                    blocks_per_file - 1,
+                    Some(highest_tx - 1),
+                    files_per_range + 1, // includes lockfile
+                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                ),
                 // Case 2: Prune most txs up to block 1.
-                (7, 1, 1, files_per_range + 1),
+                (
+                    highest_tx - 1,
+                    1,
+                    Some(0),
+                    files_per_range + 1,
+                    vec![(0, SegmentRangeInclusive::new(0, 1))],
+                ),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
-                (1, 0, 0, files_per_range + 1),
+                (1, 0, None, files_per_range + 1, vec![]),
             ];
 
             // Loop through test cases
-            for (case, (prune_count, last_block, expected_tx_tip, expected_file_count)) in
-                test_cases.into_iter().enumerate()
+            for (
+                case,
+                (prune_count, last_block, expected_tx_tip, expected_file_count, expected_tx_index),
+            ) in test_cases.into_iter().enumerate()
             {
                 prune_and_validate(
                     &sf_rw,
@@ -471,6 +539,7 @@ mod tests {
                     last_block,
                     expected_tx_tip,
                     expected_file_count,
+                    expected_tx_index,
                 )
                 .map_err(|err| eyre::eyre!("Test case {case}: {err}"))
                 .unwrap();
