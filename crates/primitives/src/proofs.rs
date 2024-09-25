@@ -1,11 +1,12 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
-    ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
+    constants::EMPTY_OMMER_ROOT_HASH, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
+    Request, TransactionSigned, Withdrawal, B256,
 };
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Encodable7685;
+use alloy_primitives::keccak256;
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 /// Calculate a transaction root.

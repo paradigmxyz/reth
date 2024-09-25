@@ -17,11 +17,12 @@ use reth::{
     args::utils::DefaultChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
-    primitives::{Address, IntoRecoveredTransaction},
+    primitives::{ IntoRecoveredTransaction},
     rpc::compat::transaction::transaction_to_call_request,
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
+use alloy_primitives::Address;
 
 fn main() {
     Cli::<DefaultChainSpecParser, RethCliTxpoolExt>::parse()

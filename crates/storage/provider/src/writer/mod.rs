@@ -544,14 +544,14 @@ mod tests {
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives::{Account, Address, Receipt, Receipts, StorageEntry};
+    use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},

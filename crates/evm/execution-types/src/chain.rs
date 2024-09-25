@@ -2,11 +2,12 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap};
+use alloy_primitives::{Address, BlockHash, BlockNumber};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
+    BlockNumHash, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionSigned, TransactionSignedEcRecovered, TxHash,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;

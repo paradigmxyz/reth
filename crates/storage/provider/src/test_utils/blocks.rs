@@ -1,14 +1,14 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{Log, Parity, Sealable, TxKind};
+use alloy_primitives::{Address, BlockNumber, Log, Parity, Sealable, TxKind};
 use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
-    alloy_primitives, b256, hex_literal::hex, Account, Address, BlockBody, BlockNumber, Bytes,
-    Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, Signature, Transaction,
-    TransactionSigned, TxType, Withdrawal, Withdrawals, B256, U256,
+    alloy_primitives, b256, hex_literal::hex, Account, BlockBody, Bytes, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, Signature, Transaction, TransactionSigned,
+    TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{

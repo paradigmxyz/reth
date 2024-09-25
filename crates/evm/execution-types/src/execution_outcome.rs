@@ -1,7 +1,7 @@
 use crate::BlockExecutionOutput;
+use alloy_primitives::{Address, BlockNumber, Bloom};
 use reth_primitives::{
-    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
-    StorageEntry, B256, U256,
+    logs_bloom, Account, Bytecode, Log, Receipt, Receipts, Requests, StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -371,8 +371,8 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
 mod tests {
     use super::*;
     use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
-    use alloy_primitives::{FixedBytes, LogData};
-    use reth_primitives::{Address, Receipts, Request, Requests, TxType, B256};
+    use alloy_primitives::{Address, FixedBytes, LogData};
+    use reth_primitives::{Receipts, Request, Requests, TxType, B256};
     use std::collections::HashMap;
 
     #[test]

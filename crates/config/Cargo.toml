@@ -28,3 +28,4 @@ eyre.workspace = true
 tempfile.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true
+alloy-primitives.workspace = true

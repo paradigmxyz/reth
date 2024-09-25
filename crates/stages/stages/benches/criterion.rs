@@ -6,7 +6,7 @@ use reth_chainspec::ChainSpec;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 
-use reth_primitives::BlockNumber;
+use alloy_primitives::BlockNumber;
 use reth_provider::{DatabaseProvider, DatabaseProviderFactory};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},

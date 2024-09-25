@@ -1,8 +1,8 @@
 use super::{collect_history_indices, load_history_indices};
+use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::tables;
 use reth_db_api::{models::ShardedKey, table::Decode, transaction::DbTxMut};
-use reth_primitives::Address;
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -148,6 +148,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
+    use alloy_primitives::BlockNumber;
     use itertools::Itertools;
     use reth_db::BlockNumberList;
     use reth_db_api::{
@@ -158,7 +159,7 @@ mod tests {
         },
         transaction::DbTx,
     };
-    use reth_primitives::{address, BlockNumber, B256};
+    use reth_primitives::{address, B256};
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,

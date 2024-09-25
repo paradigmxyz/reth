@@ -72,10 +72,9 @@ pub use transaction::{
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
-    eip191_hash_message, hex, hex_literal, keccak256, ruint,
+    hex, hex_literal, ruint,
     utils::format_ether,
-    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    Bytes, StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
@@ -88,7 +87,7 @@ pub type H64 = B64;
 pub type H128 = B128;
 #[doc(hidden)]
 #[deprecated = "use Address instead"]
-pub type H160 = Address;
+pub type H160 = alloy_primitives::Address;
 #[doc(hidden)]
 #[deprecated = "use B256 instead"]
 pub type H256 = B256;
