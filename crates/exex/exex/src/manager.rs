@@ -533,6 +533,7 @@ pub struct ExExManager {
     /// The finished height of all `ExEx`'s.
     finished_height: watch::Sender<FinishedExExHeight>,
 
+    /// Write-Ahead Log for the [`ExExNotification`]s.
     wal: Wal,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
