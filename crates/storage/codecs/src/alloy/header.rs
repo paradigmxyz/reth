@@ -36,12 +36,19 @@ struct Header {
     extra_data: Bytes,
 }
 
+/// [`Header`] extension struct.
+///
+/// All new fields should be added here in the form of a s`Option<T>`, since [`HeaderExt`] itself is
+/// a field of [`Header`] as `Option<HeaderExt`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
 struct HeaderExt {
     requests_root: Option<B256>,
 }
 
 impl HeaderExt {
+    /// Converts into [`Some`] if any of the field exists. Otherwise, returns [`None`].
+    ///
+    /// Required since [`Header`] takes this field as `Option<HeaderExt>`.
     const fn into_option(self) -> Option<Self> {
         if self.requests_root.is_some() {
             Some(self)
