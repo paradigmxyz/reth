@@ -1746,7 +1746,7 @@ mod tests {
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
     };
-    use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
+    use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,
     };
@@ -1768,7 +1768,7 @@ mod tests {
             // let OS choose port
             .listener_port(0)
             .disable_discovery()
-            .build(client, client.chain_spec());
+            .build(client);
 
         let pool = testing_pool();
 
@@ -1826,7 +1826,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
-            .build(client, client.chain_spec());
+            .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
@@ -1909,7 +1909,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
-            .build(client, client.chain_spec());
+            .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
@@ -1998,7 +1998,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
-            .build(client, client.chain_spec());
+            .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
@@ -2089,7 +2089,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
-            .build(client, client.chain_spec());
+            .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await

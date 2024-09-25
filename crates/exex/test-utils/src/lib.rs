@@ -262,7 +262,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
-            .build(provider_factory.clone(), chain_spec.clone()),
+            .build(provider_factory.clone()),
     )
     .await?;
     let network = network_manager.handle().clone();

@@ -170,7 +170,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                             p2p_secret_key,
                             default_peers_path,
                         )
-                        .build(provider_factory.clone(), provider_factory.chain_spec())
+                        .build(provider_factory.clone())
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
@@ -220,7 +220,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                             p2p_secret_key,
                             default_peers_path,
                         )
-                        .build(provider_factory.clone(), provider_factory.chain_spec())
+                        .build(provider_factory.clone())
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);

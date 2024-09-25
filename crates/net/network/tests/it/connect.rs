@@ -20,7 +20,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
-use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
+use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use tokio::task;
@@ -203,9 +203,8 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config = NetworkConfigBuilder::new(secret_key)
-        .discovery(discv4)
-        .build(NoopProvider::default(), &*MAINNET);
+    let config =
+        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -226,8 +225,7 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config =
-        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client, client.chain_spec());
+    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -263,8 +261,7 @@ async fn test_connect_to_trusted_peer() {
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
-    let config =
-        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client, client.chain_spec());
+    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
@@ -338,7 +335,7 @@ async fn test_incoming_node_id_blacklist() {
             .listener_port(0)
             .disable_discovery()
             .peer_config(peer_config)
-            .build(NoopProvider::default(), &*MAINNET);
+            .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -388,7 +385,7 @@ async fn test_incoming_connect_with_single_geth() {
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
             .disable_discovery()
-            .build(NoopProvider::default(), &*MAINNET);
+            .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -422,7 +419,7 @@ async fn test_outgoing_connect_with_single_geth() {
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
             .disable_discovery()
-            .build(NoopProvider::default(), &*MAINNET);
+            .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();
@@ -469,7 +466,7 @@ async fn test_geth_disconnect() {
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
             .disable_discovery()
-            .build(NoopProvider::default(), &*MAINNET);
+            .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();
@@ -578,7 +575,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
-        .build(NoopProvider::default(), &*MAINNET);
+        .build(NoopProvider::default());
 
     let network = NetworkManager::new(config).await.unwrap();
 
@@ -692,7 +689,7 @@ async fn new_random_peer(max_in_bound: usize, trusted_nodes: Vec<TrustedPeer>) -
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
-        .build_with_noop_provider(&*MAINNET);
+        .build_with_noop_provider(MAINNET.clone());
 
     NetworkManager::new(config).await.unwrap()
 }

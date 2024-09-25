@@ -637,7 +637,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     where
         Node::Types: NodeTypes<ChainSpec: Hardforks>,
     {
-        network_builder.build(self.provider.clone(), self.chain_spec())
+        network_builder.build(self.provider.clone())
     }
 }
 

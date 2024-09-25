@@ -124,12 +124,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
-        let chain_spec = provider_factory.chain_spec();
         let network = self
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .build(provider_factory, chain_spec)
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");

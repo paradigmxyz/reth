@@ -1,8 +1,8 @@
 //! Network config support
 
-use std::{collections::HashSet, net::SocketAddr};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
-use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -10,7 +10,7 @@ use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
-use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{noop::NoopBlockReader, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 
@@ -99,12 +99,11 @@ impl NetworkConfig<()> {
 
 impl<C> NetworkConfig<C> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
-    pub fn new(
-        client: C,
-        chain_spec: impl EthChainSpec + Hardforks,
-        secret_key: SecretKey,
-    ) -> Self {
-        NetworkConfig::builder(secret_key).build(client, chain_spec)
+    pub fn new(client: C, secret_key: SecretKey) -> Self
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
+        NetworkConfig::builder(secret_key).build(client)
     }
 
     /// Sets the config to use for the discovery v4 protocol.
@@ -456,11 +455,14 @@ impl NetworkConfigBuilder {
 
     /// Convenience function for creating a [`NetworkConfig`] with a noop provider that does
     /// nothing.
-    pub fn build_with_noop_provider(
+    pub fn build_with_noop_provider<ChainSpec>(
         self,
-        chain_spec: impl EthChainSpec + Hardforks,
-    ) -> NetworkConfig<reth_storage_api::noop::NoopBlockReader> {
-        self.build(Default::default(), chain_spec)
+        chain_spec: Arc<ChainSpec>,
+    ) -> NetworkConfig<NoopBlockReader<ChainSpec>>
+    where
+        ChainSpec: EthChainSpec + Hardforks + 'static,
+    {
+        self.build(NoopBlockReader::new(chain_spec))
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -469,12 +471,12 @@ impl NetworkConfigBuilder {
     /// The given client is to be used for interacting with the chain, for example fetching the
     /// corresponding block for a given block hash we receive from a peer in the status message when
     /// establishing a connection.
-    pub fn build<C>(
-        self,
-        client: C,
-        chain_spec: impl EthChainSpec + Hardforks,
-    ) -> NetworkConfig<C> {
+    pub fn build<C>(self, client: C) -> NetworkConfig<C>
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
         let peer_id = self.get_peer_id();
+        let chain_spec = client.chain_spec();
         let Self {
             secret_key,
             mut dns_discovery_config,
@@ -605,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_network_dns_defaults() {
-        let config = builder().build(NoopProvider::default(), &*MAINNET);
+        let config = builder().build(NoopProvider::default());
 
         let dns = config.dns_discovery_config.unwrap();
         let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();
@@ -626,7 +628,7 @@ mod tests {
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
 
         // enforce that the fork_id set in the status is consistent with the generated fork filter
-        let config = builder().build(NoopProvider::default(), chain_spec);
+        let config = builder().build_with_noop_provider(chain_spec);
 
         let status = config.status;
         let fork_filter = config.fork_filter;
