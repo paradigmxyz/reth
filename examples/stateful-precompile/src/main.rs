@@ -10,7 +10,7 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
         revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-         Bytes, U256,
+        Bytes, U256,
     },
     revm::{
         handler::register::EvmHandler,

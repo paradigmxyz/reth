@@ -1,14 +1,14 @@
 //! A no operation block executor implementation.
 
+use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{ BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
-use alloy_primitives::BlockNumber;
 
 use crate::execute::{BatchExecutor, BlockExecutorProvider, Executor};
 
