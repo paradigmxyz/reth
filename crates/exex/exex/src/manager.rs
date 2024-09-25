@@ -62,18 +62,18 @@ pub struct ExExHandle {
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
-    canonicalization_notifications: Option<CanonicalizationNotifications>,
+    canonicalization: Option<Canonicalization>,
     actions: UnboundedReceiver<ExExAction>,
     /// The [WAL](`Wal`) instance for this `ExEx`.
     wal: Wal,
 }
 
-struct CanonicalizationNotifications {
+struct Canonicalization {
     notifications: Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + Send + Sync>,
     sender: PollSender<ExExNotification>,
 }
 
-impl Debug for CanonicalizationNotifications {
+impl Debug for Canonicalization {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CanonicalizationNotifications")
             .field("notifications", &"...")
@@ -82,7 +82,7 @@ impl Debug for CanonicalizationNotifications {
     }
 }
 
-impl CanonicalizationNotifications {
+impl Canonicalization {
     fn new<P: HeaderProvider + 'static>(
         provider: P,
         exex_head: BlockNumHash,
@@ -179,7 +179,7 @@ impl ExExHandle {
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
-                canonicalization_notifications: None,
+                canonicalization: None,
                 actions: manager_action_rx,
                 wal,
             },
@@ -788,25 +788,22 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
             while let Poll::Ready(Some(action)) = exex.actions.poll_recv(cx) {
                 match action {
                     ExExAction::Canonicalize(head, canonicalization_tx) => {
-                        if exex.canonicalization_notifications.is_some() {
+                        if exex.canonicalization.is_some() {
                             debug!(exex_id = %exex.id, "Canonicalization already in progress");
                             continue
                         }
 
-                        exex.canonicalization_notifications =
-                            Some(CanonicalizationNotifications::new(
-                                this.provider.clone(),
-                                head,
-                                exex.wal.handle(),
-                                canonicalization_tx,
-                            )?);
+                        exex.canonicalization = Some(Canonicalization::new(
+                            this.provider.clone(),
+                            head,
+                            exex.wal.handle(),
+                            canonicalization_tx,
+                        )?);
                     }
                 }
             }
 
-            if let Some(canonicalization_notifications) =
-                exex.canonicalization_notifications.as_mut()
-            {
+            if let Some(canonicalization_notifications) = exex.canonicalization.as_mut() {
                 for notification in &mut canonicalization_notifications.notifications {
                     // TODO(alexey): the iterator above should be
                     // saved so we can continue sending inverted notifications.
@@ -839,7 +836,7 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
         for idx in (0..this.exex_handles.len()).rev() {
             let mut exex = this.exex_handles.swap_remove(idx);
 
-            if exex.canonicalization_notifications.is_none() {
+            if exex.canonicalization.is_none() {
                 // it is a logic error for this to ever underflow since the manager manages the
                 // notification IDs
                 let notification_index = exex
