@@ -19,7 +19,6 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
-use tokio::sync::oneshot;
 use tracing::*;
 
 /// Async state root calculator.
@@ -63,21 +62,16 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
     /// Calculate incremental state root asynchronously.
-    pub async fn incremental_root(self) -> Result<B256, AsyncStateRootError> {
-        self.calculate(false).await.map(|(root, _)| root)
+    pub fn incremental_root(self) -> Result<B256, AsyncStateRootError> {
+        self.calculate(false).map(|(root, _)| root)
     }
 
     /// Calculate incremental state root with updates asynchronously.
-    pub async fn incremental_root_with_updates(
-        self,
-    ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
-        self.calculate(true).await
+    pub fn incremental_root_with_updates(self) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
+        self.calculate(true)
     }
 
-    async fn calculate(
-        self,
-        retain_updates: bool,
-    ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
+    fn calculate(self, retain_updates: bool) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
         let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
         let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
@@ -100,7 +94,7 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = oneshot::channel();
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
             rayon::spawn_fifo(move || {
                 let result = (|| -> Result<_, AsyncStateRootError> {
@@ -160,7 +154,7 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.await.map_err(|_| {
+                        Some(rx) => rx.recv().map_err(|_| {
                             AsyncStateRootError::StorageRootChannelClosed { hashed_address }
                         })??,
                         // Since we do not store all intermediate nodes in the database, there might
@@ -227,6 +221,9 @@ pub enum AsyncStateRootError {
         /// The hashed address for which channel was closed.
         hashed_address: B256,
     },
+    /// Receive error
+    #[error(transparent)]
+    Receive(#[from] std::sync::mpsc::RecvError),
     /// Error while calculating storage root.
     #[error(transparent)]
     StorageRoot(#[from] StorageRootError),
@@ -292,7 +289,6 @@ mod tests {
         assert_eq!(
             AsyncStateRoot::new(consistent_view.clone(), Default::default(),)
                 .incremental_root()
-                .await
                 .unwrap(),
             test_utils::state_root(state.clone())
         );
@@ -323,9 +319,8 @@ mod tests {
         }
 
         assert_eq!(
-            AsyncStateRoot::new(consistent_view.clone(), TrieInput::from_state(hashed_state))
+            AsyncStateRoot::new(consistent_view, TrieInput::from_state(hashed_state))
                 .incremental_root()
-                .await
                 .unwrap(),
             test_utils::state_root(state)
         );

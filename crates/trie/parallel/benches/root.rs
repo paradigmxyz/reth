@@ -73,7 +73,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
 
         // async root
         group.bench_function(BenchmarkId::new("async root", size), |b| {
-            b.to_async(&runtime).iter_with_setup(
+            b.iter_with_setup(
                 || AsyncStateRoot::new(view.clone(), TrieInput::from_state(updated_state.clone())),
                 |calculator| calculator.incremental_root(),
             );
