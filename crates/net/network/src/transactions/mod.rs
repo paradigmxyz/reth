@@ -1396,9 +1396,10 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
-        tx: Arc<ValidPoolTransaction<T>>,
-    ) -> Self {
+    fn new<T>(tx: Arc<ValidPoolTransaction<T>>) -> Self
+    where
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         let size = tx.encoded_length();
         let recovered: TransactionSignedEcRecovered =
             tx.transaction.clone().into_consensus().into();
