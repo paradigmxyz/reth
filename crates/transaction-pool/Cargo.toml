@@ -27,7 +27,6 @@ revm.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-consensus.workspace = true
 
 # async/futures
 futures-util.workspace = true
@@ -69,6 +68,7 @@ pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = ["serde"]

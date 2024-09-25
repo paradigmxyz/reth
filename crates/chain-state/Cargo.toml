@@ -24,7 +24,6 @@ reth-trie.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
@@ -49,6 +48,7 @@ revm = { workspace = true, optional = true }
 [dev-dependencies]
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
+alloy-consensus.workspace = true
 rand.workspace = true
 revm.workspace = true
 
