@@ -17,7 +17,7 @@ use reth_primitives::{
     constants::BEACON_NONCE,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;

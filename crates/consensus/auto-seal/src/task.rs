@@ -5,7 +5,6 @@ use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_stages_api::PipelineEvent;
 use reth_tokio_util::EventStream;

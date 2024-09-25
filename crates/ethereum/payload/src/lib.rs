@@ -33,8 +33,7 @@ use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs::{self, calculate_requests_root},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt,
-    EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, EthereumHardforks, Header, Receipt, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;

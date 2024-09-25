@@ -87,8 +87,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
 use reth_primitives::{
-    BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction, PooledTransactionsElement,
-    TransactionSigned,
+    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
 };
 use std::{
     collections::{HashMap, HashSet},
