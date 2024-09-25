@@ -1375,6 +1375,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, Sealable, B256};
     use assert_matches::assert_matches;
@@ -1390,7 +1391,7 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, TxEip1559, Withdrawals,
+        TransactionSignedEcRecovered, Withdrawals,
     };
     use reth_provider::{
         test_utils::{

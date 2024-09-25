@@ -20,12 +20,42 @@ use syn::{
 mod arbitrary;
 mod compact;
 
+/// Derives the `Compact` trait for custom structs, optimizing serialization with a possible
+/// bitflag struct.
+///
+/// ## Implementation:
+/// The derived `Compact` implementation leverages a bitflag struct when needed to manage the
+/// presence of certain field types, primarily for compacting fields efficiently. This bitflag
+/// struct records information about fields that require a small, fixed number of bits for their
+/// encoding, such as `bool`, `Option<T>`, or other small types.
+///
+/// ### Bit Sizes for Fields:
+/// The amount of bits used to store a field size is determined by the field's type. For specific
+/// types, a fixed number of bits is allocated (from `fn get_bit_size`):
+/// - `bool`, `Option<T>`, `TransactionKind`, `Signature`: **1 bit**
+/// - `TxType`: **2 bits**
+/// - `u64`, `BlockNumber`, `TxNumber`, `ChainId`, `NumTransactions`: **4 bits**
+/// - `u128`: **5 bits**
+/// - `U256`: **6 bits**
+///
+/// ### Warning: Extending structs, unused bits and backwards compatibility:
+/// When the bitflag only has one bit left (for example, when adding many `Option<T>` fields),
+/// you should introduce a new struct (e.g., `TExtension`) with additional fields, and use
+/// `Option<TExtension>` in the original struct. This approach allows further field extensions while
+/// maintaining backward compatibility.
+///
+/// ### Limitations:
+/// - Fields not listed above, or types such `Vec`, or large composite types, should manage their
+///   own encoding and do not rely on the bitflag struct.
+/// - `Bytes` fields and any types containing a `Bytes` field should be placed last to ensure
+///   efficient decoding.
 #[proc_macro_derive(Compact, attributes(maybe_zero))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let is_zstd = false;
     compact::derive(input, is_zstd)
 }
 
+/// Adds `zstd` compression to derived [`Compact`].
 #[proc_macro_derive(CompactZstd, attributes(maybe_zero))]
 pub fn derive_zstd(input: TokenStream) -> TokenStream {
     let is_zstd = true;

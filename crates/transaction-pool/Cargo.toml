@@ -54,6 +54,7 @@ rand = { workspace = true, optional = true }
 paste = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
+alloy-consensus = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -68,11 +69,12 @@ pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
-test-utils = ["rand", "paste", "serde"]
+test-utils = ["rand", "paste", "serde", "alloy-consensus"]
 arbitrary = ["proptest", "reth-primitives/arbitrary", "proptest-arbitrary-interop"]
 
 [[bench]]

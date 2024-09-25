@@ -33,6 +33,7 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+revm-primitives.workspace = true
 
 # async
 futures-util.workspace = true

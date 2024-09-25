@@ -37,6 +37,7 @@ revm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+revm-primitives.workspace = true
 
 # misc
 tracing.workspace = true
