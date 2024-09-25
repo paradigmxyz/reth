@@ -6621,7 +6621,6 @@ dependencies = [
  "humantime-serde",
  "reth-network-peers",
  "reth-network-types",
- "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
  "serde",
