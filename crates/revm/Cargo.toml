@@ -21,7 +21,7 @@ reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
-alloy-primitives = { workspace = true, optional = true }
+alloy-primitives.workspace = true
 
 # revm
 revm.workspace = true
@@ -35,6 +35,6 @@ alloy-primitives.workspace = true
 default = ["std", "c-kzg"]
 std = []
 c-kzg = ["revm/c-kzg"]
-test-utils = ["dep:reth-trie", "alloy-primitives"]
+test-utils = ["dep:reth-trie"]
 optimism = ["revm/optimism"]
 serde = ["revm/serde"]
