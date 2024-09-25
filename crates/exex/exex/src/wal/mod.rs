@@ -11,7 +11,7 @@ use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
 
-/// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
+/// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
 ///
 /// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
 /// represented by [`BlockCache`]. The role of the block cache is to avoid walking the WAL directory

@@ -48,12 +48,6 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         let mut exex_handles = Vec::with_capacity(extensions.len());
         let mut exexes = Vec::with_capacity(extensions.len());
 
-        let datadir = config_container
-            .config
-            .datadir
-            .clone()
-            .resolve_datadir(config_container.config.chain.chain());
-
         for (id, exex) in extensions {
             // create a new exex handle
             let (handle, events, notifications) = ExExHandle::new(
@@ -61,7 +55,6 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 head,
                 components.provider().clone(),
                 components.block_executor().clone(),
-                Wal::new(datadir.exex_wal(&id))?,
             );
             exex_handles.push(handle);
 
@@ -103,8 +96,20 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");
         // todo(onbjerg): rm magic number
-        let exex_manager =
-            ExExManager::new(exex_handles, 1024, components.provider().finalized_block_stream());
+        let exex_wal = Wal::new(
+            config_container
+                .config
+                .datadir
+                .clone()
+                .resolve_datadir(config_container.config.chain.chain())
+                .exex_wal(),
+        )?;
+        let exex_manager = ExExManager::new(
+            exex_handles,
+            1024,
+            exex_wal,
+            components.provider().finalized_block_stream(),
+        );
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");

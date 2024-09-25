@@ -352,8 +352,8 @@ impl<D> ChainPath<D> {
     }
 
     /// Returns the path to the ExEx WAL directory for this chain.
-    pub fn exex_wal(&self, exex_id: impl AsRef<str>) -> PathBuf {
-        self.data_dir().join("exex").join(exex_id.as_ref()).join("wal")
+    pub fn exex_wal(&self) -> PathBuf {
+        self.data_dir().join("exex/wal")
     }
 }
 
