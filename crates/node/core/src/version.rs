@@ -1,6 +1,6 @@
 //! Version information for reth.
+use alloy_rpc_types_engine::ClientCode;
 use reth_db::ClientVersion;
-use reth_rpc_types::engine::ClientCode;
 
 /// The client code for Reth
 pub const CLIENT_CODE: ClientCode = ClientCode::RH;
