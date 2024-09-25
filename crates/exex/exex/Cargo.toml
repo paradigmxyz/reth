@@ -57,6 +57,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 
 alloy-genesis.workspace = true
+alloy-consensus.workspace = true
 
 secp256k1.workspace = true
 tempfile.workspace = true

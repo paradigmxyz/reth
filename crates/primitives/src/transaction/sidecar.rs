@@ -1,9 +1,7 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
-use crate::{
-    keccak256, Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
-};
-use alloy_consensus::TxEip4844WithSidecar;
+use crate::{keccak256, Signature, Transaction, TransactionSigned, TxHash, EIP4844_TX_TYPE_ID};
+use alloy_consensus::{transaction::TxEip4844, TxEip4844WithSidecar};
 use alloy_rlp::{Decodable, Error as RlpError, Header};
 use serde::{Deserialize, Serialize};
 

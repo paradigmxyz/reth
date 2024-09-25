@@ -1,5 +1,6 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
+use alloy_consensus::TxLegacy;
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
@@ -10,7 +11,7 @@ use rand::{
 };
 use reth_primitives::{
     proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionSigned, TxLegacy, Withdrawal, Withdrawals,
+    SealedHeader, StorageEntry, Transaction, TransactionSigned, Withdrawal, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -497,9 +498,10 @@ pub fn random_request<R: Rng>(rng: &mut R) -> Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::Parity;
-    use reth_primitives::{hex, public_key_to_address, Signature, TxEip1559};
+    use reth_primitives::{hex, public_key_to_address, Signature};
     use std::str::FromStr;
 
     #[test]

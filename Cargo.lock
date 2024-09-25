@@ -6173,6 +6173,7 @@ dependencies = [
 name = "reth"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-rlp",
  "alloy-rpc-types",
  "aquamarine",
@@ -6379,6 +6380,7 @@ dependencies = [
 name = "reth-blockchain-tree"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "aquamarine",
@@ -6427,6 +6429,7 @@ dependencies = [
 name = "reth-chain-state"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-signer",
@@ -6632,6 +6635,7 @@ dependencies = [
 name = "reth-consensus-common"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "mockall",
  "rand 0.8.5",
@@ -7157,6 +7161,7 @@ name = "reth-eth-wire-types"
 version = "1.0.7"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -7297,6 +7302,7 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -7319,6 +7325,7 @@ dependencies = [
 name = "reth-evm-optimism"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "reth-chainspec",
@@ -7371,6 +7378,7 @@ dependencies = [
 name = "reth-exex"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -7580,6 +7588,7 @@ dependencies = [
 name = "reth-network"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-node-bindings",
  "alloy-primitives",
@@ -8291,6 +8300,7 @@ dependencies = [
 name = "reth-provider"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -8918,6 +8928,7 @@ dependencies = [
 name = "reth-testing-utils"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -8953,6 +8964,7 @@ dependencies = [
 name = "reth-transaction-pool"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
