@@ -23,7 +23,7 @@ use reth_provider::{
 };
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::receipt_file_codec::HackReceiptFileCodec;
 
@@ -91,15 +91,6 @@ where
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
-    let total_imported_txns = provider_factory
-        .static_file_provider()
-        .count_entries::<tables::Transactions>()
-        .expect("transaction static files must exist before importing receipts");
-    let highest_block_transactions = provider_factory
-        .static_file_provider()
-        .get_highest_static_file_block(StaticFileSegment::Transactions)
-        .expect("transaction static files must exist before importing receipts");
-
     for stage in StageId::ALL {
         let checkpoint = provider_factory.database_provider_ro()?.get_stage_checkpoint(stage)?;
         trace!(target: "reth::cli",
@@ -113,53 +104,9 @@ where
     let reader = ChunkedFileReader::new(&path, chunk_len).await?;
 
     // import receipts
-    let ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns } =
-        import_receipts_from_reader(&provider_factory, reader, filter).await?;
-
-    if total_decoded_receipts == 0 {
-        error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
-        return Ok(())
-    }
-
-    let total_imported_receipts = provider_factory
-        .static_file_provider()
-        .count_entries::<tables::Receipts>()
-        .expect("static files must exist after ensuring we decoded more than zero");
-
-    if total_imported_receipts + total_filtered_out_dup_txns != total_decoded_receipts {
-        error!(target: "reth::cli",
-            total_decoded_receipts,
-            total_imported_receipts,
-            total_filtered_out_dup_txns,
-            "Receipts were partially imported"
-        );
-    }
-
-    if total_imported_receipts != total_imported_txns {
-        error!(target: "reth::cli",
-            total_imported_receipts,
-            total_imported_txns,
-            "Receipts inconsistent with transactions"
-        );
-    }
-
-    let highest_block_receipts = provider_factory
-        .static_file_provider()
-        .get_highest_static_file_block(StaticFileSegment::Receipts)
-        .expect("static files must exist after ensuring we decoded more than zero");
-
-    if highest_block_receipts != highest_block_transactions {
-        error!(target: "reth::cli",
-            highest_block_receipts,
-            highest_block_transactions,
-            "Height of receipts inconsistent with transactions"
-        );
-    }
+    let _ = import_receipts_from_reader(&provider_factory, reader, filter).await?;
 
     info!(target: "reth::cli",
-        total_imported_receipts,
-        total_decoded_receipts,
-        total_filtered_out_dup_txns,
         "Receipt file imported"
     );
 
@@ -181,11 +128,36 @@ where
     N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
-    let mut total_decoded_receipts = 0;
-    let mut total_filtered_out_dup_txns = 0;
+    let static_file_provider = provider_factory.static_file_provider();
+
+    // Ensure that receipts hasn't been initialized apart from `init_genesis`.
+    if let Some(num_receipts) =
+        static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts)
+    {
+        eyre::bail!("Expected no receipts in storage, but found {num_receipts}.");
+    } else {
+        match static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts) {
+            Some(receipts_block) => {
+                if receipts_block > 0 {
+                    eyre::bail!(
+                        "Expected highest receipt block to be 0, but found {receipts_block}."
+                    );
+                }
+            }
+            None => {
+                eyre::bail!("Receipts was not initialized. Please import blocks and transactions before calling this command.");
+            }
+        }
+    }
 
     let provider = provider_factory.provider_rw()?;
-    let static_file_provider = provider_factory.static_file_provider();
+    let mut total_decoded_receipts = 0;
+    let mut total_filtered_out_dup_txns = 0;
+    let mut highest_block_receipts = 0;
+
+    let highest_block_transactions = static_file_provider
+        .get_highest_static_file_block(StaticFileSegment::Transactions)
+        .expect("transaction static files must exist before importing receipts");
 
     while let Some(file_client) =
         reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
@@ -221,6 +193,7 @@ where
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
         }
+        highest_block_receipts = first_block + receipts.len() as u64 - 1;
 
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
@@ -228,16 +201,29 @@ where
         let execution_outcome =
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
 
-        let static_file_producer =
-            static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
-
         // finally, write the receipts
-        let mut storage_writer = UnifiedStorageWriter::from(&provider, static_file_producer);
+        let mut storage_writer = UnifiedStorageWriter::from(
+            &provider,
+            static_file_provider.latest_writer(StaticFileSegment::Receipts)?,
+        );
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
-    // as static files works in file ranges, internally it will be committing when creating the
-    // next file range already, so we only need to call explicitly at the end.
+    // Only commit if we have imported as many receipts as the number of transactions.
+    let total_imported_txns = static_file_provider
+        .count_entries::<tables::Transactions>()
+        .expect("transaction static files must exist before importing receipts");
+
+    let total_imported_receipts = total_decoded_receipts - total_filtered_out_dup_txns;
+    if total_imported_receipts != total_imported_txns {
+        eyre::bail!("Number of receipts ({total_imported_receipts}) inconsistent with transactions {total_imported_txns}")
+    }
+
+    // Only commit if the receipt block height matches the one from transactions.
+    if highest_block_receipts != highest_block_transactions {
+        eyre::bail!("Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}")
+    }
+
     UnifiedStorageWriter::commit(provider, static_file_provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
@@ -246,7 +232,9 @@ where
 /// Result of importing receipts in chunks.
 #[derive(Debug)]
 pub struct ImportReceiptsResult {
+    #[allow(unused)]
     total_decoded_receipts: usize,
+    #[allow(unused)]
     total_filtered_out_dup_txns: usize,
 }
 
