@@ -1214,7 +1214,7 @@ where
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
-                                    error!("Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
@@ -1224,7 +1224,7 @@ where
                                         Box::new(e),
                                     )
                                 })) {
-                                    error!("Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
@@ -1411,10 +1411,9 @@ where
             debug!(target: "engine::tree", "emitting backfill action event");
         }
 
-        let _ = self
-            .outgoing
-            .send(event)
-            .inspect_err(|err| error!("Failed to send internal event: {err:?}"));
+        let _ = self.outgoing.send(event).inspect_err(
+            |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
+        );
     }
 
     /// Returns true if the canonical chain length minus the last persisted
@@ -1701,6 +1700,7 @@ where
     fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header_with_total_difficulty(block, U256::MAX) {
             error!(
+                target: "engine::tree",
                 ?block,
                 "Failed to validate total difficulty for block {}: {e}",
                 block.header.hash()
@@ -1709,12 +1709,12 @@ where
         }
 
         if let Err(e) = self.consensus.validate_header(block) {
-            error!(?block, "Failed to validate header {}: {e}", block.header.hash());
+            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.header.hash());
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
-            error!(?block, "Failed to validate block {}: {e}", block.header.hash());
+            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.header.hash());
             return Err(e)
         }
 
@@ -2148,7 +2148,7 @@ where
             ))
         })?;
         if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
-            warn!(?block, "Failed to validate header {} against parent: {e}", block.header.hash());
+            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.header.hash());
             return Err(e.into())
         }
 
@@ -2199,7 +2199,7 @@ where
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(AsyncStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                    debug!(target: "engine", %error, "Async state root computation failed consistency check, falling back");
+                    debug!(target: "engine::tree", %error, "Async state root computation failed consistency check, falling back");
                     None
                 }
                 Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
