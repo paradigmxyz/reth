@@ -1,6 +1,6 @@
 use crate::{
     wal::Wal, BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight,
-    StreamBackfillJob,
+    NotificationCommitTarget, StreamBackfillJob,
 };
 use alloy_primitives::{BlockNumber, U256};
 use eyre::OptionExt;
@@ -618,28 +618,29 @@ impl ExExManager {
     ///
     /// Effectivel, it reverts the WAL to the state of the passed provider.
     pub fn canonicalize_wal<P: HeaderProvider>(&mut self, provider: P) -> eyre::Result<()> {
-        let inverted_notifications = self
-            .wal
-            .iter_notifications()?
-            // Start from the end of the WAL
-            .rev()
+        let mut reverse_entries = self.wal.entries()?.rev().peekable();
+
+        let mut file_ids_to_remove = vec![];
+        while let Some(entry) = reverse_entries.next_if(|entry| {
+            entry.as_ref().map_or(true, |(_, entry)| entry.target.is_canonicalize())
+        }) {
+            let (file_id, _) = entry?;
+            file_ids_to_remove.push(file_id);
+        }
+
+        let inverted_notifications = reverse_entries
+            .map(|entry| entry.map(|(_, entry)| entry.notification))
             // Collect notifications until we find a notification with only canonical blocks
-            .map_while(|entry| {
-                let notification = match entry {
+            .map_while(|notification| {
+                let notification = match notification {
                     Ok(notification) => notification,
                     Err(err) => return Some(Err(err)),
                 };
 
-                // Check only the committed chain. If the notification is a revert, it can mean two
-                // things:
-                // - We arrived at a notification emitted by an unwind of the pipeline and we're
-                //   sure this notification is canonical.
-                // - We arrive at a notification that's an inverted notification from a previous run
-                //   of this function. We want to keep going until we find a fully canonical commit
-                //   notification, and we will skip this revert later.
-                let Some(committed_chain) = notification.committed_chain() else {
-                    return Some(Ok(notification))
-                };
+                // Check only the committed chain. If the notification has only reverted chain, it
+                // means that we arrived at a notification emitted by an unwind of the pipeline and
+                // we're sure this notification is canonical.
+                let committed_chain = notification.committed_chain()?;
 
                 // Check that all blocks in the committed chain are canonical, i.e. present in the
                 // database.
@@ -661,18 +662,17 @@ impl ExExManager {
                     Some(Ok(notification))
                 }
             })
-            // Skip all reverted notifications from the end of the WAL. These notifications can be
-            // the inverted notifications from a previous run of this function.
-            .skip_while(|entry| {
-                entry.as_ref().map(|notification| notification.is_chain_reverted()).unwrap_or(false)
-            })
             // Convert notifications into their inverted versions
             .map(|entry| entry.map(ExExNotification::into_inverted))
             .collect::<Vec<_>>();
 
+        for file_id in file_ids_to_remove {
+            self.wal.remove(file_id)?;
+        }
+
         // Commit all inverted notifications
         for notification in inverted_notifications {
-            self.wal.commit(&notification?)?;
+            self.wal.commit(NotificationCommitTarget::Canonicalize, notification?)?;
         }
 
         Ok(())
@@ -1406,7 +1406,7 @@ mod tests {
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
         };
-        wal.commit(&notification)?;
+        wal.commit(NotificationCommitTarget::Commit, notification.clone())?;
 
         let (tx, rx) = watch::channel(None);
         let finalized_header_stream = ForkChoiceStream::new(rx);
@@ -1420,14 +1420,18 @@ mod tests {
 
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager
+                .wal
+                .entries()?
+                .map(|entry| Ok(entry?.1.notification))
+                .collect::<eyre::Result<Vec<_>>>()?,
             [notification]
         );
 
         tx.send(Some(block.header.clone()))?;
 
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
-        assert!(exex_manager.wal.iter_notifications()?.next().is_none());
+        assert!(exex_manager.wal.entries()?.next().is_none());
 
         Ok(())
     }
@@ -1664,12 +1668,15 @@ mod tests {
         .map(|block| block.seal_with_senders().expect("failed to recover sender"))
         .collect::<Vec<_>>();
 
+        // Only blocks 0, 1, 2 are committed to the database
         let provider_rw = provider_factory.provider_rw().unwrap();
         for block in &blocks[..=2] {
             provider_rw.insert_block(block.clone()).unwrap();
         }
         provider_rw.commit().unwrap();
 
+        // Create notifications for the blocks. Note that the blocks 2 and 3 are included in the
+        // same notification, but only 2 is in the database
         let notifications = [
             ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::new(blocks[0..=1].iter().cloned(), Default::default(), None)),
@@ -1681,23 +1688,72 @@ mod tests {
                 new: Arc::new(Chain::new(blocks[4..=4].iter().cloned(), Default::default(), None)),
             },
         ];
-        for notification in &notifications {
-            wal.commit(notification).unwrap();
+
+        // Commit all notifications to the WAL
+        for notification in notifications.clone() {
+            wal.commit(NotificationCommitTarget::Commit, notification).unwrap();
         }
 
+        // Create a new manager and canonicalize the WAL
         let mut manager = ExExManager::new(vec![], 1, wal, empty_finalized_header_stream());
-        manager.canonicalize_wal(provider_factory).unwrap();
+        manager.canonicalize_wal(&provider_factory).unwrap();
 
+        let wal_notifications =
+            manager.wal.entries().unwrap().collect::<eyre::Result<Vec<_>>>().unwrap();
+        // println!(
+        //     "old wal notification block numbers: {:?}",
+        //     wal_notifications
+        //         .iter()
+        //         .map(|notification| notification
+        //             .reverted_chain()
+        //             .map(|chain| chain.blocks_iter().map(|b| b.number).collect::<Vec<_>>()))
+        //         .collect::<Vec<_>>()
+        // );
         assert_eq!(
-            manager.wal.iter_notifications().unwrap().collect::<eyre::Result<Vec<_>>>().unwrap(),
+            wal_notifications
+                .clone()
+                .into_iter()
+                .map(|(_, entry)| entry.notification)
+                .collect::<Vec<_>>(),
             [
                 notifications.to_vec(),
                 vec![
-                    notifications[2].clone().into_inverted(),
-                    notifications[1].clone().into_inverted()
+                    // Commit notification with block 4 should be reverted, because block 4 is not
+                    // in the database
+                    ExExNotification::ChainReverted {
+                        old: Arc::new(Chain::new(
+                            blocks[4..=4].iter().cloned(),
+                            Default::default(),
+                            Default::default()
+                        ))
+                    },
+                    // Commit notification with blocks 2 and 3 should be reverted fully, because
+                    // block 3 is not in the database
+                    ExExNotification::ChainReverted {
+                        old: Arc::new(Chain::new(
+                            blocks[2..=3].iter().cloned(),
+                            Default::default(),
+                            Default::default()
+                        ))
+                    },
                 ]
             ]
             .concat()
         );
+
+        // On a second run, nothing should change because we already have inverted notifications
+        manager.canonicalize_wal(&provider_factory).unwrap();
+        let new_wal_notifications =
+            manager.wal.entries().unwrap().collect::<eyre::Result<Vec<_>>>().unwrap();
+        // println!(
+        //     "new wal notification block numbers: {:?}",
+        //     new_wal_notifications
+        //         .iter()
+        //         .map(|notification| notification
+        //             .reverted_chain()
+        //             .map(|chain| chain.blocks_iter().map(|b| b.number).collect::<Vec<_>>()))
+        //         .collect::<Vec<_>>()
+        // );
+        assert_eq!(new_wal_notifications, wal_notifications);
     }
 }

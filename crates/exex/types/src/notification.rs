@@ -26,10 +26,6 @@ pub enum ExExNotification {
 }
 
 impl ExExNotification {
-    pub fn is_chain_reverted(&self) -> bool {
-        matches!(self, Self::ChainReverted { .. })
-    }
-
     /// Returns the committed chain from the [`Self::ChainCommitted`] and [`Self::ChainReorged`]
     /// variants, if any.
     pub fn committed_chain(&self) -> Option<Arc<Chain>> {

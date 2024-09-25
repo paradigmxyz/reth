@@ -7408,6 +7408,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "secp256k1",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
