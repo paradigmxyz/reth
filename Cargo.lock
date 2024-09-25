@@ -6262,6 +6262,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-transaction-pool",
  "reth-trie",
+ "revm-primitives",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -6639,6 +6640,7 @@ dependencies = [
  "reth-consensus",
  "reth-primitives",
  "reth-storage-api",
+ "revm-primitives",
 ]
 
 [[package]]
@@ -7257,6 +7259,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
+ "revm-primitives",
  "tracing",
 ]
 
@@ -8111,6 +8114,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
+ "revm-primitives",
  "sha2 0.10.8",
  "thiserror",
  "tracing",

@@ -25,13 +25,14 @@ use reth_execution_errors::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, BlockHashOrNumber,
-    BlockWithSenders, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals,
+    proofs, Block, BlockBody, BlockHashOrNumber, BlockWithSenders, Header, Requests, SealedBlock,
+    SealedHeader, TransactionSigned, Withdrawals,
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use reth_trie::HashedPostState;
+use revm_primitives::calc_excess_blob_gas;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -326,11 +327,8 @@ impl StorageInner {
                 _ => (0, 0),
             };
             header.excess_blob_gas = Some(
-                calculate_excess_blob_gas(
-                    parent_excess_blob_gas as u64,
-                    parent_blob_gas_used as u64,
-                )
-                .into(),
+                calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64)
+                    .into(),
             )
         }
 
