@@ -1,12 +1,12 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
+    ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
+};
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::RethResult;
 use reth_payload_primitives::PayloadBuilderError;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
-    ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
-};
 use std::{
     fmt::Display,
     future::Future,

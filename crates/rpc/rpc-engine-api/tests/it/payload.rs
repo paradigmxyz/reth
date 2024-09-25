@@ -2,13 +2,13 @@
 
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
+use alloy_rpc_types_engine::{
+    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
+};
 use assert_matches::assert_matches;
 use reth_primitives::{
     alloy_primitives::Sealable, proofs, Block, SealedBlock, SealedHeader, TransactionSigned,
     Withdrawals,
-};
-use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,

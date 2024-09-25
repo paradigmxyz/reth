@@ -195,7 +195,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_rpc_types::engine::ForkchoiceUpdateError;
+    use alloy_rpc_types_engine::ForkchoiceUpdateError;
 
     #[track_caller]
     fn ensure_engine_rpc_error(

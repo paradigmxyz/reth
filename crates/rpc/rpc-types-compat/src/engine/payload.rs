@@ -2,15 +2,15 @@
 //! Ethereum's Engine
 
 use alloy_primitives::{B256, U256};
+use alloy_rpc_types_engine::{
+    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
+    ExecutionPayload, ExecutionPayloadBodyV2, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
+};
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
     proofs::{self},
     Block, BlockBody, Header, Request, SealedBlock, TransactionSigned, Withdrawals,
-};
-use reth_rpc_types::engine::{
-    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadBodyV2, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
 };
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
@@ -443,9 +443,9 @@ mod tests {
         validate_block_hash,
     };
     use alloy_primitives::{b256, hex, Bytes, U256};
-    use reth_rpc_types::{
-        engine::{CancunPayloadFields, ExecutionPayloadV3, ExecutionPayloadV4},
-        ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,
+    use alloy_rpc_types_engine::{
+        CancunPayloadFields, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,
+        ExecutionPayloadV3, ExecutionPayloadV4,
     };
 
     #[test]
