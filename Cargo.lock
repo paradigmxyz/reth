@@ -494,7 +494,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "alloy-sol-types",
- "arbitrary",
  "cfg-if",
  "derive_more",
  "hashbrown 0.14.5",
@@ -8705,12 +8704,8 @@ dependencies = [
 name = "reth-rpc-types"
 version = "1.0.7"
 dependencies = [
- "alloy-primitives",
- "alloy-rpc-types",
  "alloy-rpc-types-engine",
- "arbitrary",
  "jsonrpsee-types",
- "rand 0.8.5",
 ]
 
 [[package]]
