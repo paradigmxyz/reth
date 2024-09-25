@@ -85,16 +85,34 @@ impl Storage {
         Ok(range.count())
     }
 
+    /// Removes entries from the storage according to the given range.
+    ///
+    /// # Returns
+    ///
+    /// Entries that were removed.
+    pub(super) fn take_notifications(
+        &self,
+        range: RangeInclusive<u64>,
+    ) -> eyre::Result<Vec<WalEntry>> {
+        let entries = self.entries(range).collect::<eyre::Result<Vec<_>>>()?;
+
+        for (id, _) in &entries {
+            self.remove_entry(*id)?;
+        }
+
+        Ok(entries.into_iter().map(|(_, entry)| entry).collect())
+    }
+
     pub(super) fn entries(
         &self,
         range: RangeInclusive<u64>,
     ) -> impl DoubleEndedIterator<Item = eyre::Result<(u64, WalEntry)>> + '_ {
-        range.map(move |id| self.read_entrry(id).map(|entry| (id, entry)))
+        range.map(move |id| self.read_entry(id).map(|entry| (id, entry)))
     }
 
     /// Reads the entry from the file with the given id.
     #[instrument(target = "exex::wal::storage", skip(self))]
-    pub(super) fn read_entrry(&self, file_id: u64) -> eyre::Result<WalEntry> {
+    pub(super) fn read_entry(&self, file_id: u64) -> eyre::Result<WalEntry> {
         let file_path = self.file_path(file_id);
         debug!(?file_path, "Reading entry from WAL");
 
@@ -165,7 +183,7 @@ mod tests {
         // Do a round trip serialization and deserialization
         let file_id = 0;
         storage.write_entry(file_id, entry.clone())?;
-        let deserialized_notification = storage.read_entrry(file_id)?;
+        let deserialized_notification = storage.read_entry(file_id)?;
         assert_eq!(deserialized_notification, entry);
 
         Ok(())
