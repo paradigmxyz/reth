@@ -1,7 +1,6 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{Log, Parity, Sealable};
 use alloy_primitives::{Log, Parity, Sealable, TxKind};
 use once_cell::sync::Lazy;
 use reth_db::tables;

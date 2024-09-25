@@ -5,7 +5,6 @@ use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::TxKind;
 
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
-use alloy_consensus::SignableTransaction;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::Parity;
 use alloy_rlp::{
