@@ -66,6 +66,10 @@ impl Wal {
         Ok(())
     }
 
+    pub fn handle(&self) -> WalHandle {
+        WalHandle { storage: self.storage.clone() }
+    }
+
     /// Commits the notification to WAL.
     #[instrument(target = "exex::wal", skip_all, fields(
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
@@ -232,6 +236,24 @@ impl Wal {
     pub(crate) fn iter_notifications(
         &self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+        let Some(range) = self.storage.files_range()? else {
+            return Ok(Box::new(std::iter::empty()))
+        };
+
+        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WalHandle {
+    storage: Storage,
+}
+
+impl WalHandle {
+    pub fn iter_notifications(
+        &self,
+    ) -> eyre::Result<Box<dyn DoubleEndedIterator<Item = eyre::Result<ExExNotification>> + '_>>
+    {
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };

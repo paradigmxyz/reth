@@ -1,4 +1,4 @@
-use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob};
+use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
 use alloy_primitives::U256;
 use eyre::OptionExt;
 use futures::{Stream, StreamExt};
@@ -9,6 +9,7 @@ use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
     fmt::Debug,
+    iter::Peekable,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -21,6 +22,7 @@ pub struct ExExNotifications<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
+    wal_handle: WalHandle,
 }
 
 impl<P: Debug, E: Debug> Debug for ExExNotifications<P, E> {
@@ -113,6 +115,7 @@ where
             self.provider,
             self.executor,
             self.notifications,
+            self.wal_handle,
             head,
         )
     }
@@ -134,6 +137,8 @@ pub struct ExExNotificationsWithHead<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
+    wal_handle: WalHandle,
+    wal_notifications: Option<Box<dyn Iterator<Item = eyre::Result<ExExNotification>>>>,
     exex_head: ExExHead,
     pending_sync: bool,
     /// The backfill job to run before consuming any notifications.
@@ -149,11 +154,12 @@ where
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
     /// Creates a new [`ExExNotificationsWithHead`].
-    pub const fn new(
+    pub fn new(
         node_head: Head,
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification>,
+        wal_handle: WalHandle,
         exex_head: ExExHead,
     ) -> Self {
         Self {
@@ -161,6 +167,7 @@ where
             provider,
             executor,
             notifications,
+            wal_handle,
             exex_head,
             pending_sync: true,
             backfill_job: None,
@@ -262,6 +269,35 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+
+        if this.pending_sync && this.wal_notifications.is_none() {
+            // TODO: this load notifications in memory, bad. We need to have a lazy iterator here
+            // that iterates over a fixed range of files in the WAL.
+            // TODO: what if the WAL gets finalized while we're iterating over it? Is it even
+            // possible?
+            let mut wal_notifications = this
+                .wal_handle
+                .iter_notifications()?
+                .rev()
+                .take_while(|notification| {
+                    notification
+                        .as_ref()
+                        .ok()
+                        .and_then(|notification| notification.committed_chain())
+                        .map_or(true, |chain| chain.tip().block.hash() != this.exex_head.block.hash)
+                })
+                .collect::<Vec<_>>();
+            wal_notifications.reverse();
+            this.wal_notifications = Some(Box::new(wal_notifications.into_iter().rev()));
+        }
+
+        if let Some(wal_notifications) = this.wal_notifications.as_mut() {
+            if let Some(notification) = wal_notifications.next() {
+                return Poll::Ready(Some(notification));
+            }
+
+            this.wal_notifications = None;
+        }
 
         if this.pending_sync {
             this.synchronize()?;

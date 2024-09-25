@@ -14,7 +14,7 @@ use tracing::instrument;
 ///
 /// Each notification is represented by a single file that contains a MessagePack-encoded
 /// notification.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
@@ -102,7 +102,7 @@ impl Storage {
     pub(super) fn iter_notifications(
         &self,
         range: RangeInclusive<u64>,
-    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
+    ) -> impl DoubleEndedIterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
         range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
     }
 
