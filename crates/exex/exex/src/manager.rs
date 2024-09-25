@@ -610,16 +610,21 @@ impl ExExManager {
 
     /// Canonicalizes the WAL by inserting inverts of notifications that have non-canonical blocks.
     ///
-    /// 1. Iterates over all notifications in the WAL in reverse order.
-    /// 2. Takes notifications until we find a notification with only canonical blocks. This
+    /// 1. Iterate over all notifications in the WAL in reverse order.
+    /// 2. Remove dangling inverted notifications from the previous run of this function.
+    /// 3. Take notifications until we find a notification with only canonical blocks. This
     ///    notification is not included in the result.
-    /// 3. Inverts the notifications using [`ExExNotification::into_inverted`].
-    /// 4. Commits the inverted notifications using [`Wal::commit`].
+    /// 4. Invert the notifications using [`ExExNotification::into_inverted`].
+    /// 5. Commit the inverted notifications using [`Wal::commit`].
     ///
-    /// Effectivel, it reverts the WAL to the state of the passed provider.
+    /// Effectivel, it reverts the WAL to the state of the passed provider, ensuring that the
+    /// WAL height is <= provider height.
     pub fn canonicalize_wal<P: HeaderProvider>(&mut self, provider: P) -> eyre::Result<()> {
         let mut reverse_entries = self.wal.entries()?.rev().peekable();
 
+        // In case the canonicalization was interrupted before, we need to remove all the dangling
+        // inverted notifications. For that, we collect all file IDs that have entries with a target
+        // of `NotificationCommitTarget::Canonicalize`.
         let mut file_ids_to_remove = vec![];
         while let Some(entry) = reverse_entries.next_if(|entry| {
             entry.as_ref().map_or(true, |(_, entry)| entry.target.is_canonicalize())
@@ -628,6 +633,8 @@ impl ExExManager {
             file_ids_to_remove.push(file_id);
         }
 
+        // After that, we can collect all the notifications that have non-canonical blocks, and
+        // invert them.
         let inverted_notifications = reverse_entries
             .map(|entry| entry.map(|(_, entry)| entry.notification))
             // Collect notifications until we find a notification with only canonical blocks
@@ -1700,15 +1707,6 @@ mod tests {
 
         let wal_notifications =
             manager.wal.entries().unwrap().collect::<eyre::Result<Vec<_>>>().unwrap();
-        // println!(
-        //     "old wal notification block numbers: {:?}",
-        //     wal_notifications
-        //         .iter()
-        //         .map(|notification| notification
-        //             .reverted_chain()
-        //             .map(|chain| chain.blocks_iter().map(|b| b.number).collect::<Vec<_>>()))
-        //         .collect::<Vec<_>>()
-        // );
         assert_eq!(
             wal_notifications
                 .clone()
@@ -1745,15 +1743,6 @@ mod tests {
         manager.canonicalize_wal(&provider_factory).unwrap();
         let new_wal_notifications =
             manager.wal.entries().unwrap().collect::<eyre::Result<Vec<_>>>().unwrap();
-        // println!(
-        //     "new wal notification block numbers: {:?}",
-        //     new_wal_notifications
-        //         .iter()
-        //         .map(|notification| notification
-        //             .reverted_chain()
-        //             .map(|chain| chain.blocks_iter().map(|b| b.number).collect::<Vec<_>>()))
-        //         .collect::<Vec<_>>()
-        // );
         assert_eq!(new_wal_notifications, wal_notifications);
     }
 }

@@ -16,7 +16,7 @@ use super::entry::WalEntry;
 /// Each notification is represented by a single file that contains a MessagePack-encoded
 /// notification.
 #[derive(Debug)]
-pub struct Storage {
+pub(super) struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
 }

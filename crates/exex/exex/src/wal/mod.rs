@@ -1,18 +1,23 @@
 #![allow(dead_code)]
 
 mod cache;
-pub(crate) use cache::BlockCache;
+use cache::BlockCache;
+
 mod entry;
 pub(crate) use entry::NotificationCommitTarget;
-mod storage;
 use entry::WalEntry;
-pub(crate) use storage::Storage;
+
+mod storage;
+use storage::Storage;
 
 use std::path::Path;
 
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
+
+/// A double-ended iterator over file IDs and entries in the WAL.
+type EntriesIterator<'a> = Box<dyn DoubleEndedIterator<Item = eyre::Result<(u64, WalEntry)>> + 'a>;
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
 ///
@@ -69,6 +74,7 @@ impl Wal {
         Ok(())
     }
 
+    /// Removes the notification with the given file ID from the WAL.
     #[instrument(target = "exex::wal", skip(self))]
     pub fn remove(&mut self, file_id: u64) -> eyre::Result<()> {
         self.storage.remove_entry(file_id)?;
@@ -171,9 +177,7 @@ impl Wal {
     }
 
     /// Returns an iterator over all file IDs and entries in the WAL.
-    pub(crate) fn entries(
-        &self,
-    ) -> eyre::Result<Box<dyn DoubleEndedIterator<Item = eyre::Result<(u64, WalEntry)>> + '_>> {
+    pub(crate) fn entries(&self) -> eyre::Result<EntriesIterator<'_>> {
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };
@@ -393,8 +397,8 @@ mod tests {
         assert_eq!(
             read_notifications(&wal)?,
             vec![
-                committed_notification_1.clone(),
-                reverted_notification.clone(),
+                committed_notification_1,
+                reverted_notification,
                 committed_notification_2.clone(),
                 reorged_notification.clone()
             ]
