@@ -1,5 +1,5 @@
 [package]
-name = "reth-evm-optimism"
+name = "reth-optimism-evm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

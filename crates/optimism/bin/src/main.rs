@@ -5,8 +5,8 @@
 
 use clap::Parser;
 use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};
-use reth_node_optimism::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
+use reth_optimism_node::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
 

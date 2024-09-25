@@ -40,13 +40,13 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_evm_optimism::OpExecutorProvider;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use reth_node_optimism::OptimismNode;
+use reth_optimism_evm::OpExecutorProvider;
+use reth_optimism_node::OptimismNode;
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
