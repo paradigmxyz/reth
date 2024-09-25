@@ -116,10 +116,47 @@ impl Compact for AlloyHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{bloom, hex};
 
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert_eq!(Header::bitflag_encoded_bytes(), 4);
         assert_eq!(HeaderExt::bitflag_encoded_bytes(), 1);
+    }
+
+    #[test]
+    fn test_backwards_compatibility() {
+        // Holesky block #1947953
+        let holesky_header_bytes = hex!("81a121788605e0c46689f66b3deed82598e43d5002b71a929023b665228728f0c6e62a951dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347c6e2459991bfe27cca6d86722f35da23a1e4cb97edad188ca5647d62f4cca417c11a1afbadebce30d23260767f6f587e9b3b99934daf25dc08a841aa22aa0d3cb3e1f159d4dcaf6a6063d4d36bfac11d3fdb63ee1a1500328e8ade2592bbea1e04f9a9fd8c0142d3175d6e8420984ee159abd0edd0f7f22d6d915be5a3b9c0fee353f14de5ac5c8ac1850b76ce9be70b69dfe37d36410880400480e1090a001c408880800019808000125124002100400048442220020000408040423088300004d0000050803000862485a02020011600a5010404143021800881e8e08c402940404002105004820c440051640000809c000011080002300208510808150101000038002500400040000230000000110442800000800204420100008110080200088c1610c0b80000c6008900000340400200200210010111020000200041a2010804801100030a0284a8463820120a0601480244521002a10201100400801101006002001000008000000ce011011041086418609002000128800008180141002003004c00800040940c00c1180ca0028900401db93101c9c38044094966982980574db0ff0a2243b434ba2a35da8f2f72df08bca44f8733f4908d10dcaebc89f101080306000000aa1d9606b7932f2280a19b3498b9ae9eebc6a83f1afde8e45944f79d353db4c1726574682f76312e302e302f6c696e7578");
+        let (decoded_header, _) =
+            Header::from_compact(&holesky_header_bytes, holesky_header_bytes.len());
+
+        assert_eq!( decoded_header, Header {
+            parent_hash: hex!("8605e0c46689f66b3deed82598e43d5002b71a929023b665228728f0c6e62a95").into(),
+            ommers_hash: hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").into(),
+            beneficiary: hex!("c6e2459991bfe27cca6d86722f35da23a1e4cb97").into(),
+            state_root: hex!("edad188ca5647d62f4cca417c11a1afbadebce30d23260767f6f587e9b3b9993").into(),
+            transactions_root: hex!("4daf25dc08a841aa22aa0d3cb3e1f159d4dcaf6a6063d4d36bfac11d3fdb63ee").into(),
+            receipts_root: hex!("1a1500328e8ade2592bbea1e04f9a9fd8c0142d3175d6e8420984ee159abd0ed").into(),
+            withdrawals_root: Some(hex!("d0f7f22d6d915be5a3b9c0fee353f14de5ac5c8ac1850b76ce9be70b69dfe37d").into()),
+            logs_bloom: bloom!("36410880400480e1090a001c408880800019808000125124002100400048442220020000408040423088300004d0000050803000862485a02020011600a5010404143021800881e8e08c402940404002105004820c440051640000809c000011080002300208510808150101000038002500400040000230000000110442800000800204420100008110080200088c1610c0b80000c6008900000340400200200210010111020000200041a2010804801100030a0284a8463820120a0601480244521002a10201100400801101006002001000008000000ce011011041086418609002000128800008180141002003004c00800040940c00c1180ca002890040"),
+            difficulty: U256::ZERO,
+            number: 0x1db931,
+            gas_limit: 0x1c9c380,
+            gas_used: 0x440949,
+            timestamp: 0x66982980,
+            mix_hash: hex!("574db0ff0a2243b434ba2a35da8f2f72df08bca44f8733f4908d10dcaebc89f1").into(),
+            nonce: 0,
+            base_fee_per_gas: Some(0x8),
+            blob_gas_used: Some(0x60000),
+            excess_blob_gas: Some(0x0),
+            parent_beacon_block_root: Some(hex!("aa1d9606b7932f2280a19b3498b9ae9eebc6a83f1afde8e45944f79d353db4c1").into()),
+            extra_data: hex!("726574682f76312e302e302f6c696e7578").into(),
+            extra_fields: None,
+        });
+
+        let mut encoded_header = Vec::with_capacity(holesky_header_bytes.len());
+        assert_eq!(holesky_header_bytes.len(), decoded_header.to_compact(&mut encoded_header));
+        assert_eq!(encoded_header, holesky_header_bytes);
     }
 }
