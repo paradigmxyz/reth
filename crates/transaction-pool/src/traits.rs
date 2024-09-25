@@ -1392,10 +1392,8 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned, TxEip1559, TxEip2930,
-        TxEip4844, TxEip7702, TxLegacy,
-    };
+    use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+    use reth_primitives::{constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned};
 
     #[test]
     fn test_pool_size_invariants() {

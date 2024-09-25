@@ -7,7 +7,8 @@
 pub fn to_primitive_transaction(
     tx_request: reth_rpc_types::TypedTransactionRequest,
 ) -> Option<reth_primitives::Transaction> {
-    use reth_primitives::{Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+    use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+    use reth_primitives::Transaction;
     use reth_rpc_types::TypedTransactionRequest;
 
     Some(match tx_request {

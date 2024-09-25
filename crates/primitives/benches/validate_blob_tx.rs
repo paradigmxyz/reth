@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+use alloy_consensus::TxEip4844;
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use alloy_primitives::hex;
 use criterion::{
@@ -11,7 +12,7 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
-use reth_primitives::{BlobTransactionSidecar, TxEip4844};
+use reth_primitives::BlobTransactionSidecar;
 use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
 
 // constant seed to use for the rng

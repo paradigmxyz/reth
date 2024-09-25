@@ -471,7 +471,7 @@ mod tests {
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned {
                         transaction: reth_primitives::Transaction::Eip1559(
-                            reth_primitives::TxEip1559 {
+                            alloy_consensus::TxEip1559 {
                                 max_priority_fee_per_gas: random_fee,
                                 max_fee_per_gas: random_fee + base_fee_per_gas,
                                 ..Default::default()
