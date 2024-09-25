@@ -61,7 +61,7 @@ impl ExExHandle {
     /// Create a new handle for the given `ExEx`.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
-    /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
+    /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P, E>(
         id: String,
         node_head: Head,
