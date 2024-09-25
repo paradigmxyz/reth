@@ -4,6 +4,7 @@
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
 use op_alloy_rpc_types_engine::{
@@ -16,7 +17,6 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
-use reth_rpc_types::engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
     convert_block_to_payload_field_v2,

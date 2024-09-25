@@ -1,13 +1,10 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions};
+use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
 use reth_node_api::EngineTypes;
-use reth_node_core::{
-    primitives::B256,
-    rpc::types::{ExecutionPayloadV2, ExecutionPayloadV3},
-};
+use reth_node_core::primitives::B256;
 use reth_rpc_builder::auth::AuthServerHandle;
-use reth_rpc_types::ExecutionPayloadV1;
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::future::Future;
@@ -133,7 +130,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
                     continue;
                 }
             };
-            let state = reth_rpc_types::engine::ForkchoiceState {
+            let state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: block_hash,
                 safe_block_hash,
                 finalized_block_hash,

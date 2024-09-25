@@ -2,9 +2,9 @@
 
 use std::fmt;
 
+use alloy_rpc_types_engine::PayloadError;
 use jsonrpsee_core::RpcResult;
 use reth_primitives::BlockId;
-use reth_rpc_types::engine::PayloadError;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {

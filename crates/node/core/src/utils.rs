@@ -2,6 +2,7 @@
 //! blocks from the network.
 
 use alloy_primitives::Sealable;
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_block_pre_execution;
@@ -11,7 +12,6 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_primitives::{BlockHashOrNumber, SealedBlock, SealedHeader};
-use reth_rpc_types::engine::{JwtError, JwtSecret};
 use std::{
     env::VarError,
     path::{Path, PathBuf},

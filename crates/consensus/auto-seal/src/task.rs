@@ -6,7 +6,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
-use reth_rpc_types::engine::ForkchoiceState;
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};

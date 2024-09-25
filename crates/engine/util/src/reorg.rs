@@ -1,6 +1,9 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_primitives::U256;
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
+};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
@@ -16,10 +19,6 @@ use reth_revm::{
     db::{states::bundle_state::BundleRetention, State},
     state_change::post_block_withdrawals_balance_increments,
     DatabaseCommit,
-};
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState, PayloadStatus},
-    ExecutionPayload,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_trie::HashedPostState;

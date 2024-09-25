@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use crate::EngineApiError;
+use alloy_rpc_types_engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
 use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
-use reth_rpc_types::engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
 
 /// All beacon consensus engine metrics
 #[derive(Default)]
