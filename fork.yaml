@@ -1,0 +1,18 @@
+title: "scroll-reth - reth fork diff overview"
+footer: |
+  Fork-diff overview of [`scroll-reth`](https://github.com/scroll-tech/reth), a fork of [`reth`](https://github.com/paradigmxyz/reth).
+base:
+  name: reth
+  url: https://github.com/paradigmxyz/reth
+  hash: 5d2867f2c5bd2aaa5673f31cf4c13b8f4f1e2c39
+fork:
+  name: scroll-reth
+  url: https://github.com/scroll-tech/reth
+  ref: refs/heads/scroll
+def:
+  title: "scroll-reth"
+  description: |
+    This is an overview of the changes in [`scroll-reth`](https://github.com/scroll-tech/reth),
+    a fork of [`reth`](https://github.com/paradigmxyz/reth).
+  globs:
+    - "*"
