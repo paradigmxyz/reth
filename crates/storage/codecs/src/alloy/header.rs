@@ -38,10 +38,10 @@ pub(crate) struct Header {
 
 /// [`Header`] extension struct.
 ///
-/// All new fields should be added here in the form of a s`Option<T>`, since [`HeaderExt`] itself is
-/// a field of [`Header`] as `Option<HeaderExt`.
+/// All new fields should be added here in the form of a `Option<T>`, since `Option<HeaderExt>` is
+/// used as a field of [`Header`] for backwards compatibility.
 ///
-/// More information: [`reth_codecs_derive::Compact`] or <https://github.com/paradigmxyz/reth/issues/7820>.
+/// More information: <https://github.com/paradigmxyz/reth/issues/7820> & [`reth_codecs_derive::Compact`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
 pub(crate) struct HeaderExt {
     requests_root: Option<B256>,
