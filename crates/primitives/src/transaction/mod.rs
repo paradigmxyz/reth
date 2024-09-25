@@ -1,7 +1,8 @@
 //! Transaction types.
 
-use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
+use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 use alloy_eips::eip7702::SignedAuthorization;
+use alloy_primitives::TxKind;
 
 use alloy_consensus::SignableTransaction;
 use alloy_eips::eip2930::AccessList;
