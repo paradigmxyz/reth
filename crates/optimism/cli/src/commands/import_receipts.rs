@@ -203,6 +203,7 @@ where
         // RLP file may have too many blocks. We ignore the excess, but warn the user.
         if highest_block_receipts > highest_block_transactions {
             let excess = highest_block_receipts - highest_block_transactions;
+            highest_block_receipts -= excess;
 
             // Remove the last `excess` blocks
             receipts.receipt_vec.drain(receipts.len() - excess as usize..);
@@ -210,9 +211,8 @@ where
             warn!(target: "reth::cli", highest_block_transactions, highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
         }
 
-        // Keep track of totals after filtering
+        // Update total_receipts after all filtering
         total_receipts += receipts.iter().map(|v| v.len()).sum::<usize>();
-        highest_block_receipts = first_block + receipts.len() as u64 - 1;
 
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
