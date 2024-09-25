@@ -69,7 +69,6 @@ pub use transaction::{
 };
 
 // Re-exports
-pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
