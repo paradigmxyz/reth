@@ -151,6 +151,7 @@ where
 
     let provider = provider_factory.provider_rw()?;
     let mut total_decoded_receipts = 0;
+    let mut total_receipts = 0;
     let mut total_filtered_out_dup_txns = 0;
     let mut highest_block_receipts = 0;
 
@@ -208,6 +209,7 @@ where
 
             warn!(target: "reth::cli", highest_block_transactions, highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
         }
+        total_receipts += receipts.iter().map(|v| v.len()).sum::<usize>();
 
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
@@ -228,9 +230,8 @@ where
         .count_entries::<tables::Transactions>()
         .expect("transaction static files must exist before importing receipts");
 
-    let total_imported_receipts = total_decoded_receipts - total_filtered_out_dup_txns;
-    if total_imported_receipts != total_imported_txns {
-        eyre::bail!("Number of receipts ({total_imported_receipts}) inconsistent with transactions {total_imported_txns}")
+    if total_receipts != total_imported_txns {
+        eyre::bail!("Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}")
     }
 
     // Only commit if the receipt block height matches the one from transactions.
