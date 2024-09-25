@@ -341,7 +341,7 @@ impl PooledTransactionsElement {
 
     /// Returns the enveloped encoded transactions.
     ///
-    /// See also [`TransactionSigned::encode_enveloped`]
+    /// See also [`alloy_eips::eip2718::Encodable2718::encoded_2718`]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
