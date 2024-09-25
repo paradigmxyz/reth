@@ -212,7 +212,7 @@ mod tests {
 
         // Backfill the first block
         let factory = BackfillJobFactory::new(executor.clone(), blockchain_db.clone());
-        let mut backfill_stream = factory.backfill(1..=1).into_single_blocks().into_stream();
+        let mut backfill_stream = factory.backfill(1..=1).into_single_block().into_stream();
 
         // execute first block
         let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();

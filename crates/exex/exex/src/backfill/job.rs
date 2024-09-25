@@ -54,7 +54,7 @@ where
     P: BlockReader + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
-    pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
+    pub fn into_single_block(self) -> SingleBlockBackfillJob<E, P> {
         self.into()
     }
 
@@ -306,7 +306,7 @@ mod tests {
         // Backfill the first block
         let factory = BackfillJobFactory::new(executor, blockchain_db);
         let job = factory.backfill(1..=1);
-        let single_job = job.into_single_blocks();
+        let single_job = job.into_single_block();
         let block_execution_it = single_job.into_iter();
 
         // Assert that the backfill job only produces a single block
