@@ -80,11 +80,7 @@ where
             // we already know the hash, so we can seal it
             block.seal(attributes.parent())
         };
-        let config = PayloadConfig::new(
-            Arc::new(parent_block),
-            Bytes::default(),
-            attributes,
-        );
+        let config = PayloadConfig::new(Arc::new(parent_block), Bytes::default(), attributes);
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),
             _pool: self.pool.clone(),
