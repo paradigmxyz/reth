@@ -6895,6 +6895,7 @@ name = "reth-e2e-test-utils"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types",

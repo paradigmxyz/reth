@@ -28,7 +28,6 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod eip4844;
-pub mod eip7702;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
