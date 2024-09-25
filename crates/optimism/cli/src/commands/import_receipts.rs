@@ -198,6 +198,7 @@ where
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
         }
+        highest_block_receipts = first_block + receipts.len() as u64 - 1;
 
         // RLP file may have too many blocks. We ignore the excess, but warn the user.
         if highest_block_receipts > highest_block_transactions {
