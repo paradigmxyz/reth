@@ -264,3 +264,9 @@ jobs:
         with:
           webhook-url: ${{ secrets.RETH_ALERTS_WEBHOOK }}
           content: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
