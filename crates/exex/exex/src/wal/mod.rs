@@ -1,14 +1,13 @@
 #![allow(dead_code)]
 
 mod cache;
-use cache::BlockCache;
+pub use cache::*;
 
 mod entry;
-pub(crate) use entry::NotificationCommitTarget;
-use entry::WalEntry;
+pub use entry::*;
 
 mod storage;
-use storage::Storage;
+pub use storage::*;
 
 use std::path::Path;
 
@@ -170,7 +169,7 @@ impl Wal {
         // Remove notifications from the storage.
         let removed_notifications = self
             .storage
-            .take_notifications(remove_from_file_id..=remove_to_file_id)?
+            .take_entries(remove_from_file_id..=remove_to_file_id)?
             .into_iter()
             .map(|entry| entry.notification)
             .collect::<Vec<_>>();

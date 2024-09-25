@@ -14,9 +14,9 @@ use super::entry::WalEntry;
 /// The underlying WAL storage backed by a directory of files.
 ///
 /// Each notification is represented by a single file that contains a MessagePack-encoded
-/// notification.
+/// [`WalEntry`] struct.
 #[derive(Debug)]
-pub(super) struct Storage {
+pub struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
 }
@@ -90,10 +90,7 @@ impl Storage {
     /// # Returns
     ///
     /// Entries that were removed.
-    pub(super) fn take_notifications(
-        &self,
-        range: RangeInclusive<u64>,
-    ) -> eyre::Result<Vec<WalEntry>> {
+    pub(super) fn take_entries(&self, range: RangeInclusive<u64>) -> eyre::Result<Vec<WalEntry>> {
         let entries = self.entries(range).collect::<eyre::Result<Vec<_>>>()?;
 
         for (id, _) in &entries {
@@ -183,8 +180,8 @@ mod tests {
         // Do a round trip serialization and deserialization
         let file_id = 0;
         storage.write_entry(file_id, entry.clone())?;
-        let deserialized_notification = storage.read_entry(file_id)?;
-        assert_eq!(deserialized_notification, entry);
+        let deserialized_entry = storage.read_entry(file_id)?;
+        assert_eq!(deserialized_entry, entry);
 
         Ok(())
     }

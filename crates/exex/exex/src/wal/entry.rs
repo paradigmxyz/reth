@@ -1,8 +1,9 @@
 use reth_exex_types::ExExNotification;
 use serde::{Deserialize, Serialize};
 
+/// A single entry in the WAL.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct WalEntry {
+pub struct WalEntry {
     pub(crate) target: NotificationCommitTarget,
     pub(crate) notification: ExExNotification,
 }
