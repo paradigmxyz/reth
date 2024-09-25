@@ -162,6 +162,11 @@ where
     while let Some(file_client) =
         reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
     {
+        if highest_block_receipts == highest_block_transactions {
+            warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
+            break
+        }
+
         // create a new file client from chunk read from file
         let ReceiptFileClient {
             mut receipts,
@@ -194,6 +199,16 @@ where
             first_block = 1;
         }
         highest_block_receipts = first_block + receipts.len() as u64 - 1;
+
+        // RLP file may have too many blocks. We ignore the excess, but warn the user.
+        if highest_block_receipts > highest_block_transactions {
+            let excess = highest_block_receipts - highest_block_transactions;
+
+            // Remove the last `excess` blocks
+            receipts.receipt_vec.drain(receipts.len() - excess as usize..);
+
+            warn!(target: "reth::cli", highest_block_transactions, highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
+        }
 
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
