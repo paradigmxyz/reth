@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::Header`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-struct Header {
+pub(crate) struct Header {
     parent_hash: B256,
     ommers_hash: B256,
     beneficiary: Address,

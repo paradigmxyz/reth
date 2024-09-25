@@ -45,7 +45,7 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 
 rand.workspace = true
 
