@@ -55,7 +55,7 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
 #[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
-    chain_spec: &reth_chainspec::ChainSpec,
+    chain_spec: impl reth_chainspec::Hardforks,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -63,6 +63,7 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
+
     if chain_spec
         .is_fork_active_at_timestamp(reth_optimism_forks::OptimismHardfork::Regolith, timestamp) &&
         !chain_spec.is_fork_active_at_timestamp(

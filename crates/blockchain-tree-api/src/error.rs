@@ -333,6 +333,9 @@ pub enum InsertBlockErrorKindTwo {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Other errors.
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl InsertBlockErrorKindTwo {
@@ -365,6 +368,7 @@ impl InsertBlockErrorKindTwo {
                 }
             }
             Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
+            Self::Other(err) => Err(InternalBlockExecutionError::Other(err).into()),
         }
     }
 }

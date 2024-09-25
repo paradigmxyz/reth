@@ -6,6 +6,10 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
+};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -34,16 +38,9 @@ use reth_provider::{
     TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_types::{
-    engine::{
-        CancunPayloadFields, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
-        PayloadValidationError,
-    },
-    ExecutionPayload,
-};
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::parallel_root::ParallelStateRoot;
+use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -65,9 +62,11 @@ use tracing::*;
 pub mod config;
 mod invalid_block_hook;
 mod metrics;
+mod persistence_state;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
+pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::InvalidBlockHook;
 
 /// Keeps track of the state of the tree.
@@ -547,6 +546,7 @@ where
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
+
         Self {
             provider,
             executor_provider,
@@ -2191,14 +2191,14 @@ where
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
             state_root_result = match self
-                .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
+                .compute_state_root_async(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(ProviderError::ConsistentView(error)) => {
-                    debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
+                Err(AsyncStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                    debug!(target: "engine", %error, "Async state root computation failed consistency check, falling back");
                     None
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
             };
         }
 
@@ -2261,19 +2261,20 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
-    /// Compute state root for the given hashed post state in parallel.
+    /// Compute state root for the given hashed post state asynchronously.
     ///
     /// # Returns
     ///
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
+
     /// should be used instead.
-    fn compute_state_root_in_parallel(
+    fn compute_state_root_async(
         &self,
         parent_hash: B256,
         hashed_state: &HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2295,7 +2296,7 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        Ok(ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()?)
+        AsyncStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2538,49 +2539,6 @@ pub enum AdvancePersistenceError {
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),
-}
-
-/// The state of the persistence task.
-#[derive(Default, Debug)]
-pub struct PersistenceState {
-    /// Hash and number of the last block persisted.
-    ///
-    /// This tracks the chain height that is persisted on disk
-    last_persisted_block: BlockNumHash,
-    /// Receiver end of channel where the result of the persistence task will be
-    /// sent when done. A None value means there's no persistence task in progress.
-    rx: Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant)>,
-    /// The block above which blocks should be removed from disk, because there has been an on disk
-    /// reorg.
-    remove_above_state: VecDeque<u64>,
-}
-
-impl PersistenceState {
-    /// Determines if there is a persistence task in progress by checking if the
-    /// receiver is set.
-    const fn in_progress(&self) -> bool {
-        self.rx.is_some()
-    }
-
-    /// Sets state for a started persistence task.
-    fn start(&mut self, rx: oneshot::Receiver<Option<BlockNumHash>>) {
-        self.rx = Some((rx, Instant::now()));
-    }
-
-    /// Sets the `remove_above_state`, to the new tip number specified, only if it is less than the
-    /// current `last_persisted_block_number`.
-    fn schedule_removal(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, prev_remove_state=?self.remove_above_state, last_persisted_block=?self.last_persisted_block, "Scheduling removal");
-        self.remove_above_state.push_back(new_tip_num);
-    }
-
-    /// Sets state for a finished persistence task.
-    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
-        trace!(target: "engine::tree", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
-        self.rx = None;
-        self.last_persisted_block =
-            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
-    }
 }
 
 #[cfg(test)]

@@ -245,6 +245,10 @@ mod tests {
                 pub const fn bitflag_encoded_bytes() -> usize {
                     2u8 as usize
                 }
+                #[doc = "Unused bits for new fields by [`TestStructFlags`]"]
+                pub const fn bitflag_unused_bits() -> usize {
+                    1u8 as usize
+                }
             }
 
             pub use TestStruct_flags::TestStructFlags;

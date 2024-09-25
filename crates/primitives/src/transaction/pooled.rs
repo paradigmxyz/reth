@@ -8,11 +8,13 @@ use super::{
 };
 use crate::{
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
-    TxLegacy, B256, EIP4844_TX_TYPE_ID,
+    TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, EIP4844_TX_TYPE_ID,
 };
 use alloc::vec::Vec;
-use alloy_consensus::{SignableTransaction, TxEip4844WithSidecar};
+use alloy_consensus::{
+    transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
+    SignableTransaction, TxEip4844WithSidecar,
+};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};

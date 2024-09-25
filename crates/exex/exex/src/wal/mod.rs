@@ -1,17 +1,17 @@
 #![allow(dead_code)]
 
 mod cache;
+pub use cache::BlockCache;
 mod storage;
+pub use storage::Storage;
 
 use std::path::Path;
 
-use cache::BlockCache;
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
-use storage::Storage;
 
-/// WAL is a write-ahead log (WAL) that stores the notifications sent to a particular ExEx.
+/// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
 ///
 /// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
 /// represented by [`BlockCache`]. The role of the block cache is to avoid walking the WAL directory
@@ -26,7 +26,7 @@ use storage::Storage;
 /// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
 #[derive(Debug)]
-pub(crate) struct Wal {
+pub struct Wal {
     /// The underlying WAL storage backed by a file.
     storage: Storage,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
@@ -35,7 +35,7 @@ pub(crate) struct Wal {
 
 impl Wal {
     /// Creates a new instance of [`Wal`].
-    pub(crate) fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+    pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self { storage: Storage::new(directory)?, block_cache: BlockCache::new() };
         wal.fill_block_cache()?;
         Ok(wal)
@@ -71,8 +71,7 @@ impl Wal {
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
-    pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
-        debug!("Writing notification to WAL");
+    pub fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
         let file_id = self.block_cache.back().map_or(0, |block| block.0 + 1);
         self.storage.write_notification(file_id, notification)?;
 
@@ -94,7 +93,7 @@ impl Wal {
     /// 1. The block number and hash of the lowest removed block.
     /// 2. The notifications that were removed.
     #[instrument(target = "exex::wal", skip(self))]
-    pub(crate) fn rollback(
+    pub fn rollback(
         &mut self,
         to_block: BlockNumHash,
     ) -> eyre::Result<Option<(BlockNumHash, Vec<ExExNotification>)>> {
@@ -162,9 +161,9 @@ impl Wal {
     /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
     ///    notification includes both finalized and non-finalized blocks, it will not be removed.
     #[instrument(target = "exex::wal", skip(self))]
-    pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
+    pub fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the file ID of the notification with the finalized block and
-        // save the file ID with the last unfinalized block. Do not remove any notifications
+        // save the file ID with the first unfinalized block. Do not remove any notifications
         // yet.
         let mut unfinalized_from_file_id = None;
         {
@@ -177,7 +176,9 @@ impl Wal {
                 {
                     let notification = self.storage.read_notification(file_id)?;
                     if notification.committed_chain().unwrap().blocks().len() == 1 {
-                        unfinalized_from_file_id = block_cache.peek().map(|(file_id, _)| *file_id);
+                        unfinalized_from_file_id = Some(
+                            block_cache.peek().map(|(file_id, _)| *file_id).unwrap_or(u64::MAX),
+                        );
                     } else {
                         unfinalized_from_file_id = Some(file_id);
                     }
@@ -225,6 +226,17 @@ impl Wal {
         }
 
         Ok(())
+    }
+
+    /// Returns an iterator over all notifications in the WAL.
+    pub(crate) fn iter_notifications(
+        &self,
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+        let Some(range) = self.storage.files_range()? else {
+            return Ok(Box::new(std::iter::empty()))
+        };
+
+        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
 }
 

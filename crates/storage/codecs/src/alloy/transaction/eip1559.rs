@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// By deriving `Compact` here, any future changes or enhancements to the `Compact` derive
 /// will automatically apply to this type.
 ///
-/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::transaction::TxEip1559`]
+/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip1559`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(test, crate::add_arbitrary_tests(compact))]

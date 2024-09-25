@@ -14,7 +14,7 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
@@ -80,7 +80,7 @@ where
     Provider: BlockReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + 'static,
     Eth: TraceExt + 'static,
 {
@@ -559,7 +559,7 @@ where
     Provider: BlockReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + 'static,
     Eth: TraceExt + 'static,
 {

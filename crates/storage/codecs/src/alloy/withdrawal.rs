@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct Withdrawal {
+pub(crate) struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     index: u64,
     /// Index of validator associated with withdrawal.

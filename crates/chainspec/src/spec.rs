@@ -616,6 +616,10 @@ impl Hardforks for ChainSpec {
 }
 
 impl EthereumHardforks for ChainSpec {
+    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.get_final_paris_total_difficulty()
+    }
+
     fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
         self.final_paris_total_difficulty(block_number)
     }

@@ -39,7 +39,7 @@ use reth_node_metrics::{
 };
 use reth_primitives::Head;
 use reth_provider::{
-    providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
+    providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
     ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
     TreeViewer,
@@ -483,7 +483,7 @@ where
 
 impl<T> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, ProviderFactory<T>>>
 where
-    T: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    T: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &T::DB {
@@ -523,7 +523,7 @@ where
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
-                ChainSpecInfo { name: self.left().config.chain.chain.to_string() },
+                ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
                 self.task_executor().clone(),
                 Hooks::new(self.database().clone(), self.static_file_provider()),
             );
@@ -621,7 +621,7 @@ impl<T>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
     >
 where
-    T: FullNodeTypes<Types: NodeTypesWithDB<ChainSpec = ChainSpec>, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
@@ -746,7 +746,10 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<Provider: WithTree, Types: NodeTypes<ChainSpec = ChainSpec>>,
+    T: FullNodeTypes<
+        Provider: WithTree,
+        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks>,
+    >,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.

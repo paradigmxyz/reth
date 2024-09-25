@@ -2,7 +2,7 @@
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, B256, U256};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::tables;
@@ -71,10 +71,7 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
-    PF: DatabaseProviderFactory
-        + StaticFileProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + BlockHashReader,
+    PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
     PF::ProviderRW: StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
@@ -294,13 +291,14 @@ where
 }
 
 /// Inserts header for the genesis state.
-pub fn insert_genesis_header<Provider>(
+pub fn insert_genesis_header<Provider, Spec>(
     provider: &Provider,
     static_file_provider: &StaticFileProvider,
-    chain: &ChainSpec,
+    chain: &Spec,
 ) -> ProviderResult<()>
 where
     Provider: DBProvider<Tx: DbTxMut>,
+    Spec: EthChainSpec,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
 

@@ -15,7 +15,7 @@ use tracing::instrument;
 /// Each notification is represented by a single file that contains a MessagePack-encoded
 /// notification.
 #[derive(Debug)]
-pub(super) struct Storage {
+pub struct Storage {
     /// The path to the WAL file.
     path: PathBuf,
 }
@@ -107,23 +107,25 @@ impl Storage {
     }
 
     /// Reads the notification from the file with the given id.
+    #[instrument(target = "exex::wal::storage", skip(self))]
     pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<ExExNotification> {
-        debug!(?file_id, "Reading notification from WAL");
-
         let file_path = self.file_path(file_id);
+        debug!(?file_path, "Reading notification from WAL");
+
         let mut file = File::open(&file_path)?;
         read_notification(&mut file)
     }
 
     /// Writes the notification to the file with the given id.
+    #[instrument(target = "exex::wal::storage", skip(self, notification))]
     pub(super) fn write_notification(
         &self,
         file_id: u64,
         notification: &ExExNotification,
     ) -> eyre::Result<()> {
-        debug!(?file_id, "Writing notification to WAL");
-
         let file_path = self.file_path(file_id);
+        debug!(?file_path, "Writing notification to WAL");
+
         let mut file = File::create_new(&file_path)?;
         write_notification(&mut file, notification)?;
 

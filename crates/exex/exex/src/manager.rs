@@ -1,15 +1,11 @@
-use crate::{
-    BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight, StreamBackfillJob,
-};
-use alloy_primitives::{BlockNumber, U256};
-use eyre::OptionExt;
-use futures::{Stream, StreamExt};
+use crate::{wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight};
+use alloy_primitives::BlockNumber;
+use futures::StreamExt;
 use metrics::Gauge;
+use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
-use reth_evm::execute::BlockExecutorProvider;
-use reth_exex_types::ExExHead;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
+use reth_primitives::SealedHeader;
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
@@ -23,7 +19,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{
-    mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
+    mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
     watch,
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
@@ -65,7 +61,7 @@ impl ExExHandle {
     /// Create a new handle for the given `ExEx`.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
-    /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
+    /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P, E>(
         id: String,
         node_head: Head,
@@ -74,8 +70,7 @@ impl ExExHandle {
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let notifications =
-            ExExNotifications { node_head, provider, executor, notifications: notification_rx };
+        let notifications = ExExNotifications::new(node_head, provider, executor, notification_rx);
 
         (
             Self {
@@ -153,328 +148,6 @@ impl ExExHandle {
     }
 }
 
-/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
-pub struct ExExNotifications<P, E> {
-    node_head: Head,
-    provider: P,
-    executor: E,
-    notifications: Receiver<ExExNotification>,
-}
-
-impl<P: Debug, E: Debug> Debug for ExExNotifications<P, E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExExNotifications")
-            .field("provider", &self.provider)
-            .field("executor", &self.executor)
-            .field("notifications", &self.notifications)
-            .finish()
-    }
-}
-
-impl<P, E> ExExNotifications<P, E> {
-    /// Creates a new instance of [`ExExNotifications`].
-    pub const fn new(
-        node_head: Head,
-        provider: P,
-        executor: E,
-        notifications: Receiver<ExExNotification>,
-    ) -> Self {
-        Self { node_head, provider, executor, notifications }
-    }
-
-    /// Receives the next value for this receiver.
-    ///
-    /// This method returns `None` if the channel has been closed and there are
-    /// no remaining messages in the channel's buffer. This indicates that no
-    /// further values can ever be received from this `Receiver`. The channel is
-    /// closed when all senders have been dropped, or when [`Receiver::close`] is called.
-    ///
-    /// # Cancel safety
-    ///
-    /// This method is cancel safe. If `recv` is used as the event in a
-    /// [`tokio::select!`] statement and some other branch
-    /// completes first, it is guaranteed that no messages were received on this
-    /// channel.
-    ///
-    /// For full documentation, see [`Receiver::recv`].
-    #[deprecated(note = "use `ExExNotifications::next` and its `Stream` implementation instead")]
-    pub async fn recv(&mut self) -> Option<ExExNotification> {
-        self.notifications.recv().await
-    }
-
-    /// Polls to receive the next message on this channel.
-    ///
-    /// This method returns:
-    ///
-    ///  * `Poll::Pending` if no messages are available but the channel is not closed, or if a
-    ///    spurious failure happens.
-    ///  * `Poll::Ready(Some(message))` if a message is available.
-    ///  * `Poll::Ready(None)` if the channel has been closed and all messages sent before it was
-    ///    closed have been received.
-    ///
-    /// When the method returns `Poll::Pending`, the `Waker` in the provided
-    /// `Context` is scheduled to receive a wakeup when a message is sent on any
-    /// receiver, or when the channel is closed.  Note that on multiple calls to
-    /// `poll_recv` or `poll_recv_many`, only the `Waker` from the `Context`
-    /// passed to the most recent call is scheduled to receive a wakeup.
-    ///
-    /// If this method returns `Poll::Pending` due to a spurious failure, then
-    /// the `Waker` will be notified when the situation causing the spurious
-    /// failure has been resolved. Note that receiving such a wakeup does not
-    /// guarantee that the next call will succeed — it could fail with another
-    /// spurious failure.
-    ///
-    /// For full documentation, see [`Receiver::poll_recv`].
-    #[deprecated(
-        note = "use `ExExNotifications::poll_next` and its `Stream` implementation instead"
-    )]
-    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<ExExNotification>> {
-        self.notifications.poll_recv(cx)
-    }
-}
-
-impl<P, E> ExExNotifications<P, E>
-where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
-{
-    /// Subscribe to notifications with the given head.
-    ///
-    /// Notifications will be sent starting from the head, not inclusive. For example, if
-    /// `head.number == 10`, then the first notification will be with `block.number == 11`.
-    pub fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
-        ExExNotificationsWithHead::new(
-            self.node_head,
-            self.provider,
-            self.executor,
-            self.notifications,
-            head,
-        )
-    }
-}
-
-impl<P: Unpin, E: Unpin> Stream for ExExNotifications<P, E> {
-    type Item = ExExNotification;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().notifications.poll_recv(cx)
-    }
-}
-
-/// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
-/// committed or reverted after the given head.
-#[derive(Debug)]
-pub struct ExExNotificationsWithHead<P, E> {
-    node_head: Head,
-    provider: P,
-    executor: E,
-    notifications: Receiver<ExExNotification>,
-    exex_head: ExExHead,
-    pending_sync: bool,
-    /// The backfill job to run before consuming any notifications.
-    backfill_job: Option<StreamBackfillJob<E, P, Chain>>,
-    /// Whether we're currently waiting for the node head to catch up to the same height as the
-    /// ExEx head.
-    node_head_catchup_in_progress: bool,
-}
-
-impl<P, E> ExExNotificationsWithHead<P, E>
-where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
-{
-    /// Creates a new [`ExExNotificationsWithHead`].
-    pub const fn new(
-        node_head: Head,
-        provider: P,
-        executor: E,
-        notifications: Receiver<ExExNotification>,
-        exex_head: ExExHead,
-    ) -> Self {
-        Self {
-            node_head,
-            provider,
-            executor,
-            notifications,
-            exex_head,
-            pending_sync: true,
-            backfill_job: None,
-            node_head_catchup_in_progress: false,
-        }
-    }
-
-    /// Compares the node head against the ExEx head, and synchronizes them in case of a mismatch.
-    ///
-    /// Possible situations are:
-    /// - ExEx is behind the node head (`node_head.number < exex_head.number`).
-    ///   - ExEx is on the canonical chain (`exex_head.hash` is found in the node database).
-    ///     Backfill from the node database.
-    ///   - ExEx is not on the canonical chain (`exex_head.hash` is not found in the node database).
-    ///     Unwind the ExEx to the first block matching between the ExEx and the node, and then
-    ///     bacfkill from the node database.
-    /// - ExEx is at the same block number (`node_head.number == exex_head.number`).
-    ///   - ExEx is on the canonical chain (`exex_head.hash` is found in the node database). Nothing
-    ///     to do.
-    ///   - ExEx is not on the canonical chain (`exex_head.hash` is not found in the node database).
-    ///     Unwind the ExEx to the first block matching between the ExEx and the node, and then
-    ///     backfill from the node database.
-    /// - ExEx is ahead of the node head (`node_head.number > exex_head.number`). Wait until the
-    ///   node head catches up to the ExEx head, and then repeat the synchronization process.
-    fn synchronize(&mut self) -> eyre::Result<()> {
-        debug!(target: "exex::manager", "Synchronizing ExEx head");
-
-        let backfill_job_factory =
-            BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
-        match self.exex_head.block.number.cmp(&self.node_head.number) {
-            std::cmp::Ordering::Less => {
-                // ExEx is behind the node head
-
-                if let Some(exex_header) = self.provider.header(&self.exex_head.block.hash)? {
-                    // ExEx is on the canonical chain
-                    debug!(target: "exex::manager", "ExEx is behind the node head and on the canonical chain");
-
-                    if exex_header.number != self.exex_head.block.number {
-                        eyre::bail!("ExEx head number does not match the hash")
-                    }
-
-                    // ExEx is on the canonical chain, start backfill
-                    let backfill = backfill_job_factory
-                        .backfill(self.exex_head.block.number + 1..=self.node_head.number)
-                        .into_stream();
-                    self.backfill_job = Some(backfill);
-                } else {
-                    debug!(target: "exex::manager", "ExEx is behind the node head and not on the canonical chain");
-                    // ExEx is not on the canonical chain, first unwind it and then backfill
-
-                    // TODO(alexey): unwind and backfill
-                    self.backfill_job = None;
-                }
-            }
-            #[allow(clippy::branches_sharing_code)]
-            std::cmp::Ordering::Equal => {
-                // ExEx is at the same block height as the node head
-
-                if let Some(exex_header) = self.provider.header(&self.exex_head.block.hash)? {
-                    // ExEx is on the canonical chain
-                    debug!(target: "exex::manager", "ExEx is at the same block height as the node head and on the canonical chain");
-
-                    if exex_header.number != self.exex_head.block.number {
-                        eyre::bail!("ExEx head number does not match the hash")
-                    }
-
-                    // ExEx is on the canonical chain and the same as the node head, no need to
-                    // backfill
-                    self.backfill_job = None;
-                } else {
-                    // ExEx is not on the canonical chain, first unwind it and then backfill
-                    debug!(target: "exex::manager", "ExEx is at the same block height as the node head but not on the canonical chain");
-
-                    // TODO(alexey): unwind and backfill
-                    self.backfill_job = None;
-                }
-            }
-            std::cmp::Ordering::Greater => {
-                debug!(target: "exex::manager", "ExEx is ahead of the node head");
-
-                // ExEx is ahead of the node head
-
-                // TODO(alexey): wait until the node head is at the same height as the ExEx head
-                // and then repeat the process above
-                self.node_head_catchup_in_progress = true;
-            }
-        };
-
-        Ok(())
-    }
-}
-
-impl<P, E> Stream for ExExNotificationsWithHead<P, E>
-where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
-{
-    type Item = eyre::Result<ExExNotification>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        if this.pending_sync {
-            this.synchronize()?;
-            this.pending_sync = false;
-        }
-
-        if let Some(backfill_job) = &mut this.backfill_job {
-            if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)) {
-                return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
-                    new: Arc::new(chain?),
-                })))
-            }
-
-            // Backfill job is done, remove it
-            this.backfill_job = None;
-        }
-
-        loop {
-            let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
-                return Poll::Ready(None)
-            };
-
-            // 1. Either committed or reverted chain from the notification.
-            // 2. Block number of the tip of the canonical chain:
-            //   - For committed chain, it's the tip block number.
-            //   - For reverted chain, it's the block number preceding the first block in the chain.
-            let (chain, tip) = notification
-                .committed_chain()
-                .map(|chain| (chain.clone(), chain.tip().number))
-                .or_else(|| {
-                    notification
-                        .reverted_chain()
-                        .map(|chain| (chain.clone(), chain.first().number - 1))
-                })
-                .unzip();
-
-            if this.node_head_catchup_in_progress {
-                // If we are waiting for the node head to catch up to the same height as the ExEx
-                // head, then we need to check if the ExEx is on the canonical chain.
-
-                // Query the chain from the new notification for the ExEx head block number.
-                let exex_head_block = chain
-                    .as_ref()
-                    .and_then(|chain| chain.blocks().get(&this.exex_head.block.number));
-
-                // Compare the hash of the block from the new notification to the ExEx head
-                // hash.
-                if let Some((block, tip)) = exex_head_block.zip(tip) {
-                    if block.hash() == this.exex_head.block.hash {
-                        // ExEx is on the canonical chain, proceed with the notification
-                        this.node_head_catchup_in_progress = false;
-                    } else {
-                        // ExEx is not on the canonical chain, synchronize
-                        let tip =
-                            this.provider.sealed_header(tip)?.ok_or_eyre("node head not found")?;
-                        this.node_head = Head::new(
-                            tip.number,
-                            tip.hash(),
-                            tip.difficulty,
-                            U256::MAX,
-                            tip.timestamp,
-                        );
-                        this.synchronize()?;
-                    }
-                }
-            }
-
-            if notification
-                .committed_chain()
-                .or_else(|| notification.reverted_chain())
-                .map_or(false, |chain| chain.first().number > this.exex_head.block.number)
-            {
-                return Poll::Ready(Some(Ok(notification)))
-            }
-        }
-    }
-}
-
 /// Metrics for the `ExEx` manager.
 #[derive(Metrics)]
 #[metrics(scope = "exex_manager")]
@@ -530,6 +203,11 @@ pub struct ExExManager {
     /// The finished height of all `ExEx`'s.
     finished_height: watch::Sender<FinishedExExHeight>,
 
+    /// Write-Ahead Log for the [`ExExNotification`]s.
+    wal: Wal,
+    /// A stream of finalized headers.
+    finalized_header_stream: ForkChoiceStream<SealedHeader>,
+
     /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle,
     /// Metrics for the `ExEx` manager.
@@ -544,7 +222,12 @@ impl ExExManager {
     ///
     /// When the capacity is exceeded (which can happen if an `ExEx` is slow) no one can send
     /// notifications over [`ExExManagerHandle`]s until there is capacity again.
-    pub fn new(handles: Vec<ExExHandle>, max_capacity: usize) -> Self {
+    pub fn new(
+        handles: Vec<ExExHandle>,
+        max_capacity: usize,
+        wal: Wal,
+        finalized_header_stream: ForkChoiceStream<SealedHeader>,
+    ) -> Self {
         let num_exexs = handles.len();
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
@@ -574,6 +257,9 @@ impl ExExManager {
 
             is_ready: is_ready_tx,
             finished_height: finished_height_tx,
+
+            wal,
+            finalized_header_stream,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
@@ -618,6 +304,16 @@ impl Future for ExExManager {
     type Output = eyre::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Drain the finalized header stream and grab the last finalized header
+        let mut last_finalized_header = None;
+        while let Poll::Ready(finalized_header) = self.finalized_header_stream.poll_next_unpin(cx) {
+            last_finalized_header = finalized_header;
+        }
+        // If there is a finalized header, finalize the WAL with it
+        if let Some(header) = last_finalized_header {
+            self.wal.finalize((header.number, header.hash()).into())?;
+        }
+
         // drain handle notifications
         while self.buffer.len() < self.max_capacity {
             if let Poll::Ready(Some(notification)) = self.handle_rx.poll_recv(cx) {
@@ -810,15 +506,18 @@ impl Clone for ExExManagerHandle {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use eyre::OptionExt;
     use futures::StreamExt;
-    use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{Block, BlockNumHash, Header, SealedBlockWithSenders};
-    use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain,
-    };
-    use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_primitives::SealedBlockWithSenders;
+    use reth_provider::Chain;
+    use reth_testing_utils::generators::{self, random_block};
+
+    fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
+        let (tx, rx) = watch::channel(None);
+        // Do not drop the sender, otherwise the receiver will always return an error
+        std::mem::forget(tx);
+        ForkChoiceStream::new(rx)
+    }
 
     #[tokio::test]
     async fn test_delivers_events() {
@@ -833,30 +532,66 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_exexs() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let (exex_handle_1, _, _) =
             ExExHandle::new("test_exex_1".to_string(), Head::default(), (), ());
 
-        assert!(!ExExManager::new(vec![], 0).handle.has_exexs());
+        assert!(!ExExManager::new(
+            vec![],
+            0,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream()
+        )
+        .handle
+        .has_exexs());
 
-        assert!(ExExManager::new(vec![exex_handle_1], 0).handle.has_exexs());
+        assert!(ExExManager::new(
+            vec![exex_handle_1],
+            0,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream()
+        )
+        .handle
+        .has_exexs());
     }
 
     #[tokio::test]
     async fn test_has_capacity() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let (exex_handle_1, _, _) =
             ExExHandle::new("test_exex_1".to_string(), Head::default(), (), ());
 
-        assert!(!ExExManager::new(vec![], 0).handle.has_capacity());
+        assert!(!ExExManager::new(
+            vec![],
+            0,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream()
+        )
+        .handle
+        .has_capacity());
 
-        assert!(ExExManager::new(vec![exex_handle_1], 10).handle.has_capacity());
+        assert!(ExExManager::new(
+            vec![exex_handle_1],
+            10,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream()
+        )
+        .handle
+        .has_capacity());
     }
 
     #[test]
     fn test_push_notification() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), Head::default(), (), ());
 
         // Create a mock ExExManager and add the exex_handle to it
-        let mut exex_manager = ExExManager::new(vec![exex_handle], 10);
+        let mut exex_manager = ExExManager::new(
+            vec![exex_handle],
+            10,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream(),
+        );
 
         // Define the notification for testing
         let mut block1 = SealedBlockWithSenders::default();
@@ -898,11 +633,17 @@ mod tests {
 
     #[test]
     fn test_update_capacity() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), Head::default(), (), ());
 
         // Create a mock ExExManager and add the exex_handle to it
         let max_capacity = 5;
-        let mut exex_manager = ExExManager::new(vec![exex_handle], max_capacity);
+        let mut exex_manager = ExExManager::new(
+            vec![exex_handle],
+            max_capacity,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream(),
+        );
 
         // Push some notifications to fill part of the buffer
         let mut block1 = SealedBlockWithSenders::default();
@@ -932,6 +673,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let (exex_handle, event_tx, mut _notification_rx) =
             ExExHandle::new("test_exex".to_string(), Head::default(), (), ());
 
@@ -942,7 +684,12 @@ mod tests {
         event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
 
         // Create a mock ExExManager and add the exex_handle to it
-        let exex_manager = ExExManager::new(vec![exex_handle], 10);
+        let exex_manager = ExExManager::new(
+            vec![exex_handle],
+            10,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream(),
+        );
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -969,6 +716,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height_lower() {
+        let temp_dir = tempfile::tempdir().unwrap();
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) =
             ExExHandle::new("test_exex1".to_string(), Head::default(), (), ());
@@ -979,7 +727,12 @@ mod tests {
         event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
         event_tx2.send(ExExEvent::FinishedHeight(10)).unwrap();
 
-        let exex_manager = ExExManager::new(vec![exex_handle1, exex_handle2], 10);
+        let exex_manager = ExExManager::new(
+            vec![exex_handle1, exex_handle2],
+            10,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream(),
+        );
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -1002,6 +755,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height_greater() {
+        let temp_dir = tempfile::tempdir().unwrap();
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) =
             ExExHandle::new("test_exex1".to_string(), Head::default(), (), ());
@@ -1015,7 +769,12 @@ mod tests {
         event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
         event_tx2.send(ExExEvent::FinishedHeight(100)).unwrap();
 
-        let exex_manager = ExExManager::new(vec![exex_handle1, exex_handle2], 10);
+        let exex_manager = ExExManager::new(
+            vec![exex_handle1, exex_handle2],
+            10,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream(),
+        );
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -1042,12 +801,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_exex_manager_capacity() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let (exex_handle_1, _, _) =
             ExExHandle::new("test_exex_1".to_string(), Head::default(), (), ());
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
-        let mut exex_manager = ExExManager::new(vec![exex_handle_1], max_capacity);
+        let mut exex_manager = ExExManager::new(
+            vec![exex_handle_1],
+            max_capacity,
+            Wal::new(temp_dir.path()).unwrap(),
+            empty_finalized_header_stream(),
+        );
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -1224,217 +989,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exex_notifications_behind_head_canonical() -> eyre::Result<()> {
-        let mut rng = generators::rng();
+    async fn test_exex_wal_finalize() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
 
-        let provider_factory = create_test_provider_factory();
-        let genesis_hash = init_genesis(&provider_factory)?;
-        let genesis_block = provider_factory
-            .block(genesis_hash.into())?
-            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-
-        let provider = BlockchainProvider2::new(provider_factory.clone())?;
-
-        let node_head_block = random_block(
-            &mut rng,
-            genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
-        );
-        let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.insert_block(
-            node_head_block.clone().seal_with_senders().ok_or_eyre("failed to recover senders")?,
-        )?;
-        provider_rw.commit()?;
-
-        let node_head = Head {
-            number: node_head_block.number,
-            hash: node_head_block.hash(),
-            ..Default::default()
-        };
-        let exex_head =
-            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
-
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut wal = Wal::new(temp_dir.path()).unwrap();
+        let block = random_block(&mut generators::rng(), 0, Default::default())
+            .seal_with_senders()
+            .ok_or_eyre("failed to recover senders")?;
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![random_block(
-                    &mut rng,
-                    node_head.number + 1,
-                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
-                )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
-                Default::default(),
-                None,
-            )),
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
         };
+        wal.commit(&notification)?;
 
-        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+        let (tx, rx) = watch::channel(None);
+        let finalized_header_stream = ForkChoiceStream::new(rx);
 
-        notifications_tx.send(notification.clone()).await?;
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), Head::default(), (), ());
 
-        let mut notifications = ExExNotifications::new(
-            node_head,
-            provider,
-            EthExecutorProvider::mainnet(),
-            notifications_rx,
-        )
-        .with_head(exex_head);
+        let mut exex_manager =
+            std::pin::pin!(ExExManager::new(vec![exex_handle], 1, wal, finalized_header_stream));
 
-        // First notification is the backfill of missing blocks from the canonical chain
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         assert_eq!(
-            notifications.next().await.transpose()?,
-            Some(ExExNotification::ChainCommitted {
-                new: Arc::new(
-                    BackfillJobFactory::new(
-                        notifications.executor.clone(),
-                        notifications.provider.clone()
-                    )
-                    .backfill(1..=1)
-                    .next()
-                    .ok_or_eyre("failed to backfill")??
-                )
-            })
+            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            [notification]
         );
 
-        // Second notification is the actual notification that we sent before
-        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+        tx.send(Some(block.header.clone()))?;
 
-        Ok(())
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn exex_notifications_behind_head_non_canonical() -> eyre::Result<()> {
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
-        let provider_factory = create_test_provider_factory();
-        let genesis_hash = init_genesis(&provider_factory)?;
-        let genesis_block = provider_factory
-            .block(genesis_hash.into())?
-            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-
-        let provider = BlockchainProvider2::new(provider_factory)?;
-
-        let node_head =
-            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
-        let exex_head =
-            ExExHead { block: BlockNumHash { number: node_head.number, hash: node_head.hash } };
-
-        let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![Block {
-                    header: Header {
-                        parent_hash: node_head.hash,
-                        number: node_head.number + 1,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-                .seal_slow()
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
-                Default::default(),
-                None,
-            )),
-        };
-
-        let (notifications_tx, notifications_rx) = mpsc::channel(1);
-
-        notifications_tx.send(notification.clone()).await?;
-
-        let mut notifications = ExExNotifications::new(
-            node_head,
-            provider,
-            EthExecutorProvider::mainnet(),
-            notifications_rx,
-        )
-        .with_head(exex_head);
-
-        let new_notification = notifications.next().await.transpose()?;
-        assert_eq!(new_notification, Some(notification));
-
-        Ok(())
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn exex_notifications_same_head_non_canonical() -> eyre::Result<()> {
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_notifications_ahead_of_head() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-
-        let provider_factory = create_test_provider_factory();
-        let genesis_hash = init_genesis(&provider_factory)?;
-        let genesis_block = provider_factory
-            .block(genesis_hash.into())?
-            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-
-        let provider = BlockchainProvider2::new(provider_factory)?;
-
-        let exex_head_block = random_block(
-            &mut rng,
-            genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
-        );
-
-        let node_head =
-            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
-        let exex_head = ExExHead {
-            block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
-        };
-
-        let (notifications_tx, notifications_rx) = mpsc::channel(1);
-
-        notifications_tx
-            .send(ExExNotification::ChainCommitted {
-                new: Arc::new(Chain::new(
-                    vec![exex_head_block
-                        .clone()
-                        .seal_with_senders()
-                        .ok_or_eyre("failed to recover senders")?],
-                    Default::default(),
-                    None,
-                )),
-            })
-            .await?;
-
-        let mut notifications = ExExNotifications::new(
-            node_head,
-            provider,
-            EthExecutorProvider::mainnet(),
-            notifications_rx,
-        )
-        .with_head(exex_head);
-
-        // First notification is skipped because the node is catching up with the ExEx
-        let new_notification = poll_fn(|cx| Poll::Ready(notifications.poll_next_unpin(cx))).await;
-        assert!(new_notification.is_pending());
-
-        // Imitate the node catching up with the ExEx by sending a notification for the missing
-        // block
-        let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![random_block(
-                    &mut rng,
-                    exex_head_block.number + 1,
-                    BlockParams { parent: Some(exex_head_block.hash()), ..Default::default() },
-                )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
-                Default::default(),
-                None,
-            )),
-        };
-        notifications_tx.send(notification.clone()).await?;
-
-        // Second notification is received because the node caught up with the ExEx
-        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        assert!(exex_manager.wal.iter_notifications()?.next().is_none());
 
         Ok(())
     }

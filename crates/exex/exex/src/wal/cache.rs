@@ -12,7 +12,7 @@ use reth_primitives::BlockNumHash;
 /// This cache is needed to avoid walking the WAL directory every time we want to find a
 /// notification corresponding to a block.
 #[derive(Debug)]
-pub(super) struct BlockCache(BTreeMap<u64, VecDeque<CachedBlock>>);
+pub struct BlockCache(BTreeMap<u64, VecDeque<CachedBlock>>);
 
 impl BlockCache {
     /// Creates a new instance of [`BlockCache`].

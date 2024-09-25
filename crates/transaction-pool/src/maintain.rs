@@ -17,8 +17,8 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    alloy_primitives::Sealable, BlockNumberOrTag, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    alloy_primitives::Sealable, BlockNumberOrTag, PooledTransactionsElementEcRecovered,
+    SealedHeader, TransactionSigned,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;

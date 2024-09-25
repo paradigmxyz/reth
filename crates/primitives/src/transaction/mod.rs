@@ -1,11 +1,11 @@
 //! Transaction types.
 
-use crate::{
-    eip7702::SignedAuthorization, keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind,
-    B256, U256,
-};
+use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
+use alloy_eips::eip7702::SignedAuthorization;
+use alloy_primitives::TxKind;
 
-use alloy_consensus::SignableTransaction;
+use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+use alloy_eips::eip2930::AccessList;
 use alloy_primitives::Parity;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -17,10 +17,6 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
-
-pub use access_list::{AccessList, AccessListItem, AccessListResult};
-
-pub use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
@@ -1636,15 +1632,6 @@ impl Decodable for TransactionSignedEcRecovered {
             .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
         Ok(Self { signer, signed_transaction })
     }
-}
-
-/// Ensures the transaction can be sent over the
-/// network
-pub trait IntoRecoveredTransaction {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
-    ///
-    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
 }
 
 /// Generic wrapper with encoded Bytes, such as transaction data.

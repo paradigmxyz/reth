@@ -58,8 +58,6 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     config: BasicPayloadJobGeneratorConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
-    /// The chain spec.
-    chain_spec: Arc<ChainSpec>,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -78,7 +76,6 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
-        chain_spec: Arc<ChainSpec>,
         builder: Builder,
     ) -> Self {
         Self {
@@ -87,7 +84,6 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             executor,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
-            chain_spec,
             builder,
             pre_cached: None,
         }
@@ -163,12 +159,8 @@ where
             block.seal(attributes.parent())
         };
 
-        let config = PayloadConfig::new(
-            Arc::new(parent_block),
-            self.config.extradata.clone(),
-            attributes,
-            Arc::clone(&self.chain_spec),
-        );
+        let config =
+            PayloadConfig::new(Arc::new(parent_block), self.config.extradata.clone(), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -676,8 +668,6 @@ pub struct PayloadConfig<Attributes> {
     pub extra_data: Bytes,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
-    /// The chain spec.
-    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl<Attributes> PayloadConfig<Attributes> {
@@ -696,9 +686,8 @@ where
         parent_block: Arc<SealedBlock>,
         extra_data: Bytes,
         attributes: Attributes,
-        chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        Self { parent_block, extra_data, attributes, chain_spec }
+        Self { parent_block, extra_data, attributes }
     }
 
     /// Returns the payload id.

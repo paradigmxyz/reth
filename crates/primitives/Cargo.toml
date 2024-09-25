@@ -31,7 +31,6 @@ alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
-alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 
 # optimism
@@ -70,6 +69,7 @@ revm-primitives = { workspace = true, features = ["arbitrary"] }
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
 alloy-eips = { workspace = true, features = ["arbitrary"] }
+alloy-genesis.workspace = true
 
 assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }

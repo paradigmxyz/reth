@@ -3,7 +3,9 @@
 use std::{fmt, fmt::Debug};
 
 use futures::future;
-use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
+use reth_chain_state::ForkChoiceSubscriptions;
+use reth_chainspec::EthChainSpec;
+use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
@@ -35,12 +37,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     ///
     /// Spawns all extensions and returns the handle to the exex manager if any extensions are
     /// installed.
-    pub async fn launch(self) -> Option<ExExManagerHandle> {
+    pub async fn launch(self) -> eyre::Result<Option<ExExManagerHandle>> {
         let Self { head, extensions, components, config_container } = self;
 
         if extensions.is_empty() {
             // nothing to launch
-            return None
+            return Ok(None)
         }
 
         let mut exex_handles = Vec::with_capacity(extensions.len());
@@ -94,7 +96,20 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");
         // todo(onbjerg): rm magic number
-        let exex_manager = ExExManager::new(exex_handles, 1024);
+        let exex_wal = Wal::new(
+            config_container
+                .config
+                .datadir
+                .clone()
+                .resolve_datadir(config_container.config.chain.chain())
+                .exex_wal(),
+        )?;
+        let exex_manager = ExExManager::new(
+            exex_handles,
+            1024,
+            exex_wal,
+            components.provider().finalized_block_stream(),
+        );
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
@@ -117,7 +132,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
 
         info!(target: "reth::cli", "ExEx Manager started");
 
-        Some(exex_manager_handle)
+        Ok(Some(exex_manager_handle))
     }
 }
 
