@@ -497,8 +497,9 @@ pub fn random_request<R: Rng>(rng: &mut R) -> Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip2930::AccessList;
     use alloy_primitives::Parity;
-    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
+    use reth_primitives::{hex, public_key_to_address, Signature, TxEip1559};
     use std::str::FromStr;
 
     #[test]
