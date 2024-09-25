@@ -100,10 +100,13 @@ where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
-    /// Subscribe to notifications with the given head.
+    /// Subscribe to notifications with the given head. This head is the ExEx's
+    /// latest view of the host chain.
     ///
-    /// Notifications will be sent starting from the head, not inclusive. For example, if
-    /// `head.number == 10`, then the first notification will be with `block.number == 11`.
+    /// Notifications will be sent starting from the head, not inclusive. For
+    /// example, if `head.number == 10`, then the first notification will be
+    /// with `block.number == 11`. A `head.number` of 10 indicates that the ExEx
+    /// has processed up to block 10, and is ready to process block 11.
     pub fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
         ExExNotificationsWithHead::new(
             self.node_head,
