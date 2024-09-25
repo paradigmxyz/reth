@@ -40,21 +40,21 @@ std::thread_local! {
 
 /// Fn creates tx [`Compressor`]
 pub fn create_tx_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
-            .expect("Failed to instantiate tx compressor")
+    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate tx compressor")
 }
 
 /// Fn creates tx [`Decompressor`]
 pub fn create_tx_decompressor() -> ReusableDecompressor {
     ReusableDecompressor::new(
         Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
-        .expect("Failed to instantiate tx decompressor")
+            .expect("Failed to instantiate tx decompressor"),
     )
 }
 
 /// Fn creates receipt [`Compressor`]
 pub fn create_receipt_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate receipt compressor")
+    Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+        .expect("Failed to instantiate receipt compressor")
 }
 
 /// Fn creates receipt [`Decompressor`]
