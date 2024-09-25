@@ -50,7 +50,7 @@ pub(crate) struct HeaderExt {
 impl HeaderExt {
     /// Converts into [`Some`] if any of the field exists. Otherwise, returns [`None`].
     ///
-    /// Required since [`Header`] takes this field as `Option<HeaderExt>`.
+    /// Required since [`Header`] uses `Option<HeaderExt>` as a field.
     const fn into_option(self) -> Option<Self> {
         if self.requests_root.is_some() {
             Some(self)
