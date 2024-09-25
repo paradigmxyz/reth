@@ -70,6 +70,7 @@ reth-chainspec.workspace = true
 reth-codecs.workspace = true
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
+alloy-primitives = { workspace = true, features = ["map"] }
 
 assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }

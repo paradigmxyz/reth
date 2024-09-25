@@ -107,11 +107,10 @@ mod tests {
     use super::*;
     use crate::{constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, U256};
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, Address};
+    use alloy_primitives::{b256, map::HashMap, Address};
     use alloy_rlp::Decodable;
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
-    use std::collections::HashMap;
 
     #[cfg(not(feature = "optimism"))]
     use crate::TxType;
