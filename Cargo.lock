@@ -8735,7 +8735,6 @@ dependencies = [
 name = "reth-rpc-types-compat"
 version = "1.0.7"
 dependencies = [
- "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
