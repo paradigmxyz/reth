@@ -829,7 +829,7 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
     /// The chain spec type.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec + 'static;
 
     /// Get an [`Arc`] to the [`ChainSpec`].
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;

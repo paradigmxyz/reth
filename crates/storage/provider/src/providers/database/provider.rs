@@ -151,7 +151,9 @@ impl<TX, Spec> StaticFileProviderFactory for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: Send + Sync, Spec: EthChainSpec> ChainSpecProvider for DatabaseProvider<TX, Spec> {
+impl<TX: Send + Sync, Spec: EthChainSpec + 'static> ChainSpecProvider
+    for DatabaseProvider<TX, Spec>
+{
     type ChainSpec = Spec;
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {

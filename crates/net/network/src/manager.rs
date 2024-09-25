@@ -291,7 +291,7 @@ impl NetworkManager {
     /// ```
     /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
     /// use reth_network_peers::mainnet_nodes;
-    /// use reth_provider::test_utils::NoopProvider;
+    /// use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
     /// use reth_transaction_pool::TransactionPool;
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
@@ -300,8 +300,9 @@ impl NetworkManager {
     ///     // The key that's used for encrypting sessions and to identify our node.
     ///     let local_key = rng_secret_key();
     ///
-    ///     let config =
-    ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let config = NetworkConfig::builder(local_key)
+    ///         .boot_nodes(mainnet_nodes())
+    ///         .build(client.clone(), client.chain_spec());
     ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
