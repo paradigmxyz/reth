@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_node_api::EthApiTypes;
-use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered};
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
