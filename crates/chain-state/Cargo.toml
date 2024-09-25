@@ -42,6 +42,7 @@ pin-project.workspace = true
 # optional deps for test-utils
 alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }
+alloy-consensus = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 revm = { workspace = true, optional = true }
 
@@ -56,6 +57,7 @@ revm.workspace = true
 test-utils = [
   "alloy-signer",
   "alloy-signer-local",
+  "alloy-consensus",
   "rand",
   "revm"
 ]
