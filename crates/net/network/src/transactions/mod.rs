@@ -48,7 +48,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{IntoRecoveredTransaction, PooledTransactionsElement, TransactionSigned};
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1396,11 +1396,12 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: IntoRecoveredTransaction + PoolTransaction>(
+    fn new<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
         tx: Arc<ValidPoolTransaction<T>>,
     ) -> Self {
         let size = tx.encoded_length();
-        let recovered = tx.transaction.to_recovered_transaction();
+        let recovered: TransactionSignedEcRecovered =
+            tx.transaction.clone().into_consensus().into();
         let transaction = Arc::new(recovered.into_signed());
         Self { size, transaction }
     }

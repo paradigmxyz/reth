@@ -16,7 +16,7 @@ use reth::{
     args::utils::DefaultChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
-    primitives::{Address, IntoRecoveredTransaction},
+    primitives::{Address, ToRecoveredTransaction},
     rpc::{
         compat::transaction::transaction_to_call_request,
         types::trace::{parity::TraceType, tracerequest::TraceCallRequest},

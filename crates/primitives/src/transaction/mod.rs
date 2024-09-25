@@ -1610,7 +1610,7 @@ impl Decodable for TransactionSignedEcRecovered {
 
 /// Ensures the transaction can be sent over the
 /// network
-pub trait IntoRecoveredTransaction {
+pub trait ToRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.

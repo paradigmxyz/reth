@@ -14,9 +14,9 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList,
-    BlobTransactionSidecar, BlobTransactionValidationError, IntoRecoveredTransaction,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionSignedEcRecovered, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -927,10 +927,9 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 /// Super trait for transactions that can be converted to and from Eth transactions
 pub trait EthPoolTransaction:
     PoolTransaction<
-        Consensus: From<TransactionSignedEcRecovered> + Into<TransactionSignedEcRecovered>,
-        Pooled: From<PooledTransactionsElementEcRecovered>
-                    + Into<PooledTransactionsElementEcRecovered>,
-    > + IntoRecoveredTransaction
+    Consensus: From<TransactionSignedEcRecovered> + Into<TransactionSignedEcRecovered>,
+    Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
+>
 {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
@@ -970,12 +969,6 @@ pub struct EthPooledTransaction {
 
     /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
-}
-
-impl IntoRecoveredTransaction for EthPooledTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone()
-    }
 }
 
 /// Represents the blob sidecar of the [`EthPooledTransaction`].

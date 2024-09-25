@@ -16,7 +16,7 @@ use rand::{
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     transaction::TryFromRecoveredTransactionError,
-    AccessList, BlobTransactionSidecar, BlobTransactionValidationError, IntoRecoveredTransaction,
+    AccessList, BlobTransactionSidecar, BlobTransactionValidationError,
     PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -768,12 +768,6 @@ impl EthPoolTransaction for MockTransaction {
 
     fn authorization_count(&self) -> usize {
         0
-    }
-}
-
-impl IntoRecoveredTransaction for MockTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.clone().into()
     }
 }
 
