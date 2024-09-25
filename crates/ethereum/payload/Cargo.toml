@@ -30,6 +30,7 @@ reth-chainspec.workspace = true
 
 # ethereum
 revm.workspace = true
+revm-primitives.workspace = true
 
 # alloy
 alloy-primitives.workspace = true

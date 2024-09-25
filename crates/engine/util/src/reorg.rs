@@ -9,9 +9,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResu
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{system_calls::apply_beacon_root_contract_call, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, Header, Receipt, Receipts,
-};
+use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -25,7 +23,9 @@ use reth_rpc_types::{
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_trie::HashedPostState;
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg};
+use revm_primitives::{
+    calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
+};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -371,7 +371,7 @@ where
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
             (
                 Some(sum_blob_gas_used),
-                Some(calculate_excess_blob_gas(
+                Some(calc_excess_blob_gas(
                     reorg_target_parent.excess_blob_gas.unwrap_or_default() as u64,
                     reorg_target_parent.blob_gas_used.unwrap_or_default() as u64,
                 )),
