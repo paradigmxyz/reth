@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{BlockNumber, U256};
 use eyre::OptionExt;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryFutureExt};
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
@@ -145,6 +145,21 @@ impl Canonicalization {
         );
 
         Ok(Self { notifications, sender })
+    }
+}
+
+impl Future for Canonicalization {
+    type Output = eyre::Result<()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        for notification in &mut this.notifications {
+            ready!(this.sender.poll_reserve(cx)?);
+            this.sender.send_item(notification?)?;
+        }
+
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -803,14 +818,10 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
                 }
             }
 
-            if let Some(canonicalization_notifications) = exex.canonicalization.as_mut() {
-                for notification in &mut canonicalization_notifications.notifications {
-                    // TODO(alexey): the iterator above should be
-                    // saved so we can continue sending inverted notifications.
-                    if canonicalization_notifications.sender.poll_reserve(cx)?.is_ready() {
-                        canonicalization_notifications.sender.send_item(notification?)?;
-                    }
-                }
+            if let Some(canonicalization) = exex.canonicalization.as_mut() {
+                if canonicalization.try_poll_unpin(cx)?.is_ready() {
+                    exex.canonicalization = None;
+                };
             }
         }
 
