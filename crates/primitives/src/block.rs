@@ -576,17 +576,8 @@ pub struct BlockBody {
 
 impl BlockBody {
     /// Create a [`Block`] from the body and its header.
-    // todo(onbjerg): should this not just take `self`? its used in one place
-    pub fn create_block(&self, header: Header) -> Block {
-        Block {
-            header,
-            body: Self {
-                transactions: self.transactions.clone(),
-                ommers: self.ommers.clone(),
-                withdrawals: self.withdrawals.clone(),
-                requests: self.requests.clone(),
-            },
-        }
+    pub const fn into_block(self, header: Header) -> Block {
+        Block { header, body: self }
     }
 
     /// Calculate the transaction root for the block body.
