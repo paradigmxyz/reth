@@ -62,13 +62,25 @@ pub struct ExExHandle {
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
-    canonicalization: Option<Canonicalization>,
-    actions: UnboundedReceiver<ExExAction>,
     /// The [WAL](`Wal`) instance for this `ExEx`.
-    wal: Wal,
+    canonicalization: CanonicalizationState,
+    actions: UnboundedReceiver<ExExAction>,
+}
+
+#[derive(Debug)]
+enum CanonicalizationState {
+    Idle(Option<Wal>),
+    InProgress(Option<Canonicalization>),
+}
+
+impl CanonicalizationState {
+    const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle(_))
+    }
 }
 
 struct Canonicalization {
+    wal: Wal,
     notifications: Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + Send + Sync>,
     sender: PollSender<ExExNotification>,
 }
@@ -86,11 +98,11 @@ impl Canonicalization {
     fn new<P: HeaderProvider + 'static>(
         provider: P,
         exex_head: BlockNumHash,
-        wal_handle: WalHandle,
+        wal: Wal,
         sender: PollSender<ExExNotification>,
     ) -> eyre::Result<Self> {
         let notifications = Box::new(
-            wal_handle
+            wal.handle()
                 .into_iter_notifications()?
                 .rev()
                 .skip_while(move |entry| {
@@ -144,7 +156,7 @@ impl Canonicalization {
                 }),
         );
 
-        Ok(Self { notifications, sender })
+        Ok(Self { wal, notifications, sender })
     }
 }
 
@@ -155,8 +167,11 @@ impl Future for Canonicalization {
         let this = self.get_mut();
 
         for notification in &mut this.notifications {
+            let notification = notification?;
+
             ready!(this.sender.poll_reserve(cx)?);
-            this.sender.send_item(notification?)?;
+            this.wal.commit(&notification)?;
+            this.sender.send_item(notification)?;
         }
 
         Poll::Ready(Ok(()))
@@ -194,9 +209,8 @@ impl ExExHandle {
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
-                canonicalization: None,
+                canonicalization: CanonicalizationState::Idle(Some(wal)),
                 actions: manager_action_rx,
-                wal,
             },
             event_tx,
             notifications,
@@ -266,7 +280,10 @@ impl ExExHandle {
 
     /// Finalizes the [WAL](`Wal`) with the given finalized header.
     fn finalize(&mut self, finalized_header: &SealedHeader) -> eyre::Result<()> {
-        self.wal.finalize((finalized_header.number, finalized_header.hash()).into())
+        let CanonicalizationState::Idle(Some(wal)) = &mut self.canonicalization else {
+            return Ok(())
+        };
+        wal.finalize((finalized_header.number, finalized_header.hash()).into())
     }
 }
 
@@ -803,24 +820,33 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
             while let Poll::Ready(Some(action)) = exex.actions.poll_recv(cx) {
                 match action {
                     ExExAction::Canonicalize(head, canonicalization_tx) => {
-                        if exex.canonicalization.is_some() {
-                            debug!(exex_id = %exex.id, "Canonicalization already in progress");
-                            continue
+                        match &mut exex.canonicalization {
+                            CanonicalizationState::Idle(wal) => {
+                                exex.canonicalization =
+                                    CanonicalizationState::InProgress(Some(Canonicalization::new(
+                                        this.provider.clone(),
+                                        head,
+                                        wal.take().unwrap(),
+                                        canonicalization_tx,
+                                    )?));
+                            }
+                            _ => {
+                                debug!(exex_id = %exex.id, "Canonicalization already in progress");
+                                continue
+                            }
                         }
-
-                        exex.canonicalization = Some(Canonicalization::new(
-                            this.provider.clone(),
-                            head,
-                            exex.wal.handle(),
-                            canonicalization_tx,
-                        )?);
                     }
                 }
             }
 
-            if let Some(canonicalization) = exex.canonicalization.as_mut() {
-                if canonicalization.try_poll_unpin(cx)?.is_ready() {
-                    exex.canonicalization = None;
+            if let CanonicalizationState::InProgress(canonicalization) = &mut exex.canonicalization
+            {
+                if canonicalization.as_mut().map_or_else(
+                    || eyre::Ok(false),
+                    |canonicalization| Ok(canonicalization.try_poll_unpin(cx)?.is_ready()),
+                )? {
+                    exex.canonicalization =
+                        CanonicalizationState::Idle(Some(canonicalization.take().unwrap().wal));
                 };
             }
         }
@@ -847,7 +873,7 @@ impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
         for idx in (0..this.exex_handles.len()).rev() {
             let mut exex = this.exex_handles.swap_remove(idx);
 
-            if exex.canonicalization.is_none() {
+            if exex.canonicalization.is_idle() {
                 // it is a logic error for this to ever underflow since the manager manages the
                 // notification IDs
                 let notification_index = exex

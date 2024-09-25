@@ -245,6 +245,7 @@ impl Wal {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct WalHandle {
     storage: Storage,
 }
