@@ -198,7 +198,6 @@ where
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
         }
-        highest_block_receipts = first_block + receipts.len() as u64 - 1;
 
         // RLP file may have too many blocks. We ignore the excess, but warn the user.
         if highest_block_receipts > highest_block_transactions {
@@ -209,7 +208,10 @@ where
 
             warn!(target: "reth::cli", highest_block_transactions, highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
         }
+
+        // Keep track of totals after filtering
         total_receipts += receipts.iter().map(|v| v.len()).sum::<usize>();
+        highest_block_receipts = first_block + receipts.len() as u64 - 1;
 
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
