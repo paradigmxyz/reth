@@ -134,19 +134,18 @@ where
     if let Some(num_receipts) =
         static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts)
     {
-        eyre::bail!("Expected no receipts in storage, but found {num_receipts}.");
-    } else {
-        match static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts) {
-            Some(receipts_block) => {
-                if receipts_block > 0 {
-                    eyre::bail!(
-                        "Expected highest receipt block to be 0, but found {receipts_block}."
-                    );
-                }
+        if num_receipts > 0 {
+            eyre::bail!("Expected no receipts in storage, but found {num_receipts}.");
+        }
+    }
+    match static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts) {
+        Some(receipts_block) => {
+            if receipts_block > 0 {
+                eyre::bail!("Expected highest receipt block to be 0, but found {receipts_block}.");
             }
-            None => {
-                eyre::bail!("Receipts was not initialized. Please import blocks and transactions before calling this command.");
-            }
+        }
+        None => {
+            eyre::bail!("Receipts was not initialized. Please import blocks and transactions before calling this command.");
         }
     }
 
