@@ -256,6 +256,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 }
             }
 
+            info!(target: "reth::cli", block_number, "Comparing incremental storage trie vs clean storage trie");
+
             // Storage trie
             let mut first_mismatched_storage = None;
             let mut incremental_storage_trie_iter = incremental_storage_trie.into_iter().peekable();
@@ -284,15 +286,21 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 }
             }
 
+            let incremental_mismatched = (
+                incremental_account_mismatched,
+                first_mismatched_storage.as_ref().map(|(incremental, _)| incremental),
+            );
+
+            let clean_mismatched = (
+                clean_account_mismatched,
+                first_mismatched_storage.as_ref().map(|(_, clean)| clean),
+            );
+
+            println!("Incremental mismatched: {incremental_mismatched:#?}");
+            println!("Clean mismatched: {clean_mismatched:#?}");
             similar_asserts::assert_eq!(
-                (
-                    incremental_account_mismatched,
-                    first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)
-                ),
-                (
-                    clean_account_mismatched,
-                    first_mismatched_storage.as_ref().map(|(_, clean)| clean)
-                ),
+                incremental_mismatched,
+                clean_mismatched,
                 "Mismatched trie nodes"
             );
         }
