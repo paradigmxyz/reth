@@ -16,7 +16,7 @@ mod tests {
         alloy::{
             authorization_list::Authorization,
             genesis_account::{GenesisAccount, GenesisAccountRef, StorageEntries, StorageEntry},
-            header::Header,
+            header::{Header, HeaderExt},
             transaction::{
                 eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
                 legacy::TxLegacy,
@@ -33,6 +33,7 @@ mod tests {
         // [`validate_bitflag_backwards_compat`] macro for detailed instructions on handling
         // it.
         validate_bitflag_backwards_compat!(Header, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(HeaderExt, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(TxEip2930, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntries, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntry, UnusedBits::Zero);

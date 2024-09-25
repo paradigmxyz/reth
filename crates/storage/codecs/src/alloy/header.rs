@@ -41,7 +41,7 @@ pub(crate) struct Header {
 /// All new fields should be added here in the form of a s`Option<T>`, since [`HeaderExt`] itself is
 /// a field of [`Header`] as `Option<HeaderExt`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-struct HeaderExt {
+pub(crate) struct HeaderExt {
     requests_root: Option<B256>,
 }
 
