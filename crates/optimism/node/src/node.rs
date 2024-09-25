@@ -278,7 +278,6 @@ impl OptimismPayloadBuilder {
             pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            ctx.chain_spec(),
             payload_builder,
         );
         let (payload_service, payload_builder) =

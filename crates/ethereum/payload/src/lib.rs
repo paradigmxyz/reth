@@ -15,6 +15,7 @@ use reth_basic_payload_builder::{
     PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
+use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
@@ -36,7 +37,7 @@ use reth_primitives::{
     Block, BlockBody, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt,
     EMPTY_OMMER_ROOT_HASH,
 };
-use reth_provider::StateProviderFactory;
+use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
@@ -88,7 +89,7 @@ where
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
 {
     type Attributes = EthPayloadBuilderAttributes;
@@ -137,22 +138,22 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
+    let chain_spec = client.chain_spec();
     let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
+    let PayloadConfig { parent_block, extra_data, attributes } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
-    let block_gas_limit: u64 =
-        initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
+    let block_gas_limit: u64 = initialized_block_env.gas_limit.to::<u64>();
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();

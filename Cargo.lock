@@ -7244,6 +7244,7 @@ dependencies = [
  "alloy-primitives",
  "reth-basic-payload-builder",
  "reth-chain-state",
+ "reth-chainspec",
  "reth-errors",
  "reth-evm",
  "reth-evm-ethereum",

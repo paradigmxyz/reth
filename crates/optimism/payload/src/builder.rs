@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, ChainSpecProvider, EthereumHardforks};
 use reth_evm::{
     system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
     NextBlockEnvAttributes,
@@ -93,7 +93,7 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -164,16 +164,17 @@ pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
+    let chain_spec = client.chain_spec();
     let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let PayloadConfig { parent_block, attributes, chain_spec, extra_data } = config;
+    let PayloadConfig { parent_block, attributes, extra_data } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
