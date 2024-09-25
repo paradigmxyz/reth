@@ -24,3 +24,5 @@ revm-primitives.workspace = true
 reth-storage-api.workspace = true
 rand.workspace = true
 mockall = "0.12"
+
+alloy-consensus.workspace = true

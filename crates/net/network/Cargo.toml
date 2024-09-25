@@ -87,6 +87,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
 alloy-provider= { workspace = true, features = ["admin-api"] }
+alloy-consensus.workspace = true
 
 # misc
 serial_test.workspace = true

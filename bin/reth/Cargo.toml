@@ -68,6 +68,7 @@ reth-prune.workspace = true
 # crypto
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-consensus.workspace = true
 
 # tracing
 tracing.workspace = true

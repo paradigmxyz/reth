@@ -472,6 +472,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxLegacy;
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -481,7 +482,7 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        public_key_to_address, Account, Block, BlockBody, Transaction, TxLegacy,
+        public_key_to_address, Account, Block, BlockBody, Transaction,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,

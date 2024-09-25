@@ -112,11 +112,12 @@ mod tests {
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
         HeadersDirection,
     };
+    use alloy_consensus::TxLegacy;
     use alloy_primitives::{hex, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
         alloy_primitives::Parity, BlockHashOrNumber, Header, Signature, Transaction,
-        TransactionSigned, TxLegacy,
+        TransactionSigned,
     };
     use std::str::FromStr;
 

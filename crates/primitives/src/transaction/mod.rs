@@ -4,7 +4,7 @@ use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::TxKind;
 
-use alloy_consensus::SignableTransaction;
+use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::Parity;
 use alloy_rlp::{
@@ -17,8 +17,6 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
-
-pub use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
