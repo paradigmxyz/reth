@@ -208,7 +208,7 @@ where
             // Remove the last `excess` blocks
             receipts.receipt_vec.truncate(receipts.len() - excess as usize);
 
-            warn!(target: "reth::cli", highest_block_transactions, highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
+            warn!(target: "reth::cli", highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
         }
 
         // Update total_receipts after all filtering
