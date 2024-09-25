@@ -20,8 +20,8 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, BlockBody, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
-    SealedHeader, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
+    TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,

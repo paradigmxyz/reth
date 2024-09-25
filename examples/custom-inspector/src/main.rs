@@ -18,7 +18,7 @@ use reth::{
     args::utils::DefaultChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
-    primitives::{BlockNumberOrTag, IntoRecoveredTransaction},
+    primitives::BlockNumberOrTag,
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},
