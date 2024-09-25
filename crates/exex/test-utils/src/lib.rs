@@ -55,7 +55,7 @@ use std::{
     task::Poll,
 };
 use thiserror::Error;
-use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+use tokio::sync::mpsc::{unbounded_channel, Sender, UnboundedReceiver};
 
 /// A test [`PoolBuilder`] that builds a [`TestPool`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -310,6 +310,7 @@ pub async fn test_exex_context_with_chain_spec(
         components.provider.clone(),
         components.components.executor.clone(),
         notifications_rx,
+        unbounded_channel().0,
     );
 
     let ctx = ExExContext {
