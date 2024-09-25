@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
@@ -32,8 +33,8 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    Block, BlockBody, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt,
+    EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -390,7 +391,10 @@ where
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+            Some(calculate_excess_blob_gas(
+                parent_excess_blob_gas as u64,
+                parent_blob_gas_used as u64,
+            ))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
@@ -411,21 +415,24 @@ where
         logs_bloom,
         timestamp: attributes.timestamp,
         mix_hash: attributes.prev_randao,
-        nonce: BEACON_NONCE,
-        base_fee_per_gas: Some(base_fee),
+        nonce: BEACON_NONCE.into(),
+        base_fee_per_gas: Some(base_fee.into()),
         number: parent_block.number + 1,
-        gas_limit: block_gas_limit,
+        gas_limit: block_gas_limit.into(),
         difficulty: U256::ZERO,
-        gas_used: cumulative_gas_used,
+        gas_used: cumulative_gas_used.into(),
         extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
-        blob_gas_used,
-        excess_blob_gas,
+        blob_gas_used: blob_gas_used.map(Into::into),
+        excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_root,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
+    let block = Block {
+        header,
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests },
+    };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

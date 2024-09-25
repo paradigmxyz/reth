@@ -14,7 +14,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 /// Generic trait over a set of ordered hardforks
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Hardforks: Default + Clone {
+pub trait Hardforks: Clone {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition;

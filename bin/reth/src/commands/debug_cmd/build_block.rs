@@ -1,5 +1,6 @@
 //! Command for debugging block building.
 use alloy_rlp::Decodable;
+use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
@@ -31,7 +32,6 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
-use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,

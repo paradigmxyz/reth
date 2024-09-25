@@ -23,14 +23,12 @@ extern crate alloc;
 
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
-pub mod basefee;
 mod block;
 #[cfg(feature = "reth-codec")]
 mod compression;
 pub mod constants;
 pub mod eip4844;
 pub mod eip7702;
-pub mod genesis;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -47,7 +45,6 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
     MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
@@ -112,7 +109,7 @@ pub use c_kzg as kzg;
 /// Optimism specific re-exports
 #[cfg(feature = "optimism")]
 mod optimism {
-    pub use crate::transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
+    pub use crate::transaction::{optimism_deposit_tx_signature, TxDeposit, DEPOSIT_TX_TYPE_ID};
     pub use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 }
 

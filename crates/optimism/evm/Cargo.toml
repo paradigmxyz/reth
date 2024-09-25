@@ -40,6 +40,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
+alloy-genesis.workspace = true
 
 [features]
 optimism = [

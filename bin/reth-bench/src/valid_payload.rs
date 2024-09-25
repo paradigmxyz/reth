@@ -4,12 +4,12 @@
 
 use alloy_provider::{ext::EngineApi, Network};
 use alloy_rpc_types_engine::{
-    ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
+    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use alloy_transport::{Transport, TransportResult};
 use reth_node_api::EngineApiMessageVersion;
 use reth_primitives::B256;
-use reth_rpc_types::{ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV3};
 use tracing::error;
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.

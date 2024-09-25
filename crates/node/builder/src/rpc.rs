@@ -6,10 +6,7 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_chainspec::ChainSpec;
-use reth_node_api::{
-    BuilderProvider, FullNodeComponents, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
-};
+use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
@@ -18,6 +15,7 @@ use reth_node_core::{
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -192,6 +190,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         TaskExecutor,
         Node::Provider,
         EthApi,
+        Node::Executor,
     >,
 }
 
@@ -207,6 +206,7 @@ where
         TaskExecutor,
         Node::Provider,
         EthApi,
+        Node::Executor,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -296,12 +296,12 @@ where
 pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     node: Node,
     engine_api: Engine,
-    config: &NodeConfig<ChainSpec>,
+    config: &NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     jwt_secret: JwtSecret,
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
-    Node: FullNodeComponents<Types: NodeTypesWithDB<ChainSpec = ChainSpec>> + Clone,
+    Node: FullNodeComponents<Types: ProviderNodeTypes> + Clone,
     Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
     EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
 {
@@ -316,6 +316,7 @@ where
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config().clone())
+        .with_block_executor(node.block_executor().clone())
         .build_with_auth_server(module_config, engine_api, EthApi::eth_api_builder());
 
     let mut registry = RpcRegistry { registry };
