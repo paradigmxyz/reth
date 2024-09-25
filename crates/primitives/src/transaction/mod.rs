@@ -10,7 +10,6 @@ use alloy_eips::{
     eip2930::AccessList,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-use bytes::Buf;
 use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
@@ -736,6 +735,8 @@ impl reth_codecs::Compact for Transaction {
     // A panic will be triggered if an identifier larger than 3 is passed from the database. For
     // optimism a identifier with value [`DEPOSIT_TX_TYPE_ID`] is allowed.
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         match identifier {
             COMPACT_IDENTIFIER_LEGACY => {
                 let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
@@ -981,6 +982,8 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
         let bitflags = buf.get_u8() as usize;
 
