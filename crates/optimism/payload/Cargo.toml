@@ -18,7 +18,6 @@ reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
@@ -38,6 +37,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 revm-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # misc
 tracing.workspace = true

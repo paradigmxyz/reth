@@ -6,6 +6,10 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
+};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -34,13 +38,6 @@ use reth_provider::{
     TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_types::{
-    engine::{
-        CancunPayloadFields, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
-        PayloadValidationError,
-    },
-    ExecutionPayload,
-};
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};

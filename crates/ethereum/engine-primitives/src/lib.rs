@@ -11,19 +11,16 @@
 mod payload;
 use std::sync::Arc;
 
+pub use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+};
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineTypes, EngineValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes, PayloadTypes,
-};
-pub use reth_rpc_types::{
-    engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-        PayloadAttributes as EthPayloadAttributes,
-    },
-    ExecutionPayloadV1,
 };
 
 /// The types used in the default mainnet ethereum beacon consensus engine.

@@ -12,10 +12,6 @@ description = "Reth RPC types"
 workspace = true
 
 [dependencies]
-
-# ethereum
-alloy-rpc-types-engine = { workspace = true, features = ["std", "serde", "jsonrpsee-types"], optional = true }
-
 # misc
 jsonrpsee-types = { workspace = true, optional = true }
 
@@ -25,6 +21,4 @@ jsonrpsee-types = { workspace = true, optional = true }
 default = ["jsonrpsee-types"]
 jsonrpsee-types = [
     "dep:jsonrpsee-types",
-    "dep:alloy-rpc-types-engine",
-    "alloy-rpc-types-engine/jsonrpsee-types",
 ]

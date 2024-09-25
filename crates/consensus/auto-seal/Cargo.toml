@@ -26,7 +26,6 @@ reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-consensus.workspace = true
-reth-rpc-types.workspace = true
 reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
 reth-trie.workspace = true
@@ -34,6 +33,7 @@ reth-trie.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 revm-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # async
 futures-util.workspace = true
