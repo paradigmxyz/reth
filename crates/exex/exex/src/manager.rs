@@ -1,6 +1,6 @@
 use crate::{
     wal::Wal, BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight,
-    StreamBackfillJob,
+    StreamBackfillJob, WalHandle,
 };
 use alloy_primitives::{BlockNumber, U256};
 use eyre::OptionExt;
@@ -46,6 +46,7 @@ struct ExExMetrics {
 /// A handle should be created for each `ExEx` with a unique ID. The channels returned by
 /// [`ExExHandle::new`] should be given to the `ExEx`, while the handle itself should be given to
 /// the manager in [`ExExManager::new`].
+#[derive(Debug)]
 pub struct ExExHandle {
     /// The execution extension's ID.
     id: String,
@@ -61,31 +62,89 @@ pub struct ExExHandle {
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
-    canonicalization_notifications: Option<(
-        Box<dyn Iterator<Item = eyre::Result<ExExNotification>>>,
-        PollSender<ExExNotification>,
-    )>,
-    manager_actions: UnboundedReceiver<ExExManagerAction>,
+    canonicalization_notifications: Option<CanonicalizationNotifications>,
+    actions: UnboundedReceiver<ExExAction>,
     /// The [WAL](`Wal`) instance for this `ExEx`.
     wal: Wal,
 }
 
-impl Debug for ExExHandle {
+struct CanonicalizationNotifications {
+    notifications: Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + Send + Sync>,
+    sender: PollSender<ExExNotification>,
+}
+
+impl Debug for CanonicalizationNotifications {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExExHandle")
-            .field("id", &self.id)
-            .field("metrics", &self.metrics)
+        f.debug_struct("CanonicalizationNotifications")
+            .field("notifications", &"...")
             .field("sender", &self.sender)
-            .field("receiver", &self.receiver)
-            .field("next_notification_id", &self.next_notification_id)
-            .field("finished_height", &self.finished_height)
-            .field(
-                "canonicalization_notifications",
-                &self.canonicalization_notifications.as_ref().map(|_| "..."),
-            )
-            .field("manager_actions", &self.manager_actions)
-            .field("wal", &self.wal)
-            .finish_non_exhaustive()
+            .finish()
+    }
+}
+
+impl CanonicalizationNotifications {
+    fn new<P: HeaderProvider + 'static>(
+        provider: P,
+        exex_head: BlockNumHash,
+        wal_handle: WalHandle,
+        sender: PollSender<ExExNotification>,
+    ) -> eyre::Result<Self> {
+        let notifications = Box::new(
+            wal_handle
+                .into_iter_notifications()?
+                .rev()
+                .skip_while(move |entry| {
+                    let Ok(notification) = entry else { return false };
+
+                    match &notification {
+                        ExExNotification::ChainCommitted { new } |
+                        ExExNotification::ChainReorged { new, .. } => {
+                            new.tip().number > exex_head.number
+                        }
+                        ExExNotification::ChainReverted { .. } => true,
+                    }
+                })
+                .map_while(move |entry| {
+                    let notification = match entry {
+                        Ok(notification) => notification,
+                        Err(err) => return Some(Err(err)),
+                    };
+
+                    let chain_to_check = match &notification {
+                        ExExNotification::ChainCommitted { new } |
+                        ExExNotification::ChainReorged { new, .. } => new.blocks(),
+                        ExExNotification::ChainReverted { .. } => &BTreeMap::new(),
+                    };
+
+                    let mut is_canonical = true;
+                    for block in chain_to_check.values() {
+                        match provider.header_by_hash_or_number(block.hash().into()) {
+                            Ok(Some(_)) => {}
+                            Ok(None) => {
+                                is_canonical = false;
+                                break
+                            }
+                            Err(err) => return Some(Err(err.into())),
+                        }
+                    }
+
+                    if is_canonical {
+                        None
+                    } else {
+                        Some(Ok(notification))
+                    }
+                })
+                .map(|entry| {
+                    let notification = match entry {
+                        Ok(notification) => notification,
+                        Err(err) => return Err(err),
+                    };
+
+                    Ok(notification.into_inverted())
+                }),
+        );
+
+        Ok(Self { notifications, sender })
     }
 }
 
@@ -109,7 +168,7 @@ impl ExExHandle {
             provider,
             executor,
             notifications: notification_rx,
-            manager_actions: manager_action_tx,
+            actions: manager_action_tx,
         };
 
         (
@@ -121,7 +180,7 @@ impl ExExHandle {
                 next_notification_id: 0,
                 finished_height: None,
                 canonicalization_notifications: None,
-                manager_actions: manager_action_rx,
+                actions: manager_action_rx,
                 wal,
             },
             event_tx,
@@ -202,7 +261,7 @@ pub struct ExExNotifications<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
-    manager_actions: UnboundedSender<ExExManagerAction>,
+    actions: UnboundedSender<ExExAction>,
 }
 
 impl<P: Debug, E: Debug> Debug for ExExNotifications<P, E> {
@@ -222,9 +281,9 @@ impl<P, E> ExExNotifications<P, E> {
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification>,
-        manager_actions: UnboundedSender<ExExManagerAction>,
+        actions: UnboundedSender<ExExAction>,
     ) -> Self {
-        Self { node_head, provider, executor, notifications, manager_actions }
+        Self { node_head, provider, executor, notifications, actions }
     }
 
     /// Receives the next value for this receiver.
@@ -293,7 +352,7 @@ where
             self.provider,
             self.executor,
             self.notifications,
-            self.manager_actions,
+            self.actions,
             head,
         )
     }
@@ -315,7 +374,7 @@ pub struct ExExNotificationsWithHead<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
-    manager_actions: UnboundedSender<ExExManagerAction>,
+    actions: UnboundedSender<ExExAction>,
     exex_head: ExExHead,
     pending_sync: bool,
     /// The backfill job to run before consuming any notifications.
@@ -337,7 +396,7 @@ where
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification>,
-        manager_actions: UnboundedSender<ExExManagerAction>,
+        actions: UnboundedSender<ExExAction>,
         exex_head: ExExHead,
     ) -> Self {
         Self {
@@ -345,7 +404,7 @@ where
             provider,
             executor,
             notifications,
-            manager_actions,
+            actions,
             exex_head,
             pending_sync: true,
             canonicalization_notifications: None,
@@ -438,7 +497,7 @@ where
         if canonicalize {
             let (canonicalization_tx, canonicalization_rx) = mpsc::channel(1024);
             self.canonicalization_notifications = Some(canonicalization_rx);
-            self.manager_actions.send(ExExManagerAction::Canonicalize(
+            self.actions.send(ExExAction::Canonicalize(
                 self.exex_head.block,
                 PollSender::new(canonicalization_tx),
             ))?;
@@ -561,8 +620,11 @@ pub struct ExExManagerMetrics {
     num_exexs: Gauge,
 }
 
+/// The action that the [`ExExManager`] can perform for a specific ExEx.
 #[derive(Debug)]
-pub enum ExExManagerAction {
+pub enum ExExAction {
+    /// Canonicalize the ExEx with the given head. If the ExEx is not on the canonical chain, the
+    /// notifications for reverting back to the canonical block wil be sent over the given channel.
     Canonicalize(BlockNumHash, PollSender<ExExNotification>),
 }
 
@@ -702,7 +764,7 @@ impl<P> ExExManager<P> {
     }
 }
 
-impl<P: HeaderProvider + Unpin + 'static> Future for ExExManager<P> {
+impl<P: HeaderProvider + Clone + Unpin + 'static> Future for ExExManager<P> {
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -776,90 +838,33 @@ impl<P: HeaderProvider + Unpin + 'static> Future for ExExManager<P> {
                 }
             }
 
-            while let Poll::Ready(Some(action)) = exex.manager_actions.poll_recv(cx) {
+            while let Poll::Ready(Some(action)) = exex.actions.poll_recv(cx) {
                 match action {
-                    ExExManagerAction::Canonicalize(head, canonicalization_tx) => {
+                    ExExAction::Canonicalize(head, canonicalization_tx) => {
                         if exex.canonicalization_notifications.is_some() {
                             debug!(exex_id = %exex.id, "Canonicalization already in progress");
                             continue
                         }
 
-                        exex.canonicalization_notifications = Some((
-                            Box::new(
-                                exex.wal
-                                    .iter_notifications()?
-                                    .rev()
-                                    .skip_while(move |entry| {
-                                        let Ok(notification) = entry else { return false };
-
-                                        match &notification {
-                                            ExExNotification::ChainCommitted { new } |
-                                            ExExNotification::ChainReorged { new, .. } => {
-                                                new.tip().number > head.number
-                                            }
-                                            ExExNotification::ChainReverted { .. } => true,
-                                        }
-                                    })
-                                    .map_while(|entry| {
-                                        let notification = match entry {
-                                            Ok(notification) => notification,
-                                            Err(err) => return Some(Err(err)),
-                                        };
-
-                                        let chain_to_check = match &notification {
-                                            ExExNotification::ChainCommitted { new } |
-                                            ExExNotification::ChainReorged { new, .. } => {
-                                                new.blocks()
-                                            }
-                                            ExExNotification::ChainReverted { .. } => {
-                                                &BTreeMap::new()
-                                            }
-                                        };
-
-                                        let mut is_canonical = true;
-                                        for block in chain_to_check.values() {
-                                            match this
-                                                .provider
-                                                .header_by_hash_or_number(block.hash().into())
-                                            {
-                                                Ok(Some(_)) => {}
-                                                Ok(None) => {
-                                                    is_canonical = false;
-                                                    break
-                                                }
-                                                Err(err) => return Some(Err(err.into())),
-                                            }
-                                        }
-
-                                        if is_canonical {
-                                            None
-                                        } else {
-                                            Some(Ok(notification))
-                                        }
-                                    })
-                                    .map(|entry| {
-                                        let notification = match entry {
-                                            Ok(notification) => notification,
-                                            Err(err) => return Err(err),
-                                        };
-
-                                        Ok(notification.into_inverted())
-                                    }),
-                            ),
-                            canonicalization_tx,
-                        ));
+                        exex.canonicalization_notifications =
+                            Some(CanonicalizationNotifications::new(
+                                this.provider.clone(),
+                                head,
+                                exex.wal.handle(),
+                                canonicalization_tx,
+                            )?);
                     }
                 }
             }
 
-            if let Some((canonicalization_notifications, canonicalization_tx)) =
+            if let Some(canonicalization_notifications) =
                 exex.canonicalization_notifications.as_mut()
             {
-                for notification in canonicalization_notifications {
+                for notification in &mut canonicalization_notifications.notifications {
                     // TODO(alexey): the iterator above should be
                     // saved so we can continue sending inverted notifications.
-                    if canonicalization_tx.poll_reserve(cx)?.is_ready() {
-                        canonicalization_tx.send_item(notification?)?;
+                    if canonicalization_notifications.sender.poll_reserve(cx)?.is_ready() {
+                        canonicalization_notifications.sender.send_item(notification?)?;
                     }
                 }
             }

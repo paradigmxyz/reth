@@ -239,6 +239,32 @@ impl Wal {
 
         Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
+
+    pub(crate) fn handle(&self) -> WalHandle {
+        WalHandle::new(self.storage.clone())
+    }
+}
+
+pub(crate) struct WalHandle {
+    storage: Storage,
+}
+
+impl WalHandle {
+    const fn new(storage: Storage) -> Self {
+        Self { storage }
+    }
+
+    pub(crate) fn into_iter_notifications(
+        self,
+    ) -> eyre::Result<
+        Box<dyn DoubleEndedIterator<Item = eyre::Result<ExExNotification>> + Send + Sync>,
+    > {
+        let Some(range) = self.storage.files_range()? else {
+            return Ok(Box::new(std::iter::empty()))
+        };
+
+        Ok(Box::new(self.storage.into_iter_notifications(range).map(|entry| Ok(entry?.1))))
+    }
 }
 
 #[cfg(test)]
