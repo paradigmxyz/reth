@@ -893,7 +893,7 @@ impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx = TransactionSigned {
             hash: *tx.hash(),
-            signature: Signature::default(),
+            signature: Signature::test_signature(),
             transaction: tx.clone().into(),
         };
 

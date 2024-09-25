@@ -2,6 +2,7 @@
 //! RPC methods.
 
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use futures::Future;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
@@ -11,7 +12,6 @@ use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};

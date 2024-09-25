@@ -20,6 +20,7 @@ mod impl_secp256k1 {
         ecdsa::{RecoverableSignature, RecoveryId},
         Message, PublicKey, SecretKey, SECP256K1,
     };
+    use alloy_primitives::Parity;
     use revm_primitives::U256;
 
     /// Recovers the address of the sender using secp256k1 pubkey recovery.
@@ -43,11 +44,11 @@ mod impl_secp256k1 {
         let s = SECP256K1.sign_ecdsa_recoverable(&Message::from_digest(message.0), &sec);
         let (rec_id, data) = s.serialize_compact();
 
-        let signature = Signature {
-            r: U256::try_from_be_slice(&data[..32]).expect("The slice has at most 32 bytes"),
-            s: U256::try_from_be_slice(&data[32..64]).expect("The slice has at most 32 bytes"),
-            odd_y_parity: rec_id.to_i32() != 0,
-        };
+        let signature = Signature::new(
+            U256::try_from_be_slice(&data[..32]).expect("The slice has at most 32 bytes"),
+            U256::try_from_be_slice(&data[32..64]).expect("The slice has at most 32 bytes"),
+            Parity::Parity(rec_id.to_i32() != 0),
+        );
         Ok(signature)
     }
 
@@ -65,6 +66,7 @@ mod impl_secp256k1 {
 mod impl_k256 {
     use super::*;
     use crate::keccak256;
+    use alloy_primitives::Parity;
     pub(crate) use k256::ecdsa::Error;
     use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
     use revm_primitives::U256;
@@ -98,11 +100,11 @@ mod impl_k256 {
         let (sig, rec_id) = sec.sign_prehash_recoverable(&message.0)?;
         let (r, s) = sig.split_bytes();
 
-        let signature = Signature {
-            r: U256::try_from_be_slice(&r).expect("The slice has at most 32 bytes"),
-            s: U256::try_from_be_slice(&s).expect("The slice has at most 32 bytes"),
-            odd_y_parity: rec_id.is_y_odd(),
-        };
+        let signature = Signature::new(
+            U256::try_from_be_slice(&r).expect("The slice has at most 32 bytes"),
+            U256::try_from_be_slice(&s).expect("The slice has at most 32 bytes"),
+            Parity::Parity(rec_id.is_y_odd()),
+        );
         Ok(signature)
     }
 
@@ -131,9 +133,9 @@ mod tests {
             sign_message(B256::from_slice(&secret.secret_bytes()[..]), hash).expect("sign message");
 
         let mut sig: [u8; 65] = [0; 65];
-        sig[0..32].copy_from_slice(&signature.r.to_be_bytes::<32>());
-        sig[32..64].copy_from_slice(&signature.s.to_be_bytes::<32>());
-        sig[64] = signature.odd_y_parity as u8;
+        sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
+        sig[64] = signature.v().y_parity_byte();
 
         assert_eq!(recover_signer_unchecked(&sig, &hash), Ok(signer));
     }
@@ -191,16 +193,16 @@ mod tests {
 
         let mut sig: [u8; 65] = [0; 65];
 
-        sig[0..32].copy_from_slice(&secp256k1_signature.r.to_be_bytes::<32>());
-        sig[32..64].copy_from_slice(&secp256k1_signature.s.to_be_bytes::<32>());
-        sig[64] = secp256k1_signature.odd_y_parity as u8;
+        sig[0..32].copy_from_slice(&secp256k1_signature.r().to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&secp256k1_signature.s().to_be_bytes::<32>());
+        sig[64] = secp256k1_signature.v().y_parity_byte();
         let secp256k1_recovered =
             impl_secp256k1::recover_signer_unchecked(&sig, &hash).expect("secp256k1 recover");
         assert_eq!(secp256k1_recovered, secp256k1_signer);
 
-        sig[0..32].copy_from_slice(&k256_signature.r.to_be_bytes::<32>());
-        sig[32..64].copy_from_slice(&k256_signature.s.to_be_bytes::<32>());
-        sig[64] = k256_signature.odd_y_parity as u8;
+        sig[0..32].copy_from_slice(&k256_signature.r().to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&k256_signature.s().to_be_bytes::<32>());
+        sig[64] = k256_signature.v().y_parity_byte();
         let k256_recovered =
             impl_k256::recover_signer_unchecked(&sig, &hash).expect("k256 recover");
         assert_eq!(k256_recovered, k256_signer);

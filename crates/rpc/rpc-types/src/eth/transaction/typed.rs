@@ -1,7 +1,3 @@
-//! The [`TransactionRequest`][crate::TransactionRequest] is a universal representation for a
-//! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
-//! it can be converted into the container type [`TypedTransactionRequest`].
-
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 

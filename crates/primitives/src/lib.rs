@@ -112,7 +112,7 @@ pub use c_kzg as kzg;
 /// Optimism specific re-exports
 #[cfg(feature = "optimism")]
 mod optimism {
-    pub use crate::transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
+    pub use crate::transaction::{optimism_deposit_tx_signature, TxDeposit, DEPOSIT_TX_TYPE_ID};
     pub use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 }
 

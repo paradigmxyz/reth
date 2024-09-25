@@ -3,7 +3,10 @@
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_primitives::{proofs, Block, SealedBlock, TransactionSigned, Withdrawals};
+use reth_primitives::{
+    alloy_primitives::Sealable, proofs, Block, SealedBlock, SealedHeader, TransactionSigned,
+    Withdrawals,
+};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
@@ -21,8 +24,10 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     // Recalculate roots
     transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
+    let sealed = transformed.header.seal_slow();
+    let (header, seal) = sealed.into_parts();
     block_to_payload(SealedBlock {
-        header: transformed.header.seal_slow(),
+        header: SealedHeader::new(header, seal),
         body: transformed.body,
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
@@ -133,7 +138,7 @@ fn payload_validation() {
 
     // None zero nonce
     let block_with_nonce = transform_block(block.clone(), |mut b| {
-        b.header.nonce = 1;
+        b.header.nonce = 1u64.into();
         b
     });
     assert_matches!(

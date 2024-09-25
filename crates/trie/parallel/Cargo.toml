@@ -33,7 +33,6 @@ thiserror.workspace = true
 derive_more.workspace = true
 
 # `async` feature
-reth-tasks = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, default-features = false }
 itertools = { workspace = true, optional = true }
 
@@ -61,7 +60,7 @@ proptest-arbitrary-interop.workspace = true
 [features]
 default = ["metrics", "async", "parallel"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
-async = ["reth-tasks/rayon", "tokio/sync", "itertools"]
+async = ["tokio/sync", "itertools"]
 parallel = ["rayon"]
 
 [[bench]]

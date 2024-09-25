@@ -263,10 +263,18 @@ impl Command {
 
                 let block_range =
                     SegmentRangeInclusive::new(first_ranges.0.start(), last_ranges.0.end());
-                let tx_range = first_ranges
-                    .1
-                    .zip(last_ranges.1)
-                    .map(|(first, last)| SegmentRangeInclusive::new(first.start(), last.end()));
+
+                // Transaction ranges can be empty, so we need to find the first and last which are
+                // not.
+                let tx_range = {
+                    let start = ranges
+                        .iter()
+                        .find_map(|(_, tx_range)| tx_range.map(|r| r.start()))
+                        .unwrap_or_default();
+                    let end =
+                        ranges.iter().rev().find_map(|(_, tx_range)| tx_range.map(|r| r.end()));
+                    end.map(|end| SegmentRangeInclusive::new(start, end))
+                };
 
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))

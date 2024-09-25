@@ -292,10 +292,10 @@ impl StorageInner {
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             difficulty: U256::from(2),
             number: self.best_block + 1,
-            gas_limit: chain_spec.max_gas_limit,
+            gas_limit: chain_spec.max_gas_limit.into(),
             timestamp,
             base_fee_per_gas,
-            blob_gas_used,
+            blob_gas_used: blob_gas_used.map(Into::into),
             requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
             ..Default::default()
         };
@@ -317,8 +317,13 @@ impl StorageInner {
                 }
                 _ => (0, 0),
             };
-            header.excess_blob_gas =
-                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+            header.excess_blob_gas = Some(
+                calculate_excess_blob_gas(
+                    parent_excess_blob_gas as u64,
+                    parent_blob_gas_used as u64,
+                )
+                .into(),
+            )
         }
 
         header
@@ -392,7 +397,7 @@ impl StorageInner {
 
         // now we need to update certain header fields with the results of the execution
         header.state_root = db.state_root(hashed_state)?;
-        header.gas_used = gas_used;
+        header.gas_used = gas_used.into();
 
         let receipts = execution_outcome.receipts_by_block(header.number);
 
@@ -420,7 +425,7 @@ impl StorageInner {
         self.insert_new_block(header.clone(), body);
 
         // set new header with hash that should have been updated by insert_new_block
-        let new_header = header.seal(self.best_hash);
+        let new_header = SealedHeader::new(header, self.best_hash);
 
         Ok((new_header, execution_outcome))
     }
@@ -574,7 +579,7 @@ mod tests {
         assert_eq!(header.parent_hash, best_block_hash);
         assert_eq!(header.number, best_block_number + 1);
         assert_eq!(header.timestamp, timestamp);
-        assert_eq!(header.gas_limit, chain_spec.max_gas_limit);
+        assert_eq!(header.gas_limit, chain_spec.max_gas_limit.into());
     }
 
     #[test]
@@ -668,7 +673,7 @@ mod tests {
                 withdrawals_root: None,
                 difficulty: U256::from(2),
                 number: 1,
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: chain_spec.max_gas_limit.into(),
                 timestamp,
                 base_fee_per_gas: None,
                 blob_gas_used: Some(0),

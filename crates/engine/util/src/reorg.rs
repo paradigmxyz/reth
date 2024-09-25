@@ -303,7 +303,7 @@ where
     let mut versioned_hashes = Vec::new();
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
-        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
+        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit as u64 {
             continue
         }
 
@@ -372,8 +372,8 @@ where
             (
                 Some(sum_blob_gas_used),
                 Some(calculate_excess_blob_gas(
-                    reorg_target_parent.excess_blob_gas.unwrap_or_default(),
-                    reorg_target_parent.blob_gas_used.unwrap_or_default(),
+                    reorg_target_parent.excess_blob_gas.unwrap_or_default() as u64,
+                    reorg_target_parent.blob_gas_used.unwrap_or_default() as u64,
                 )),
             )
         } else {
@@ -402,9 +402,9 @@ where
             receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
             requests_root: None, // TODO(prague)
-            gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas,
+            gas_used: cumulative_gas_used.into(),
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: excess_blob_gas.map(Into::into),
             state_root: state_provider.state_root(hashed_state)?,
         },
         body: transactions,

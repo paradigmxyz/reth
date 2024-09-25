@@ -146,7 +146,7 @@ mod tests {
 
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
         let expected_account =
-            reth_rpc_types::Account { code_hash: KECCAK_EMPTY, ..Default::default() };
+            alloy_rpc_types::Account { code_hash: KECCAK_EMPTY, ..Default::default() };
         assert_eq!(Some(expected_account), account);
     }
 }

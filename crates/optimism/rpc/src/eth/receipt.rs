@@ -1,5 +1,6 @@
 //! Loads and formats OP receipt RPC response.
 
+use alloy_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{
     receipt::L1BlockInfo, OpTransactionReceipt, OptimismTransactionReceiptFields,
@@ -12,7 +13,6 @@ use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
 
 use crate::{OpEthApi, OpEthApiError};
 

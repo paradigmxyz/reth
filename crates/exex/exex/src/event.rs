@@ -1,4 +1,4 @@
-use reth_primitives::BlockNumber;
+use alloy_primitives::BlockNumber;
 
 /// Events emitted by an `ExEx`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

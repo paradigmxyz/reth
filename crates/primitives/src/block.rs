@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+use alloy_primitives::Sealable;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -50,8 +51,10 @@ pub struct Block {
 impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
+        let sealed = self.header.seal_slow();
+        let (header, seal) = sealed.into_parts();
         SealedBlock {
-            header: self.header.seal_slow(),
+            header: SealedHeader::new(header, seal),
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
@@ -64,7 +67,7 @@ impl Block {
     /// WARNING: This method does not perform validation whether the hash is correct.
     pub fn seal(self, hash: B256) -> SealedBlock {
         SealedBlock {
-            header: self.header.seal(hash),
+            header: SealedHeader::new(self.header, hash),
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
@@ -183,7 +186,22 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
             .collect::<arbitrary::Result<Vec<_>>>()?;
 
         // then generate up to 2 ommers
-        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+        let ommers = (0..2)
+            .map(|_| {
+                let mut header = Header::arbitrary(u)?;
+                header.gas_limit = (header.gas_limit as u64).into();
+                header.gas_used = (header.gas_used as u64).into();
+                header.base_fee_per_gas = header
+                    .base_fee_per_gas
+                    .map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
+                header.blob_gas_used =
+                    header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
+                header.excess_blob_gas =
+                    header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
+
+                Ok(header)
+            })
+            .collect::<arbitrary::Result<Vec<_>>>()?;
 
         Ok(Self {
             header: u.arbitrary()?,
@@ -633,7 +651,22 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
             .collect::<arbitrary::Result<Vec<_>>>()?;
 
         // then generate up to 2 ommers
-        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+        let ommers = (0..2)
+            .map(|_| {
+                let mut header = Header::arbitrary(u)?;
+                header.gas_limit = (header.gas_limit as u64).into();
+                header.gas_used = (header.gas_used as u64).into();
+                header.base_fee_per_gas = header
+                    .base_fee_per_gas
+                    .map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
+                header.blob_gas_used =
+                    header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
+                header.excess_blob_gas =
+                    header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
+
+                Ok(header)
+            })
+            .collect::<arbitrary::Result<Vec<_>>>()?;
 
         // for now just generate empty requests, see HACK above
         Ok(Self { transactions, ommers, requests: None, withdrawals: u.arbitrary()? })

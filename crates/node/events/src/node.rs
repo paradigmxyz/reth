@@ -260,12 +260,12 @@ impl NodeState {
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body.len(),
-                    gas=%format_gas(block.header.gas_used),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
+                    gas=%format_gas(block.header.gas_used as u64),
+                    gas_throughput=%format_gas_throughput(block.header.gas_used as u64, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
+                    blobs=block.header.blob_gas_used.unwrap_or(0) as u64 / constants::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) as u64 / constants::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );

@@ -55,34 +55,40 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit =
             if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
-                parent.gas_limit *
+                parent.gas_limit as u64 *
                     self.chain_spec
                         .base_fee_params_at_timestamp(header.timestamp)
                         .elasticity_multiplier as u64
             } else {
-                parent.gas_limit
+                parent.gas_limit as u64
             };
 
         // Check for an increase in gas limit beyond the allowed threshold.
-        if header.gas_limit > parent_gas_limit {
-            if header.gas_limit - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+
+        if header.gas_limit as u64 > parent_gas_limit {
+            if header.gas_limit as u64 - parent_gas_limit >=
+                parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
+            {
                 return Err(ConsensusError::GasLimitInvalidIncrease {
                     parent_gas_limit,
-                    child_gas_limit: header.gas_limit,
+                    child_gas_limit: header.gas_limit as u64,
                 })
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
-        else if parent_gas_limit - header.gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
+        else if parent_gas_limit - header.gas_limit as u64 >=
+            parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
         {
             return Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit,
-                child_gas_limit: header.gas_limit,
+                child_gas_limit: header.gas_limit as u64,
             })
         }
         // Check if the self gas limit is below the minimum required limit.
-        else if header.gas_limit < MINIMUM_GAS_LIMIT {
-            return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit })
+        else if header.gas_limit < MINIMUM_GAS_LIMIT.into() {
+            return Err(ConsensusError::GasLimitInvalidMinimum {
+                child_gas_limit: header.gas_limit as u64,
+            })
         }
 
         Ok(())
@@ -167,7 +173,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
-            if header.nonce != 0 {
+            if !header.nonce.is_zero() {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
@@ -227,17 +233,17 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
 mod tests {
     use super::*;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_primitives::{proofs, B256};
+    use reth_primitives::{alloy_primitives::Sealable, proofs, B256};
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = Header { gas_limit, ..Default::default() };
-        header.seal(B256::ZERO)
+        let header = Header { gas_limit: gas_limit.into(), ..Default::default() };
+        SealedHeader::new(header, B256::ZERO)
     }
 
     #[test]
     fn test_valid_gas_limit_increase() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
-        let child = header_with_gas_limit(parent.gas_limit + 5);
+        let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
@@ -254,7 +260,7 @@ mod tests {
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
                 .validate_against_parent_gas_limit(&child, &parent),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
+            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
         );
     }
 
@@ -262,15 +268,15 @@ mod tests {
     fn test_invalid_gas_limit_increase_exceeding_limit() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(
-            parent.gas_limit + parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR + 1,
+            (parent.gas_limit + parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR as u128 + 1) as u64,
         );
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
                 .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
+                parent_gas_limit: parent.gas_limit as u64,
+                child_gas_limit: child.gas_limit as u64,
             })
         );
     }
@@ -278,7 +284,7 @@ mod tests {
     #[test]
     fn test_valid_gas_limit_decrease_within_limit() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
-        let child = header_with_gas_limit(parent.gas_limit - 5);
+        let child = header_with_gas_limit(parent.gas_limit as u64 - 5);
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
@@ -291,15 +297,15 @@ mod tests {
     fn test_invalid_gas_limit_decrease_exceeding_limit() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(
-            parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1,
+            (parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR as u128 - 1) as u64,
         );
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
                 .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
+                parent_gas_limit: parent.gas_limit as u64,
+                child_gas_limit: child.gas_limit as u64,
             })
         );
     }
@@ -310,13 +316,17 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let header = Header {
-            base_fee_per_gas: Some(1337u64),
+        let sealed = Header {
+            base_fee_per_gas: Some(1337u128),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
         }
         .seal_slow();
+        let (header, seal) = sealed.into_parts();
 
-        assert_eq!(EthBeaconConsensus::new(chain_spec).validate_header(&header), Ok(()));
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::new(header, seal)),
+            Ok(())
+        );
     }
 }

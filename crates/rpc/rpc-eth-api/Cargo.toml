@@ -37,6 +37,9 @@ alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-json-rpc.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-mev.workspace = true
 
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

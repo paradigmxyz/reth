@@ -36,6 +36,8 @@ impl PayloadTypes for EthEngineTypes {
 }
 
 impl EngineTypes for EthEngineTypes {
+    type ChainSpec = ChainSpec;
+
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;

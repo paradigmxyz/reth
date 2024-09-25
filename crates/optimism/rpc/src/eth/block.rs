@@ -1,5 +1,6 @@
 //! Loads and formats OP block RPC response.
 
+use alloy_rpc_types::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -11,7 +12,6 @@ use reth_rpc_eth_api::{
     RpcReceipt,
 };
 use reth_rpc_eth_types::EthStateCache;
-use reth_rpc_types::BlockId;
 
 use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
@@ -57,8 +57,9 @@ where
                         index: idx as u64,
                         block_hash,
                         block_number,
-                        base_fee,
-                        excess_blob_gas,
+                        base_fee: base_fee.map(|base_fee| base_fee as u64),
+                        excess_blob_gas: excess_blob_gas
+                            .map(|excess_blob_gas| excess_blob_gas as u64),
                         timestamp,
                     };
 

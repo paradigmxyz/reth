@@ -476,7 +476,10 @@ where
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+            Some(calculate_excess_blob_gas(
+                parent_excess_blob_gas as u64,
+                parent_blob_gas_used as u64,
+            ))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
@@ -497,16 +500,16 @@ where
         logs_bloom,
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
-        nonce: BEACON_NONCE,
-        base_fee_per_gas: Some(base_fee),
+        nonce: BEACON_NONCE.into(),
+        base_fee_per_gas: Some(base_fee.into()),
         number: parent_block.number + 1,
-        gas_limit: block_gas_limit,
+        gas_limit: block_gas_limit.into(),
         difficulty: U256::ZERO,
-        gas_used: cumulative_gas_used,
+        gas_used: cumulative_gas_used.into(),
         extra_data,
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,
-        excess_blob_gas,
+        excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_root: None,
     };
 

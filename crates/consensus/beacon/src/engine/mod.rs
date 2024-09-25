@@ -946,7 +946,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(safe.header.seal(safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
         }
         Ok(())
     }
@@ -967,7 +967,8 @@ where
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
             self.blockchain.finalize_block(finalized.number)?;
-            self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
+            self.blockchain
+                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
         }
         Ok(())
     }

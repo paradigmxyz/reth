@@ -1,6 +1,6 @@
 use super::Header;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, BlockHash};
+use alloy_primitives::{keccak256, BlockHash, Sealable};
 #[cfg(any(test, feature = "test-utils"))]
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -66,7 +66,9 @@ impl SealedHeader {
 
 impl Default for SealedHeader {
     fn default() -> Self {
-        Header::default().seal_slow()
+        let sealed = Header::default().seal_slow();
+        let (header, hash) = sealed.into_parts();
+        Self { header, hash }
     }
 }
 
@@ -131,6 +133,18 @@ impl SealedHeader {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Header::arbitrary(u)?.seal_slow())
+        let mut header = Header::arbitrary(u)?;
+        header.gas_limit = (header.gas_limit as u64).into();
+        header.gas_used = (header.gas_used as u64).into();
+        header.base_fee_per_gas =
+            header.base_fee_per_gas.map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
+        header.blob_gas_used =
+            header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
+        header.excess_blob_gas =
+            header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
+
+        let sealed = header.seal_slow();
+        let (header, seal) = sealed.into_parts();
+        Ok(Self::new(header, seal))
     }
 }

@@ -30,6 +30,9 @@ reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 ## async
 futures.workspace = true
 tokio-util.workspace = true

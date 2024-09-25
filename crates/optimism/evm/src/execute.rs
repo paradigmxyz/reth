@@ -19,19 +19,14 @@ use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::BlockBatchRecord,
-    db::{
-        states::{bundle_state::BundleRetention, StorageSlot},
-        BundleAccount,
-    },
-    state_change::post_block_balance_increments,
-    Evm, State,
+    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
+    state_change::post_block_balance_increments, Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{collections::hash_map::Entry, fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Provides executors to execute regular optimism blocks
@@ -154,12 +149,12 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas &&
+            if transaction.gas_limit() > block_available_gas as u64 &&
                 (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
+                    block_available_gas: block_available_gas as u64,
                 }
                 .into())
             }
@@ -204,7 +199,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used();
+            cumulative_gas_used += result.gas_used() as u128;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -212,7 +207,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
-                cumulative_gas_used,
+                cumulative_gas_used: cumulative_gas_used as u64,
                 logs: result.into_logs(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -226,7 +221,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used))
+        Ok((receipts, cumulative_gas_used as u64))
     }
 }
 
@@ -364,87 +359,28 @@ where
             gas_used,
         })
     }
-}
 
-/// An executor that retains all cache state from execution in its bundle state.
-#[derive(Debug)]
-pub struct OpBlockAccessListExecutor<EvmConfig, DB> {
-    /// The executor used to execute single blocks
-    ///
-    /// All state changes are committed to the [State].
-    executor: OpBlockExecutor<EvmConfig, DB>,
-}
-
-impl<EvmConfig, DB> Executor<DB> for OpBlockAccessListExecutor<EvmConfig, DB>
-where
-    EvmConfig: ConfigureEvm<Header = Header>,
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
-    type Error = BlockExecutionError;
-
-    /// Executes the block and commits the changes to the internal state.
-    ///
-    /// Returns the receipts of the transactions in the block.
-    ///
-    /// This also returns the accounts from the internal state cache in the bundle state, allowing
-    /// access to not only the state that changed during execution, but also the state accessed
-    /// during execution.
-    ///
-    /// Returns an error if the block could not be executed or failed verification.
-    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_with_state_witness<F>(
+        mut self,
+        input: Self::Input<'_>,
+        mut witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, gas_used) =
-            self.executor.execute_without_verification(block, total_difficulty)?;
+        let (receipts, gas_used) = self.execute_without_verification(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
-        self.executor.state.merge_transitions(BundleRetention::Reverts);
+        self.state.merge_transitions(BundleRetention::Reverts);
+        witness(&self.state);
 
-        // now, ensure each account from the state is included in the bundle state
-        let mut bundle_state = self.executor.state.take_bundle();
-        for (address, account) in self.executor.state.cache.accounts {
-            // convert all slots, insert all slots
-            let account_info = account.account_info();
-            let account_storage = account.account.map(|a| a.storage).unwrap_or_default();
-
-            match bundle_state.state.entry(address) {
-                Entry::Vacant(entry) => {
-                    // we have to add the entire account here
-                    let extracted_storage = account_storage
-                        .into_iter()
-                        .map(|(k, v)| {
-                            (k, StorageSlot { previous_or_original_value: v, present_value: v })
-                        })
-                        .collect();
-
-                    let bundle_account = BundleAccount {
-                        info: account_info.clone(),
-                        original_info: account_info,
-                        storage: extracted_storage,
-                        status: account.status,
-                    };
-                    entry.insert(bundle_account);
-                }
-                Entry::Occupied(mut entry) => {
-                    // only add slots that are unchanged
-                    let current_account = entry.get_mut();
-
-                    // iterate over all storage slots, checking keys that are not in the bundle
-                    // state
-                    for (k, v) in account_storage {
-                        if let Entry::Vacant(storage_entry) = current_account.storage.entry(k) {
-                            storage_entry.insert(StorageSlot {
-                                previous_or_original_value: v,
-                                present_value: v,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(BlockExecutionOutput { state: bundle_state, receipts, requests: vec![], gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests: vec![],
+            gas_used,
+        })
     }
 }
 
@@ -530,6 +466,7 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
+    use reth_optimism_chainspec::optimism_deposit_tx_signature;
     use reth_primitives::{
         Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
@@ -544,7 +481,7 @@ mod tests {
         let l1_block_contract_account =
             Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
 
-        let mut l1_block_storage = HashMap::new();
+        let mut l1_block_storage = HashMap::with_capacity(4);
         // base fee
         l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
         // l1 fee overhead
@@ -607,7 +544,7 @@ mod tests {
                 to: addr.into(),
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
@@ -617,7 +554,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS as u128,
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let provider = executor_provider(chain_spec);
@@ -691,7 +628,7 @@ mod tests {
                 to: addr.into(),
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
@@ -701,7 +638,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS as u128,
                 ..Default::default()
             }),
-            Signature::optimism_deposit_tx_signature(),
+            optimism_deposit_tx_signature(),
         );
 
         let provider = executor_provider(chain_spec);

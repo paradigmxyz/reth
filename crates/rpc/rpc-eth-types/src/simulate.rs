@@ -1,6 +1,12 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_primitives::Parity;
+use alloy_rpc_types::{
+    simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    Block, BlockTransactionsKind,
+};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     logs_bloom,
@@ -9,10 +15,7 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types::{
-    simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    Block, BlockTransactionsKind, ToRpcError, TransactionRequest,
-};
+use reth_rpc_types::ToRpcError;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -132,7 +135,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature =
-            Signature { odd_y_parity: false, r: Default::default(), s: Default::default() };
+            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
@@ -222,7 +225,7 @@ pub fn build_block<T: TransactionCompat>(
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
-                        reth_rpc_types::Log {
+                        alloy_rpc_types::Log {
                             inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(transaction_index as u64),
@@ -278,7 +281,7 @@ pub fn build_block<T: TransactionCompat>(
         timestamp: block_env.timestamp.to(),
         base_fee_per_gas: Some(block_env.basefee.to()),
         gas_limit: block_env.gas_limit.to(),
-        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>(),
+        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>() as u128,
         blob_gas_used: Some(0),
         parent_hash,
         receipts_root: calculate_receipt_root(&receipts),

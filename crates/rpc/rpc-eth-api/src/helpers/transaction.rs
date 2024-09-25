@@ -3,6 +3,8 @@
 
 use alloy_dyn_abi::TypedData;
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_rpc_types::{BlockNumberOrTag, TransactionInfo};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
 use reth_primitives::{
     BlockId, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
@@ -17,7 +19,7 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    BlockNumberOrTag, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -578,7 +580,8 @@ pub trait EthTransactions: LoadTransaction {
                 .sign(account, &message)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .to_hex_bytes())
+                .as_bytes()
+                .into())
         }
     }
 
@@ -588,7 +591,8 @@ pub trait EthTransactions: LoadTransaction {
             .find_signer(&account)?
             .sign_typed_data(account, data)
             .map_err(Self::Error::from_eth_err)?
-            .to_hex_bytes())
+            .as_bytes()
+            .into())
     }
 
     /// Returns the signer for the given account, if found in configured signers.

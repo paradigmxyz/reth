@@ -1,6 +1,7 @@
 //! Utility functions for node startup and shutdown, for example path parsing and retrieving single
 //! blocks from the network.
 
+use alloy_primitives::Sealable;
 use eyre::Result;
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_block_pre_execution;
@@ -53,7 +54,9 @@ where
         eyre::bail!("Invalid number of headers received. Expected: 1. Received: {}", response.len())
     }
 
-    let header = response.into_iter().next().unwrap().seal_slow();
+    let sealed_header = response.into_iter().next().unwrap().seal_slow();
+    let (header, seal) = sealed_header.into_parts();
+    let header = SealedHeader::new(header, seal);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,

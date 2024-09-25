@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a `PooledTransactions` response.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobTransaction {
     /// The transaction hash.
     pub hash: TxHash,
@@ -114,8 +114,7 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP encoding methods, and does not
     /// represent the full RLP encoding of the blob transaction.
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        self.transaction
-            .encode_with_signature_fields(&self.signature.as_signature_with_boolean_parity(), out);
+        self.transaction.encode_with_signature_fields(&self.signature, out);
     }
 
     /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
@@ -156,7 +155,7 @@ impl BlobTransaction {
         // its list header.
         let tx_header = Header {
             list: true,
-            payload_length: self.transaction.tx.fields_len() + self.signature.payload_len(),
+            payload_length: self.transaction.tx.fields_len() + self.signature.rlp_vrs_len(),
         };
 
         let tx_length = tx_header.length() + tx_header.payload_length;
@@ -212,7 +211,7 @@ impl BlobTransaction {
         let transaction = TxEip4844::decode_fields(data)?;
 
         // signature
-        let signature = Signature::decode(data)?;
+        let signature = Signature::decode_rlp_vrs(data)?;
 
         // the inner header only decodes the transaction and signature, so we check the length here
         let inner_consumed = inner_remaining_len - data.len();
@@ -240,11 +239,7 @@ impl BlobTransaction {
         // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
         // signature for hashing without a header. We then hash the result.
         let mut buf = Vec::new();
-        transaction.encode_with_signature(
-            &signature.as_signature_with_boolean_parity(),
-            &mut buf,
-            false,
-        );
+        transaction.encode_with_signature(&signature, &mut buf, false);
         let hash = keccak256(&buf);
 
         // the outer header is for the entire transaction, so we check the length here

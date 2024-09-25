@@ -11,7 +11,6 @@
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
-use reth_chainspec::ChainSpec;
 pub use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
     PayloadTypes,
@@ -32,6 +31,9 @@ pub trait EngineTypes:
     + Serialize
     + 'static
 {
+    /// The chain specification of the node.
+    type ChainSpec: Send + Sync;
+
     /// Execution Payload V1 type.
     type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V2 type.
@@ -44,7 +46,7 @@ pub trait EngineTypes:
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
-        chain_spec: &ChainSpec,
+        chain_spec: &Self::ChainSpec,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError>;

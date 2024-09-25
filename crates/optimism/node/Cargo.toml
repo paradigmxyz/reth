@@ -44,6 +44,7 @@ reth-optimism-forks.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 
 # async
 async-trait.workspace = true
