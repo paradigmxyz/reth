@@ -349,7 +349,7 @@ impl DbTxMut for Tx<RW> {
     ) -> Result<bool, DatabaseError> {
         let mut data = None;
 
-        let value = value.map(Compress::compress);
+        let value = value.map(|val| val.compress());
         if let Some(value) = &value {
             data = Some(value.as_ref());
         };

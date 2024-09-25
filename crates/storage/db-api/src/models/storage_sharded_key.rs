@@ -52,9 +52,9 @@ impl StorageShardedKey {
 impl Encode for StorageShardedKey {
     type Encoded = Vec<u8>;
 
-    fn encode(self) -> Self::Encoded {
-        let mut buf: Vec<u8> = Encode::encode(self.address).into();
-        buf.extend_from_slice(&Encode::encode(self.sharded_key.key));
+    fn encode(&self) -> Self::Encoded {
+        let mut buf: Vec<u8> = Encode::encode(&self.address).into();
+        buf.extend_from_slice(&Encode::encode(&self.sharded_key.key));
         buf.extend_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
         buf
     }

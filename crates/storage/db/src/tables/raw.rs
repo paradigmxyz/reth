@@ -48,7 +48,7 @@ pub struct RawKey<K: Key> {
 impl<K: Key> RawKey<K> {
     /// Create new raw key.
     pub fn new(key: K) -> Self {
-        Self { key: K::encode(key).into(), _phantom: std::marker::PhantomData }
+        Self { key: K::encode(&key).into(), _phantom: std::marker::PhantomData }
     }
 
     /// Creates a raw key from an existing `Vec`. Useful when we already have the encoded
@@ -89,8 +89,8 @@ impl AsRef<[u8]> for RawKey<Vec<u8>> {
 impl<K: Key> Encode for RawKey<K> {
     type Encoded = Vec<u8>;
 
-    fn encode(self) -> Self::Encoded {
-        self.key
+    fn encode(&self) -> Self::Encoded {
+        self.key.clone()
     }
 }
 
@@ -113,7 +113,7 @@ pub struct RawValue<V: Value> {
 impl<V: Value> RawValue<V> {
     /// Create new raw value.
     pub fn new(value: V) -> Self {
-        Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
+        Self { value: V::compress(&value).into(), _phantom: std::marker::PhantomData }
     }
 
     /// Creates a raw value from an existing `Vec`. Useful when we already have the encoded
@@ -158,11 +158,11 @@ impl<V: Value> Compress for RawValue<V> {
         Some(&self.value)
     }
 
-    fn compress(self) -> Self::Compressed {
-        self.value
+    fn compress(&self) -> Self::Compressed {
+        self.value.clone()
     }
 
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
         buf.put_slice(self.value.as_slice())
     }
 }

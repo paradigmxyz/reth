@@ -421,7 +421,7 @@ pub enum ChainStateKey {
 impl Encode for ChainStateKey {
     type Encoded = [u8; 1];
 
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         match self {
             Self::LastFinalizedBlock => [0],
         }

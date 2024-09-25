@@ -50,8 +50,8 @@ where
 {
     type Encoded = Vec<u8>;
 
-    fn encode(self) -> Self::Encoded {
-        let mut buf: Vec<u8> = Encode::encode(self.key).into();
+    fn encode(&self) -> Self::Encoded {
+        let mut buf: Vec<u8> = Encode::encode(&self.key).into();
         buf.extend_from_slice(&self.highest_block_number.to_be_bytes());
         buf
     }

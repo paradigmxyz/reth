@@ -51,7 +51,7 @@ impl From<(BlockNumber, Address)> for BlockNumberAddress {
 impl Encode for BlockNumberAddress {
     type Encoded = [u8; 28];
 
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         let block_number = self.0 .0;
         let address = self.0 .1;
 
@@ -84,7 +84,7 @@ pub struct AddressStorageKey(pub (Address, StorageKey));
 impl Encode for AddressStorageKey {
     type Encoded = [u8; 52];
 
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         let address = self.0 .0;
         let storage_key = self.0 .1;
 
@@ -124,7 +124,7 @@ mod tests {
         bytes[..8].copy_from_slice(&num.to_be_bytes());
         bytes[8..].copy_from_slice(hash.as_slice());
 
-        let encoded = Encode::encode(key);
+        let encoded = Encode::encode(&key);
         assert_eq!(encoded, bytes);
 
         let decoded: BlockNumberAddress = Decode::decode(encoded).unwrap();
@@ -136,7 +136,7 @@ mod tests {
         let mut bytes = [0u8; 28];
         thread_rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        assert_eq!(bytes, Encode::encode(key));
+        assert_eq!(bytes, Encode::encode(&key));
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
         bytes[..20].copy_from_slice(address.as_slice());
         bytes[20..].copy_from_slice(storage_key.as_slice());
 
-        let encoded = Encode::encode(key);
+        let encoded = Encode::encode(&key);
         assert_eq!(encoded, bytes);
 
         let decoded: AddressStorageKey = Decode::decode(encoded).unwrap();
@@ -161,6 +161,6 @@ mod tests {
         let mut bytes = [0u8; 52];
         thread_rng().fill(bytes.as_mut_slice());
         let key = AddressStorageKey::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        assert_eq!(bytes, Encode::encode(key));
+        assert_eq!(bytes, Encode::encode(&key));
     }
 }
