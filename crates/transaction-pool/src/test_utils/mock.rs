@@ -8,6 +8,7 @@ use crate::{
     ValidPoolTransaction,
 };
 use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
@@ -21,6 +22,9 @@ use reth_primitives::{
     PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
     TransactionSignedEcRecovered, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElementEcRecovered,
+    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};

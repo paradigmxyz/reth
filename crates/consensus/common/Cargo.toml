@@ -18,6 +18,7 @@ reth-consensus.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+revm-primitives.workspace = true
 
 [dev-dependencies]
 reth-storage-api.workspace = true

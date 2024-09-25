@@ -7,9 +7,9 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    eip4844::calculate_excess_blob_gas,
     EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
 };
+use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -166,7 +166,7 @@ pub fn validate_4844_header_standalone(header: &Header) -> Result<(), ConsensusE
     }
 
     // `excess_blob_gas` must also be a multiple of `DATA_GAS_PER_BLOB`. This will be checked later
-    // (via `calculate_excess_blob_gas`), but it doesn't hurt to catch the problem sooner.
+    // (via `calc_excess_blob_gas`), but it doesn't hurt to catch the problem sooner.
     if excess_blob_gas as u64 % DATA_GAS_PER_BLOB != 0 {
         return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
             excess_blob_gas: excess_blob_gas as u64,
@@ -276,7 +276,7 @@ pub fn validate_against_parent_4844(
     // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
     // > are evaluated as 0.
     //
-    // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
+    // This means in the first post-fork block, calc_excess_blob_gas will return 0.
     let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0) as u64;
     let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0) as u64;
 
@@ -287,7 +287,7 @@ pub fn validate_against_parent_4844(
         header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)? as u64;
 
     let expected_excess_blob_gas =
-        calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+        calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
