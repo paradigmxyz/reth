@@ -231,7 +231,8 @@ impl Wal {
     /// Returns an iterator over all notifications in the WAL.
     pub(crate) fn iter_notifications(
         &self,
-    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+    ) -> eyre::Result<Box<dyn DoubleEndedIterator<Item = eyre::Result<ExExNotification>> + '_>>
+    {
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };

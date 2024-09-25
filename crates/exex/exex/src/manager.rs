@@ -15,7 +15,7 @@ use reth_primitives::SealedHeader;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     future::{poll_fn, Future},
     pin::Pin,
@@ -606,6 +606,75 @@ impl ExExManager {
     /// Returns the handle to the manager.
     pub fn handle(&self) -> ExExManagerHandle {
         self.handle.clone()
+    }
+
+    /// Canonicalizes the WAL by inserting inverts of notifications that have non-canonical blocks.
+    ///
+    /// 1. Iterates over all notifications in the WAL in reverse order.
+    /// 2. Takes notifications until we find a notification with only canonical blocks. This
+    ///    notification is not included in the result.
+    /// 3. Inverts the notifications using [`ExExNotification::into_inverted`].
+    /// 4. Commits the inverted notifications using [`Wal::commit`].
+    ///
+    /// Effectivel, it reverts the WAL to the state of the passed provider.
+    pub fn canonicalize_wal<P: HeaderProvider>(&mut self, provider: P) -> eyre::Result<()> {
+        let inverted_notifications = self
+            .wal
+            .iter_notifications()?
+            // Start from the end of the WAL
+            .rev()
+            // Convert all notifications into their inverted versions until we find a notification
+            // with only canonical blocks
+            .map_while(|entry| {
+                let notification = match entry {
+                    Ok(notification) => notification,
+                    Err(err) => return Some(Err(err)),
+                };
+
+                // Check only the committed chain. If the notification is a revert, it can mean two
+                // things:
+                // - We arrived at a notification emitted by an unwind of the pipeline and we're
+                //   sure this notification is canonical.
+                // - We arrive at a notification that's an inverted notification from a previous run
+                //   of this function. We want to keep going until we find a fully canonical commit
+                //   notification, and we will skip this revert later.
+                let Some(committed_chain) = notification.committed_chain() else {
+                    return Some(Ok(notification))
+                };
+
+                // Check that all blocks in the committed chain are canonical, i.e. present in the
+                // database.
+                let mut all_blocks_canonical = true;
+                for block in committed_chain.blocks_iter() {
+                    match provider.header_by_hash_or_number(block.hash().into()) {
+                        Ok(Some(_)) => {}
+                        Ok(None) => {
+                            all_blocks_canonical = false;
+                            break
+                        }
+                        Err(err) => return Some(Err(err.into())),
+                    }
+                }
+
+                if all_blocks_canonical {
+                    None
+                } else {
+                    Some(Ok(notification))
+                }
+            })
+            // Skip all reverted notifications from the end of the WAL. These notifications can be
+            // the inverted notifications from a previous run of this function.
+            .skip_while(|entry| {
+                entry.as_ref().map(|notification| notification.is_chain_reverted()).unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+
+        // Commit all inverted notifications
+        for notification in inverted_notifications {
+            self.wal.commit(&notification?)?;
+        }
+
+        Ok(())
     }
 
     /// Updates the current buffer capacity and notifies all `is_ready` watchers of the manager's
