@@ -18,10 +18,9 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader
 };
-use reth_stages::StageId;
+use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, info, trace, warn};
 
@@ -241,6 +240,9 @@ where
     if highest_block_receipts != highest_block_transactions {
         eyre::bail!("Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}")
     }
+
+    // Required or any access-write provider factory will attempt to unwind to 0.
+    provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(highest_block_receipts))?;
 
     UnifiedStorageWriter::commit(provider, static_file_provider)?;
 
