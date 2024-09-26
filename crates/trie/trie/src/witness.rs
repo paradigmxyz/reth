@@ -127,7 +127,7 @@ where
                     account_multiproof
                         .account_subtree
                         .matching_nodes_iter(&key)
-                        .sorted_by(|a, b| a.0.cmp(&b.0)),
+                        .sorted_by(|a, b| a.0.cmp(b.0)),
                 )?,
             );
 
@@ -147,7 +147,7 @@ where
                         storage_multiproof
                             .subtree
                             .matching_nodes_iter(&slot_nibbles)
-                            .sorted_by(|a, b| a.0.cmp(&b.0)),
+                            .sorted_by(|a, b| a.0.cmp(b.0)),
                     )?,
                 );
             }

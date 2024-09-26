@@ -38,7 +38,7 @@ impl MultiProof {
         let proof = self
             .account_subtree
             .matching_nodes_iter(&nibbles)
-            .sorted_by(|a, b| a.0.cmp(&b.0))
+            .sorted_by(|a, b| a.0.cmp(b.0))
             .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
@@ -101,7 +101,7 @@ impl StorageMultiProof {
         let proof = self
             .subtree
             .matching_nodes_iter(&nibbles)
-            .sorted_by(|a, b| a.0.cmp(&b.0))
+            .sorted_by(|a, b| a.0.cmp(b.0))
             .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
