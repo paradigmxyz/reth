@@ -930,7 +930,7 @@ mod tests {
                 let this = self.get_mut();
 
                 if this.headers.is_empty() {
-                    return Poll::Ready(None);
+                    return Poll::Ready(None)
                 }
 
                 let mut response = Vec::default();
