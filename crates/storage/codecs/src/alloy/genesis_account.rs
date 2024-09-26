@@ -3,7 +3,6 @@ use alloc::vec::Vec;
 use alloy_genesis::GenesisAccount as AlloyGenesisAccount;
 use alloy_primitives::{Bytes, B256, U256};
 use reth_codecs_derive::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
 
 /// `GenesisAccount` acts as bridge which simplifies Compact implementation for
 /// `AlloyGenesisAccount`.
@@ -23,8 +22,8 @@ pub(crate) struct GenesisAccountRef<'a> {
     private_key: Option<&'a B256>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct GenesisAccount {
     /// The nonce of the account at genesis.
@@ -39,15 +38,15 @@ pub(crate) struct GenesisAccount {
     private_key: Option<B256>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct StorageEntry {
     key: B256,

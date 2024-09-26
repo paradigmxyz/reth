@@ -2272,7 +2272,6 @@ where
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-
     /// should be used instead.
     fn compute_state_root_async(
         &self,
