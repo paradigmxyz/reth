@@ -292,21 +292,23 @@ where
         let this = self.get_mut();
 
         if this.pending_sync && this.wal_notifications.is_none() {
-            // TODO: what if the WAL gets finalized while we're iterating over it? Is it even
-            // possible?
-            // TODO : simply walk the cache to get the file ID of the first notification after the
-            // current head
-            let mut wal_notifications =
-                this.wal_handle.clone().into_iter_notifications()?.peekable();
+            // TODO: what if the WAL gets finalized while we're iterating over it?
+            let mut wal_block_cache = this.wal_handle.block_cache().into_iter();
             // Advance iterator until we find a notification matching the current head
-            for notification in &mut wal_notifications {
-                if notification?
-                    .committed_chain()
-                    .map_or(false, |chain| chain.tip().block.hash() == this.exex_head.block.hash)
-                {
-                    break
+            'wal_block_cache: for (_, cached_blocks) in &mut wal_block_cache {
+                for cached_block in cached_blocks {
+                    if cached_block.action.is_commit() &&
+                        cached_block.block.hash == this.exex_head.block.hash
+                    {
+                        break 'wal_block_cache
+                    }
                 }
             }
+            let mut wal_notifications = this
+                .wal_handle
+                .clone()
+                .into_iter_notifications(wal_block_cache.map(|(file_id, _)| file_id))?
+                .peekable();
             // If there are any notifications left, save the iterator to drain it on every poll
             if wal_notifications.peek().is_some() {
                 this.wal_notifications = Some(Box::new(wal_notifications));

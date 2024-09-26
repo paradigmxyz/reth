@@ -36,13 +36,13 @@ impl BlockCache {
         self.read().is_empty()
     }
 
-    /// Returns a front-to-back iterator.
-    pub(super) fn iter(&self) -> impl Iterator<Item = (u64, CachedBlock)> + '_ {
-        self.read()
-            .iter()
-            .flat_map(|(k, v)| v.iter().map(|b| (*k, *b)))
-            .collect::<Vec<_>>()
-            .into_iter()
+    pub(super) fn clone(&self) -> BTreeMap<u64, VecDeque<CachedBlock>> {
+        self.read().clone()
+    }
+
+    /// Returns a front-to-back flattened list of cached blocks.
+    pub(super) fn flatten(&self) -> Vec<(u64, CachedBlock)> {
+        self.read().iter().flat_map(|(k, v)| v.iter().map(|b| (*k, *b))).collect::<Vec<_>>()
     }
 
     /// Provides a reference to the first block from the cache, or `None` if the cache is
@@ -137,20 +137,20 @@ impl BlockCache {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CachedBlock {
-    pub(super) action: CachedBlockAction,
+pub(crate) struct CachedBlock {
+    pub(crate) action: CachedBlockAction,
     /// The block number and hash of the block.
-    pub(super) block: BlockNumHash,
+    pub(crate) block: BlockNumHash,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CachedBlockAction {
+pub(crate) enum CachedBlockAction {
     Commit,
     Revert,
 }
 
 impl CachedBlockAction {
-    pub(super) const fn is_commit(&self) -> bool {
+    pub(crate) const fn is_commit(&self) -> bool {
         matches!(self, Self::Commit)
     }
 }

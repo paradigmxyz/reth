@@ -3,9 +3,13 @@
 mod cache;
 pub use cache::BlockCache;
 mod storage;
+use cache::CachedBlock;
 pub use storage::Storage;
 
-use std::path::Path;
+use std::{
+    collections::{BTreeMap, VecDeque},
+    path::Path,
+};
 
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
@@ -172,7 +176,7 @@ impl Wal {
         // yet.
         let mut unfinalized_from_file_id = None;
         {
-            let mut block_cache = self.block_cache.iter().peekable();
+            let mut block_cache = self.block_cache.flatten().into_iter().peekable();
             while let Some((file_id, block)) = block_cache.next() {
                 debug!(?file_id, ?block, "Iterating over the block cache");
                 if block.action.is_commit() &&
@@ -237,7 +241,7 @@ impl Wal {
     pub(crate) fn iter_notifications(
         &self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
-        let range = self.block_cache.iter().map(|(file_id, _)| file_id);
+        let range = self.block_cache.flatten().into_iter().map(|(file_id, _)| file_id);
         Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
 }
@@ -249,16 +253,17 @@ pub struct WalHandle {
 }
 
 impl WalHandle {
+    pub(crate) fn block_cache(&self) -> BTreeMap<u64, VecDeque<CachedBlock>> {
+        self.wal.block_cache.clone()
+    }
+
     /// Consumes the handle and returns an iterator over all notifications in the WAL. The
     /// underlying files are only read when the iterator is advanced.
-    pub fn into_iter_notifications(
+    pub(crate) fn into_iter_notifications<'a>(
         self,
-    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>>>> {
-        let range = self.wal.block_cache.iter().map(|(file_id, _)| file_id).collect::<Vec<_>>();
-
-        Ok(Box::new(
-            self.wal.storage.into_iter_notifications(range.into_iter()).map(|entry| Ok(entry?.1)),
-        ))
+        range: impl Iterator<Item = u64> + 'a,
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + 'a>> {
+        Ok(Box::new(self.wal.storage.into_iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
 }
 
@@ -372,7 +377,7 @@ mod tests {
             ),
         ];
         wal.commit(&committed_notification_1)?;
-        assert_eq!(wal.block_cache.iter().collect::<Vec<_>>(), committed_notification_1_cache);
+        assert_eq!(wal.block_cache.flatten(), committed_notification_1_cache);
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
 
         // Second notification (revert block 1)
@@ -386,7 +391,7 @@ mod tests {
             },
         )];
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.block_cache.flatten(),
             [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
         );
         assert_eq!(
@@ -400,7 +405,7 @@ mod tests {
         // notification (revert block 1). Additionally, check that the block that the rolled
         // back to is the block with number 0.
         let rollback_result = wal.rollback((blocks[1].number, blocks[1].hash()).into())?;
-        assert_eq!(wal.block_cache.iter().collect::<Vec<_>>(), vec![]);
+        assert_eq!(wal.block_cache.flatten(), vec![]);
         assert_eq!(read_notifications(&wal)?, vec![]);
         assert_eq!(
             rollback_result,
@@ -412,14 +417,11 @@ mod tests {
 
         // Commit notifications 1 and 2 again
         wal.commit(&committed_notification_1)?;
-        assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
-            [committed_notification_1_cache.clone()].concat()
-        );
+        assert_eq!(wal.block_cache.flatten(), [committed_notification_1_cache.clone()].concat());
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
         wal.commit(&reverted_notification)?;
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.block_cache.flatten(),
             [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
         );
         assert_eq!(
@@ -447,7 +449,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.block_cache.flatten(),
             [
                 committed_notification_1_cache.clone(),
                 reverted_notification_cache.clone(),
@@ -491,7 +493,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.block_cache.flatten(),
             [
                 committed_notification_1_cache,
                 reverted_notification_cache,
@@ -516,7 +518,7 @@ mod tests {
         // the notifications before it.
         wal.finalize((block_1_reorged.number, block_1_reorged.hash()).into())?;
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.block_cache.flatten(),
             [committed_notification_2_cache, reorged_notification_cache].concat()
         );
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_2, reorged_notification]);
