@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn test_contains_local_address() {
         let address = Address::new([1; 20]);
-        let mut local_addresses = HashSet::new();
+        let mut local_addresses = HashSet::default();
         local_addresses.insert(address);
 
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
@@ -283,7 +283,7 @@ mod tests {
         let address = Address::new([1; 20]);
         let config = LocalTransactionConfig {
             no_exemptions: true,
-            local_addresses: HashSet::new(),
+            local_addresses: HashSet::default(),
             ..Default::default()
         };
 
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_is_local_without_no_exemptions() {
         let address = Address::new([1; 20]);
-        let mut local_addresses = HashSet::new();
+        let mut local_addresses = HashSet::default();
         local_addresses.insert(address);
 
         let config =

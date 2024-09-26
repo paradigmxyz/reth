@@ -6,13 +6,16 @@ use crate::{
     walker::TrieWalker,
     HashBuilder, Nibbles,
 };
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Address, B256,
+};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
-use std::collections::{HashMap, HashSet};
 
 /// A struct for generating merkle proofs.
 ///
@@ -70,7 +73,7 @@ impl<T, H> Proof<T, H> {
 
     /// Set the target account and slots.
     pub fn with_target(self, target: (B256, HashSet<B256>)) -> Self {
-        self.with_targets(HashMap::from([target]))
+        self.with_targets(HashMap::from_iter([target]))
     }
 
     /// Set the target accounts and slots.

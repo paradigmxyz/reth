@@ -2708,7 +2708,7 @@ mod tests {
 
         assert_eq!(pool.pending_pool.len(), 2);
 
-        let mut changed_senders = HashMap::new();
+        let mut changed_senders = HashMap::default();
         changed_senders.insert(
             id.sender,
             SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
@@ -2892,7 +2892,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::new();
+        let mut updated_accounts = HashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),
@@ -2967,7 +2967,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::new();
+        let mut updated_accounts = HashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),
