@@ -8196,6 +8196,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-storage"
+version = "1.0.7"
+dependencies = [
+ "reth-codecs",
+ "reth-db-api",
+ "reth-primitives",
+ "reth-prune-types",
+ "reth-stages-types",
+]
+
+[[package]]
 name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
