@@ -1952,6 +1952,7 @@ where
             let old_first = old.first().map(|first| first.block.num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
+            self.update_reorg_metrics(old.len());
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
         }
@@ -1971,6 +1972,12 @@ where
             Box::new(tip),
             start.elapsed(),
         ));
+    }
+
+    /// This updates metrics based on the given reorg length.
+    fn update_reorg_metrics(&self, old_chain_length: usize) {
+        self.metrics.tree.reorgs.increment(1);
+        self.metrics.tree.latest_reorg_depth.set(old_chain_length as f64);
     }
 
     /// This reinserts any blocks in the new chain that do not already exist in the tree
