@@ -100,26 +100,11 @@ impl Receipts {
         self.receipt_vec.push(receipts);
     }
 
-    /// Retrieves the receipt root for all recorded receipts from index.
-    pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_no_memo(
-            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
-        ))
-    }
-
-    /// Retrieves the receipt root for all recorded receipts from index.
-    #[cfg(feature = "optimism")]
-    pub fn optimism_root_slow(
-        &self,
-        index: usize,
-        chain_spec: impl reth_chainspec::Hardforks,
-        timestamp: u64,
-    ) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_no_memo_optimism(
-            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
-            chain_spec,
-            timestamp,
-        ))
+    /// Retrieves all recorded receipts from index and calculates the root using the given closure.
+    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
+        let receipts =
+            self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
+        Some(f(receipts.as_slice()))
     }
 }
 

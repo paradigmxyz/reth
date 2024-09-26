@@ -11,6 +11,7 @@ use reth_evm::{
     NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
@@ -443,11 +444,9 @@ where
         Vec::new(),
     );
     let receipts_root = execution_outcome
-        .optimism_receipts_root_slow(
-            block_number,
-            &chain_spec,
-            attributes.payload_attributes.timestamp,
-        )
+        .generic_receipts_root_slow(block_number, |receipts| {
+            calculate_receipt_root_no_memo_optimism(receipts, &chain_spec, attributes.timestamp())
+        })
         .expect("Number is in range");
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 

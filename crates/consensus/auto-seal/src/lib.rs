@@ -419,7 +419,13 @@ impl StorageInner {
         header.receipts_root = {
             #[cfg(feature = "optimism")]
             let receipts_root = execution_outcome
-                .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
+                .generic_receipts_root_slow(header.number, |receipts| {
+                    reth_optimism_consensus::calculate_receipt_root_no_memo_optimism(
+                        receipts,
+                        &chain_spec,
+                        header.timestamp,
+                    )
+                })
                 .expect("Receipts is present");
 
             #[cfg(not(feature = "optimism"))]
