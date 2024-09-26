@@ -365,7 +365,7 @@ where
             }
         }
         if last_block == 0 {
-            break;
+            break
         }
         last_block -= 1;
     }
