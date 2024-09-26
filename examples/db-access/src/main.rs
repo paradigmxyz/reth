@@ -1,8 +1,9 @@
+use alloy_primitives::Address;
 use alloy_rpc_types::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::{alloy_primitives::Sealable, Address, SealedHeader, B256};
+use reth_primitives::{alloy_primitives::Sealable, SealedHeader, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,

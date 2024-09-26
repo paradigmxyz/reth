@@ -1,7 +1,7 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
-use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_db::tables;
 use reth_db_api::{
@@ -9,8 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry,
-    Withdrawals,
+    Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals,
 };
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};

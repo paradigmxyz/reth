@@ -1,12 +1,12 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered, Withdrawals, B256,
+    Bytes, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
+    Withdrawals, B256,
 };
 use alloc::vec::Vec;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
-use alloy_primitives::Sealable;
+use alloy_primitives::{Address, Sealable};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
