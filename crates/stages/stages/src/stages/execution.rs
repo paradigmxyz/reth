@@ -1,4 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
+use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
@@ -9,9 +10,7 @@ use reth_evm::{
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{
-    alloy_primitives::Sealable, BlockNumber, Header, SealedHeader, StaticFileSegment,
-};
+use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -659,6 +658,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::TestStageDB;
+    use alloy_primitives::{keccak256, Address};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -666,8 +666,7 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, Address, Bytecode, SealedBlock,
-        StorageEntry, B256, U256,
+        address, hex_literal::hex, Account, Bytecode, SealedBlock, StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,

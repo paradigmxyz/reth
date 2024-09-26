@@ -10,6 +10,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_primitives::Address;
 use alloy_rpc_types::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
@@ -17,7 +18,7 @@ use reth::{
     args::utils::DefaultChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
-    primitives::{Address, BlockNumberOrTag},
+    primitives::BlockNumberOrTag,
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},

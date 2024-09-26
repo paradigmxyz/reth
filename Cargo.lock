@@ -2712,6 +2712,7 @@ name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "alloy-rpc-types",
  "eyre",
  "reth",
@@ -2734,6 +2735,7 @@ name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "reth",
  "reth-chainspec",
@@ -2750,6 +2752,7 @@ dependencies = [
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types",
  "clap",
  "futures-util",
@@ -2810,6 +2813,7 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types",
  "eyre",
  "reth-chainspec",
@@ -2916,6 +2920,7 @@ name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "parking_lot 0.12.3",
  "reth",
@@ -2933,6 +2938,7 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types-trace",
  "clap",
  "futures-util",
@@ -6174,6 +6180,7 @@ name = "reth"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
  "aquamarine",
@@ -6610,11 +6617,11 @@ dependencies = [
 name = "reth-config"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "humantime-serde",
  "reth-network-peers",
  "reth-network-types",
- "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
  "serde",
@@ -8403,6 +8410,7 @@ dependencies = [
 name = "reth-revm"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-consensus-common",
  "reth-ethereum-forks",
@@ -8757,6 +8765,7 @@ dependencies = [
 name = "reth-stages"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "criterion",

@@ -182,7 +182,8 @@ impl BlockBatchRecord {
 mod tests {
     use super::*;
     use alloc::collections::BTreeMap;
-    use reth_primitives::{Address, Log, Receipt};
+    use alloy_primitives::Address;
+    use reth_primitives::{Log, Receipt};
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
 
     #[test]

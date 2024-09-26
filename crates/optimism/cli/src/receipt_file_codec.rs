@@ -1,10 +1,10 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_primitives::B256;
+use alloy_primitives::{Address, Bloom, B256};
 use alloy_rlp::{Decodable, RlpDecodable};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
-    Address, Bloom, Bytes, Log, Receipt, TxType,
+    Bytes, Log, Receipt, TxType,
 };
 use tokio_util::codec::Decoder;
 
