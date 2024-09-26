@@ -33,7 +33,7 @@ pub struct Proof<T, H> {
 }
 
 impl<T, H> Proof<T, H> {
-    /// Create a new [Proof] instance.
+    /// Create a new [`Proof`] instance.
     pub fn new(t: T, h: H) -> Self {
         Self {
             trie_cursor_factory: t,
@@ -155,12 +155,12 @@ pub struct StorageProof<T, H> {
 }
 
 impl<T, H> StorageProof<T, H> {
-    /// Create a new [StorageProof] instance.
+    /// Create a new [`StorageProof`] instance.
     pub fn new(t: T, h: H, address: Address) -> Self {
         Self::new_hashed(t, h, keccak256(address))
     }
 
-    /// Create a new [StorageProof] instance with hashed address.
+    /// Create a new [`StorageProof`] instance with hashed address.
     pub fn new_hashed(t: T, h: H, hashed_address: B256) -> Self {
         Self {
             trie_cursor_factory: t,
