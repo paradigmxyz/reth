@@ -25,7 +25,7 @@ use reth_tracing::tracing::{debug, instrument};
 ///    with [`Wal::commit`].
 /// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Wal {
     /// The underlying WAL storage backed by a file.
     storage: Storage,
@@ -64,6 +64,11 @@ impl Wal {
         }
 
         Ok(())
+    }
+
+    /// Returns a read-only handle to the WAL.
+    pub fn handle(&self) -> WalHandle {
+        WalHandle { wal: self.clone() }
     }
 
     /// Commits the notification to WAL.
@@ -238,6 +243,12 @@ impl Wal {
 
         Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
+}
+
+/// A read-only handle to the WAL that can be shared.
+#[derive(Debug)]
+pub struct WalHandle {
+    wal: Wal,
 }
 
 #[cfg(test)]
