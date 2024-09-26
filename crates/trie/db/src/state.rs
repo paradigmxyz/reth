@@ -267,10 +267,10 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, Address};
+    use alloy_primitives::{map::HashMap, Address, U256};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
-    use reth_primitives::{hex, revm_primitives::AccountInfo, U256};
+    use reth_primitives::{hex, revm_primitives::AccountInfo};
     use revm::db::BundleState;
 
     #[test]

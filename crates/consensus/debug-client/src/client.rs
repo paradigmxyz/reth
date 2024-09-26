@@ -1,9 +1,9 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::B256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
 use reth_node_api::EngineTypes;
-use reth_node_core::primitives::B256;
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};

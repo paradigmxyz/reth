@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
-    Address, BlockNumber, StorageKey,
+    Address, BlockNumber, StorageKey, B256, U256,
 };
-use reth_primitives::{Account, Bytecode, Bytes, B256, U256};
+use reth_primitives::{Account, Bytecode, Bytes};
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     StorageRootProvider,

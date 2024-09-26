@@ -3,14 +3,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
 use parking_lot::RwLock;
 use reth::{
     api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
         revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        Bytes, U256,
+        Bytes,
     },
     revm::{
         handler::register::EvmHandler,
