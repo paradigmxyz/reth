@@ -14,21 +14,23 @@ use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider,
 };
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
+    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
+    collections::{hash_map, HashMap},
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
     time::Instant,
@@ -120,6 +122,81 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         };
 
         (start, end)
+    }
+
+    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
+    /// [`PlainAccountState`] and [`PlainStorageState`] tables, based on the given storage and
+    /// account changesets.
+    fn populate_bundle_state(
+        &self,
+        account_changeset: Vec<(u64, AccountBeforeTx)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+        block_range_end: BlockNumber,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+        // iterate previous value and get plain state value to create changeset
+        // Double option around Account represent if Account state is know (first option) and
+        // account is removed (Second Option)
+        let mut state: BundleStateInit = HashMap::new();
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+
+        let mut reverts: RevertsInit = HashMap::new();
+        let state_provider = self.state_by_block_number_or_tag(block_range_end.into())?;
+
+        // add account changeset changes
+        for (block_number, account_before) in account_changeset.into_iter().rev() {
+            let AccountBeforeTx { info: old_info, address } = account_before;
+            match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_info = state_provider.basic_account(address)?;
+                    entry.insert((old_info, new_info, HashMap::new()));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    // overwrite old account state.
+                    entry.get_mut().0 = old_info;
+                }
+            }
+            // insert old info into reverts.
+            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+        }
+
+        // add storage changeset changes
+        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
+            let BlockNumberAddress((block_number, address)) = block_and_address;
+            // get account state or insert from plain state.
+            let account_state = match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let present_info = state_provider.basic_account(address)?;
+                    entry.insert((present_info, present_info, HashMap::new()))
+                }
+                hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            };
+
+            // match storage.
+            match account_state.2.entry(old_storage.key) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_storage_value =
+                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
+                    entry.insert((old_storage.value, new_storage_value));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().0 = old_storage.value;
+                }
+            };
+
+            reverts
+                .entry(block_number)
+                .or_default()
+                .entry(address)
+                .or_default()
+                .1
+                .push(old_storage);
+        }
+
+        Ok((state, reverts))
     }
 
     /// Fetches a range of data from both in-memory state and persistent storage while a predicate
