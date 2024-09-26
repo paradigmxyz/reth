@@ -2,7 +2,10 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, B256, U256,
+};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_storage_api::StateProvider;
@@ -70,7 +73,7 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
     fn multiproof(
         &self,
         input: reth_trie::TrieInput,
-        targets: std::collections::HashMap<B256, std::collections::HashSet<B256>>,
+        targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<reth_trie::MultiProof> {
         self.0.multiproof(input, targets)
     }
@@ -79,7 +82,8 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
         &self,
         input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, alloy_primitives::Bytes>> {
+    ) -> reth_errors::ProviderResult<alloy_primitives::map::HashMap<B256, alloy_primitives::Bytes>>
+    {
         self.0.witness(input, target)
     }
 }

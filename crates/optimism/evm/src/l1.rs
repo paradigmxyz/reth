@@ -289,7 +289,7 @@ where
         revm_acc.mark_touch();
 
         // Commit the create2 deployer account to the database.
-        db.commit(HashMap::from([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
+        db.commit(HashMap::from_iter([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
         return Ok(())
     }
 

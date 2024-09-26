@@ -1090,7 +1090,6 @@ impl Display for InboundConnectionError {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::HashSet,
         future::{poll_fn, Future},
         io,
         net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -1968,7 +1967,7 @@ mod tests {
     async fn test_discovery_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let ban_list = BanList::new(HashSet::new(), vec![ip]);
+        let ban_list = BanList::new(vec![], vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         peer_manager.add_peer(B512::default(), PeerAddr::from_tcp(socket_addr), None);
@@ -1980,7 +1979,7 @@ mod tests {
     async fn test_on_pending_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let ban_list = BanList::new(HashSet::new(), vec![ip]);
+        let ban_list = BanList::new(vec![], vec![ip]);
         let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         let a = peer_manager.on_incoming_pending_session(socket_addr.ip());
@@ -2001,7 +2000,7 @@ mod tests {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
         let given_peer_id = PeerId::random();
-        let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
+        let ban_list = BanList::new(vec![given_peer_id], vec![]);
         let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         assert!(peer_manager.on_incoming_pending_session(socket_addr.ip()).is_ok());

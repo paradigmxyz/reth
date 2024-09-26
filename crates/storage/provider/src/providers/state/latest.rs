@@ -2,7 +2,10 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -16,7 +19,6 @@ use reth_trie::{
     HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
-use std::collections::{HashMap, HashSet};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]

@@ -956,15 +956,20 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
-            crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
-                let mut compressor = compressor.borrow_mut();
-                let mut tmp = Vec::with_capacity(256);
+            let mut tmp = Vec::with_capacity(256);
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    tx_bits as u8
+                })
+            } else {
+                let mut compressor = crate::compression::create_tx_compressor();
                 let tx_bits = self.transaction.to_compact(&mut tmp);
-
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-
                 tx_bits as u8
-            })
+            }
         } else {
             self.transaction.to_compact(buf) as u8
         };
@@ -984,17 +989,26 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
 
-                // TODO: enforce that zstd is only present at a "top" level type
+                    // TODO: enforce that zstd is only present at a "top" level type
 
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) =
+                        Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+
+                    (transaction, buf)
+                })
+            } else {
+                let mut decompressor = crate::compression::create_tx_decompressor();
                 let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
                 (transaction, buf)
-            })
+            }
         } else {
             let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)

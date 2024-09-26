@@ -482,7 +482,7 @@ mod tests {
         let l1_block_contract_account =
             Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
 
-        let mut l1_block_storage = HashMap::with_capacity(4);
+        let mut l1_block_storage = HashMap::default();
         // base fee
         l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
         // l1 fee overhead
@@ -529,7 +529,7 @@ mod tests {
 
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
@@ -613,7 +613,7 @@ mod tests {
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
 
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))

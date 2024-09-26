@@ -1,8 +1,9 @@
 //! Connection tests
 
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use alloy_node_bindings::Geth;
+use alloy_primitives::map::HashSet;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_chainspec::MAINNET;
@@ -328,7 +329,7 @@ async fn test_incoming_node_id_blacklist() {
         let enr = provider.node_info().await.unwrap().enr;
         let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
-        let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
+        let ban_list = BanList::new(vec![geth_peer_id], vec![]);
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
         let config = NetworkConfigBuilder::new(secret_key)

@@ -551,7 +551,7 @@ pub struct ActiveFilters<T> {
 impl<T> ActiveFilters<T> {
     /// Returns an empty instance.
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(HashMap::new())) }
+        Self { inner: Arc::new(Mutex::new(HashMap::default())) }
     }
 }
 

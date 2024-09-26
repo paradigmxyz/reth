@@ -133,7 +133,7 @@ where
         let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
-        let mut state_preimages = HashMap::new();
+        let mut state_preimages = HashMap::default();
 
         // Grab all account proofs for the data accessed during block execution.
         //
@@ -170,7 +170,10 @@ where
         let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness { state, keys: Some(state_preimages) };
+        let response = ExecutionWitness {
+            state: std::collections::HashMap::from_iter(state),
+            keys: Some(state_preimages),
+        };
         let re_executed_witness_path = self.save_file(
             format!("{}_{}.witness.re_executed.json", block.number, block.hash()),
             &response,

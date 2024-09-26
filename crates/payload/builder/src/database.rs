@@ -158,6 +158,6 @@ struct CachedAccount {
 
 impl CachedAccount {
     fn new(info: Option<AccountInfo>) -> Self {
-        Self { info, storage: HashMap::new() }
+        Self { info, storage: HashMap::default() }
     }
 }

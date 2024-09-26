@@ -1459,7 +1459,7 @@ mod test {
         for hash in &seen_hashes {
             peer_2_data.seen_transactions.insert(*hash);
         }
-        let mut peers = HashMap::new();
+        let mut peers = HashMap::default();
         peers.insert(peer_1, peer_1_data);
         peers.insert(peer_2, peer_2_data);
 

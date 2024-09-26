@@ -5,7 +5,10 @@ use crate::{
     persistence::PersistenceHandle,
 };
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    BlockNumber, B256, U256,
+};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
@@ -43,7 +46,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     cmp::Ordering,
-    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
     ops::Bound,
     sync::{
@@ -101,11 +104,11 @@ impl TreeState {
     /// Returns a new, empty tree state that points to the given canonical head.
     fn new(current_canonical_head: BlockNumHash) -> Self {
         Self {
-            blocks_by_hash: HashMap::new(),
+            blocks_by_hash: HashMap::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
-            parent_to_child: HashMap::new(),
-            persisted_trie_updates: HashMap::new(),
+            parent_to_child: HashMap::default(),
+            persisted_trie_updates: HashMap::default(),
         }
     }
 
@@ -2697,12 +2700,11 @@ mod tests {
         }
 
         fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-            let mut blocks_by_hash = HashMap::with_capacity(blocks.len());
+            let mut blocks_by_hash = HashMap::default();
             let mut blocks_by_number = BTreeMap::new();
-            let mut state_by_hash = HashMap::with_capacity(blocks.len());
+            let mut state_by_hash = HashMap::default();
             let mut hash_by_number = BTreeMap::new();
-            let mut parent_to_child: HashMap<B256, HashSet<B256>> =
-                HashMap::with_capacity(blocks.len());
+            let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::default();
             let mut parent_hash = B256::ZERO;
 
             for block in &blocks {
@@ -3158,7 +3160,7 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[0].block.hash()),
-            Some(&HashSet::from([blocks[1].block.hash()]))
+            Some(&HashSet::from_iter([blocks[1].block.hash()]))
         );
 
         assert!(!tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
@@ -3167,7 +3169,7 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[1].block.hash()),
-            Some(&HashSet::from([blocks[2].block.hash()]))
+            Some(&HashSet::from_iter([blocks[2].block.hash()]))
         );
         assert!(tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
 
@@ -3255,11 +3257,11 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[2].block.hash()),
-            Some(&HashSet::from([blocks[3].block.hash()]))
+            Some(&HashSet::from_iter([blocks[3].block.hash()]))
         );
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[3].block.hash()),
-            Some(&HashSet::from([blocks[4].block.hash()]))
+            Some(&HashSet::from_iter([blocks[4].block.hash()]))
         );
     }
 
@@ -3305,11 +3307,11 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[2].block.hash()),
-            Some(&HashSet::from([blocks[3].block.hash()]))
+            Some(&HashSet::from_iter([blocks[3].block.hash()]))
         );
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[3].block.hash()),
-            Some(&HashSet::from([blocks[4].block.hash()]))
+            Some(&HashSet::from_iter([blocks[4].block.hash()]))
         );
     }
 
@@ -3355,11 +3357,11 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[2].block.hash()),
-            Some(&HashSet::from([blocks[3].block.hash()]))
+            Some(&HashSet::from_iter([blocks[3].block.hash()]))
         );
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[3].block.hash()),
-            Some(&HashSet::from([blocks[4].block.hash()]))
+            Some(&HashSet::from_iter([blocks[4].block.hash()]))
         );
     }
 
@@ -3546,7 +3548,7 @@ mod tests {
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
-                let expected_block_set = HashSet::from([missing_block.hash()]);
+                let expected_block_set = HashSet::from_iter([missing_block.hash()]);
                 assert_eq!(actual_block_set, expected_block_set);
             }
             _ => panic!("Unexpected event: {:#?}", event),
@@ -3641,7 +3643,7 @@ mod tests {
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
-                assert_eq!(hash_set, HashSet::from([main_chain_last_hash]));
+                assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
@@ -3704,7 +3706,7 @@ mod tests {
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
-                assert_eq!(hash_set, HashSet::from([main_chain_backfill_target_hash]));
+                assert_eq!(hash_set, HashSet::from_iter([main_chain_backfill_target_hash]));
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
@@ -3749,7 +3751,7 @@ mod tests {
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockSet(target_hash)) => {
-                assert_eq!(target_hash, HashSet::from([main_chain_last_hash]));
+                assert_eq!(target_hash, HashSet::from_iter([main_chain_last_hash]));
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
