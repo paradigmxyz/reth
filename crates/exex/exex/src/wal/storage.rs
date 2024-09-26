@@ -81,24 +81,6 @@ impl Storage {
         Ok(range.count())
     }
 
-    /// Removes notifications from the storage according to the given range.
-    ///
-    /// # Returns
-    ///
-    /// Notifications that were removed.
-    pub(super) fn take_notifications(
-        &self,
-        range: RangeInclusive<u64>,
-    ) -> eyre::Result<Vec<ExExNotification>> {
-        let notifications = self.iter_notifications(range).collect::<eyre::Result<Vec<_>>>()?;
-
-        for (id, _) in &notifications {
-            self.remove_notification(*id);
-        }
-
-        Ok(notifications.into_iter().map(|(_, notification)| notification).collect())
-    }
-
     pub(super) fn iter_notifications(
         &self,
         range: RangeInclusive<u64>,

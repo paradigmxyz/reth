@@ -19,11 +19,7 @@ use reth_tracing::tracing::{debug, instrument};
 ///
 /// The expected mode of operation is as follows:
 /// 1. On every new canonical chain notification, call [`Wal::commit`].
-/// 2. When ExEx is on a wrong fork, rollback the WAL using [`Wal::rollback`]. The caller is
-///    expected to create reverts from the removed notifications and backfill the blocks between the
-///    returned block and the given rollback block. After that, commit new notifications as usual
-///    with [`Wal::commit`].
-/// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
+/// 2. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
 #[derive(Debug)]
 pub struct Wal {
@@ -79,79 +75,6 @@ impl Wal {
         self.block_cache.insert_notification_blocks_with_file_id(file_id, notification);
 
         Ok(())
-    }
-
-    /// Rollbacks the WAL to the given block, inclusive.
-    ///
-    /// 1. Walks the WAL from the end and searches for the first notification where committed chain
-    ///    contains a block with the same number and hash as `to_block`.
-    /// 2. If the notification is found, truncates the WAL. It means that if the found notification
-    ///    contains both given block and blocks before it, the whole notification will be truncated.
-    ///
-    /// # Returns
-    ///
-    /// 1. The block number and hash of the lowest removed block.
-    /// 2. The notifications that were removed.
-    #[instrument(target = "exex::wal", skip(self))]
-    pub fn rollback(
-        &mut self,
-        to_block: BlockNumHash,
-    ) -> eyre::Result<Option<(BlockNumHash, Vec<ExExNotification>)>> {
-        // First, pop items from the back of the cache until we find the notification with the
-        // specified block. When found, save the file ID of that notification.
-        let mut remove_from_file_id = None;
-        let mut remove_to_file_id = None;
-        let mut lowest_removed_block = None;
-        while let Some((file_id, block)) = self.block_cache.pop_back() {
-            debug!(?file_id, ?block, "Popped back block from the block cache");
-            if block.action.is_commit() && block.block.number == to_block.number {
-                debug!(
-                    ?file_id,
-                    ?block,
-                    ?remove_from_file_id,
-                    ?lowest_removed_block,
-                    "Found the requested block"
-                );
-
-                if block.block.hash != to_block.hash {
-                    eyre::bail!("block hash mismatch in WAL")
-                }
-
-                remove_from_file_id = Some(file_id);
-
-                let notification = self.storage.read_notification(file_id)?;
-                lowest_removed_block = notification
-                    .committed_chain()
-                    .as_ref()
-                    .map(|chain| chain.first())
-                    .map(|block| (block.number, block.hash()).into());
-
-                break
-            }
-
-            remove_from_file_id = Some(file_id);
-            remove_to_file_id.get_or_insert(file_id);
-        }
-
-        // If the specified block is still not found, we can't do anything and just return. The
-        // cache was empty.
-        let Some((remove_from_file_id, remove_to_file_id)) =
-            remove_from_file_id.zip(remove_to_file_id)
-        else {
-            debug!("No blocks were rolled back");
-            return Ok(None)
-        };
-
-        // Remove the rest of the block cache entries for the file ID that we found.
-        self.block_cache.remove_notification(remove_from_file_id);
-        debug!(?remove_from_file_id, "Block cache was rolled back");
-
-        // Remove notifications from the storage.
-        let removed_notifications =
-            self.storage.take_notifications(remove_from_file_id..=remove_to_file_id)?;
-        debug!(removed_notifications = ?removed_notifications.len(), "Storage was rolled back");
-
-        Ok(Some((lowest_removed_block.expect("qed"), removed_notifications)))
     }
 
     /// Finalizes the WAL to the given block, inclusive.
@@ -363,39 +286,6 @@ mod tests {
                 block: (blocks[1].number, blocks[1].hash()).into(),
             },
         )];
-        assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
-            [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
-        );
-        assert_eq!(
-            read_notifications(&wal)?,
-            vec![committed_notification_1.clone(), reverted_notification.clone()]
-        );
-
-        // Now, rollback to block 1 and verify that both the block cache and the storage are
-        // empty. We expect the rollback to delete the first notification (commit block 0, 1),
-        // because we can't delete blocks partly from the notification, and also the second
-        // notification (revert block 1). Additionally, check that the block that the rolled
-        // back to is the block with number 0.
-        let rollback_result = wal.rollback((blocks[1].number, blocks[1].hash()).into())?;
-        assert_eq!(wal.block_cache.iter().collect::<Vec<_>>(), vec![]);
-        assert_eq!(read_notifications(&wal)?, vec![]);
-        assert_eq!(
-            rollback_result,
-            Some((
-                (blocks[0].number, blocks[0].hash()).into(),
-                vec![committed_notification_1.clone(), reverted_notification.clone()]
-            ))
-        );
-
-        // Commit notifications 1 and 2 again
-        wal.commit(&committed_notification_1)?;
-        assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
-            [committed_notification_1_cache.clone()].concat()
-        );
-        assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
-        wal.commit(&reverted_notification)?;
         assert_eq!(
             wal.block_cache.iter().collect::<Vec<_>>(),
             [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
