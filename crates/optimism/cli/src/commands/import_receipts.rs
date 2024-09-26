@@ -255,10 +255,10 @@ where
 /// Result of importing receipts in chunks.
 #[derive(Debug)]
 pub struct ImportReceiptsResult {
-    #[allow(unused)]
-    total_decoded_receipts: usize,
-    #[allow(unused)]
-    total_filtered_out_dup_txns: usize,
+    /// Total decoded receipts.
+    pub total_decoded_receipts: usize,
+    /// Total filtered out receipts.
+    pub total_filtered_out_dup_txns: usize,
 }
 
 #[cfg(test)]
