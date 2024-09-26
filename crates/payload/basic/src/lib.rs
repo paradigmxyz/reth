@@ -351,7 +351,7 @@ where
 {
     /// Spawns a new payload build task.
     fn spawn_build_job(&mut self) {
-        trace!(target: "payload_builder", "spawn new payload build task");
+        trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let client = self.client.clone();
         let pool = self.pool.clone();
