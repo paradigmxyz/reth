@@ -666,7 +666,10 @@ where
 
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
-                Ok(ExecutionWitness { state, keys: include_preimages.then_some(keys) })
+                Ok(ExecutionWitness {
+                    state: std::collections::HashMap::from_iter(state.into_iter()),
+                    keys: include_preimages.then_some(keys),
+                })
             })
             .await
     }
