@@ -1,5 +1,4 @@
-use crate::U64;
-use alloy_primitives::U8;
+use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -114,19 +113,19 @@ impl TryFrom<u8> for TxType {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         #[cfg(feature = "optimism")]
         if value == Self::Deposit {
-            return Ok(Self::Deposit)
+            return Ok(Self::Deposit);
         }
 
         if value == Self::Legacy {
-            return Ok(Self::Legacy)
+            return Ok(Self::Legacy);
         } else if value == Self::Eip2930 {
-            return Ok(Self::Eip2930)
+            return Ok(Self::Eip2930);
         } else if value == Self::Eip1559 {
-            return Ok(Self::Eip1559)
+            return Ok(Self::Eip1559);
         } else if value == Self::Eip4844 {
-            return Ok(Self::Eip4844)
+            return Ok(Self::Eip4844);
         } else if value == Self::Eip7702 {
-            return Ok(Self::Eip7702)
+            return Ok(Self::Eip7702);
         }
 
         Err("invalid tx type")

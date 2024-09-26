@@ -296,7 +296,7 @@ impl TransactionsProvider for MockEthProvider {
                             .map(|excess_blob_gas| excess_blob_gas as u64),
                         timestamp: block.header.timestamp,
                     };
-                    return Ok(Some((tx.clone(), meta)))
+                    return Ok(Some((tx.clone(), meta)));
                 }
             }
         }
