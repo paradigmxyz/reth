@@ -5,7 +5,7 @@ use crate::{
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -16,11 +16,7 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -197,7 +193,7 @@ impl CanonicalInMemoryState {
 
     /// Create an empty state.
     pub fn empty() -> Self {
-        Self::new(HashMap::new(), BTreeMap::new(), None, None)
+        Self::new(HashMap::default(), BTreeMap::new(), None, None)
     }
 
     /// Create a new in memory state with the given local head and finalized header
@@ -984,7 +980,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
-        let mut state_by_hash = HashMap::new();
+        let mut state_by_hash = HashMap::default();
         let number = rand::thread_rng().gen::<u64>();
         let mut test_block_builder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
@@ -1056,7 +1052,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_no_pending_state() {
-        let in_memory_state = InMemoryState::new(HashMap::new(), BTreeMap::new(), None);
+        let in_memory_state = InMemoryState::new(HashMap::default(), BTreeMap::new(), None);
 
         assert_eq!(in_memory_state.pending_state(), None);
     }

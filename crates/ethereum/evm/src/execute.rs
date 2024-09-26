@@ -505,7 +505,7 @@ mod tests {
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
             Some(BEACON_ROOTS_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -524,7 +524,7 @@ mod tests {
             WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
             withdrawal_requests_contract_account,
             Some(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -685,7 +685,7 @@ mod tests {
         let mut db = create_state_provider_with_beacon_root_contract();
 
         // insert an empty SYSTEM_ADDRESS
-        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
+        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
@@ -883,7 +883,7 @@ mod tests {
             HISTORY_STORAGE_ADDRESS,
             blockhashes_contract_account,
             Some(HISTORY_STORAGE_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -1230,7 +1230,7 @@ mod tests {
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
-            HashMap::new(),
+            HashMap::default(),
         );
 
         // https://github.com/lightclient/7002asm/blob/e0d68e04d15f25057af7b6d180423d94b6b3bdb3/test/Contract.t.sol.in#L49-L64
@@ -1313,7 +1313,7 @@ mod tests {
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
-            HashMap::new(),
+            HashMap::default(),
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes

@@ -529,7 +529,7 @@ mod tests {
 
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
@@ -613,7 +613,7 @@ mod tests {
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
 
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
