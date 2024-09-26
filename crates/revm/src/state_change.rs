@@ -1,5 +1,5 @@
-use crate::precompile::HashMap;
 use alloy_primitives::Address;
+use alloy_primitives::map::HashMap;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
 use reth_primitives::{Block, Withdrawal, Withdrawals, U256};

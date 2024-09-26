@@ -1,7 +1,7 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{Address, BlockNumber, Log, Parity, Sealable, TxKind};
+use alloy_primitives::{map::HashMap, BlockNumber, Log, Parity, Sealable, TxKind};
 use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -11,10 +11,7 @@ use reth_primitives::{
     TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use revm::{
-    db::BundleState,
-    primitives::{AccountInfo, HashMap},
-};
+use revm::{db::BundleState, primitives::AccountInfo};
 use std::str::FromStr;
 
 /// Assert genesis block
