@@ -949,7 +949,7 @@ mod tests {
                 }
 
                 if !response.is_empty() {
-                    return Poll::Ready(Some(Ok(response)));
+                    return Poll::Ready(Some(Ok(response)))
                 }
 
                 panic!("requested bodies without setting headers")
