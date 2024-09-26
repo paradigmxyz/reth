@@ -295,9 +295,9 @@ pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
 ///
 /// 1. Creates a temporary file with a `.tmp` extension on the same file directory.
 /// 2. Writes content with `write_fn`.
-/// 3. FSyncs the temp file to disk.
+/// 3. Fsyncs the temp file to disk.
 /// 4. Renames the temp file to the target path.
-/// 5. FSyncs the file directory.
+/// 5. Fsyncs the file directory.
 ///
 /// Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
 pub fn atomic_write_file<F, E>(file_path: &Path, write_fn: F) -> Result<()>
