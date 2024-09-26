@@ -1,7 +1,6 @@
 use crate::Compact;
 use alloy_consensus::Header as AlloyHeader;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
-use serde::{Deserialize, Serialize};
 
 /// Block header
 ///
@@ -11,7 +10,8 @@ use serde::{Deserialize, Serialize};
 /// will automatically apply to this type.
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::Header`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
 pub(crate) struct Header {
     parent_hash: B256,
     ommers_hash: B256,
@@ -42,7 +42,8 @@ pub(crate) struct Header {
 /// used as a field of [`Header`] for backwards compatibility.
 ///
 /// More information: <https://github.com/paradigmxyz/reth/issues/7820> & [`reth_codecs_derive::Compact`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
 pub(crate) struct HeaderExt {
     requests_root: Option<B256>,
 }

@@ -1,11 +1,12 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
-    ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
+    constants::EMPTY_OMMER_ROOT_HASH, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
+    Request, TransactionSigned, Withdrawal, B256,
 };
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Encodable7685;
+use alloy_primitives::keccak256;
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 /// Calculate a transaction root.
@@ -44,47 +45,6 @@ pub fn calculate_receipt_root_ref(receipts: &[ReceiptWithBloomRef<'_>]) -> B256 
 ///
 /// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
-    ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
-    })
-}
-
-/// Calculates the receipt root for a header for the reference type of [Receipt].
-///
-/// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
-#[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[&Receipt],
-    chain_spec: impl reth_chainspec::Hardforks,
-    timestamp: u64,
-) -> B256 {
-    // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
-    // the receipt root calculation does not include the deposit nonce in the receipt
-    // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
-    // receipts before calculating the receipt root. This was corrected in the Canyon
-    // hardfork.
-
-    if chain_spec
-        .is_fork_active_at_timestamp(reth_optimism_forks::OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(
-            reth_optimism_forks::OptimismHardfork::Canyon,
-            timestamp,
-        )
-    {
-        let receipts = receipts
-            .iter()
-            .map(|r| {
-                let mut r = (*r).clone();
-                r.deposit_nonce = None;
-                r
-            })
-            .collect::<Vec<_>>();
-
-        return ordered_trie_root_with_encoder(&receipts, |r, buf| {
-            ReceiptWithBloomRef::from(r).encode_inner(buf, false)
-        })
-    }
-
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
     })

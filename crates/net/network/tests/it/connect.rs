@@ -5,6 +5,7 @@ use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use alloy_node_bindings::Geth;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
+use reth_chainspec::MAINNET;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::{DisconnectReason, HeadersDirection};
 use reth_net_banlist::BanList;
@@ -688,7 +689,7 @@ async fn new_random_peer(max_in_bound: usize, trusted_nodes: Vec<TrustedPeer>) -
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
 
     NetworkManager::new(config).await.unwrap()
 }

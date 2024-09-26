@@ -2712,6 +2712,7 @@ name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "alloy-rpc-types",
  "eyre",
  "reth",
@@ -2734,6 +2735,7 @@ name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "reth",
  "reth-chainspec",
@@ -2750,6 +2752,7 @@ dependencies = [
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types",
  "clap",
  "futures-util",
@@ -2810,6 +2813,7 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types",
  "eyre",
  "reth-chainspec",
@@ -2916,6 +2920,7 @@ name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "parking_lot 0.12.3",
  "reth",
@@ -2933,6 +2938,7 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types-trace",
  "clap",
  "futures-util",
@@ -6174,6 +6180,7 @@ name = "reth"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
  "aquamarine",
@@ -6255,6 +6262,7 @@ dependencies = [
  "reth-execution-types",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6609,11 +6617,11 @@ dependencies = [
 name = "reth-config"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "humantime-serde",
  "reth-network-peers",
  "reth-network-types",
- "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
  "serde",
@@ -7283,6 +7291,7 @@ name = "reth-evm"
 version = "1.0.7"
 dependencies = [
  "alloy-eips",
+ "alloy-primitives",
  "auto_impl",
  "futures-util",
  "metrics",
@@ -7367,7 +7376,6 @@ version = "1.0.7"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
- "reth-chainspec",
  "reth-execution-errors",
  "reth-primitives",
  "reth-trie",
@@ -8117,6 +8125,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-optimism",
  "reth-execution-types",
+ "reth-optimism-consensus",
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -8163,6 +8172,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
+ "reth-optimism-consensus",
  "reth-optimism-forks",
  "reth-primitives",
  "reth-provider",
@@ -8262,7 +8272,6 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-optimism-chainspec",
- "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",
@@ -8402,6 +8411,7 @@ dependencies = [
 name = "reth-revm"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-consensus-common",
  "reth-ethereum-forks",
@@ -8756,6 +8766,7 @@ dependencies = [
 name = "reth-stages"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "criterion",

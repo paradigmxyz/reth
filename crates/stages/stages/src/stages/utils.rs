@@ -1,4 +1,5 @@
 //! Utils for `stages`.
+use alloy_primitives::BlockNumber;
 use reth_config::config::EtlConfig;
 use reth_db::BlockNumberList;
 use reth_db_api::{
@@ -9,7 +10,6 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_etl::Collector;
-use reth_primitives::BlockNumber;
 use reth_provider::DBProvider;
 use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};

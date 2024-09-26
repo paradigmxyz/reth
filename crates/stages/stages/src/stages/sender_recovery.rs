@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
@@ -6,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
+use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -333,9 +334,10 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::BlockNumber;
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
+    use reth_primitives::{SealedBlock, TransactionSigned, B256};
     use reth_provider::{
         providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
         StaticFileProviderFactory, TransactionsProvider,

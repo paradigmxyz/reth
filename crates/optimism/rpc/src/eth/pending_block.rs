@@ -4,6 +4,7 @@ use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_primitives::{
     revm_primitives::BlockEnv, BlockNumberOrTag, Header, Receipt, SealedBlockWithSenders,
 };
@@ -79,16 +80,18 @@ where
 
     fn receipts_root(
         &self,
-        _block_env: &BlockEnv,
+        block_env: &BlockEnv,
         execution_outcome: &ExecutionOutcome,
         block_number: BlockNumber,
     ) -> B256 {
         execution_outcome
-            .optimism_receipts_root_slow(
-                block_number,
-                self.provider().chain_spec().as_ref(),
-                _block_env.timestamp.to::<u64>(),
-            )
+            .generic_receipts_root_slow(block_number, |receipts| {
+                calculate_receipt_root_no_memo_optimism(
+                    receipts,
+                    self.provider().chain_spec().as_ref(),
+                    block_env.timestamp.to::<u64>(),
+                )
+            })
             .expect("Block is present")
     }
 }

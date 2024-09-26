@@ -62,9 +62,9 @@ pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber,
-    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    InvalidTransactionError, Signature, Transaction, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
 
@@ -72,29 +72,12 @@ pub use transaction::{
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
-    eip191_hash_message, hex, hex_literal, keccak256, ruint,
+    hex, hex_literal, ruint,
     utils::format_ether,
-    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    Bytes, StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
-
-#[doc(hidden)]
-#[deprecated = "use B64 instead"]
-pub type H64 = B64;
-#[doc(hidden)]
-#[deprecated = "use B128 instead"]
-pub type H128 = B128;
-#[doc(hidden)]
-#[deprecated = "use Address instead"]
-pub type H160 = Address;
-#[doc(hidden)]
-#[deprecated = "use B256 instead"]
-pub type H256 = B256;
-#[doc(hidden)]
-#[deprecated = "use B512 instead"]
-pub type H512 = B512;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

@@ -1,7 +1,8 @@
 use crate::precompile::HashMap;
+use alloy_primitives::Address;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
-use reth_primitives::{Address, Block, Withdrawal, Withdrawals, U256};
+use reth_primitives::{Block, Withdrawal, Withdrawals, U256};
 
 /// Collect all balance changes at the end of the block.
 ///

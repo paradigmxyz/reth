@@ -1,3 +1,4 @@
+use alloy_primitives::{BlockHash, BlockNumber};
 use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -10,7 +11,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{BlockHash, BlockNumber, SealedHeader, StaticFileSegment, B256};
+use reth_primitives::{SealedHeader, StaticFileSegment, B256};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,

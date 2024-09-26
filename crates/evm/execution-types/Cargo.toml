@@ -12,21 +12,23 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-chainspec = { workspace = true, optional = true }
 reth-execution-errors.workspace = true
 reth-trie.workspace = true
 
 revm.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["test-utils"] }
-alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
 default = ["std"]
-optimism = ["dep:reth-chainspec"]
+optimism = []
 serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
 std = []

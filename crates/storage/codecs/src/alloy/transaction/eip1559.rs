@@ -2,8 +2,6 @@ use crate::Compact;
 use alloy_consensus::TxEip1559 as AlloyTxEip1559;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
-use serde::{Deserialize, Serialize};
-
 /// [EIP-1559 Transaction](https://eips.ethereum.org/EIPS/eip-1559)
 ///
 /// This is a helper type to use derive on it instead of manually managing `bitfield`.
@@ -12,8 +10,8 @@ use serde::{Deserialize, Serialize};
 /// will automatically apply to this type.
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip1559`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default, Serialize, Deserialize)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[cfg_attr(test, crate::add_arbitrary_tests(compact))]
 pub(crate) struct TxEip1559 {
     chain_id: ChainId,

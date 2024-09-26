@@ -1,4 +1,5 @@
-use crate::{Address, Signature};
+use crate::Signature;
+use alloy_primitives::Address;
 use revm_primitives::B256;
 
 #[cfg(feature = "secp256k1")]
@@ -14,13 +15,12 @@ pub(crate) mod secp256k1 {
 #[cfg(feature = "secp256k1")]
 mod impl_secp256k1 {
     use super::*;
-    use crate::keccak256;
     pub(crate) use ::secp256k1::Error;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
         Message, PublicKey, SecretKey, SECP256K1,
     };
-    use alloy_primitives::Parity;
+    use alloy_primitives::{keccak256, Parity};
     use revm_primitives::U256;
 
     /// Recovers the address of the sender using secp256k1 pubkey recovery.
@@ -65,8 +65,7 @@ mod impl_secp256k1 {
 #[cfg_attr(feature = "secp256k1", allow(unused, unreachable_pub))]
 mod impl_k256 {
     use super::*;
-    use crate::keccak256;
-    use alloy_primitives::Parity;
+    use alloy_primitives::{keccak256, Parity};
     pub(crate) use k256::ecdsa::Error;
     use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
     use revm_primitives::U256;
