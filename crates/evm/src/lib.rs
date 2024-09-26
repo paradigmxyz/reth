@@ -14,12 +14,11 @@ extern crate alloc;
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_primitives::{Address, TransactionSigned, TransactionSignedEcRecovered, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
+use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
-use revm_primitives::{
-    BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
-};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
 
 pub mod builder;
 pub mod either;
