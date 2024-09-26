@@ -40,7 +40,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
+use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -1214,7 +1214,7 @@ where
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
-                                    error!("Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
@@ -1224,7 +1224,7 @@ where
                                         Box::new(e),
                                     )
                                 })) {
-                                    error!("Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
@@ -1291,6 +1291,7 @@ where
             backfill_num_hash,
         );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+        self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
 
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
@@ -1410,10 +1411,9 @@ where
             debug!(target: "engine::tree", "emitting backfill action event");
         }
 
-        let _ = self
-            .outgoing
-            .send(event)
-            .inspect_err(|err| error!("Failed to send internal event: {err:?}"));
+        let _ = self.outgoing.send(event).inspect_err(
+            |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
+        );
     }
 
     /// Returns true if the canonical chain length minus the last persisted
@@ -1700,6 +1700,7 @@ where
     fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header_with_total_difficulty(block, U256::MAX) {
             error!(
+                target: "engine::tree",
                 ?block,
                 "Failed to validate total difficulty for block {}: {e}",
                 block.header.hash()
@@ -1708,12 +1709,12 @@ where
         }
 
         if let Err(e) = self.consensus.validate_header(block) {
-            error!(?block, "Failed to validate header {}: {e}", block.header.hash());
+            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.header.hash());
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
-            error!(?block, "Failed to validate block {}: {e}", block.header.hash());
+            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.header.hash());
             return Err(e)
         }
 
@@ -1956,6 +1957,9 @@ where
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
 
+        // Update metrics based on new tip
+        self.metrics.tree.canonical_chain_height.set(tip.number as f64);
+
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
 
@@ -2144,7 +2148,7 @@ where
             ))
         })?;
         if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
-            warn!(?block, "Failed to validate header {} against parent: {e}", block.header.hash());
+            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.header.hash());
             return Err(e.into())
         }
 
@@ -2191,11 +2195,11 @@ where
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
             state_root_result = match self
-                .compute_state_root_async(block.parent_hash, &hashed_state)
+                .compute_state_root_parallel(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(AsyncStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                    debug!(target: "engine", %error, "Async state root computation failed consistency check, falling back");
+                Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
                     None
                 }
                 Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
@@ -2261,20 +2265,19 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
-    /// Compute state root for the given hashed post state asynchronously.
+    /// Compute state root for the given hashed post state in parallel.
     ///
     /// # Returns
     ///
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-
     /// should be used instead.
-    fn compute_state_root_async(
+    fn compute_state_root_parallel(
         &self,
         parent_hash: B256,
         hashed_state: &HashedPostState,
-    ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2296,7 +2299,7 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        AsyncStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.

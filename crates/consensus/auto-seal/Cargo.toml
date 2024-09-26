@@ -35,6 +35,9 @@ alloy-primitives.workspace = true
 revm-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+# optimism
+reth-optimism-consensus = { workspace = true, optional = true }
+
 # async
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
@@ -42,4 +45,4 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-optimism = ["reth-provider/optimism"]
+optimism = ["reth-provider/optimism", "reth-optimism-consensus"]

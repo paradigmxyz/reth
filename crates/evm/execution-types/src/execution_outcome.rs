@@ -3,6 +3,8 @@ use alloy_primitives::{Address, BlockNumber, Bloom};
 use reth_primitives::{
     logs_bloom, Account, Bytecode, Log, Receipt, Receipts, Requests, StorageEntry, B256, U256,
 };
+use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
+use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
@@ -198,24 +200,21 @@ impl ExecutionOutcome {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
+        self.receipts.root_slow(
+            self.block_number_to_index(_block_number)?,
+            reth_primitives::proofs::calculate_receipt_root_no_memo,
+        )
     }
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    #[cfg(feature = "optimism")]
-    pub fn optimism_receipts_root_slow(
+    pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        chain_spec: impl reth_chainspec::Hardforks,
-        timestamp: u64,
+        f: impl FnOnce(&[&Receipt]) -> B256,
     ) -> Option<B256> {
-        self.receipts.optimism_root_slow(
-            self.block_number_to_index(block_number)?,
-            chain_spec,
-            timestamp,
-        )
+        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
     }
 
     /// Returns reference to receipts.
@@ -373,6 +372,8 @@ mod tests {
     use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
     use alloy_primitives::{Address, FixedBytes, LogData};
     use reth_primitives::{Receipts, Request, Requests, TxType, B256};
+    use alloy_primitives::{Address, FixedBytes, LogData, B256};
+    use reth_primitives::{Receipts, Request, Requests, TxType};
     use std::collections::HashMap;
 
     #[test]

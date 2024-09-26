@@ -152,8 +152,8 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::U256;
     use std::marker::PhantomData;
 
     #[derive(Clone, Default)]
