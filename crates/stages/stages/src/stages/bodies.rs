@@ -189,7 +189,7 @@ where
                         segment: StaticFileSegment::Transactions,
                         database: block_number,
                         static_file: appended_block_number,
-                    });
+                    })
                 }
             }
 
