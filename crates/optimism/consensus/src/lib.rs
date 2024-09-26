@@ -25,6 +25,8 @@ use reth_primitives::{
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;
+pub use proof::calculate_receipt_root_no_memo_optimism;
+
 mod validation;
 pub use validation::validate_block_post_execution;
 

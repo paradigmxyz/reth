@@ -18,12 +18,10 @@ reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
-reth-chainspec = { workspace = true, optional = true }
 reth-codecs = { workspace = true, optional = true }
 
 # op-reth
 reth-optimism-chainspec = { workspace = true, optional = true }
-reth-optimism-forks = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -96,7 +94,6 @@ asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
-    "reth-chainspec?/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
@@ -111,12 +108,10 @@ c-kzg = [
     "alloy-consensus/kzg",
 ]
 optimism = [
-    "reth-chainspec/optimism",
     "revm-primitives/optimism",
     "reth-codecs?/optimism",
     "dep:reth-optimism-chainspec",
     "dep:op-alloy-consensus",
-    "reth-optimism-forks",
 ]
 alloy-compat = [
     "dep:alloy-rpc-types",
