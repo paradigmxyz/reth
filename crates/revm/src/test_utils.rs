@@ -136,7 +136,7 @@ impl StateProvider for StateProviderTest {
         &self,
         account: Address,
         storage_key: StorageKey,
-    ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 

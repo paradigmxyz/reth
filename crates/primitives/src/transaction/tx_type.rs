@@ -1,5 +1,4 @@
-use crate::U64;
-use alloy_primitives::U8;
+use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 

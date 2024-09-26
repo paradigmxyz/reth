@@ -1921,7 +1921,7 @@ mod tests {
 
     #[test]
     fn decode_raw_tx_and_recover_signer() {
-        use crate::hex_literal::hex;
+        use alloy_primitives::hex_literal::hex;
         // transaction is from ropsten
 
         let hash: B256 =

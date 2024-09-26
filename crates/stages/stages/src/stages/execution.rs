@@ -658,16 +658,14 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::TestStageDB;
-    use alloy_primitives::{keccak256, Address};
+    use alloy_primitives::{hex_literal::hex, keccak256, Address};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
-    use reth_primitives::{
-        address, hex_literal::hex, Account, Bytecode, SealedBlock, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{address, Account, Bytecode, SealedBlock, StorageEntry, B256, U256};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
         ReceiptProvider, StaticFileProviderFactory,
