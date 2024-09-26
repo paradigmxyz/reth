@@ -109,7 +109,7 @@ impl Storage {
     pub(super) fn iter_notifications<'a>(
         &'a self,
         file_ids: impl Iterator<Item = u64> + 'a,
-    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
+    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + 'a {
         file_ids.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
     }
 
