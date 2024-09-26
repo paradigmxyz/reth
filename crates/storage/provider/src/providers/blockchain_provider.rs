@@ -27,8 +27,12 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::StorageChangeSetReader;
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use revm::{
+    db::states::PlainStorageRevert,
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+};
 use std::{
     collections::{hash_map, HashMap},
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -122,6 +126,96 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         };
 
         (start, end)
+    }
+
+    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
+    ///
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    ///    we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    ///    have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
+    ///
+    /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
+    pub fn get_state(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<ExecutionOutcome>> {
+        if range.is_empty() {
+            return Ok(None)
+        }
+        let start_block_number = *range.start();
+        let end_block_number = *range.end();
+
+        // We are not removing block meta as it is used to get block changesets.
+        let mut block_bodies = Vec::new();
+        for block_num in range.clone() {
+            let Some(block_body) = self.block_body_indices(block_num)? else { break };
+            block_bodies.push((block_num, block_body))
+        }
+
+        // get transaction receipts
+        let Some(from_transaction_num) = block_bodies.first().map(|bodies| bodies.1.first_tx_num())
+        else {
+            return Ok(None)
+        };
+        let Some(to_transaction_num) = block_bodies.last().map(|bodies| bodies.1.last_tx_num())
+        else {
+            return Ok(None)
+        };
+
+        let mut account_changeset = Vec::new();
+        for block_num in range.clone() {
+            let changeset =
+                self.account_block_changeset(block_num)?.into_iter().map(|elem| (block_num, elem));
+            account_changeset.extend(changeset);
+        }
+
+        let mut storage_changeset = Vec::new();
+        for block_num in range {
+            let changeset = self.storage_changeset(block_num)?;
+            storage_changeset.extend(changeset);
+        }
+
+        let (state, reverts) =
+            self.populate_bundle_state(account_changeset, storage_changeset, end_block_number)?;
+
+        // iterate over block body and create ExecutionResult
+        let mut receipt_iter =
+            self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?.into_iter();
+
+        let mut receipts = Vec::with_capacity(block_bodies.len());
+        // loop break if we are at the end of the blocks.
+        for (_, block_body) in block_bodies {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                if let Some(receipt) = receipt_iter.next() {
+                    block_receipts.push(Some(receipt));
+                }
+            }
+            receipts.push(block_receipts);
+        }
+
+        Ok(Some(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts.into(),
+            start_block_number,
+            Vec::new(),
+        )))
     }
 
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
@@ -1494,6 +1588,38 @@ impl<N: NodeTypesWithDB> ForkChoiceSubscriptions for BlockchainProvider2<N> {
     fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
         let receiver = self.canonical_in_memory_state.subscribe_finalized_block();
         ForkChoiceNotifications(receiver)
+    }
+}
+
+impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider2<N> {
+    fn storage_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
+            let changesets = state
+                .block()
+                .execution_output
+                .bundle
+                .reverts
+                .clone()
+                .into_plain_state_reverts()
+                .storage
+                .into_iter()
+                .flatten()
+                .flat_map(|revert: PlainStorageRevert| {
+                    revert.storage_revert.into_iter().map(move |(key, value)| {
+                        (
+                            BlockNumberAddress((block_number, revert.address)),
+                            StorageEntry { key: key.into(), value: value.to_previous_value() },
+                        )
+                    })
+                })
+                .collect();
+            Ok(changesets)
+        } else {
+            self.database.provider()?.storage_changeset(block_number)
+        }
     }
 }
 
