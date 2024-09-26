@@ -330,7 +330,7 @@ where
                 static_file_tx_num,
                 &static_file_provider,
                 provider,
-            )?);
+            )?)
         }
 
         // Unwinds static file
