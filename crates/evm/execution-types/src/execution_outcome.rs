@@ -1,8 +1,6 @@
 use crate::BlockExecutionOutput;
 use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{
-    logs_bloom, Account, Bytecode, Log, Receipt, Receipts, Requests, StorageEntry, B256, U256,
-};
+use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},

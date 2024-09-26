@@ -7,8 +7,8 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    BlockNumHash, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionSigned, TransactionSignedEcRecovered, TxHash,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
