@@ -112,6 +112,7 @@ impl Storage {
         debug!(?file_path, "Reading notification from WAL");
 
         let mut file = File::open(&file_path)?;
+        // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
         Ok(serde_json::from_reader(&mut file)?)
     }
 
