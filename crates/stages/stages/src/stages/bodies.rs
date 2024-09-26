@@ -283,7 +283,7 @@ where
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
-                break;
+                break
             }
 
             // Delete the ommers entry if any
