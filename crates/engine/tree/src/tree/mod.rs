@@ -40,7 +40,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
+use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -2195,11 +2195,11 @@ where
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
             state_root_result = match self
-                .compute_state_root_async(block.parent_hash, &hashed_state)
+                .compute_state_root_parallel(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(AsyncStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                    debug!(target: "engine::tree", %error, "Async state root computation failed consistency check, falling back");
+                Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
                     None
                 }
                 Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
@@ -2265,7 +2265,7 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
-    /// Compute state root for the given hashed post state asynchronously.
+    /// Compute state root for the given hashed post state in parallel.
     ///
     /// # Returns
     ///
@@ -2273,11 +2273,11 @@ where
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
     /// should be used instead.
-    fn compute_state_root_async(
+    fn compute_state_root_parallel(
         &self,
         parent_hash: B256,
         hashed_state: &HashedPostState,
-    ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2299,7 +2299,7 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        AsyncStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.
