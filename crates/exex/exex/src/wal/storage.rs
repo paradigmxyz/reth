@@ -1,6 +1,5 @@
 use std::{
     fs::File,
-    io::Read,
     ops::RangeInclusive,
     path::{Path, PathBuf},
 };
@@ -113,7 +112,7 @@ impl Storage {
         debug!(?file_path, "Reading notification from WAL");
 
         let mut file = File::open(&file_path)?;
-        read_notification(&mut file)
+        Ok(serde_json::from_reader(&mut file)?)
     }
 
     /// Writes the notification to the file with the given id.
@@ -127,15 +126,10 @@ impl Storage {
         debug!(?file_path, "Writing notification to WAL");
 
         Ok(reth_fs_util::atomic_write_file(&file_path, |mut file| {
+            // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
             serde_json::to_writer(&mut file, notification)
         })?)
     }
-}
-
-// TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-fn read_notification(r: &mut impl Read) -> eyre::Result<ExExNotification> {
-    // Ok(rmp_serde::from_read(r)?)
-    Ok(serde_json::from_reader(r)?)
 }
 
 #[cfg(test)]

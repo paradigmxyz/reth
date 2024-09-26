@@ -293,7 +293,7 @@ pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
 
 /// Writes atomically to file.
 ///
-/// 1. Creates a temporary file with a `.tmp` extension on the same file directory.
+/// 1. Creates a temporary file with a `.tmp` extension in the same file directory.
 /// 2. Writes content with `write_fn`.
 /// 3. Fsyncs the temp file to disk.
 /// 4. Renames the temp file to the target path.
@@ -306,7 +306,7 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let mut tmp_path = file_path.to_path_buf();
-    tmp_path.set_extension(".tmp");
+    tmp_path.set_extension("tmp");
 
     // Write to the temporary file
     let mut file =
