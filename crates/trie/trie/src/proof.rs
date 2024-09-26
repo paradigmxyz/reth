@@ -136,7 +136,7 @@ where
             }
         }
         let _ = hash_builder.root();
-        Ok(MultiProof { account_subtree: hash_builder.take_proofs(), storages })
+        Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
     }
 
     /// Generate a storage multiproof according to specified targets.
@@ -181,6 +181,6 @@ where
         }
 
         let root = hash_builder.root();
-        Ok(StorageMultiProof { root, subtree: hash_builder.take_proofs() })
+        Ok(StorageMultiProof { root, subtree: hash_builder.take_proof_nodes() })
     }
 }
