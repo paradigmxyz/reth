@@ -25,7 +25,7 @@ use reth_tracing::tracing::{debug, instrument};
 ///    with [`Wal::commit`].
 /// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Wal {
     /// The underlying WAL storage backed by a file.
     storage: Storage,
@@ -68,7 +68,7 @@ impl Wal {
 
     /// Returns a handle to the WAL.
     pub fn handle(&self) -> WalHandle {
-        WalHandle { storage: self.storage.clone() }
+        WalHandle { wal: self.clone() }
     }
 
     /// Commits the notification to WAL.
@@ -237,11 +237,7 @@ impl Wal {
     pub(crate) fn iter_notifications(
         &self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
-        // TODO: use cache to not iterate over the directory and parse filename every time
-        let Some(range) = self.storage.files_range()? else {
-            return Ok(Box::new(std::iter::empty()))
-        };
-
+        let range = self.block_cache.iter().map(|(file_id, _)| file_id);
         Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
 }
@@ -249,7 +245,7 @@ impl Wal {
 /// A handle to the WAL. Used to access the WAL for non-mutable operations, such as iteration.
 #[derive(Debug, Clone)]
 pub struct WalHandle {
-    storage: Storage,
+    wal: Wal,
 }
 
 impl WalHandle {
@@ -258,12 +254,11 @@ impl WalHandle {
     pub fn into_iter_notifications(
         self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>>>> {
-        // TODO: use cache to not iterate over the directory and parse filename every time
-        let Some(range) = self.storage.files_range()? else {
-            return Ok(Box::new(std::iter::empty()))
-        };
+        let range = self.wal.block_cache.iter().map(|(file_id, _)| file_id).collect::<Vec<_>>();
 
-        Ok(Box::new(self.storage.into_iter_notifications(range).map(|entry| Ok(entry?.1))))
+        Ok(Box::new(
+            self.wal.storage.into_iter_notifications(range.into_iter()).map(|entry| Ok(entry?.1)),
+        ))
     }
 }
 

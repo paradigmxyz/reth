@@ -101,16 +101,16 @@ impl Storage {
 
     pub(super) fn into_iter_notifications(
         self,
-        range: RangeInclusive<u64>,
+        file_ids: impl Iterator<Item = u64>,
     ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> {
-        range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
+        file_ids.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
     }
 
-    pub(super) fn iter_notifications(
-        &self,
-        range: RangeInclusive<u64>,
+    pub(super) fn iter_notifications<'a>(
+        &'a self,
+        file_ids: impl Iterator<Item = u64> + 'a,
     ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
-        range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
+        file_ids.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
     }
 
     /// Reads the notification from the file with the given id.
