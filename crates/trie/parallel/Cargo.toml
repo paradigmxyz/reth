@@ -31,10 +31,8 @@ tracing.workspace = true
 # misc
 thiserror.workspace = true
 derive_more.workspace = true
-
-# `parallel` feature
-rayon = { workspace = true, optional = true }
-itertools = { workspace = true, optional = true }
+rayon.workspace = true
+itertools.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -55,11 +53,9 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
 [features]
-default = ["metrics", "parallel"]
+default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
-parallel = ["rayon", "itertools"]
 
 [[bench]]
 name = "root"
-required-features = ["parallel"]
 harness = false

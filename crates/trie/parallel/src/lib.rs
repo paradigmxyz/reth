@@ -14,7 +14,6 @@ pub use storage_root_targets::StorageRootTargets;
 pub mod stats;
 
 /// Implementation of parallel state root computation.
-#[cfg(feature = "parallel")]
 pub mod parallel_root;
 
 /// Parallel state root metrics.

@@ -25,7 +25,7 @@ reth-execution-types.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
-reth-trie-parallel = { workspace = true, features = ["parallel"] }
+reth-trie-parallel.workspace = true
 reth-network.workspace = true
 reth-consensus.workspace = true
 reth-node-types.workspace = true
