@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::Read,
     ops::RangeInclusive,
     path::{Path, PathBuf},
 };
@@ -126,22 +126,13 @@ impl Storage {
         let file_path = self.file_path(file_id);
         debug!(?file_path, "Writing notification to WAL");
 
-        let mut file = File::create_new(&file_path)?;
-        write_notification(&mut file, notification)?;
-
-        Ok(())
+        Ok(reth_fs_util::atomic_write_file(&file_path, |mut file| {
+            serde_json::to_writer(&mut file, notification)
+        })?)
     }
 }
 
 // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-
-fn write_notification(mut w: &mut impl Write, notification: &ExExNotification) -> eyre::Result<()> {
-    // rmp_serde::encode::write(w, notification)?;
-    serde_json::to_writer(&mut w, notification)?;
-    w.flush()?;
-    Ok(())
-}
-
 fn read_notification(r: &mut impl Read) -> eyre::Result<ExExNotification> {
     // Ok(rmp_serde::from_read(r)?)
     Ok(serde_json::from_reader(r)?)
