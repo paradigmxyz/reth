@@ -8,6 +8,7 @@ use alloy_trie::{
     proof::{verify_proof, ProofNodes, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
+use itertools::Itertools;
 use reth_primitives_traits::{constants::KECCAK_EMPTY, Account};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -36,8 +37,8 @@ impl MultiProof {
         // Retrieve the account proof.
         let proof = self
             .account_subtree
-            .iter()
-            .filter(|(path, _)| nibbles.starts_with(path))
+            .matching_nodes_iter(&nibbles)
+            .sorted_by(|a, b| a.0.cmp(&b.0))
             .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
@@ -99,8 +100,8 @@ impl StorageMultiProof {
         // Retrieve the storage proof.
         let proof = self
             .subtree
-            .iter()
-            .filter(|(path, _)| nibbles.starts_with(path))
+            .matching_nodes_iter(&nibbles)
+            .sorted_by(|a, b| a.0.cmp(&b.0))
             .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
