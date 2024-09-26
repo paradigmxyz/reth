@@ -2,7 +2,7 @@
 mod ethereum;
 pub use ethereum::EthereumHardforks;
 
-use crate::{ForkCondition, Hardfork};
+use crate::{ForkCondition, ForkFilter, ForkId, Hardfork, Head};
 #[cfg(feature = "std")]
 use rustc_hash::FxHashMap;
 #[cfg(feature = "std")]
@@ -31,6 +31,15 @@ pub trait Hardforks: Clone {
     fn is_fork_active_at_block<H: Hardfork>(&self, fork: H, block_number: u64) -> bool {
         self.fork(fork).active_at_block(block_number)
     }
+
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
+    fn fork_id(&self, head: &Head) -> ForkId;
+
+    /// Returns the [`ForkId`] for the last fork.
+    fn latest_fork_id(&self) -> ForkId;
+
+    /// Creates a [`ForkFilter`] for the block described by [Head].
+    fn fork_filter(&self, head: Head) -> ForkFilter;
 }
 
 /// Ordered list of a chain hardforks that implement [`Hardfork`].
@@ -126,16 +135,6 @@ impl ChainHardforks {
     pub fn remove<H: Hardfork>(&mut self, fork: H) {
         self.forks.retain(|(inner_fork, _)| inner_fork.name() != fork.name());
         self.map.remove(fork.name());
-    }
-}
-
-impl Hardforks for ChainHardforks {
-    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
-        self.fork(fork)
-    }
-
-    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
-        self.forks_iter()
     }
 }
 

@@ -3,7 +3,7 @@ use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_chainspec::{ChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{EthereumHardfork, ForkId, Head};
 use std::fmt::{Debug, Display};
@@ -75,9 +75,12 @@ impl Status {
     ///
     /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
     /// and head.
-    pub fn spec_builder(spec: &ChainSpec, head: &Head) -> StatusBuilder {
+    pub fn spec_builder<Spec>(spec: Spec, head: &Head) -> StatusBuilder
+    where
+        Spec: EthChainSpec + Hardforks,
+    {
         Self::builder()
-            .chain(spec.chain)
+            .chain(spec.chain())
             .genesis(spec.genesis_hash())
             .blockhash(head.hash)
             .total_difficulty(head.total_difficulty)
