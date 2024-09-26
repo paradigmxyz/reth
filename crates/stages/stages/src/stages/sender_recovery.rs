@@ -85,7 +85,7 @@ where
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
-            });
+            })
         }
 
         // Acquire the cursor for inserting elements
