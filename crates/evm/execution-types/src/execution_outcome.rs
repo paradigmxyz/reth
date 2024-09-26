@@ -1,6 +1,6 @@
 use crate::BlockExecutionOutput;
 use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
+use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Requests, StorageEntry};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
@@ -32,7 +32,7 @@ impl ChangedAccount {
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcome {
+pub struct ExecutionOutcome<T = reth_primitives::Receipts>  {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
@@ -40,7 +40,7 @@ pub struct ExecutionOutcome {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    pub receipts: Receipts,
+    pub receipts: T,
     /// First block of bundle state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
@@ -50,6 +50,22 @@ pub struct ExecutionOutcome {
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
+}
+
+pub trait Receipts {
+    fn root_slow(&self) -> Option<B256>;
+}
+
+pub struct BlockReceipts {
+    receipts: Vec<Option<Receipt>>,
+}
+
+impl Receipts for BlockReceipts {
+    fn root_slow(&self) -> Option<B256> {
+        Some(proofs::calculate_receipt_root_no_memo(
+            &self.receipts.iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+        ))
+    }
 }
 
 /// Type used to initialize revms bundle state.
@@ -196,10 +212,7 @@ impl ExecutionOutcome {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
+       
     }
 
     /// Returns the receipt root for all recorded receipts.

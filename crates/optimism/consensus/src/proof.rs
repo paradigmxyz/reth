@@ -6,6 +6,22 @@ use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 use reth_trie_common::root::ordered_trie_root_with_encoder;
 
+pub struct OpBlockReceipts {
+    chain_spec: Arc<ChainSpec>,
+    block_timestamp: u64,
+    receipts: Vec<Option<Receipt>>,
+}
+
+impl Receipts for OpBlockReceipts {
+    fn root_slow(&self) -> Option<B256> {
+        Some(proofs::calculate_receipt_root_no_memo_optimism(
+            self.receipts.iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+            self.chain_spec,
+            self.block_timestamp,
+        ))
+    }
+}
+
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
