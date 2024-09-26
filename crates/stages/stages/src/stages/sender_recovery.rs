@@ -248,7 +248,7 @@ where
                                     .into(),
                             ))
                         }
-                    };
+                    }
                 }
             };
             senders_cursor.append(tx_id, sender)?;
