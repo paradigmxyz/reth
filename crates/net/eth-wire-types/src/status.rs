@@ -75,7 +75,10 @@ impl Status {
     ///
     /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
     /// and head.
-    pub fn spec_builder(spec: impl EthChainSpec + Hardforks, head: &Head) -> StatusBuilder {
+    pub fn spec_builder<Spec>(spec: Spec, head: &Head) -> StatusBuilder
+    where
+        Spec: EthChainSpec + Hardforks,
+    {
         Self::builder()
             .chain(spec.chain())
             .genesis(spec.genesis_hash())
