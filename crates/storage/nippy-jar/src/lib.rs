@@ -250,8 +250,8 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |mut file| {
-            bincode::serialize_into(&mut file, &self)
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
+            bincode::serialize_into(file, &self)
         })?)
     }
 }

@@ -125,9 +125,9 @@ impl Storage {
         let file_path = self.file_path(file_id);
         debug!(?file_path, "Writing notification to WAL");
 
-        Ok(reth_fs_util::atomic_write_file(&file_path, |mut file| {
+        Ok(reth_fs_util::atomic_write_file(&file_path, |file| {
             // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-            serde_json::to_writer(&mut file, notification)
+            serde_json::to_writer(file, notification)
         })?)
     }
 }
