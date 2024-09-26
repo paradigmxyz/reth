@@ -4,17 +4,22 @@ use dashmap::DashMap;
 use reth_exex_types::ExExNotification;
 use reth_primitives::{BlockNumHash, B256};
 
-/// The block cache of the WAL. Acts as a mapping of `File ID -> List of Blocks`.
-///
-/// For each notification written to the WAL, there will be an entry per block written to
-/// the cache with the same file ID. I.e. for each notification, there may be multiple blocks in the
-/// cache.
+/// The block cache of the WAL.
 ///
 /// This cache is needed to avoid walking the WAL directory every time we want to find a
-/// notification corresponding to a block.
+/// notification corresponding to a block or a block corresponding to a hash.
 #[derive(Debug)]
 pub struct BlockCache {
+    /// A mapping of `File ID -> List of Blocks`.
+    ///
+    /// For each notification written to the WAL, there will be an entry per block written to
+    /// the cache with the same file ID. I.e. for each notification, there may be multiple blocks
+    /// in the cache.
     files: BTreeMap<u64, VecDeque<CachedBlock>>,
+    /// A mapping of `Block Hash -> Block`.
+    ///
+    /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
+    /// block.
     blocks: DashMap<B256, CachedBlock>,
 }
 
