@@ -2,7 +2,8 @@
 //! network.
 
 use alloy_dyn_abi::TypedData;
-use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_network::TransactionBuilder;
+use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types::{BlockNumberOrTag, TransactionInfo};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
@@ -13,13 +14,6 @@ use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, Transacti
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
     EthApiError, EthStateCache, SignError, TransactionSource,
-};
-use reth_rpc_types::{
-    transaction::{
-        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
-        LegacyTransactionRequest,
-    },
-    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -369,172 +363,14 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             let chain_id = self.chain_id();
+            request.chain_id = Some(chain_id.to::<u64>());
 
             let estimated_gas =
                 self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
             let gas_limit = estimated_gas;
+            request.set_gas_limit(gas_limit.to::<u128>());
 
-            let TransactionRequest {
-                to,
-                gas_price,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                gas,
-                value,
-                input: data,
-                nonce,
-                mut access_list,
-                max_fee_per_blob_gas,
-                blob_versioned_hashes,
-                sidecar,
-                ..
-            } = request;
-
-            // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
-            let transaction = match (
-                gas_price,
-                max_fee_per_gas,
-                access_list.take(),
-                max_fee_per_blob_gas,
-                blob_versioned_hashes,
-                sidecar,
-            ) {
-                // legacy transaction
-                // gas price required
-                (Some(_), None, None, None, None, None) => {
-                    Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                        nonce: nonce.unwrap_or_default(),
-                        gas_price: U256::from(gas_price.unwrap_or_default()),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        kind: to.unwrap_or(TxKind::Create),
-                        chain_id: None,
-                    }))
-                }
-                // EIP2930
-                // if only accesslist is set, and no eip1599 fees
-                (_, None, Some(access_list), None, None, None) => {
-                    Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                        nonce: nonce.unwrap_or_default(),
-                        gas_price: U256::from(gas_price.unwrap_or_default()),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        kind: to.unwrap_or(TxKind::Create),
-                        chain_id: 0,
-                        access_list,
-                    }))
-                }
-                // EIP1559
-                // if 4844 fields missing
-                // gas_price, max_fee_per_gas, access_list, max_fee_per_blob_gas,
-                // blob_versioned_hashes, sidecar,
-                (None, _, _, None, None, None) => {
-                    // Empty fields fall back to the canonical transaction schema.
-                    Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                        nonce: nonce.unwrap_or_default(),
-                        max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                        max_priority_fee_per_gas: U256::from(
-                            max_priority_fee_per_gas.unwrap_or_default(),
-                        ),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        kind: to.unwrap_or(TxKind::Create),
-                        chain_id: 0,
-                        access_list: access_list.unwrap_or_default(),
-                    }))
-                }
-                // EIP4884
-                // all blob fields required
-                (
-                    None,
-                    _,
-                    _,
-                    Some(max_fee_per_blob_gas),
-                    Some(blob_versioned_hashes),
-                    Some(sidecar),
-                ) => {
-                    // As per the EIP, we follow the same semantics as EIP-1559.
-                    Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
-                        chain_id: 0,
-                        nonce: nonce.unwrap_or_default(),
-                        max_priority_fee_per_gas: U256::from(
-                            max_priority_fee_per_gas.unwrap_or_default(),
-                        ),
-                        max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        to: match to {
-                            Some(TxKind::Call(to)) => to,
-                            _ => Address::default(),
-                        },
-                        access_list: access_list.unwrap_or_default(),
-
-                        // eip-4844 specific.
-                        max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
-                        blob_versioned_hashes,
-                        sidecar,
-                    }))
-                }
-
-                _ => None,
-            };
-
-            let transaction = match transaction {
-                Some(TypedTransactionRequest::Legacy(mut req)) => {
-                    req.chain_id = Some(chain_id.to());
-                    req.gas_limit = gas_limit.saturating_to();
-                    req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
-
-                    TypedTransactionRequest::Legacy(req)
-                }
-                Some(TypedTransactionRequest::EIP2930(mut req)) => {
-                    req.chain_id = chain_id.to();
-                    req.gas_limit = gas_limit.saturating_to();
-                    req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
-
-                    TypedTransactionRequest::EIP2930(req)
-                }
-                Some(TypedTransactionRequest::EIP1559(mut req)) => {
-                    let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                        .eip1559_fees(
-                            max_fee_per_gas.map(U256::from),
-                            max_priority_fee_per_gas.map(U256::from),
-                        )
-                        .await?;
-
-                    req.chain_id = chain_id.to();
-                    req.gas_limit = gas_limit.saturating_to();
-                    req.max_fee_per_gas = max_fee_per_gas.saturating_to();
-                    req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
-
-                    TypedTransactionRequest::EIP1559(req)
-                }
-                Some(TypedTransactionRequest::EIP4844(mut req)) => {
-                    let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                        .eip1559_fees(
-                            max_fee_per_gas.map(U256::from),
-                            max_priority_fee_per_gas.map(U256::from),
-                        )
-                        .await?;
-
-                    req.max_fee_per_gas = max_fee_per_gas;
-                    req.max_priority_fee_per_gas = max_priority_fee_per_gas;
-                    req.max_fee_per_blob_gas =
-                        self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
-
-                    req.chain_id = chain_id.to();
-                    req.gas_limit = gas_limit;
-
-                    TypedTransactionRequest::EIP4844(req)
-                }
-                None => return Err(EthApiError::ConflictingFeeFieldsInRequest.into()),
-            };
-
-            let signed_tx = self.sign_request(&from, transaction)?;
+            let signed_tx = self.sign_request(&from, request).await?;
 
             let recovered =
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -555,17 +391,20 @@ pub trait EthTransactions: LoadTransaction {
     fn sign_request(
         &self,
         from: &Address,
-        request: TypedTransactionRequest,
-    ) -> Result<TransactionSigned, Self::Error> {
-        for signer in self.signers().read().iter() {
-            if signer.is_signer_for(from) {
-                return match signer.sign_transaction(request, from) {
-                    Ok(tx) => Ok(tx),
-                    Err(e) => Err(e.into_eth_err()),
+        txn: TransactionRequest,
+    ) -> impl Future<Output = Result<TransactionSigned, Self::Error>> + Send {
+        async move {
+            let signers: Vec<_> = self.signers().read().iter().cloned().collect();
+            for signer in signers {
+                if signer.is_signer_for(from) {
+                    return match signer.sign_transaction(txn, from).await {
+                        Ok(tx) => Ok(tx),
+                        Err(e) => Err(e.into_eth_err()),
+                    }
                 }
             }
+            Err(EthApiError::InvalidTransactionSignature.into())
         }
-        Err(EthApiError::InvalidTransactionSignature.into())
     }
 
     /// Signs given message. Returns the signature.

@@ -11,7 +11,8 @@ use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     logs_bloom,
     proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned, TransactionSignedNoHash,
+    BlockBody, BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned,
+    TransactionSignedNoHash,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
@@ -293,7 +294,10 @@ pub fn build_block<T: TransactionCompat>(
     };
 
     let block = BlockWithSenders {
-        block: reth_primitives::Block { header, body: transactions, ..Default::default() },
+        block: reth_primitives::Block {
+            header,
+            body: BlockBody { transactions, ..Default::default() },
+        },
         senders,
     };
 

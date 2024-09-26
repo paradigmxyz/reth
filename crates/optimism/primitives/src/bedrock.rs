@@ -55,6 +55,10 @@ pub fn is_dup_tx(block_number: u64) -> bool {
     false
 }
 
+/// OVM Header #1 hash.
+pub const OVM_HEADER_1_HASH: B256 =
+    b256!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+
 /// Bedrock hash on Optimism Mainnet.
 pub const BEDROCK_HEADER_HASH: B256 =
     b256!("dbf6a80fef073de06add9b0d14026d6e5a86c85f6d102c36d3d8e9cf89c2afd3");

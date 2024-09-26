@@ -1,13 +1,10 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
+use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayload, ForkchoiceState};
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
 use reth_fs_util as fs;
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState},
-    ExecutionPayload,
-};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,

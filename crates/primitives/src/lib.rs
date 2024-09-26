@@ -23,14 +23,10 @@ extern crate alloc;
 
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
-pub mod basefee;
 mod block;
 #[cfg(feature = "reth-codec")]
 mod compression;
 pub mod constants;
-pub mod eip4844;
-pub mod eip7702;
-pub mod genesis;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -47,7 +43,6 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
     MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
@@ -67,41 +62,20 @@ pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    AccessList, AccessListItem, InvalidTransactionError, Signature, ToRecoveredTransaction,
-    Transaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxHashOrNumber, TxLegacy,
-    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    InvalidTransactionError, Signature, Transaction, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
 
 // Re-exports
-pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
-    eip191_hash_message, hex, hex_literal, keccak256, ruint,
-    utils::format_ether,
-    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    hex, Bytes, TxHash, B256, U256, U64,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
-
-#[doc(hidden)]
-#[deprecated = "use B64 instead"]
-pub type H64 = B64;
-#[doc(hidden)]
-#[deprecated = "use B128 instead"]
-pub type H128 = B128;
-#[doc(hidden)]
-#[deprecated = "use Address instead"]
-pub type H160 = Address;
-#[doc(hidden)]
-#[deprecated = "use B256 instead"]
-pub type H256 = B256;
-#[doc(hidden)]
-#[deprecated = "use B512 instead"]
-pub type H512 = B512;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

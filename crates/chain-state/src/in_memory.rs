@@ -5,7 +5,7 @@ use crate::{
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -16,11 +16,7 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -197,7 +193,7 @@ impl CanonicalInMemoryState {
 
     /// Create an empty state.
     pub fn empty() -> Self {
-        Self::new(HashMap::new(), BTreeMap::new(), None, None)
+        Self::new(HashMap::default(), BTreeMap::new(), None, None)
     }
 
     /// Create a new in memory state with the given local head and finalized header
@@ -542,7 +538,9 @@ impl CanonicalInMemoryState {
     /// Returns a `TransactionSigned` for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
         for block_state in self.canonical_chain() {
-            if let Some(tx) = block_state.block().block().body.iter().find(|tx| tx.hash() == hash) {
+            if let Some(tx) =
+                block_state.block().block().body.transactions().find(|tx| tx.hash() == hash)
+            {
                 return Some(tx.clone())
             }
         }
@@ -560,7 +558,7 @@ impl CanonicalInMemoryState {
                 .block()
                 .block()
                 .body
-                .iter()
+                .transactions()
                 .enumerate()
                 .find(|(_, tx)| tx.hash() == tx_hash)
             {
@@ -841,7 +839,7 @@ impl NewCanonicalChain {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
-    use alloy_primitives::{BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{map::HashSet, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, Receipt, Requests};
@@ -850,7 +848,6 @@ mod tests {
         StorageRootProvider,
     };
     use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
-    use std::collections::HashSet;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -982,7 +979,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
-        let mut state_by_hash = HashMap::new();
+        let mut state_by_hash = HashMap::default();
         let number = rand::thread_rng().gen::<u64>();
         let mut test_block_builder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
@@ -996,7 +993,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_number() {
-        let mut state_by_hash = HashMap::new();
+        let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
 
         let number = rand::thread_rng().gen::<u64>();
@@ -1015,7 +1012,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_head_state() {
-        let mut state_by_hash = HashMap::new();
+        let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
         let mut test_block_builder = TestBlockBuilder::default();
         let state1 = Arc::new(create_mock_state(&mut test_block_builder, 1, B256::random()));
@@ -1043,7 +1040,7 @@ mod tests {
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
-            InMemoryState::new(HashMap::new(), BTreeMap::new(), Some(pending_state));
+            InMemoryState::new(HashMap::default(), BTreeMap::new(), Some(pending_state));
 
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
@@ -1054,7 +1051,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_no_pending_state() {
-        let in_memory_state = InMemoryState::new(HashMap::new(), BTreeMap::new(), None);
+        let in_memory_state = InMemoryState::new(HashMap::default(), BTreeMap::new(), None);
 
         assert_eq!(in_memory_state.pending_state(), None);
     }
@@ -1208,7 +1205,7 @@ mod tests {
         let state2 = BlockState::with_parent(block2.clone(), Some(state1.clone()));
         let state3 = BlockState::with_parent(block3.clone(), Some(state2.clone()));
 
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         blocks.insert(block1.block().hash(), Arc::new(state1));
         blocks.insert(block2.block().hash(), Arc::new(state2));
         blocks.insert(block3.block().hash(), Arc::new(state3));
@@ -1255,7 +1252,7 @@ mod tests {
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
         let block = TestBlockBuilder::default().get_executed_block_with_number(1, B256::random());
         let hash = block.block().hash();
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
         let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);
@@ -1270,7 +1267,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         let mut numbers = BTreeMap::new();
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::default();
@@ -1294,7 +1291,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         let mut numbers = BTreeMap::new();
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::default();

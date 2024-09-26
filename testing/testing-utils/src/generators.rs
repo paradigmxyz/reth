@@ -1,5 +1,6 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
+use alloy_consensus::TxLegacy;
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
@@ -9,8 +10,8 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, Header, Log, Receipt, Request, Requests, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionSigned, TxLegacy, Withdrawal, Withdrawals,
+    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
+    SealedHeader, StorageEntry, Transaction, TransactionSigned, Withdrawal, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -36,7 +37,7 @@ pub struct BlockParams {
 }
 
 /// Used to pass arguments for random block generation function in tests
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockRangeParams {
     /// The parent hash of the block.
     pub parent: Option<B256>,
@@ -48,6 +49,17 @@ pub struct BlockRangeParams {
     pub requests_count: Option<Range<u8>>,
     /// The number of withdrawals in the block.
     pub withdrawals_count: Option<Range<u8>>,
+}
+
+impl Default for BlockRangeParams {
+    fn default() -> Self {
+        Self {
+            parent: None,
+            tx_count: 0..u8::MAX / 2,
+            requests_count: None,
+            withdrawals_count: None,
+        }
+    }
 }
 
 /// Returns a random number generator that can be seeded using the `SEED` environment variable.
@@ -224,10 +236,12 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
 
     SealedBlock {
         header: SealedHeader::new(header, seal),
-        body: transactions,
-        ommers,
-        withdrawals: withdrawals.map(Withdrawals::new),
-        requests: requests.map(Requests),
+        body: BlockBody {
+            transactions,
+            ommers,
+            withdrawals: withdrawals.map(Withdrawals::new),
+            requests: requests.map(Requests),
+        },
     }
 }
 
@@ -484,8 +498,10 @@ pub fn random_request<R: Rng>(rng: &mut R) -> Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
+    use alloy_eips::eip2930::AccessList;
     use alloy_primitives::Parity;
-    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
+    use reth_primitives::{hex, public_key_to_address, Signature};
     use std::str::FromStr;
 
     #[test]

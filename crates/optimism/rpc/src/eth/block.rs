@@ -48,6 +48,7 @@ where
 
             return block
                 .body
+                .transactions
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()

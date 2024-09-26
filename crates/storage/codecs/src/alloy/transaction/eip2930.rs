@@ -1,9 +1,8 @@
 use crate::Compact;
-use alloy_consensus::transaction::TxEip2930 as AlloyTxEip2930;
+use alloy_consensus::TxEip2930 as AlloyTxEip2930;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 use reth_codecs_derive::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
 ///
@@ -12,9 +11,9 @@ use serde::{Deserialize, Serialize};
 /// By deriving `Compact` here, any future changes or enhancements to the `Compact` derive
 /// will automatically apply to this type.
 ///
-/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::transaction::TxEip2930`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip2930`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxEip2930 {
     chain_id: ChainId,

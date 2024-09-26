@@ -3,11 +3,12 @@ use alloc::{boxed::Box, string::ToString};
 
 use crate::ConfigureEvm;
 use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use alloy_primitives::B256;
+use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, B256};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
@@ -19,7 +20,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, B256};
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_beacon_block_root: Option<B256>,
@@ -51,21 +52,23 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
+/// chain spec, EVM.
 ///
-/// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
-/// state changes are made.
+/// Note: this does not commit the state changes to the database, it only transact the call.
+///
+/// Returns `None` if Cancun is not active or the block is the genesis block, otherwise returns the
+/// result of the call.
 ///
 /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
-pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
+pub fn transact_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
     evm_config: &EvmConfig,
     chain_spec: &Spec,
     block_timestamp: u64,
     block_number: u64,
     parent_beacon_block_root: Option<B256>,
     evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
+) -> Result<Option<ResultAndState>, BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
@@ -73,7 +76,7 @@ where
     Spec: EthereumHardforks,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(())
+        return Ok(None)
     }
 
     let parent_beacon_block_root =
@@ -88,7 +91,7 @@ where
             }
             .into())
         }
-        return Ok(())
+        return Ok(None)
     }
 
     // get previous env
@@ -102,8 +105,8 @@ where
         parent_beacon_block_root.0.into(),
     );
 
-    let mut state = match evm.transact() {
-        Ok(res) => res.state,
+    let mut res = match evm.transact() {
+        Ok(res) => res,
         Err(e) => {
             evm.context.evm.env = previous_env;
             return Err(BlockValidationError::BeaconRootContractCall {
@@ -114,13 +117,46 @@ where
         }
     };
 
-    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-
-    evm.context.evm.db.commit(state);
+    res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
+    res.state.remove(&evm.block().coinbase);
 
     // re-set the previous env
     evm.context.evm.env = previous_env;
+
+    Ok(Some(res))
+}
+
+/// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
+/// chain spec, EVM.
+///
+/// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
+/// state changes are made.
+///
+/// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
+#[inline]
+pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
+    chain_spec: impl EthereumHardforks,
+    block_timestamp: u64,
+    block_number: u64,
+    parent_beacon_block_root: Option<B256>,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<(), BlockExecutionError>
+where
+    DB: Database + DatabaseCommit,
+    DB::Error: core::fmt::Display,
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    if let Some(res) = transact_beacon_root_contract_call(
+        evm_config,
+        &chain_spec,
+        block_timestamp,
+        block_number,
+        parent_beacon_block_root,
+        evm,
+    )? {
+        evm.context.evm.db.commit(res.state);
+    }
 
     Ok(())
 }

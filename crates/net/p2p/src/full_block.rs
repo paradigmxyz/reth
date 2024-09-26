@@ -96,7 +96,7 @@ where
             client,
             headers: None,
             pending_headers: VecDeque::new(),
-            bodies: HashMap::new(),
+            bodies: HashMap::default(),
             consensus: Arc::clone(&self.consensus),
         }
     }

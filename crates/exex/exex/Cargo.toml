@@ -13,10 +13,12 @@ workspace = true
 
 [dependencies]
 ## reth
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
-reth-exex-types.workspace = true
+reth-exex-types = { workspace = true, features = ["serde"] }
+reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
@@ -41,6 +43,8 @@ tokio.workspace = true
 ## misc
 eyre.workspace = true
 metrics.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-blockchain-tree.workspace = true
@@ -52,7 +56,11 @@ reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
+
 secp256k1.workspace = true
+tempfile.workspace = true
 
 [features]
 default = []

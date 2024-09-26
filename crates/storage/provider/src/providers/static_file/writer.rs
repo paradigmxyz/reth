@@ -381,8 +381,9 @@ impl StaticFileProviderRW {
     /// Commits to the configuration file at the end.
     fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
         let mut remaining_rows = num_rows;
+        let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
-            let len = match self.writer.user_header().segment() {
+            let len = match segment {
                 StaticFileSegment::Headers => {
                     self.writer.user_header().block_len().unwrap_or_default()
                 }
@@ -396,7 +397,14 @@ impl StaticFileProviderRW {
                 // delete the whole file and go to the next static file
                 let block_start = self.writer.user_header().expected_block_start();
 
-                if block_start != 0 {
+                // We only delete the file if it's NOT the first static file AND:
+                // * it's a Header segment  OR
+                // * it's a tx-based segment AND `last_block` is lower than the first block of this
+                //   file's block range. Otherwise, having no rows simply means that this block
+                //   range has no transactions, but the file should remain.
+                if block_start != 0 &&
+                    (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
+                {
                     self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`

@@ -1,6 +1,6 @@
 use crate::engine::hooks::EngineHookError;
+use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use reth_errors::{DatabaseError, RethError};
-use reth_rpc_types::engine::ForkchoiceUpdateError;
 use reth_stages_api::PipelineError;
 
 /// Beacon engine result.

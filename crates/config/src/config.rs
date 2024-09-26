@@ -444,8 +444,8 @@ where
 mod tests {
     use super::{Config, EXTENSION};
     use crate::PruneConfig;
+    use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
-    use reth_primitives::Address;
     use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
     use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 

@@ -17,7 +17,7 @@
 
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_execution_errors::{
@@ -25,15 +25,17 @@ use reth_execution_errors::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, BlockHashOrNumber,
-    BlockWithSenders, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals,
+    proofs, Block, BlockBody, BlockHashOrNumber, BlockWithSenders, Header, Requests, SealedBlock,
+    SealedHeader, TransactionSigned, Withdrawals,
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use reth_trie::HashedPostState;
+use revm_primitives::calc_excess_blob_gas;
 use std::{
     collections::HashMap,
+    fmt::Debug,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -52,19 +54,19 @@ pub use task::MiningTask;
 /// A consensus implementation intended for local development and testing purposes.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct AutoSealConsensus {
+pub struct AutoSealConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
 }
 
-impl AutoSealConsensus {
+impl<ChainSpec> AutoSealConsensus<ChainSpec> {
     /// Create a new instance of [`AutoSealConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl Consensus for AutoSealConsensus {
+impl<ChainSpec: Send + Sync + Debug> Consensus for AutoSealConsensus<ChainSpec> {
     fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
         Ok(())
     }
@@ -100,9 +102,9 @@ impl Consensus for AutoSealConsensus {
 
 /// Builder type for configuring the setup
 #[derive(Debug)]
-pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
+pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig, ChainSpec> {
     client: Client,
-    consensus: AutoSealConsensus,
+    consensus: AutoSealConsensus<ChainSpec>,
     pool: Pool,
     mode: MiningMode,
     storage: Storage,
@@ -112,11 +114,13 @@ pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
 
 // === impl AutoSealBuilder ===
 
-impl<Client, Pool, Engine, EvmConfig> AutoSealBuilder<Client, Pool, Engine, EvmConfig>
+impl<Client, Pool, Engine, EvmConfig, ChainSpec>
+    AutoSealBuilder<Client, Pool, Engine, EvmConfig, ChainSpec>
 where
     Client: BlockReaderIdExt,
     Pool: TransactionPool,
     Engine: EngineTypes,
+    ChainSpec: EthChainSpec,
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(
@@ -127,11 +131,9 @@ where
         mode: MiningMode,
         evm_config: EvmConfig,
     ) -> Self {
-        let latest_header = client
-            .latest_header()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| chain_spec.sealed_genesis_header());
+        let latest_header = client.latest_header().ok().flatten().unwrap_or_else(|| {
+            SealedHeader::new(chain_spec.genesis_header().clone(), chain_spec.genesis_hash())
+        });
 
         Self {
             storage: Storage::new(latest_header),
@@ -154,7 +156,11 @@ where
     #[track_caller]
     pub fn build(
         self,
-    ) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, EvmConfig, Engine>) {
+    ) -> (
+        AutoSealConsensus<ChainSpec>,
+        AutoSealClient,
+        MiningTask<Client, Pool, EvmConfig, Engine, ChainSpec>,
+    ) {
         let Self { client, consensus, pool, mode, storage, to_engine, evm_config } = self;
         let auto_client = AutoSealClient::new(storage.clone());
         let task = MiningTask::new(
@@ -259,7 +265,7 @@ impl StorageInner {
 
     /// Fills in pre-execution header fields based on the current best block and given
     /// transactions.
-    pub(crate) fn build_header_template(
+    pub(crate) fn build_header_template<ChainSpec>(
         &self,
         timestamp: u64,
         transactions: &[TransactionSigned],
@@ -267,7 +273,10 @@ impl StorageInner {
         withdrawals: Option<&Withdrawals>,
         requests: Option<&Requests>,
         chain_spec: &ChainSpec,
-    ) -> Header {
+    ) -> Header
+    where
+        ChainSpec: EthChainSpec + EthereumHardforks,
+    {
         // check previous block for base fee
         let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
@@ -292,7 +301,7 @@ impl StorageInner {
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             difficulty: U256::from(2),
             number: self.best_block + 1,
-            gas_limit: chain_spec.max_gas_limit.into(),
+            gas_limit: chain_spec.max_gas_limit().into(),
             timestamp,
             base_fee_per_gas,
             blob_gas_used: blob_gas_used.map(Into::into),
@@ -318,11 +327,8 @@ impl StorageInner {
                 _ => (0, 0),
             };
             header.excess_blob_gas = Some(
-                calculate_excess_blob_gas(
-                    parent_excess_blob_gas as u64,
-                    parent_blob_gas_used as u64,
-                )
-                .into(),
+                calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64)
+                    .into(),
             )
         }
 
@@ -333,7 +339,7 @@ impl StorageInner {
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn build_and_execute<Provider, Executor>(
+    pub(crate) fn build_and_execute<Provider, Executor, ChainSpec>(
         &mut self,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
@@ -344,6 +350,7 @@ impl StorageInner {
     where
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
+        ChainSpec: EthChainSpec + EthereumHardforks,
     {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
@@ -365,10 +372,12 @@ impl StorageInner {
 
         let block = Block {
             header,
-            body: transactions,
-            ommers: ommers.clone(),
-            withdrawals: withdrawals.clone(),
-            requests: requests.clone(),
+            body: BlockBody {
+                transactions,
+                ommers: ommers.clone(),
+                withdrawals: withdrawals.clone(),
+                requests: requests.clone(),
+            },
         }
         .with_recovered_senders()
         .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
@@ -391,7 +400,7 @@ impl StorageInner {
         // root here
 
         let Block { mut header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers, withdrawals, requests };
+        let body = BlockBody { transactions: body.transactions, ommers, withdrawals, requests };
 
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
@@ -410,7 +419,13 @@ impl StorageInner {
         header.receipts_root = {
             #[cfg(feature = "optimism")]
             let receipts_root = execution_outcome
-                .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
+                .generic_receipts_root_slow(header.number, |receipts| {
+                    reth_optimism_consensus::calculate_receipt_root_no_memo_optimism(
+                        receipts,
+                        &chain_spec,
+                        header.timestamp,
+                    )
+                })
                 .expect("Receipts is present");
 
             #[cfg(not(feature = "optimism"))]
@@ -433,7 +448,7 @@ impl StorageInner {
 
 #[cfg(test)]
 mod tests {
-    use reth_chainspec::{ChainHardforks, EthereumHardfork, ForkCondition};
+    use reth_chainspec::{ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition};
     use reth_primitives::Transaction;
 
     use super::*;

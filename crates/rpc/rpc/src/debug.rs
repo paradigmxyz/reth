@@ -1,17 +1,20 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
-use alloy_rpc_types::{state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext};
+use alloy_rpc_types::{
+    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
+};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
+    call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType,
+    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    NoopFrame, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
@@ -32,7 +35,6 @@ use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
     db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
-    StateBuilder,
 };
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -44,16 +46,22 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Provider, Eth> {
-    inner: Arc<DebugApiInner<Provider, Eth>>,
+pub struct DebugApi<Provider, Eth, BlockExecutor> {
+    inner: Arc<DebugApiInner<Provider, Eth, BlockExecutor>>,
 }
 
 // === impl DebugApi ===
 
-impl<Provider, Eth> DebugApi<Provider, Eth> {
+impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor> {
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(provider: Provider, eth: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard });
+    pub fn new(
+        provider: Provider,
+        eth: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        block_executor: BlockExecutor,
+    ) -> Self {
+        let inner =
+            Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard, block_executor });
         Self { inner }
     }
 
@@ -65,15 +73,16 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
 
 // === impl DebugApi ===
 
-impl<Provider, Eth> DebugApi<Provider, Eth>
+impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -160,6 +169,7 @@ where
             if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
                 block
                     .body
+                    .transactions
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered()
@@ -170,6 +180,7 @@ where
             } else {
                 block
                     .body
+                    .transactions
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
@@ -388,9 +399,32 @@ where
                         return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
+                        );
+
+                        let frame: FlatCallFrame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (_res, env) =
+                                    this.eth_api().inspect(db, env, &mut inspector)?;
+                                let tx_info = TransactionInfo::default();
+                                let frame: FlatCallFrame = inspector
+                                    .with_transaction_gas_limit(env.tx.gas_limit)
+                                    .into_parity_builder()
+                                    .into_localized_transaction_traces(tx_info)
+                                    .pop()
+                                    .unwrap();
+                                Ok(frame)
+                            })
+                            .await?;
+
+                        return Ok(frame.into());
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -481,11 +515,11 @@ where
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or(block.body.len());
+        let num_txs = transaction_index.index().unwrap_or(block.body.transactions.len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
-        if !target_block.is_pending() && num_txs == block.body.len() {
+        if !target_block.is_pending() && num_txs == block.body.transactions.len() {
             at = block.hash();
             replay_block_txs = false;
         }
@@ -572,107 +606,70 @@ where
         block_id: BlockNumberOrTag,
         include_preimages: bool,
     ) -> Result<ExecutionWitness, Eth::Error> {
-        let ((cfg, block_env, _), maybe_block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(block_id.into()),
-            self.inner.eth_api.block_with_senders(block_id.into()),
-        )?;
-        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
-
         let this = self.clone();
+        let block = this
+            .inner
+            .eth_api
+            .block_with_senders(block_id.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         self.inner
             .eth_api
-            .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
-                let evm_config = Call::evm_config(this.eth_api()).clone();
-                let mut db =
-                    StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
+            .spawn_with_state_at_block(block.parent_hash.into(), move |state_provider| {
+                let db = StateProviderDatabase::new(&state_provider);
+                let block_executor = this.inner.block_executor.executor(db);
 
-                pre_block_beacon_root_contract_call(
-                    &mut db,
-                    &evm_config,
-                    &this.inner.provider.chain_spec(),
-                    &cfg,
-                    &block_env,
-                    block.parent_beacon_block_root,
-                )
-                .map_err(|err| EthApiError::Internal(err.into()))?;
-
-                // apply eip-2935 blockhashes update
-                pre_block_blockhashes_contract_call(
-                    &mut db,
-                    &evm_config,
-                    &this.inner.provider.chain_spec(),
-                    &cfg,
-                    &block_env,
-                    block.parent_hash,
-                )
-                .map_err(|err| EthApiError::Internal(err.into()))?;
-
-                // Re-execute all of the transactions in the block to load all touched accounts into
-                // the cache DB.
-                for tx in block.into_transactions_ecrecovered() {
-                    let env = EnvWithHandlerCfg {
-                        env: Env::boxed(
-                            cfg.cfg_env.clone(),
-                            block_env.clone(),
-                            evm_config.tx_env(&tx),
-                        ),
-                        handler_cfg: cfg.handler_cfg,
-                    };
-
-                    let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
-                    db.commit(res.state);
-                }
-
-                // No need to merge transitions and create the bundle state, we will use Revm's
-                // cache directly.
-
-                // Initialize a map of preimages.
-                let mut state_preimages = HashMap::new();
-
-                // Grab all account proofs for the data accessed during block execution.
-                //
-                // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
-                // referenced accounts + storage slots. Cache is a superset of `BundleState`, so we
-                // can just query it to get the latest state of all accounts and storage slots.
                 let mut hashed_state = HashedPostState::default();
-                for (address, account) in db.cache.accounts {
-                    let hashed_address = keccak256(address);
-                    hashed_state.accounts.insert(
-                        hashed_address,
-                        account.account.as_ref().map(|a| a.info.clone().into()),
-                    );
+                let mut keys = HashMap::default();
+                let _ = block_executor
+                    .execute_with_state_witness(
+                        (&block.clone().unseal(), block.difficulty).into(),
+                        |statedb| {
+                            for (address, account) in &statedb.cache.accounts {
+                                let hashed_address = keccak256(address);
+                                hashed_state.accounts.insert(
+                                    hashed_address,
+                                    account.account.as_ref().map(|a| a.info.clone().into()),
+                                );
 
-                    let storage = hashed_state
-                        .storages
-                        .entry(hashed_address)
-                        .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
+                                let storage =
+                                    hashed_state.storages.entry(hashed_address).or_insert_with(
+                                        || HashedStorage::new(account.status.was_destroyed()),
+                                    );
 
-                    if let Some(account) = account.account {
-                        if include_preimages {
-                            state_preimages
-                                .insert(hashed_address, alloy_rlp::encode(address).into());
-                        }
+                                if let Some(account) = &account.account {
+                                    if include_preimages {
+                                        keys.insert(
+                                            hashed_address,
+                                            alloy_rlp::encode(address).into(),
+                                        );
+                                    }
 
-                        for (slot, value) in account.storage {
-                            let slot = B256::from(slot);
-                            let hashed_slot = keccak256(slot);
-                            storage.storage.insert(hashed_slot, value);
+                                    for (slot, value) in &account.storage {
+                                        let slot = B256::from(*slot);
+                                        let hashed_slot = keccak256(slot);
+                                        storage.storage.insert(hashed_slot, *value);
 
-                            if include_preimages {
-                                state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                                        if include_preimages {
+                                            keys.insert(
+                                                hashed_slot,
+                                                alloy_rlp::encode(slot).into(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
-                        }
-                    }
-                }
+                        },
+                    )
+                    .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                // Generate an execution witness for the aggregated state of accessed accounts.
-                // Destruct the cache database to retrieve the state provider.
-                let state_provider = db.database.into_inner();
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
-
-                Ok(ExecutionWitness { state, keys: include_preimages.then_some(state_preimages) })
+                Ok(ExecutionWitness {
+                    state: std::collections::HashMap::from_iter(state.into_iter()),
+                    keys: include_preimages.then_some(keys),
+                })
             })
             .await
     }
@@ -689,8 +686,7 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
-        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
+        transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -756,9 +752,31 @@ where
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
-                        return Err(
-                            EthApiError::Unsupported("Flatcall tracer is not supported yet").into()
-                        )
+                        let flat_call_config = tracer_config
+                            .into_flat_call_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = TracingInspector::new(
+                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
+                        );
+
+                        let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
+
+                        let tx_info = TransactionInfo {
+                            hash: transaction_context.unwrap().tx_hash,
+                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
+                            block_hash: transaction_context.unwrap().block_hash,
+                            block_number: Some(env.block.number.try_into().unwrap_or_default()),
+                            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
+                        };
+                        let frame: FlatCallFrame = inspector
+                            .with_transaction_gas_limit(env.tx.gas_limit)
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info)
+                            .pop()
+                            .unwrap();
+
+                        return Ok((frame.into(), res.state));
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -803,15 +821,16 @@ where
 }
 
 #[async_trait]
-impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
+impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -1190,23 +1209,25 @@ where
     }
 }
 
-impl<Provider, Eth> std::fmt::Debug for DebugApi<Provider, Eth> {
+impl<Provider, Eth, BlockExecutor> std::fmt::Debug for DebugApi<Provider, Eth, BlockExecutor> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Eth> Clone for DebugApi<Provider, Eth> {
+impl<Provider, Eth, BlockExecutor> Clone for DebugApi<Provider, Eth, BlockExecutor> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Provider, Eth> {
+struct DebugApiInner<Provider, Eth, BlockExecutor> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
+    /// block executor for debug & trace apis
+    block_executor: BlockExecutor,
 }

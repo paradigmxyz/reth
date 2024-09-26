@@ -5,6 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -20,9 +21,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
-};
+use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Request};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
@@ -163,7 +162,7 @@ where
 
         // execute transactions
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
+        let mut receipts = Vec::with_capacity(block.body.transactions.len());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -473,21 +472,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxLegacy;
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
+    use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        keccak256, public_key_to_address, Account, Block, Transaction, TxKind, TxLegacy, B256,
+        public_key_to_address, Account, Block, BlockBody, Transaction,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
+    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
@@ -504,7 +505,7 @@ mod tests {
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
             Some(BEACON_ROOTS_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -523,7 +524,7 @@ mod tests {
             WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
             withdrawal_requests_contract_account,
             Some(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -557,10 +558,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -588,10 +591,12 @@ mod tests {
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
-                        body: vec![],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+                        body: BlockBody {
+                            transactions: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                     },
                     senders: vec![],
                 },
@@ -654,10 +659,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -678,7 +685,7 @@ mod tests {
         let mut db = create_state_provider_with_beacon_root_contract();
 
         // insert an empty SYSTEM_ADDRESS
-        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
+        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
@@ -707,10 +714,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -749,13 +758,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header: header.clone(), body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -776,13 +779,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -835,13 +832,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header: header.clone(), body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -892,7 +883,7 @@ mod tests {
             HISTORY_STORAGE_ADDRESS,
             blockhashes_contract_account,
             Some(HISTORY_STORAGE_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -920,13 +911,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -970,13 +955,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1027,13 +1006,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1090,13 +1063,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1144,13 +1111,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1186,13 +1147,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1228,13 +1183,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1281,7 +1230,7 @@ mod tests {
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
-            HashMap::new(),
+            HashMap::default(),
         );
 
         // https://github.com/lightclient/7002asm/blob/e0d68e04d15f25057af7b6d180423d94b6b3bdb3/test/Contract.t.sol.in#L49-L64
@@ -1319,10 +1268,7 @@ mod tests {
                 (
                     &Block {
                         header,
-                        body: vec![tx],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+                        body: BlockBody { transactions: vec![tx], ..Default::default() },
                     }
                     .with_recovered_senders()
                     .unwrap(),
@@ -1367,7 +1313,7 @@ mod tests {
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
-            HashMap::new(),
+            HashMap::default(),
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes
@@ -1405,15 +1351,9 @@ mod tests {
         // Execute the block and capture the result
         let exec_result = executor.execute(
             (
-                &Block {
-                    header,
-                    body: vec![tx],
-                    ommers: vec![],
-                    withdrawals: None,
-                    requests: None,
-                }
-                .with_recovered_senders()
-                .unwrap(),
+                &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                    .with_recovered_senders()
+                    .unwrap(),
                 U256::ZERO,
             )
                 .into(),

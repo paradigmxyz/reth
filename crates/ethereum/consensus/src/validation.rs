@@ -1,8 +1,7 @@
+use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
-};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt, Request};
 
 /// Validate a block with regard to execution results:
 ///

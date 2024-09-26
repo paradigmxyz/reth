@@ -228,7 +228,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 let executed_block = block_state.block();
                 let block = executed_block.block();
 
-                for tx_index in 0..block.body.len() {
+                for tx_index in 0..block.body.transactions.len() {
                     if id == in_memory_tx_num {
                         return Ok(Some((Some(block_state), tx_index)))
                     }
@@ -499,7 +499,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                 // Check in-memory state first
                 self.canonical_in_memory_state
                     .state_by_number(number)
-                    .map(|o| o.block().block().ommers.clone())
+                    .map(|o| o.block().block().body.ommers.clone())
                     .map_or_else(|| self.database.ommers(id), |ommers| Ok(Some(ommers)))
             }
             None => self.database.ommers(id),
@@ -526,7 +526,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             stored_indices.first_tx_num = stored_indices.next_tx_num();
 
             for state in parent_chain {
-                let txs = state.block().block.body.len() as u64;
+                let txs = state.block().block.body.transactions.len() as u64;
                 if state.block().block().number == number {
                     stored_indices.tx_count = txs;
                 } else {
@@ -673,7 +673,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
                 .canonical_in_memory_state
                 .state_by_number(block_number)
                 .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
-            for tx in &block_state.block().block().body {
+            for tx in block_state.block().block().body.transactions() {
                 if tx.hash() == tx_hash {
                     return Ok(Some(in_memory_tx_id))
                 }
@@ -692,7 +692,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         };
 
         if let Some(block_state) = block_state {
-            let transaction = block_state.block().block().body.get(tx_index).cloned();
+            let transaction = block_state.block().block().body.transactions.get(tx_index).cloned();
             Ok(transaction)
         } else {
             provider.transaction_by_id(id)
@@ -709,8 +709,14 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         };
 
         if let Some(block_state) = block_state {
-            let transaction =
-                block_state.block().block().body.get(tx_index).cloned().map(Into::into);
+            let transaction = block_state
+                .block()
+                .block()
+                .body
+                .transactions
+                .get(tx_index)
+                .cloned()
+                .map(Into::into);
             Ok(transaction)
         } else {
             provider.transaction_by_id_no_hash(id)
@@ -753,12 +759,12 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         match id {
             BlockHashOrNumber::Hash(hash) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.block().block().body.clone()));
+                    return Ok(Some(block_state.block().block().body.transactions.clone()));
                 }
             }
             BlockHashOrNumber::Number(number) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                    return Ok(Some(block_state.block().block().body.clone()));
+                    return Ok(Some(block_state.block().block().body.transactions.clone()));
                 }
             }
         }
@@ -780,7 +786,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
-                transactions.push(block_state.block().block().body.clone());
+                transactions.push(block_state.block().block().body.transactions.clone());
                 last_in_memory_block = Some(number);
             } else {
                 break
@@ -825,6 +831,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
                 .block()
                 .block()
                 .body
+                .transactions
                 .get(tx_index)
                 .and_then(|transaction| transaction.recover_signer());
             Ok(sender)
@@ -857,12 +864,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
 
             // assuming 1:1 correspondence between transactions and receipts
             debug_assert_eq!(
-                block.body.len(),
+                block.body.transactions.len(),
                 receipts.len(),
                 "Mismatch between transaction and receipt count"
             );
 
-            if let Some(tx_index) = block.body.iter().position(|tx| tx.hash() == hash) {
+            if let Some(tx_index) = block.body.transactions.iter().position(|tx| tx.hash() == hash)
+            {
                 // safe to use tx_index for receipts due to 1:1 correspondence
                 return Ok(receipts.get(tx_index).cloned());
             }
@@ -940,7 +948,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
 
         if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().withdrawals.clone())
+            Ok(block.block().block().body.withdrawals.clone())
         } else {
             self.database.withdrawals_by_block(id, timestamp)
         }
@@ -952,7 +960,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         // If the best block is in memory, use that. Otherwise, use the latest withdrawal in the
         // database.
         if let Some(block) = self.canonical_in_memory_state.state_by_number(best_block_num) {
-            Ok(block.block().block().withdrawals.clone().and_then(|mut w| w.pop()))
+            Ok(block.block().block().body.withdrawals.clone().and_then(|mut w| w.pop()))
         } else {
             self.database.latest_withdrawal()
         }
@@ -970,7 +978,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         }
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().requests.clone())
+            Ok(block.block().block().body.requests.clone())
         } else {
             self.database.requests_by_block(id, timestamp)
         }
@@ -1501,7 +1509,7 @@ mod tests {
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
-            .map(|block| block.body.iter())
+            .map(|block| block.body.transactions.iter())
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
@@ -1826,11 +1834,11 @@ mod tests {
         // First in memory block ommers should be found
         assert_eq!(
             provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
         assert_eq!(
             provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
 
         // A random hash should return None as the block number is not found
@@ -2779,7 +2787,7 @@ mod tests {
                         shainghai_timestamp
                     )?
                     .unwrap(),
-                block.withdrawals.unwrap(),
+                block.body.withdrawals.unwrap(),
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
@@ -2789,7 +2797,7 @@ mod tests {
 
         assert_eq!(
             Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.withdrawals.clone().unwrap().pop(),
+            canonical_block.body.withdrawals.clone().unwrap().pop(),
             "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
         );
 
@@ -2986,11 +2994,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
 
         let block_number = in_memory_block.number;
@@ -2998,11 +3006,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
 
         Ok(())
@@ -3022,8 +3030,8 @@ mod tests {
 
         for block in blocks {
             let block_number = block.number as usize;
-            for (txn_number, _) in block.body.iter().enumerate() {
-                let txn_hash = block.body.get(txn_number).unwrap().hash();
+            for (txn_number, _) in block.body.transactions.iter().enumerate() {
+                let txn_hash = block.body.transactions.get(txn_number).unwrap().hash();
                 let txn_id = provider.transaction_id(txn_hash)?.unwrap();
                 assert_eq!(
                     provider.receipt(txn_id)?.unwrap(),
@@ -3265,11 +3273,11 @@ mod tests {
 
         assert_eq!(
             provider.requests_by_block(database_block.number.into(), prague_timestamp,)?,
-            database_block.requests.clone()
+            database_block.body.requests.clone()
         );
         assert_eq!(
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
-            in_memory_block.requests.clone()
+            in_memory_block.body.requests.clone()
         );
 
         Ok(())
@@ -3535,7 +3543,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction ID can be found in the database
@@ -3544,7 +3552,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction ID can be found in the in-memory state
@@ -3587,7 +3595,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3603,7 +3611,7 @@ mod tests {
 
         // Database
         // Choose a random transaction ID from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3643,7 +3651,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3660,7 +3668,7 @@ mod tests {
 
         // Database
         // Choose a random transaction ID from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3700,7 +3708,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction hash from the in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction can be retrieved by its hash from the in-memory state
@@ -3713,7 +3721,7 @@ mod tests {
 
         // Database
         // Choose a random transaction hash from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction can be retrieved by its hash from the database
@@ -3749,7 +3757,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory block
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Create the expected metadata for this transaction
@@ -3780,7 +3788,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Create the expected metadata for this transaction
@@ -3834,7 +3842,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3852,7 +3860,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database block
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3896,7 +3904,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3910,7 +3918,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -3949,7 +3957,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3963,7 +3971,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -4006,8 +4014,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the in-memory blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], in_memory_blocks[0].body);
-        assert_eq!(result[1], in_memory_blocks[1].body);
+        assert_eq!(result[0], in_memory_blocks[0].body.transactions);
+        assert_eq!(result[1], in_memory_blocks[1].body.transactions);
 
         // Database
         // Define a block range entirely within database blocks
@@ -4019,8 +4027,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the database blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body);
-        assert_eq!(result[1], database_blocks[1].body);
+        assert_eq!(result[0], database_blocks[0].body.transactions);
+        assert_eq!(result[1], database_blocks[1].body.transactions);
 
         Ok(())
     }
@@ -4047,8 +4055,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the database
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body[0].clone().into());
-        assert_eq!(result[1], database_blocks[0].body[1].clone().into());
+        assert_eq!(result[0], database_blocks[0].body.transactions[0].clone().into());
+        assert_eq!(result[1], database_blocks[0].body.transactions[1].clone().into());
 
         // Define an empty range that should return no transactions
         let start_tx_num = u64::MAX;
@@ -4130,7 +4138,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory block
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
 
         // Retrieve the transaction ID
         let tx_id = provider.transaction_id(tx.hash())?.unwrap();
@@ -4148,7 +4156,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database block
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
 
         // Retrieve the transaction ID
         let tx_id = provider.transaction_id(tx.hash())?.unwrap();

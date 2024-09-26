@@ -1,11 +1,11 @@
 //! Transaction types.
 
-use crate::{
-    eip7702::SignedAuthorization, keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind,
-    B256, U256,
-};
+use crate::{BlockHashOrNumber, Bytes, TxHash, B256, U256};
+use alloy_eips::eip7702::SignedAuthorization;
+use alloy_primitives::{keccak256, Address, TxKind};
 
-use alloy_consensus::SignableTransaction;
+use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+use alloy_eips::eip2930::AccessList;
 use alloy_primitives::Parity;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -17,10 +17,6 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
-
-pub use access_list::{AccessList, AccessListItem, AccessListResult};
-
-pub use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
@@ -960,15 +956,20 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
-            crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
-                let mut compressor = compressor.borrow_mut();
-                let mut tmp = Vec::with_capacity(256);
+            let mut tmp = Vec::with_capacity(256);
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    tx_bits as u8
+                })
+            } else {
+                let mut compressor = crate::compression::create_tx_compressor();
                 let tx_bits = self.transaction.to_compact(&mut tmp);
-
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-
                 tx_bits as u8
-            })
+            }
         } else {
             self.transaction.to_compact(buf) as u8
         };
@@ -988,17 +989,26 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
+            if cfg!(feature = "std") {
+                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
 
-                // TODO: enforce that zstd is only present at a "top" level type
+                    // TODO: enforce that zstd is only present at a "top" level type
 
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) =
+                        Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+
+                    (transaction, buf)
+                })
+            } else {
+                let mut decompressor = crate::compression::create_tx_decompressor();
                 let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
                 (transaction, buf)
-            })
+            }
         } else {
             let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
@@ -1638,15 +1648,6 @@ impl Decodable for TransactionSignedEcRecovered {
     }
 }
 
-/// Ensures the transaction can be sent over the
-/// network
-pub trait ToRecoveredTransaction {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
-    ///
-    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
-}
-
 /// Generic wrapper with encoded Bytes, such as transaction data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithEncoded<T>(Bytes, pub T);
@@ -1706,10 +1707,10 @@ mod tests {
     use crate::{
         hex,
         transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, B256, U256,
     };
-    use alloy_primitives::{address, b256, bytes, Parity};
+    use alloy_primitives::{address, b256, bytes, Address, Parity};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
@@ -1920,7 +1921,7 @@ mod tests {
 
     #[test]
     fn decode_raw_tx_and_recover_signer() {
-        use crate::hex_literal::hex;
+        use alloy_primitives::hex_literal::hex;
         // transaction is from ropsten
 
         let hash: B256 =

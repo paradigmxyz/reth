@@ -31,9 +31,6 @@ pub trait EngineTypes:
     + Serialize
     + 'static
 {
-    /// The chain specification of the node.
-    type ChainSpec: Send + Sync;
-
     /// Execution Payload V1 type.
     type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V2 type.
@@ -42,12 +39,22 @@ pub trait EngineTypes:
     type ExecutionPayloadV3: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V4 type.
     type ExecutionPayloadV4: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+}
 
+/// Type that validates the payloads sent to the engine.
+pub trait EngineValidator<Types: EngineTypes>: Clone + Send + Sync + Unpin + 'static {
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
-        chain_spec: &Self::ChainSpec,
+        &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &<Types as PayloadTypes>::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError>;
 }

@@ -66,7 +66,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthTransactions<TransactionCompat: TransactionCompat>
+        > + EthTransactions
         + TraceExt
         + 'static,
 {

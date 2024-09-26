@@ -1,11 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
-
 mod signature;
-mod typed;
 
 pub use signature::*;
-pub use typed::*;
-
 use std::fmt;
 
 use alloy_rpc_types::{

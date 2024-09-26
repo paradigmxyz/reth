@@ -1,12 +1,16 @@
 use crate::{walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles};
 use alloy_primitives::B256;
+#[cfg(feature = "serde")]
+use serde::{ser::SerializeMap, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_map"))]
     pub(crate) account_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_set"))]
     pub(crate) removed_nodes: HashSet<Nibbles>,
     pub(crate) storage_tries: HashMap<B256, StorageTrieUpdates>,
 }
@@ -113,8 +117,10 @@ pub struct StorageTrieUpdates {
     /// Flag indicating whether the trie was deleted.
     pub(crate) is_deleted: bool,
     /// Collection of updated storage trie nodes.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_map"))]
     pub(crate) storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed storage trie nodes.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_nibbles_set"))]
     pub(crate) removed_nodes: HashSet<Nibbles>,
 }
 
@@ -216,6 +222,42 @@ impl StorageTrieUpdates {
     }
 }
 
+/// Serializes any [`HashSet`] that includes [`Nibbles`] elements, by using the hex-encoded packed
+/// representation.
+///
+/// This also sorts the set before serializing.
+#[cfg(feature = "serde")]
+fn serialize_nibbles_set<S>(map: &HashSet<Nibbles>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut storage_nodes =
+        Vec::from_iter(map.iter().map(|elem| reth_primitives::hex::encode(elem.pack())));
+    storage_nodes.sort_unstable();
+    storage_nodes.serialize(serializer)
+}
+
+/// Serializes any [`HashMap`] that uses [`Nibbles`] as keys, by using the hex-encoded packed
+/// representation.
+///
+/// This also sorts the map's keys before encoding and serializing.
+#[cfg(feature = "serde")]
+fn serialize_nibbles_map<S, T>(map: &HashMap<Nibbles, T>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
+    let mut storage_nodes = Vec::from_iter(map);
+    storage_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    for (k, v) in storage_nodes {
+        // pack, then hex encode the Nibbles
+        let packed = reth_primitives::hex::encode(k.pack());
+        map_serializer.serialize_entry(&packed, &v)?;
+    }
+    map_serializer.end()
+}
+
 /// Sorted trie updates used for lookups and insertions.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct TrieUpdatesSorted {
@@ -276,4 +318,40 @@ fn exclude_empty_from_pair<V>(
     iter: impl IntoIterator<Item = (Nibbles, V)>,
 ) -> impl Iterator<Item = (Nibbles, V)> {
     iter.into_iter().filter(|(n, _)| !n.is_empty())
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serialize_trie_updates_works() {
+        let mut default_updates = TrieUpdates::default();
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates
+            .account_nodes
+            .insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0f]), BranchNodeCompact::default());
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates.storage_tries.insert(B256::default(), StorageTrieUpdates::default());
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+    }
+
+    #[test]
+    fn test_serialize_storage_trie_updates_works() {
+        let mut default_updates = StorageTrieUpdates::default();
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+
+        default_updates
+            .storage_nodes
+            .insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0f]), BranchNodeCompact::default());
+        let _updates_string = serde_json::to_string(&default_updates).unwrap();
+    }
 }

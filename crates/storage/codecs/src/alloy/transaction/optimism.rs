@@ -2,7 +2,6 @@ use crate::Compact;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_alloy_consensus::TxDeposit as AlloyTxDeposit;
 use reth_codecs_derive::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
 
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
 ///
@@ -12,8 +11,8 @@ use serde::{Deserialize, Serialize};
 /// will automatically apply to this type.
 ///
 /// Notice: Make sure this struct is 1:1 with [`op_alloy_consensus::TxDeposit`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxDeposit {
     source_hash: B256,
