@@ -7283,6 +7283,7 @@ name = "reth-evm"
 version = "1.0.7"
 dependencies = [
  "alloy-eips",
+ "alloy-primitives",
  "auto_impl",
  "futures-util",
  "metrics",

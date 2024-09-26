@@ -4,12 +4,12 @@ use core::fmt::Display;
 
 use crate::ConfigureEvm;
 use alloy_eips::eip7002::{WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
+use alloy_primitives::{Address, Bytes, FixedBytes};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{Buf, Header, Request};
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{
-    Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, FixedBytes,
-    ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState,
 };
 
 /// Apply the [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) post block contract call.

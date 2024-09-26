@@ -2,11 +2,13 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap};
+use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
@@ -508,7 +510,8 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Receipt, Receipts, TxType, B256};
+    use alloy_primitives::B256;
+    use reth_primitives::{Receipt, Receipts, TxType};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]

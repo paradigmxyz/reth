@@ -18,6 +18,10 @@ reth-trie.workspace = true
 
 revm.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
