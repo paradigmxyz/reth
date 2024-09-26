@@ -132,6 +132,7 @@ pub(super) struct CachedBlock {
     pub(super) action: CachedBlockAction,
     /// The block number and hash of the block.
     pub(super) block: BlockNumHash,
+    /// The hash of the parent block.
     pub(super) parent_hash: B256,
 }
 
