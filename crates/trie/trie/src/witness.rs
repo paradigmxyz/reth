@@ -10,7 +10,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{BufMut, Decodable, Encodable};
-use itertools::Either;
+use itertools::{Either, Itertools};
 use reth_execution_errors::TrieWitnessError;
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
@@ -120,11 +120,16 @@ where
                 None
             };
             let key = Nibbles::unpack(hashed_address);
-            account_trie_nodes.extend(self.target_nodes(
-                key.clone(),
-                value,
-                account_multiproof.account_subtree.matching_nodes_iter(&key),
-            )?);
+            account_trie_nodes.extend(
+                self.target_nodes(
+                    key.clone(),
+                    value,
+                    account_multiproof
+                        .account_subtree
+                        .matching_nodes_iter(&key)
+                        .sorted_by(|a, b| a.0.cmp(&b.0)),
+                )?,
+            );
 
             // Gather and record storage trie nodes for this account.
             let mut storage_trie_nodes = BTreeMap::default();
@@ -135,11 +140,16 @@ where
                     .and_then(|s| s.storage.get(&hashed_slot))
                     .filter(|v| !v.is_zero())
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
-                storage_trie_nodes.extend(self.target_nodes(
-                    slot_nibbles.clone(),
-                    slot_value,
-                    storage_multiproof.subtree.matching_nodes_iter(&slot_nibbles),
-                )?);
+                storage_trie_nodes.extend(
+                    self.target_nodes(
+                        slot_nibbles.clone(),
+                        slot_value,
+                        storage_multiproof
+                            .subtree
+                            .matching_nodes_iter(&slot_nibbles)
+                            .sorted_by(|a, b| a.0.cmp(&b.0)),
+                    )?,
+                );
             }
 
             Self::next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
