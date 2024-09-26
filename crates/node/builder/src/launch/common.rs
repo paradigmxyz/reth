@@ -400,7 +400,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
 impl<DB, ChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpec>, DB>>
 where
     DB: Database + Clone + 'static,
-    ChainSpec: EthChainSpec + EthereumHardforks,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
