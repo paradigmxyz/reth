@@ -1,5 +1,4 @@
-use alloy_primitives::Address;
-use alloy_primitives::map::HashMap;
+use alloy_primitives::{map::HashMap, Address};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
 use reth_primitives::{Block, Withdrawal, Withdrawals, U256};
