@@ -196,24 +196,21 @@ impl ExecutionOutcome {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
+        self.receipts.root_slow(
+            self.block_number_to_index(_block_number)?,
+            reth_primitives::proofs::calculate_receipt_root_no_memo,
+        )
     }
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    #[cfg(feature = "optimism")]
-    pub fn optimism_receipts_root_slow(
+    pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        chain_spec: impl reth_chainspec::Hardforks,
-        timestamp: u64,
+        f: impl FnOnce(&[&Receipt]) -> B256,
     ) -> Option<B256> {
-        self.receipts.optimism_root_slow(
-            self.block_number_to_index(block_number)?,
-            chain_spec,
-            timestamp,
-        )
+        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
     }
 
     /// Returns reference to receipts.

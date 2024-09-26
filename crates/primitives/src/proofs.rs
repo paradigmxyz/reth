@@ -49,47 +49,6 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
     })
 }
 
-/// Calculates the receipt root for a header for the reference type of [Receipt].
-///
-/// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
-#[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[&Receipt],
-    chain_spec: impl reth_chainspec::Hardforks,
-    timestamp: u64,
-) -> B256 {
-    // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
-    // the receipt root calculation does not include the deposit nonce in the receipt
-    // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
-    // receipts before calculating the receipt root. This was corrected in the Canyon
-    // hardfork.
-
-    if chain_spec
-        .is_fork_active_at_timestamp(reth_optimism_forks::OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(
-            reth_optimism_forks::OptimismHardfork::Canyon,
-            timestamp,
-        )
-    {
-        let receipts = receipts
-            .iter()
-            .map(|r| {
-                let mut r = (*r).clone();
-                r.deposit_nonce = None;
-                r
-            })
-            .collect::<Vec<_>>();
-
-        return ordered_trie_root_with_encoder(&receipts, |r, buf| {
-            ReceiptWithBloomRef::from(r).encode_inner(buf, false)
-        })
-    }
-
-    ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
-    })
-}
-
 /// Calculates the root hash for ommer/uncle headers.
 pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     // Check if `ommers` list is empty

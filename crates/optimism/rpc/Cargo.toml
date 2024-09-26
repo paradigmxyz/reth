@@ -29,6 +29,7 @@ reth-chainspec.workspace = true
 
 # op-reth
 reth-evm-optimism.workspace = true
+reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
