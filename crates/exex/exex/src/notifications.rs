@@ -9,7 +9,6 @@ use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
     fmt::Debug,
-    iter::Peekable,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -42,8 +41,9 @@ impl<P, E> ExExNotifications<P, E> {
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification>,
+        wal_handle: WalHandle,
     ) -> Self {
-        Self { node_head, provider, executor, notifications }
+        Self { node_head, provider, executor, notifications, wal_handle }
     }
 
     /// Receives the next value for this receiver.
@@ -131,7 +131,6 @@ impl<P: Unpin, E: Unpin> Stream for ExExNotifications<P, E> {
 
 /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
 /// committed or reverted after the given head.
-#[derive(Debug)]
 pub struct ExExNotificationsWithHead<P, E> {
     node_head: Head,
     provider: P,
@@ -146,6 +145,27 @@ pub struct ExExNotificationsWithHead<P, E> {
     /// Whether we're currently waiting for the node head to catch up to the same height as the
     /// ExEx head.
     node_head_catchup_in_progress: bool,
+}
+
+impl<P, E> Debug for ExExNotificationsWithHead<P, E>
+where
+    P: Debug,
+    E: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExExNotificationsWithHead")
+            .field("node_head", &self.node_head)
+            .field("provider", &self.provider)
+            .field("executor", &self.executor)
+            .field("notifications", &self.notifications)
+            .field("wal_handle", &self.wal_handle)
+            .field("wal_notifications", &self.wal_notifications.as_ref().map(|_| "..."))
+            .field("exex_head", &self.exex_head)
+            .field("pending_sync", &self.pending_sync)
+            .field("backfill_job", &self.backfill_job.is_some())
+            .field("node_head_catchup_in_progress", &self.node_head_catchup_in_progress)
+            .finish()
+    }
 }
 
 impl<P, E> ExExNotificationsWithHead<P, E>
@@ -168,6 +188,7 @@ where
             executor,
             notifications,
             wal_handle,
+            wal_notifications: None,
             exex_head,
             pending_sync: true,
             backfill_job: None,
@@ -271,24 +292,25 @@ where
         let this = self.get_mut();
 
         if this.pending_sync && this.wal_notifications.is_none() {
-            // TODO: this load notifications in memory, bad. We need to have a lazy iterator here
-            // that iterates over a fixed range of files in the WAL.
             // TODO: what if the WAL gets finalized while we're iterating over it? Is it even
             // possible?
-            let mut wal_notifications = this
-                .wal_handle
-                .iter_notifications()?
-                .rev()
-                .take_while(|notification| {
-                    notification
-                        .as_ref()
-                        .ok()
-                        .and_then(|notification| notification.committed_chain())
-                        .map_or(true, |chain| chain.tip().block.hash() != this.exex_head.block.hash)
-                })
-                .collect::<Vec<_>>();
-            wal_notifications.reverse();
-            this.wal_notifications = Some(Box::new(wal_notifications.into_iter().rev()));
+            // TODO : simply walk the cache to get the file ID of the first notification after the
+            // current head
+            let mut wal_notifications =
+                this.wal_handle.clone().into_iter_notifications()?.peekable();
+            // Advance iterator until we find a notification matching the current head
+            for notification in &mut wal_notifications {
+                if notification?
+                    .committed_chain()
+                    .map_or(false, |chain| chain.tip().block.hash() == this.exex_head.block.hash)
+                {
+                    break
+                }
+            }
+            // If there are any notifications left, save the iterator to drain it on every poll
+            if wal_notifications.peek().is_some() {
+                this.wal_notifications = Some(Box::new(wal_notifications));
+            }
         }
 
         if let Some(wal_notifications) = this.wal_notifications.as_mut() {
@@ -380,6 +402,8 @@ where
 mod tests {
     use std::future::poll_fn;
 
+    use crate::Wal;
+
     use super::*;
     use alloy_consensus::Header;
     use eyre::OptionExt;
@@ -397,6 +421,9 @@ mod tests {
     #[tokio::test]
     async fn exex_notifications_behind_head_canonical() -> eyre::Result<()> {
         let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
@@ -448,6 +475,7 @@ mod tests {
             provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
+            wal.handle(),
         )
         .with_head(exex_head);
 
@@ -481,6 +509,9 @@ mod tests {
 
     #[tokio::test]
     async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
@@ -521,6 +552,7 @@ mod tests {
             provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
+            wal.handle(),
         )
         .with_head(exex_head);
 
@@ -539,6 +571,9 @@ mod tests {
     #[tokio::test]
     async fn test_notifications_ahead_of_head() -> eyre::Result<()> {
         let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
@@ -580,6 +615,7 @@ mod tests {
             provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
+            wal.handle(),
         )
         .with_head(exex_head);
 

@@ -66,6 +66,7 @@ impl Wal {
         Ok(())
     }
 
+    /// Returns a handle to the WAL.
     pub fn handle(&self) -> WalHandle {
         WalHandle { storage: self.storage.clone() }
     }
@@ -236,6 +237,7 @@ impl Wal {
     pub(crate) fn iter_notifications(
         &self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+        // TODO: use cache to not iterate over the directory and parse filename every time
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };
@@ -244,21 +246,24 @@ impl Wal {
     }
 }
 
+/// A handle to the WAL. Used to access the WAL for non-mutable operations, such as iteration.
 #[derive(Debug, Clone)]
 pub struct WalHandle {
     storage: Storage,
 }
 
 impl WalHandle {
-    pub fn iter_notifications(
-        &self,
-    ) -> eyre::Result<Box<dyn DoubleEndedIterator<Item = eyre::Result<ExExNotification>> + '_>>
-    {
+    /// Consumes the handle and returns an iterator over all notifications in the WAL. The
+    /// underlying files are only read when the iterator is advanced.
+    pub fn into_iter_notifications(
+        self,
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>>>> {
+        // TODO: use cache to not iterate over the directory and parse filename every time
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };
 
-        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
+        Ok(Box::new(self.storage.into_iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
 }
 

@@ -99,10 +99,17 @@ impl Storage {
         Ok(notifications.into_iter().map(|(_, notification)| notification).collect())
     }
 
+    pub(super) fn into_iter_notifications(
+        self,
+        range: RangeInclusive<u64>,
+    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> {
+        range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
+    }
+
     pub(super) fn iter_notifications(
         &self,
         range: RangeInclusive<u64>,
-    ) -> impl DoubleEndedIterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
+    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
         range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
     }
 
