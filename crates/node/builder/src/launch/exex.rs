@@ -104,12 +104,16 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 .resolve_datadir(config_container.config.chain.chain())
                 .exex_wal(),
         )?;
-        let exex_manager = ExExManager::new(
+        let mut exex_manager = ExExManager::new(
             exex_handles,
             1024,
             exex_wal,
             components.provider().finalized_block_stream(),
         );
+
+        // Canonicalize the ExEx WAL in case it's ahead of the node
+        exex_manager.canonicalize_wal(components.provider())?;
+
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
