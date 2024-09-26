@@ -85,7 +85,7 @@ where
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         if input.target_reached() || self.buffer.is_some() {
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(Ok(()))
         }
 
         // Update the header range on the downloader
