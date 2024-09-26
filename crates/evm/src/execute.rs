@@ -5,8 +5,9 @@ pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
+use alloy_primitives::BlockNumber;
 use core::fmt::Display;
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm::State;
 use revm_primitives::db::Database;
@@ -151,8 +152,8 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::U256;
     use std::marker::PhantomData;
 
     #[derive(Clone, Default)]
