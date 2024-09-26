@@ -944,7 +944,7 @@ mod tests {
                     }
 
                     if response.len() as u64 >= this.batch_size {
-                        break;
+                        break
                     }
                 }
 
