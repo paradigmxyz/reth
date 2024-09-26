@@ -19,11 +19,7 @@ use reth_tracing::tracing::{debug, instrument};
 ///
 /// The expected mode of operation is as follows:
 /// 1. On every new canonical chain notification, call [`Wal::commit`].
-/// 2. When ExEx is on a wrong fork, rollback the WAL using [`Wal::rollback`]. The caller is
-///    expected to create reverts from the removed notifications and backfill the blocks between the
-///    returned block and the given rollback block. After that, commit new notifications as usual
-///    with [`Wal::commit`].
-/// 3. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
+/// 2. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
 #[derive(Debug)]
 pub struct Wal {
