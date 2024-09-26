@@ -196,9 +196,9 @@ impl FromReader for FileClient {
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut headers = HashMap::new();
-        let mut hash_to_number = HashMap::new();
-        let mut bodies = HashMap::new();
+        let mut headers = HashMap::default();
+        let mut hash_to_number = HashMap::default();
+        let mut bodies = HashMap::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);

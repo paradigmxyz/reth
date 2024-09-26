@@ -101,11 +101,11 @@ impl TreeState {
     /// Returns a new, empty tree state that points to the given canonical head.
     fn new(current_canonical_head: BlockNumHash) -> Self {
         Self {
-            blocks_by_hash: HashMap::new(),
+            blocks_by_hash: HashMap::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
-            parent_to_child: HashMap::new(),
-            persisted_trie_updates: HashMap::new(),
+            parent_to_child: HashMap::default(),
+            persisted_trie_updates: HashMap::default(),
         }
     }
 

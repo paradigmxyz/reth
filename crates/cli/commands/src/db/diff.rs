@@ -267,7 +267,7 @@ where
     T::Key: Hash,
 {
     fn default() -> Self {
-        Self { discrepancies: HashMap::new(), extra_elements: HashMap::new() }
+        Self { discrepancies: HashMap::default(), extra_elements: HashMap::default() }
     }
 }
 

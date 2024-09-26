@@ -51,7 +51,7 @@ where
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
+    let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
     let mut collect = |cache: &HashMap<P, Vec<u64>>| {
         for (key, indice_list) in cache {

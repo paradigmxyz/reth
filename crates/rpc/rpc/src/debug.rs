@@ -621,7 +621,7 @@ where
                 let block_executor = this.inner.block_executor.executor(db);
 
                 let mut hashed_state = HashedPostState::default();
-                let mut keys = HashMap::new();
+                let mut keys = HashMap::default();
                 let _ = block_executor
                     .execute_with_state_witness(
                         (&block.clone().unseal(), block.difficulty).into(),

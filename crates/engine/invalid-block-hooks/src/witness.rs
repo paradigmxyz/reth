@@ -133,7 +133,7 @@ where
         let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
-        let mut state_preimages = HashMap::new();
+        let mut state_preimages = HashMap::default();
 
         // Grab all account proofs for the data accessed during block execution.
         //

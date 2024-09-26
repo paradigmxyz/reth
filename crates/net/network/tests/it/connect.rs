@@ -328,7 +328,7 @@ async fn test_incoming_node_id_blacklist() {
         let enr = provider.node_info().await.unwrap().enr;
         let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
-        let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
+        let ban_list = BanList::new(vec![geth_peer_id], HashSet::default());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
         let config = NetworkConfigBuilder::new(secret_key)

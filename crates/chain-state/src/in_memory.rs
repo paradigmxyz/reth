@@ -839,7 +839,7 @@ impl NewCanonicalChain {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
-    use alloy_primitives::{BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{map::HashSet, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, Receipt, Requests};
@@ -848,7 +848,6 @@ mod tests {
         StorageRootProvider,
     };
     use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
-    use std::collections::HashSet;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -994,7 +993,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_number() {
-        let mut state_by_hash = HashMap::new();
+        let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
 
         let number = rand::thread_rng().gen::<u64>();
@@ -1013,7 +1012,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_head_state() {
-        let mut state_by_hash = HashMap::new();
+        let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
         let mut test_block_builder = TestBlockBuilder::default();
         let state1 = Arc::new(create_mock_state(&mut test_block_builder, 1, B256::random()));
@@ -1041,7 +1040,7 @@ mod tests {
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
-            InMemoryState::new(HashMap::new(), BTreeMap::new(), Some(pending_state));
+            InMemoryState::new(HashMap::default(), BTreeMap::new(), Some(pending_state));
 
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
@@ -1206,7 +1205,7 @@ mod tests {
         let state2 = BlockState::with_parent(block2.clone(), Some(state1.clone()));
         let state3 = BlockState::with_parent(block3.clone(), Some(state2.clone()));
 
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         blocks.insert(block1.block().hash(), Arc::new(state1));
         blocks.insert(block2.block().hash(), Arc::new(state2));
         blocks.insert(block3.block().hash(), Arc::new(state3));
@@ -1253,7 +1252,7 @@ mod tests {
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
         let block = TestBlockBuilder::default().get_executed_block_with_number(1, B256::random());
         let hash = block.block().hash();
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
         let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);
@@ -1268,7 +1267,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         let mut numbers = BTreeMap::new();
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::default();
@@ -1292,7 +1291,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
-        let mut blocks = HashMap::new();
+        let mut blocks = HashMap::default();
         let mut numbers = BTreeMap::new();
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::default();

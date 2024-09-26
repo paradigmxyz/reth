@@ -88,7 +88,7 @@ where
     T::Value: for<'a> Arbitrary<'a> + serde::Serialize + Clone,
 {
     let mut rows = vec![];
-    let mut seen_keys = HashSet::new();
+    let mut seen_keys = HashSet::default();
     let strategy =
         proptest::collection::vec(arb::<TableRow<T>>(), per_table - rows.len()).no_shrink().boxed();
 
@@ -120,7 +120,7 @@ where
     let mut rows = vec![];
 
     // We want to control our repeated keys
-    let mut seen_keys = HashSet::new();
+    let mut seen_keys = HashSet::default();
 
     let strat_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
 
