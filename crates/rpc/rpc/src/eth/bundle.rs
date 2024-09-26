@@ -3,7 +3,10 @@
 use std::sync::Arc;
 
 use alloy_primitives::{keccak256, U256};
-use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use alloy_rpc_types_mev::{
+    EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult, SendBundleRequest,
+    SimBundleOverrides, SimBundleResponse,
+};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
@@ -21,12 +24,13 @@ use revm::{
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
 
 use reth_provider::{ChainSpecProvider, HeaderProvider};
+use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
-
+use tracing::info;
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.
@@ -257,6 +261,16 @@ where
             })
             .await
     }
+
+    /// Simulates a bundle of transactions.
+    pub async fn sim_bundle(
+        &self,
+        request: SendBundleRequest,
+        overrides: SimBundleOverrides,
+    ) -> RpcResult<SimBundleResponse> {
+        info!("mev_simBundle called, request: {:?}, overrides: {:?}", request, overrides);
+        Err(EthApiError::Unsupported("mev_simBundle is not supported").into())
+    }
 }
 
 #[async_trait::async_trait]
@@ -266,6 +280,20 @@ where
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
         Self::call_bundle(self, request).await.map_err(Into::into)
+    }
+}
+
+#[async_trait::async_trait]
+impl<Eth> MevSimApiServer for EthBundle<Eth>
+where
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+{
+    async fn sim_bundle(
+        &self,
+        request: SendBundleRequest,
+        overrides: SimBundleOverrides,
+    ) -> RpcResult<SimBundleResponse> {
+        Self::sim_bundle(self, request, overrides).await.map_err(Into::into)
     }
 }
 
