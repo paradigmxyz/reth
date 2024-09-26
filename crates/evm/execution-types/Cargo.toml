@@ -15,8 +15,6 @@ reth-primitives.workspace = true
 reth-execution-errors.workspace = true
 reth-trie.workspace = true
 
-alloy-primitives.workspace = true
-
 revm.workspace = true
 
 # alloy

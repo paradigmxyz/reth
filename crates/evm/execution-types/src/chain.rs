@@ -2,19 +2,13 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap};
-use alloy_primitives::{Address, BlockHash, BlockNumber};
-use core::{fmt, ops::RangeInclusive};
-use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
-use reth_primitives::{
-    BlockNumHash, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionSigned, TransactionSignedEcRecovered, TxHash,
 use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered,
+    BlockNumHash, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionSigned, TransactionSignedEcRecovered, TxHash,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
