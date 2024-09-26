@@ -709,8 +709,8 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 #[cfg(test)]
 mod tests {
     use super::{BlockNumberOrTag::*, *};
-    use crate::hex_literal::hex;
     use alloy_eips::eip1898::HexStringMissingPrefixError;
+    use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 

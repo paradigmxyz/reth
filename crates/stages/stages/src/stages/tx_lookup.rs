@@ -1,3 +1,4 @@
+use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{tables, RawKey, RawValue};
@@ -6,7 +7,6 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::{TxHash, TxNumber};
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
@@ -109,7 +109,7 @@ where
             }
         }
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         // 500MB temporary files
@@ -172,7 +172,7 @@ where
                     "Transaction hashes inserted"
                 );
 
-                break
+                break;
             }
         }
 
@@ -199,7 +199,7 @@ where
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
-                break
+                break;
             }
 
             // Delete all transactions that belong to this block

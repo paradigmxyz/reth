@@ -1,4 +1,4 @@
-use alloy_primitives::Address;
+use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
@@ -7,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
+use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,

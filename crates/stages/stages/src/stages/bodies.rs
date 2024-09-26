@@ -6,6 +6,7 @@ use std::{
 use futures_util::TryStreamExt;
 use tracing::*;
 
+use alloy_primitives::TxNumber;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -13,7 +14,7 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::{StaticFileSegment, TxNumber};
+use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
@@ -621,7 +622,7 @@ mod tests {
                 UnwindStageTestRunner,
             },
         };
-        use alloy_primitives::{BlockHash, BlockNumber};
+        use alloy_primitives::{BlockHash, BlockNumber, TxNumber};
         use futures_util::Stream;
         use reth_db::{static_file::HeaderMask, tables};
         use reth_db_api::{
@@ -637,7 +638,7 @@ mod tests {
             error::DownloadResult,
         };
         use reth_primitives::{
-            BlockBody, Header, SealedBlock, SealedHeader, StaticFileSegment, TxNumber, B256,
+            BlockBody, Header, SealedBlock, SealedHeader, StaticFileSegment, B256,
         };
         use reth_provider::{
             providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,

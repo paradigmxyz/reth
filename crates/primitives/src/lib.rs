@@ -72,9 +72,7 @@ pub use transaction::{
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
-    hex, hex_literal, ruint,
-    utils::format_ether,
-    Bytes, StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64,
+    hex, Bytes, TxHash, B256, U256, U64,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};

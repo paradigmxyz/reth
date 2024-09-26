@@ -501,8 +501,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex_literal::hex;
-    use alloy_primitives::{address, b256, bytes};
+    use alloy_primitives::{address, b256, bytes, hex_literal::hex};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
