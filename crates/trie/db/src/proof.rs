@@ -1,5 +1,8 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, B256,
+};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
@@ -7,7 +10,6 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, MultiProof, TrieInput,
 };
 use reth_trie_common::AccountProof;
-use std::collections::{HashMap, HashSet};
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a, TX> {

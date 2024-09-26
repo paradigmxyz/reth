@@ -1,5 +1,9 @@
 use super::ExecutedBlock;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
@@ -9,10 +13,7 @@ use reth_storage_api::{
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.

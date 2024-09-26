@@ -618,13 +618,13 @@ impl<V> PartiallyValidData<V> {
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
     /// announcement.
     pub fn empty_eth68() -> Self {
-        Self::from_raw_data_eth68(HashMap::new())
+        Self::from_raw_data_eth68(HashMap::default())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth66`](EthVersion::Eth66)
     /// announcement.
     pub fn empty_eth66() -> Self {
-        Self::from_raw_data_eth66(HashMap::new())
+        Self::from_raw_data_eth66(HashMap::default())
     }
 
     /// Returns the version of the message this data was received in if different versions of the
@@ -704,7 +704,7 @@ impl RequestTxHashes {
 
     /// Returns an new empty instance.
     fn empty() -> Self {
-        Self::new(HashSet::new())
+        Self::new(HashSet::default())
     }
 
     /// Retains the given number of elements, returning and iterator over the rest.

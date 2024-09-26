@@ -297,7 +297,7 @@ impl Config {
     pub fn builder(rlpx_tcp_socket: SocketAddr) -> ConfigBuilder {
         ConfigBuilder {
             discv5_config: None,
-            bootstrap_nodes: HashSet::new(),
+            bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
             other_enr_kv_pairs: Vec::new(),

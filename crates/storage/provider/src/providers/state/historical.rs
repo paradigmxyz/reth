@@ -2,7 +2,10 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -21,10 +24,7 @@ use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageRoot, DatabaseTrieWitness,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-};
+use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
 ///

@@ -436,16 +436,16 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = HashMap::new();
+        let mut state_init: BundleStateInit = HashMap::default();
         state_init
             .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
 
         // Create a HashMap for account reverts and insert initial data
-        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::new();
+        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
         revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
-        let mut revert_init: RevertsInit = HashMap::new();
+        let mut revert_init: RevertsInit = HashMap::default();
         revert_init.insert(123, revert_inner);
 
         // Assert that creating a new ExecutionOutcome using the new_init method matches
