@@ -299,7 +299,9 @@ pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
 /// 4. Renames the temp file to the target path.
 /// 5. Fsyncs the file directory.
 ///
-/// Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
+/// Atomic writes are hard: 
+/// * <https://github.com/paradigmxyz/reth/issues/8622>
+/// * <https://users.rust-lang.org/t/how-to-write-replace-files-atomically/42821/13>
 pub fn atomic_write_file<F, E>(file_path: &Path, write_fn: F) -> Result<()>
 where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
