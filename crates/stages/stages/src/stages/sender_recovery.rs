@@ -185,7 +185,7 @@ where
                     // We exit early since we could not process this chunk.
                     let _ = recovered_senders_tx
                         .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                    break;
+                    break
                 }
             };
 
