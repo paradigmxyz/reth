@@ -1420,7 +1420,7 @@ impl<TX: DbTx, Spec: Send + Sync> StorageChangeSetReader for DatabaseProvider<TX
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = block_number..=block_number;
-        let storage_range = BlockNumberAddress::range(range.clone());
+        let storage_range = BlockNumberAddress::range(range);
         self.tx
             .cursor_dup_read::<tables::StorageChangeSets>()?
             .walk_range(storage_range)?

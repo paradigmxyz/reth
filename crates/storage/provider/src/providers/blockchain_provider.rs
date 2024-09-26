@@ -130,10 +130,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
     ///
-    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    /// 1. Iterate over the [`BlockBodyIndices`][reth_db::BlockBodyIndices] table to get all the
     ///    transaction ids.
-    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
-    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    /// 2. Iterate over the [`StorageChangeSets`][reth_db::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][reth_db::AccountChangeSets] tables in reverse order to reconstruct
     ///    the changesets.
     ///    - In order to have both the old and new values in the changesets, we also access the
     ///      plain state tables.
@@ -219,8 +219,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     }
 
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
-    /// [`PlainAccountState`] and [`PlainStorageState`] tables, based on the given storage and
-    /// account changesets.
+    /// [`reth_db::PlainAccountState`] and [`reth_db::PlainStorageState`] tables, based on the given
+    /// storage and account changesets.
     fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -1663,7 +1663,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
             let state = state.block_ref().execution_outcome().clone();
             Ok(Some(state))
         } else {
-            self.database.provider()?.get_state(block..=block)
+            self.get_state(block..=block)
         }
     }
 }
