@@ -8185,6 +8185,7 @@ dependencies = [
 name = "reth-optimism-storage"
 version = "1.0.7"
 dependencies = [
+ "reth-codecs",
  "reth-db-api",
  "reth-primitives",
  "reth-prune-types",

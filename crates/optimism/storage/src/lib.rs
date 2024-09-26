@@ -11,11 +11,14 @@
 
 #[cfg(test)]
 mod tests {
+    use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
     use reth_db_api::models::{
         CompactClientVersion, CompactU256, CompactU64, StoredBlockBodyIndices, StoredBlockOmmers,
         StoredBlockWithdrawals,
     };
-    use reth_primitives::{Account, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
+    use reth_primitives::{
+        Account, Receipt, ReceiptWithBloom, Requests, SealedHeader, Withdrawals,
+    };
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
