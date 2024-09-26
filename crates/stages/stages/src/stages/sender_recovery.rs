@@ -206,7 +206,7 @@ where
 
                     // Finish early
                     if is_err {
-                        break;
+                        break
                     }
                 }
             });
