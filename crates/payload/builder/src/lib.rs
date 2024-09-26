@@ -37,9 +37,9 @@
 //! impl PayloadJobGenerator for EmptyBlockPayloadJobGenerator {
 //!     type Job = EmptyBlockPayloadJob;
 //!
-//! /// This is invoked when the node receives payload attributes from the beacon node via
-//! `engine_forkchoiceUpdatedV1` fn new_payload_job(&self, attr: EthPayloadBuilderAttributes) ->
-//! Result<Self::Job, PayloadBuilderError> {         Ok(EmptyBlockPayloadJob{ attributes: attr,})
+//! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
+//! fn new_payload_job(&self, attr: EthPayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
+//!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
 //!     }
 //!
 //! }
@@ -51,8 +51,8 @@
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
 //!    type PayloadAttributes = EthPayloadBuilderAttributes;
-//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload,
-//! PayloadBuilderError>>;    type BuiltPayload = EthBuiltPayload;
+//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
+//!    type BuiltPayload = EthBuiltPayload;
 //!
 //! fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
 //!     // NOTE: some fields are omitted here for brevity
@@ -65,8 +65,8 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO,
-//! None);     Ok(payload)
+//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None);
+//!     Ok(payload)
 //! }
 //!
 //! fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
