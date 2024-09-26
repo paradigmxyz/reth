@@ -4,7 +4,6 @@ use alloy_consensus::TxEip7702 as AlloyTxEip7702;
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, ChainId, U256};
 use reth_codecs_derive::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
 
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
@@ -14,8 +13,8 @@ use serde::{Deserialize, Serialize};
 /// will automatically apply to this type.
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip7702`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxEip7702 {
     chain_id: ChainId,
