@@ -49,7 +49,7 @@ Imports a `.rlp` file of blocks.
 Import of >100 million OVM blocks, from genesis to Bedrock, completes in 45 minutes.
 
 ```bash
-$ op-reth import-op <exported-blocks>
+$ op-reth import-op --chain optimism <exported-blocks>
 ```
 
 #### 2. Import Receipts
@@ -63,7 +63,7 @@ Imports a `.rlp` file of receipts, that has been exported with command specified
 Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
 
 ```bash
-$ op-reth import-receipts-op <exported-receipts>
+$ op-reth import-receipts-op --chain optimism <exported-receipts>
 ```
 
 #### 3. Import State
