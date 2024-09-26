@@ -367,7 +367,7 @@ mod tests {
     use super::*;
     use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
     use alloy_primitives::{Address, FixedBytes, LogData, B256};
-    use reth_primitives::{Receipts, Request, Requests, TxType, B256};
+    use reth_primitives::{Receipts, Request, Requests, TxType};
     use std::collections::HashMap;
 
     #[test]
