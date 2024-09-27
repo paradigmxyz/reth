@@ -111,20 +111,12 @@ impl<EvmConfig, DB, Chainspec, Hook> SystemCaller<EvmConfig, DB, Chainspec, Hook
             &mut evm,
         )?;
 
-        if let Some(ref mut hook) = self.hook {
-            if let Some(res) = result_and_state {
+        if let Some(res) = result_and_state {
+            if let Some(ref mut hook) = self.hook {
                 hook.on_state(&res);
             }
+            evm.context.evm.db.commit(res.state);
         }
-
-        eip2935::apply_blockhashes_contract_call(
-            &self.evm_config,
-            self.chain_spec.as_ref(),
-            initialized_block_env.timestamp.to(),
-            initialized_block_env.number.to(),
-            parent_block_hash,
-            &mut evm,
-        )?;
 
         Ok(self)
     }
