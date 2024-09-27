@@ -373,7 +373,8 @@ where
     type Output = eyre::Result<()>;
 
     /// Main loop of the [`ExExManager`]. The order of operations is as follows:
-    /// 1. Handle incoming ExEx events.
+    /// 1. Handle incoming ExEx events. We do it before finalizing the WAL, because it depends on
+    ///    the latest state of [`ExExEvent::FinishedHeight`] events.
     /// 2. Finalize the WAL with the finalized header, if necessary.
     /// 3. Drain [`ExExManagerHandle`] notifications, push them to the internal buffer and update
     ///    the internal buffer capacity.
