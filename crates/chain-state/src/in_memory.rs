@@ -517,7 +517,8 @@ impl CanonicalInMemoryState {
         MemoryOverlayStateProvider::new(historical, in_memory)
     }
 
-    /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest.
+    /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest
+    /// (highest to lowest).
     pub fn canonical_chain(&self) -> impl Iterator<Item = Arc<BlockState>> {
         let pending = self.inner.in_memory_state.pending.borrow().clone();
         let head = self.inner.in_memory_state.head_state();
@@ -666,8 +667,12 @@ impl BlockState {
             .unwrap_or_default()
     }
 
-    /// Returns a vector of parent `BlockStates`.
-    /// The block state order in the output vector is newest to oldest.
+    /// Returns a vector of __parent__ `BlockStates`.
+    ///
+    /// The block state order in the output vector is newest to oldest (highest to lowest):
+    /// `[5,4,3,2,1]`
+    ///
+    /// Note: This does not include self.
     pub fn parent_state_chain(&self) -> Vec<&Self> {
         let mut parents = Vec::new();
         let mut current = self.parent.as_deref();
@@ -681,8 +686,8 @@ impl BlockState {
     }
 
     /// Returns a vector of `BlockStates` representing the entire in memory chain.
-    /// The block state order in the output vector is newest to oldest, including
-    /// self as the first element.
+    /// The block state order in the output vector is newest to oldest (highest to lowest),
+    /// including self as the first element.
     pub fn chain(&self) -> Vec<&Self> {
         let mut chain = vec![self];
         self.append_parent_chain(&mut chain);
