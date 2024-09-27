@@ -7,8 +7,8 @@ pub use storage::Storage;
 
 use std::{path::Path, sync::Arc};
 
+use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExNotification;
-use reth_primitives::BlockNumHash;
 use reth_tracing::tracing::{debug, instrument};
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
