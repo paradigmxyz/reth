@@ -298,7 +298,7 @@ mod tests {
     use reth_primitives::{Block, BlockNumHash};
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockWriter,
-        Chain,
+        Chain, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use tokio::sync::mpsc;
@@ -386,12 +386,6 @@ mod tests {
         Ok(())
     }
 
-    #[ignore]
-    #[tokio::test]
-    async fn exex_notifications_behind_head_non_canonical() -> eyre::Result<()> {
-        Ok(())
-    }
-
     #[tokio::test]
     async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -447,9 +441,102 @@ mod tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test]
     async fn exex_notifications_same_head_non_canonical() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut wal = Wal::new(temp_dir.path()).unwrap();
+
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let provider = BlockchainProvider2::new(provider_factory)?;
+
+        let node_head_block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .seal_with_senders()
+        .ok_or_eyre("failed to recover senders")?;
+        let node_head = Head {
+            number: node_head_block.number,
+            hash: node_head_block.hash(),
+            ..Default::default()
+        };
+        let provider_rw = provider.database_provider_rw()?;
+        provider_rw.insert_block(node_head_block)?;
+        provider_rw.commit()?;
+        let node_head_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(
+                BackfillJobFactory::new(EthExecutorProvider::mainnet(), provider.clone())
+                    .backfill(node_head.number..=node_head.number)
+                    .next()
+                    .ok_or_else(|| eyre::eyre!("failed to backfill"))??,
+            ),
+        };
+
+        let exex_head_block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        );
+        let exex_head = ExExHead { block: exex_head_block.num_hash() };
+        let exex_head_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![exex_head_block
+                    .clone()
+                    .seal_with_senders()
+                    .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                None,
+            )),
+        };
+        wal.commit(&exex_head_notification)?;
+
+        let new_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    node_head.number + 1,
+                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                )
+                .seal_with_senders()
+                .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                None,
+            )),
+        };
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+
+        notifications_tx.send(new_notification.clone()).await?;
+
+        let mut notifications = ExExNotifications::new(
+            node_head,
+            provider,
+            EthExecutorProvider::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(exex_head);
+
+        // First notification is the revert of the ExEx head block to get back to the canonical
+        // chain
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(exex_head_notification.into_inverted())
+        );
+        // Second notification is the backfilled block from the canonical chain to get back to the
+        // canonical tip
+        assert_eq!(notifications.next().await.transpose()?, Some(node_head_notification));
+        // Third notification is the actual notification that we sent before
+        assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
+
         Ok(())
     }
 
@@ -519,13 +606,14 @@ mod tests {
         )
         .with_head(exex_head);
 
-        // First notification is the revert of the ExEx head block
+        // First notification is the revert of the ExEx head block to get back to the canonical
+        // chain
         assert_eq!(
             notifications.next().await.transpose()?,
             Some(exex_head_notification.into_inverted())
         );
 
-        // Second notification is the block from the notifications channel
+        // Second notification is the actual notification that we sent before
         assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
 
         Ok(())
