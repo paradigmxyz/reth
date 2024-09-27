@@ -57,7 +57,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
             if let Some(committed_chain) = notification.committed_chain() {
                 this.ctx
                     .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
             }
         }
 
@@ -152,7 +152,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
 
                 this.ctx
                     .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
             }
 
             if let Some(first_block) = this.first_block {
