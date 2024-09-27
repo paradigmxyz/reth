@@ -239,8 +239,7 @@ impl_compression_for_compact!(
 macro_rules! impl_compression_fixed_compact {
     ($($name:tt),+) => {
         $(
-            impl Compress for $name
-            {
+            impl Compress for $name {
                 type Compressed = Vec<u8>;
 
                 fn uncompressable_ref(&self) -> Option<&[u8]> {
@@ -252,10 +251,8 @@ macro_rules! impl_compression_fixed_compact {
                 }
             }
 
-            impl Decompress for $name
-            {
+            impl Decompress for $name {
                 fn decompress(value: &[u8]) -> Result<$name, $crate::DatabaseError> {
-                    let value = value;
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
                 }
