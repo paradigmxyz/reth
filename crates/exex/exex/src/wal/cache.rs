@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
+use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExNotification;
-use reth_primitives::BlockNumHash;
 
 /// The block cache of the WAL. Acts as a mapping of `File ID -> List of Blocks`.
 ///
