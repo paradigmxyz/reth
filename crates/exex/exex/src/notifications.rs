@@ -1,6 +1,4 @@
 use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
-use alloy_primitives::U256;
-use eyre::OptionExt;
 use futures::{Stream, StreamExt};
 use reth_chainspec::Head;
 use reth_evm::execute::BlockExecutorProvider;
@@ -137,15 +135,12 @@ pub struct ExExNotificationsWithHead<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
-    #[allow(dead_code)]
     wal_handle: WalHandle,
     exex_head: ExExHead,
-    pending_sync: bool,
+    pending_check_canonical: bool,
+    pending_check_backfill: bool,
     /// The backfill job to run before consuming any notifications.
     backfill_job: Option<StreamBackfillJob<E, P, Chain>>,
-    /// Whether we're currently waiting for the node head to catch up to the same height as the
-    /// ExEx head.
-    node_head_catchup_in_progress: bool,
 }
 
 impl<P, E> ExExNotificationsWithHead<P, E>
@@ -169,90 +164,67 @@ where
             notifications,
             wal_handle,
             exex_head,
-            pending_sync: true,
+            pending_check_canonical: true,
+            pending_check_backfill: true,
             backfill_job: None,
-            node_head_catchup_in_progress: false,
         }
+    }
+
+    fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification>> {
+        if self.provider.header(&self.exex_head.block.hash)?.is_some() {
+            return Ok(None)
+        }
+
+        // If the head block is not found in the database, it means we're not on the canonical
+        // chain.
+
+        // Get the committed notification for the head block from the WAL.
+        let Some(notification) =
+            self.wal_handle.get_committed_notification_by_block_hash(&self.exex_head.block.hash)?
+        else {
+            return Err(eyre::eyre!(
+                "Could not find notification for block hash {:?} in the WAL",
+                self.exex_head.block.hash
+            ))
+        };
+
+        // Update the head block hash to the parent hash of the first committed block.
+        self.exex_head.block = notification.committed_chain().unwrap().first().num_hash();
+
+        // Return an inverted notification. See the documentation for
+        // `ExExNotification::into_inverted`.
+        Ok(Some(notification.into_inverted()))
     }
 
     /// Compares the node head against the ExEx head, and synchronizes them in case of a mismatch.
     ///
+    /// CAUTON: This method assumes that the ExEx head is <= the node head, and that it's on the
+    /// canonical chain.
+    ///
     /// Possible situations are:
-    /// - ExEx is behind the node head (`node_head.number < exex_head.number`).
-    ///   - ExEx is on the canonical chain (`exex_head.hash` is found in the node database).
-    ///     Backfill from the node database.
-    ///   - ExEx is not on the canonical chain (`exex_head.hash` is not found in the node database).
-    ///     Unwind the ExEx to the first block matching between the ExEx and the node, and then
-    ///     bacfkill from the node database.
-    /// - ExEx is at the same block number (`node_head.number == exex_head.number`).
-    ///   - ExEx is on the canonical chain (`exex_head.hash` is found in the node database). Nothing
-    ///     to do.
-    ///   - ExEx is not on the canonical chain (`exex_head.hash` is not found in the node database).
-    ///     Unwind the ExEx to the first block matching between the ExEx and the node, and then
-    ///     backfill from the node database.
-    /// - ExEx is ahead of the node head (`node_head.number > exex_head.number`). Wait until the
-    ///   node head catches up to the ExEx head, and then repeat the synchronization process.
-    fn synchronize(&mut self) -> eyre::Result<()> {
+    /// - ExEx is behind the node head (`node_head.number < exex_head.number`). Backfill from the
+    ///   node database.
+    /// - ExEx is at the same block number as the node head (`node_head.number ==
+    ///   exex_head.number`). Nothing to do.
+    fn check_backfill(&mut self) -> eyre::Result<()> {
         debug!(target: "exex::manager", "Synchronizing ExEx head");
 
         let backfill_job_factory =
             BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
         match self.exex_head.block.number.cmp(&self.node_head.number) {
             std::cmp::Ordering::Less => {
-                // ExEx is behind the node head
-
-                if let Some(exex_header) = self.provider.header(&self.exex_head.block.hash)? {
-                    // ExEx is on the canonical chain
-                    debug!(target: "exex::manager", "ExEx is behind the node head and on the canonical chain");
-
-                    if exex_header.number != self.exex_head.block.number {
-                        eyre::bail!("ExEx head number does not match the hash")
-                    }
-
-                    // ExEx is on the canonical chain, start backfill
-                    let backfill = backfill_job_factory
-                        .backfill(self.exex_head.block.number + 1..=self.node_head.number)
-                        .into_stream();
-                    self.backfill_job = Some(backfill);
-                } else {
-                    debug!(target: "exex::manager", "ExEx is behind the node head and not on the canonical chain");
-                    // ExEx is not on the canonical chain, first unwind it and then backfill
-
-                    // TODO(alexey): unwind and backfill
-                    self.backfill_job = None;
-                }
+                // ExEx is behind the node head, start backfill
+                debug!(target: "exex::manager", "ExEx is behind the node head and on the canonical chain, starting backfill");
+                let backfill = backfill_job_factory
+                    .backfill(self.exex_head.block.number + 1..=self.node_head.number)
+                    .into_stream();
+                self.backfill_job = Some(backfill);
             }
-            #[allow(clippy::branches_sharing_code)]
             std::cmp::Ordering::Equal => {
-                // ExEx is at the same block height as the node head
-
-                if let Some(exex_header) = self.provider.header(&self.exex_head.block.hash)? {
-                    // ExEx is on the canonical chain
-                    debug!(target: "exex::manager", "ExEx is at the same block height as the node head and on the canonical chain");
-
-                    if exex_header.number != self.exex_head.block.number {
-                        eyre::bail!("ExEx head number does not match the hash")
-                    }
-
-                    // ExEx is on the canonical chain and the same as the node head, no need to
-                    // backfill
-                    self.backfill_job = None;
-                } else {
-                    // ExEx is not on the canonical chain, first unwind it and then backfill
-                    debug!(target: "exex::manager", "ExEx is at the same block height as the node head but not on the canonical chain");
-
-                    // TODO(alexey): unwind and backfill
-                    self.backfill_job = None;
-                }
+                debug!(target: "exex::manager", "ExEx is at the node head");
             }
             std::cmp::Ordering::Greater => {
-                debug!(target: "exex::manager", "ExEx is ahead of the node head");
-
-                // ExEx is ahead of the node head
-
-                // TODO(alexey): wait until the node head is at the same height as the ExEx head
-                // and then repeat the process above
-                self.node_head_catchup_in_progress = true;
+                return Err(eyre::eyre!("ExEx is ahead of the node head"))
             }
         };
 
@@ -270,9 +242,16 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if this.pending_sync {
-            this.synchronize()?;
-            this.pending_sync = false;
+        if this.pending_check_canonical {
+            if let Some(canonical_notification) = this.check_canonical()? {
+                return Poll::Ready(Some(Ok(canonical_notification)))
+            }
+            this.pending_check_canonical = false;
+        }
+
+        if this.pending_check_backfill {
+            this.check_backfill()?;
+            this.pending_check_backfill = false;
         }
 
         if let Some(backfill_job) = &mut this.backfill_job {
@@ -286,64 +265,18 @@ where
             this.backfill_job = None;
         }
 
-        loop {
-            let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
-                return Poll::Ready(None)
-            };
+        let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
+            return Poll::Ready(None)
+        };
 
-            // 1. Either committed or reverted chain from the notification.
-            // 2. Block number of the tip of the canonical chain:
-            //   - For committed chain, it's the tip block number.
-            //   - For reverted chain, it's the block number preceding the first block in the chain.
-            let (chain, tip) = notification
-                .committed_chain()
-                .map(|chain| (chain.clone(), chain.tip().number))
-                .or_else(|| {
-                    notification
-                        .reverted_chain()
-                        .map(|chain| (chain.clone(), chain.first().number - 1))
-                })
-                .unzip();
-
-            if this.node_head_catchup_in_progress {
-                // If we are waiting for the node head to catch up to the same height as the ExEx
-                // head, then we need to check if the ExEx is on the canonical chain.
-
-                // Query the chain from the new notification for the ExEx head block number.
-                let exex_head_block = chain
-                    .as_ref()
-                    .and_then(|chain| chain.blocks().get(&this.exex_head.block.number));
-
-                // Compare the hash of the block from the new notification to the ExEx head
-                // hash.
-                if let Some((block, tip)) = exex_head_block.zip(tip) {
-                    if block.hash() == this.exex_head.block.hash {
-                        // ExEx is on the canonical chain, proceed with the notification
-                        this.node_head_catchup_in_progress = false;
-                    } else {
-                        // ExEx is not on the canonical chain, synchronize
-                        let tip =
-                            this.provider.sealed_header(tip)?.ok_or_eyre("node head not found")?;
-                        this.node_head = Head::new(
-                            tip.number,
-                            tip.hash(),
-                            tip.difficulty,
-                            U256::MAX,
-                            tip.timestamp,
-                        );
-                        this.synchronize()?;
-                    }
-                }
-            }
-
-            if notification
-                .committed_chain()
-                .or_else(|| notification.reverted_chain())
-                .map_or(false, |chain| chain.first().number > this.exex_head.block.number)
-            {
-                return Poll::Ready(Some(Ok(notification)))
-            }
+        if let Some(committed_chain) = notification.committed_chain() {
+            this.exex_head.block = committed_chain.tip().num_hash();
+        } else if let Some(reverted_chain) = notification.reverted_chain() {
+            let first_block = reverted_chain.first();
+            this.exex_head.block = (first_block.parent_hash, first_block.number - 1).into();
         }
+
+        Poll::Ready(Some(Ok(notification)))
     }
 }
 

@@ -84,16 +84,25 @@ impl Storage {
         &self,
         range: RangeInclusive<u64>,
     ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
-        range.map(move |id| self.read_notification(id).map(|notification| (id, notification)))
+        range.map(move |id| {
+            let notification = self.read_notification(id)?.ok_or_eyre("notification not found")?;
+
+            Ok((id, notification))
+        })
     }
 
     /// Reads the notification from the file with the given id.
     #[instrument(target = "exex::wal::storage", skip(self))]
-    pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<ExExNotification> {
+    pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<Option<ExExNotification>> {
         let file_path = self.file_path(file_id);
         debug!(?file_path, "Reading notification from WAL");
 
-        let mut file = File::open(&file_path)?;
+        let mut file = match File::open(&file_path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err.into()),
+        };
+
         // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
         Ok(serde_json::from_reader(&mut file)?)
     }
@@ -149,7 +158,7 @@ mod tests {
         let file_id = 0;
         storage.write_notification(file_id, &notification)?;
         let deserialized_notification = storage.read_notification(file_id)?;
-        assert_eq!(deserialized_notification, notification);
+        assert_eq!(deserialized_notification, Some(notification));
 
         Ok(())
     }
