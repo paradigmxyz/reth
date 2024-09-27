@@ -309,4 +309,54 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_canonical_chain_subscription() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Start the provider and the pruner
+        let (_, static_dir_path) = create_test_static_files_dir();
+        let provider = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
+            create_test_rw_db(),
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path)?,
+        );
+        let pruner = PrunerBuilder::new(PruneConfig::default())
+            .build_with_provider_factory(provider.clone());
+
+        // Create an empty canonical in memory state
+        let canonical_in_memory_state = CanonicalInMemoryState::empty();
+        let mut notifications = canonical_in_memory_state.subscribe_canon_state();
+
+        // Start the payload builder service
+        let payload_handle = spawn_test_payload_service::<EthEngineTypes>();
+
+        // Start a transaction pool
+        let pool = testing_pool();
+
+        // Sync metric channel
+        let (sync_metrics_tx, _) = unbounded_channel();
+
+        // Launch the LocalEngineService in instant mode
+        LocalEngineService::spawn_new(
+            payload_handle,
+            TestPayloadAttributesBuilder,
+            provider.clone(),
+            pruner,
+            canonical_in_memory_state,
+            sync_metrics_tx,
+            MiningMode::instant(pool.clone()),
+        );
+
+        // Add a transaction to the pool
+        let transaction = MockTransaction::legacy().with_gas_price(10);
+        pool.add_transaction(Default::default(), transaction).await?;
+
+        // Check a notification is received for block 0
+        let res = notifications.recv().await?;
+
+        assert_eq!(res.tip().number, 0);
+
+        Ok(())
+    }
 }
