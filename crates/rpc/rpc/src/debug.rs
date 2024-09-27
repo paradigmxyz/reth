@@ -114,7 +114,7 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
 
-                    tracing::info!("tracing block {at:?} tx {}", tx.hash);
+                    println!("tracing block {at:?} tx {}", tx.hash);
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
