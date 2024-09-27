@@ -30,13 +30,12 @@ macro_rules! impl_fuzzer_with_input {
 
                 /// Encodes and decodes table types returning its encoded size and the decoded object.
                 /// This method is used for benchmarking, so its parameter should be the actual type that is being tested.
-                pub fn encode_and_decode(obj: $name) -> (usize, $name)
-                {
+                pub fn encode_and_decode(obj: $name) -> (usize, $name) {
                     let data = table::$encode::$encode_method(obj);
                     let size = data.len();
 
                     // Some `data` might be a fixed array.
-                    (size, table::$decode::$decode_method(data.to_vec()).expect("failed to decode"))
+                    (size, table::$decode::$decode_method(&data).expect("failed to decode"))
                 }
 
                 #[cfg(test)]

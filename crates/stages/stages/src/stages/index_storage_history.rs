@@ -124,7 +124,7 @@ where
             |AddressStorageKey((address, storage_key)), highest_block_number| {
                 StorageShardedKey::new(address, storage_key, highest_block_number)
             },
-            StorageShardedKey::decode,
+            StorageShardedKey::decode_owned,
             |key| AddressStorageKey((key.address, key.sharded_key.key)),
         )?;
 
