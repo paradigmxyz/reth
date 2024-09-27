@@ -1,11 +1,10 @@
 use crate::{wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight};
-use alloy_primitives::BlockNumber;
 use futures::StreamExt;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockNumHash, SealedHeader};
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
@@ -54,7 +53,7 @@ pub struct ExExHandle {
     /// The finished block number of the `ExEx`.
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
-    finished_height: Option<BlockNumber>,
+    finished_height: Option<BlockNumHash>,
 }
 
 impl ExExHandle {
@@ -101,11 +100,11 @@ impl ExExHandle {
                     // Skip the chain commit notification if the finished height of the ExEx is
                     // higher than or equal to the tip of the new notification.
                     // I.e., the ExEx has already processed the notification.
-                    if finished_height >= new.tip().number {
+                    if finished_height.number >= new.tip().number {
                         debug!(
                             exex_id = %self.id,
                             %notification_id,
-                            %finished_height,
+                            ?finished_height,
                             new_tip = %new.tip().number,
                             "Skipping notification"
                         );
@@ -373,7 +372,7 @@ impl Future for ExExManager {
 
         // update watch channel block number
         let finished_height = self.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
-            exex.finished_height.map_or(Err(()), |height| Ok(height.min(curr)))
+            exex.finished_height.map_or(Err(()), |height| Ok(height.number.min(curr)))
         });
         if let Ok(finished_height) = finished_height {
             let _ = self.finished_height.send(FinishedExExHeight::Height(finished_height));
@@ -525,9 +524,10 @@ mod tests {
             ExExHandle::new("test_exex".to_string(), Head::default(), (), ());
 
         // Send an event and check that it's delivered correctly
-        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
+        let event = ExExEvent::FinishedHeight(BlockNumHash::new(42, B256::random()));
+        event_tx.send(event).unwrap();
         let received_event = exex_handle.receiver.recv().await.unwrap();
-        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
+        assert_eq!(received_event, event);
     }
 
     #[tokio::test]
@@ -681,7 +681,8 @@ mod tests {
         assert!(exex_handle.finished_height.is_none());
 
         // Update the block height via an event
-        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
+        let block = BlockNumHash::new(42, B256::random());
+        event_tx.send(ExExEvent::FinishedHeight(block)).unwrap();
 
         // Create a mock ExExManager and add the exex_handle to it
         let exex_manager = ExExManager::new(
@@ -699,7 +700,7 @@ mod tests {
 
         // Check that the block height was updated
         let updated_exex_handle = &pinned_manager.exex_handles[0];
-        assert_eq!(updated_exex_handle.finished_height, Some(42));
+        assert_eq!(updated_exex_handle.finished_height, Some(block));
 
         // Get the receiver for the finished height
         let mut receiver = pinned_manager.handle.finished_height();
@@ -723,9 +724,12 @@ mod tests {
         let (exex_handle2, event_tx2, _) =
             ExExHandle::new("test_exex2".to_string(), Head::default(), (), ());
 
+        let block1 = BlockNumHash::new(42, B256::random());
+        let block2 = BlockNumHash::new(10, B256::random());
+
         // Send events to update the block heights of the two handles, with the second being lower
-        event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
-        event_tx2.send(ExExEvent::FinishedHeight(10)).unwrap();
+        event_tx1.send(ExExEvent::FinishedHeight(block1)).unwrap();
+        event_tx2.send(ExExEvent::FinishedHeight(block2)).unwrap();
 
         let exex_manager = ExExManager::new(
             vec![exex_handle1, exex_handle2],
@@ -765,9 +769,12 @@ mod tests {
         // Assert that the initial block height is `None` for the first `ExExHandle`.
         assert!(exex_handle1.finished_height.is_none());
 
+        let block1 = BlockNumHash::new(42, B256::random());
+        let block2 = BlockNumHash::new(100, B256::random());
+
         // Send events to update the block heights of the two handles, with the second being higher.
-        event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
-        event_tx2.send(ExExEvent::FinishedHeight(100)).unwrap();
+        event_tx1.send(ExExEvent::FinishedHeight(block1)).unwrap();
+        event_tx2.send(ExExEvent::FinishedHeight(block2)).unwrap();
 
         let exex_manager = ExExManager::new(
             vec![exex_handle1, exex_handle2],
@@ -893,7 +900,7 @@ mod tests {
             ExExHandle::new("test_exex".to_string(), Head::default(), (), ());
 
         // Set finished_height to a value higher than the block tip
-        exex_handle.finished_height = Some(15);
+        exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
         let mut block1 = SealedBlockWithSenders::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
@@ -941,7 +948,7 @@ mod tests {
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
-        exex_handle.finished_height = Some(u64::MAX);
+        exex_handle.finished_height = Some(BlockNumHash::new(u64::MAX, B256::random()));
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -969,7 +976,7 @@ mod tests {
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
-        exex_handle.finished_height = Some(u64::MAX);
+        exex_handle.finished_height = Some(BlockNumHash::new(u64::MAX, B256::random()));
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
