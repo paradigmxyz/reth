@@ -341,6 +341,8 @@ pub trait Trace: LoadState {
                     let env =
                         EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
 
+                    println!("tracing block {} tx {:?}", block.number, tx_info.hash);
+
                     let mut inspector = inspector_setup();
                     let (res, _) =
                         this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
