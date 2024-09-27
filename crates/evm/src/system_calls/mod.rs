@@ -54,8 +54,8 @@ impl OnStateHook for NoopHook {
 ///
 /// This can be used to chain system transaction calls.
 #[allow(missing_debug_implementations)]
-pub struct SystemCaller<'a, EvmConfig, DB: Database, Chainspec, Hook = NoopHook> {
-    evm: Evm<'a, (), DB>,
+pub struct SystemCaller<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook = NoopHook> {
+    evm: Evm<'a, Ext, DB>,
     evm_config: EvmConfig,
     chain_spec: Chainspec,
     /// Optional hook to be called after each state change.
@@ -63,12 +63,12 @@ pub struct SystemCaller<'a, EvmConfig, DB: Database, Chainspec, Hook = NoopHook>
     hook: Option<Hook>,
 }
 
-impl<'a, EvmConfig, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, DB, Chainspec> {
+impl<'a, EvmConfig, Ext, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, Ext, DB, Chainspec> {
     /// Create a new system caller with the given EVM, EVM config, database, and chain spec.
     pub const fn new_with_evm(
         evm_config: EvmConfig,
         chain_spec: Chainspec,
-        evm: Evm<'a, (), DB>,
+        evm: Evm<'a, Ext, DB>,
     ) -> Self {
         Self { evm_config, chain_spec, evm, hook: None }
     }
@@ -80,9 +80,11 @@ impl<'a, EvmConfig, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, DB, Cha
         chain_spec: Chainspec,
         initialized_cfg: &CfgEnvWithHandlerCfg,
         initialized_block_env: &BlockEnv,
+        external_context: Ext,
     ) -> Self {
         let evm = Evm::builder()
             .with_db(db)
+            .with_external_context(external_context)
             .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
@@ -94,14 +96,14 @@ impl<'a, EvmConfig, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, DB, Cha
     }
 }
 
-impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
-    SystemCaller<'a, EvmConfig, DB, Chainspec, Hook>
+impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
+    SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, Hook>
 {
     /// Installs a custom hook to be called after each state change.
     pub fn with_state_hook<H: OnStateHook>(
         self,
         hook: H,
-    ) -> SystemCaller<'a, EvmConfig, DB, Chainspec, H> {
+    ) -> SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, H> {
         let Self { evm_config, chain_spec, evm, .. } = self;
         SystemCaller { evm_config, chain_spec, evm, hook: Some(hook) }
     }
@@ -109,8 +111,8 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
     pub fn finish(self) {}
 }
 
-impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
-    SystemCaller<'a, EvmConfig, DB, Chainspec, Hook>
+impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
+    SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, Hook>
 {
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn pre_block_blockhashes_contract_call(
@@ -119,13 +121,17 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
         parent_block_hash: B256,
     ) -> Result<Self, BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
         Hook: OnStateHook,
     {
-        self.apply_blockhashes_contract_call(initialized_block_env, parent_block_hash)?;
+        self.apply_blockhashes_contract_call(
+            initialized_block_env.timestamp.to(),
+            initialized_block_env.number.to(),
+            parent_block_hash,
+        )?;
 
         Ok(self)
     }
@@ -133,11 +139,12 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn apply_blockhashes_contract_call(
         &mut self,
-        initialized_block_env: &BlockEnv,
+        timestamp: u64,
+        block_number: u64,
         parent_block_hash: B256,
     ) -> Result<(), BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
@@ -146,8 +153,8 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
         let result_and_state = eip2935::transact_blockhashes_contract_call(
             &self.evm_config,
             self.chain_spec.as_ref(),
-            initialized_block_env.timestamp.to(),
-            initialized_block_env.number.to(),
+            timestamp,
+            block_number,
             parent_block_hash,
             &mut self.evm,
         )?;
@@ -169,13 +176,17 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
         parent_block_hash: Option<B256>,
     ) -> Result<Self, BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
         Hook: OnStateHook,
     {
-        self.apply_beacon_root_contract_call(initialized_block_env, parent_block_hash)?;
+        self.apply_beacon_root_contract_call(
+            initialized_block_env.timestamp.to(),
+            initialized_block_env.number.to(),
+            parent_block_hash,
+        )?;
 
         Ok(self)
     }
@@ -183,11 +194,12 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
     /// Applies the pre-block call to the EIP-4788 beacon root contract.
     pub fn apply_beacon_root_contract_call(
         &mut self,
-        initialized_block_env: &BlockEnv,
+        timestamp: u64,
+        block_number: u64,
         parent_block_hash: Option<B256>,
     ) -> Result<(), BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
@@ -196,8 +208,8 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
         let result_and_state = eip4788::transact_beacon_root_contract_call(
             &self.evm_config,
             self.chain_spec.as_ref(),
-            initialized_block_env.timestamp.to(),
-            initialized_block_env.number.to(),
+            timestamp,
+            block_number,
             parent_block_hash,
             &mut self.evm,
         )?;
@@ -213,27 +225,27 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
     }
 
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
-    pub fn post_block_withdrawal_request_contract_call(
+    pub fn post_block_withdrawal_requests_contract_call(
         self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
         Hook: OnStateHook,
     {
-        let result = self.apply_withdrawal_request_contract_call()?;
+        let result = self.apply_withdrawal_requests_contract_call()?;
 
         Ok(result)
     }
 
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
-    pub fn apply_withdrawal_request_contract_call(
+    pub fn apply_withdrawal_requests_contract_call(
         mut self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
@@ -299,7 +311,7 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
         self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
@@ -315,7 +327,7 @@ impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
         mut self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit,
         DB::Error: Display,
         EvmConfig: ConfigureEvm<Header = Header>,
         Chainspec: AsRef<ChainSpec>,
