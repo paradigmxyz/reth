@@ -18,7 +18,7 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{NodeTypes, NodeTypesWithDB};
 use reth_primitives::{
     alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
@@ -35,7 +35,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::ProviderNodeTypes;
+use super::{DatabaseProvider, ProviderNodeTypes};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -127,7 +127,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// - `fetch_db_range`: Retrieves a range of items from the database.
     /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
     ///   is returned.
-    fn fetch_db_mem_range<T, F, G, P>(
+    fn fetch_db_mem_range_while<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
         fetch_db_range: F,
@@ -135,34 +135,89 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        F: FnOnce(RangeInclusive<BlockNumber>, &mut P) -> ProviderResult<Vec<T>>,
-        G: Fn(BlockNumber, &mut P) -> Option<T>,
+        F: FnOnce(
+            &DatabaseProvider<
+                <<N as NodeTypesWithDB>::DB as reth_db_api::Database>::TX,
+                <N as NodeTypes>::ChainSpec,
+            >,
+            RangeInclusive<BlockNumber>,
+            &mut P,
+        ) -> ProviderResult<Vec<T>>,
+        G: Fn(
+            &DatabaseProvider<
+                <<N as NodeTypesWithDB>::DB as reth_db_api::Database>::TX,
+                <N as NodeTypes>::ChainSpec,
+            >,
+            Arc<BlockState>,
+            &mut P,
+        ) -> Option<T>,
         P: FnMut(&T) -> bool,
     {
+        // Each one provides a snapshot at the time of instantiation, but its order matters.
+        //
+        // If we acquire first the database provider, it's possible that before the in-memory chain
+        // snapshot is instantiated, it will flush blocks to disk. This would
+        // mean that our database provider would not have access to the flushed blocks (since it's
+        // working under an older view), while the in-memory state may have deleted them
+        // entirely. Resulting in gaps on the range.
+        let in_memory_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let db_provider = self.database_provider_ro()?;
+
         let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
+            // the first block is the highest one.
+            in_memory_chain
+                .first()
+                .map(|b| b.number())
+                .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
         });
-        let mut range = start..=end;
+
+        // Split range into storage_range and in-memory range. If the in-memory range is not necessary drop it early.
+        //
+        // The last block of `in_memory_chain` is the lowest block number.
+        let (in_memory, storage_range) = match in_memory_chain.last() {
+            Some(lowest_memory_block) if (start..=end).contains(&lowest_memory_block.number())   => {
+                // There is a small chance that database may overlap with in-memory-chain blocks, in
+                // case of a re-org. This happens because on re-org handling we
+                // schedule the disk blocks to be deleted, while inserting the new
+                // ones into memory right away.
+                //
+                // Ensures that we choose the newer versions of the overlapped blocks.
+                let in_memory_range = lowest_memory_block.number()..=
+                    end.min(in_memory_chain.first().expect("qed").number());
+                let storage_range =
+                    (*in_memory_range.start() > start).then(|| start..=in_memory_range.start() - 1);
+                    
+                (Some((in_memory_chain, in_memory_range)), storage_range)
+            }
+            _ => {
+                // Drop the in-memory chain so we don't hold blocks in memory.
+                drop(in_memory_chain);
+
+                (None, Some(start..=end))
+            }
+        };
+
         let mut items = Vec::with_capacity((end - start + 1) as usize);
 
-        // First, fetch the items from the database
-        let mut db_items = fetch_db_range(range.clone(), &mut predicate)?;
-
-        if !db_items.is_empty() {
+        if let Some(storage_range) = storage_range {
+            let mut db_items = fetch_db_range(&db_provider, storage_range.clone(), &mut predicate)?;
             items.append(&mut db_items);
 
-            // Advance the range iterator by the number of items fetched from the database
-            range.nth(items.len() - 1);
+            // If the number of items differs from the expected one, then the predicate was not met,
+            // and we should stop and return what we have.
+            if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
+                return Ok(items)
+            }
         }
 
-        // Fetch the remaining items from the in-memory state
-        for num in range {
-            // TODO: there might be an update between loop iterations, we
-            // need to handle that situation.
-            if let Some(item) = map_block_state_item(num, &mut predicate) {
-                items.push(item);
-            } else {
-                break;
+        if let Some((in_memory_chain, in_memory_range)) = in_memory {
+            for (num, block) in in_memory_range.zip(in_memory_chain) {
+                debug_assert!(num == block.number());
+                if let Some(item) = map_block_state_item(&db_provider, block, &mut predicate) {
+                    items.push(item);
+                } else {
+                    break
+                }
             }
         }
 
