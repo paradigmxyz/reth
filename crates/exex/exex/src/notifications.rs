@@ -355,11 +355,12 @@ mod tests {
 
     use super::*;
     use alloy_consensus::Header;
+    use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{Block, BlockNumHash};
+    use reth_primitives::Block;
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockWriter,
         Chain,
