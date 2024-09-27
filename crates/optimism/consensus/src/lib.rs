@@ -42,12 +42,7 @@ pub struct OptimismBeaconConsensus {
 
 impl OptimismBeaconConsensus {
     /// Create a new instance of [`OptimismBeaconConsensus`]
-    ///
-    /// # Panics
-    ///
-    /// If given chain spec is not optimism [`ChainSpec::is_optimism`]
     pub fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        assert!(chain_spec.is_optimism(), "optimism consensus only valid for optimism chains");
         Self { chain_spec }
     }
 }
