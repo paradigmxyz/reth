@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::TriePrefixSetsMut,
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
     HashBuilder, Nibbles,
@@ -30,18 +30,15 @@ pub struct Proof<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
-    /// Proof targets.
-    targets: HashMap<B256, HashSet<B256>>,
 }
 
 impl<T, H> Proof<T, H> {
-    /// Create a new [Proof] instance.
+    /// Create a new [`Proof`] instance.
     pub fn new(t: T, h: H) -> Self {
         Self {
             trie_cursor_factory: t,
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
-            targets: HashMap::default(),
         }
     }
 
@@ -51,7 +48,6 @@ impl<T, H> Proof<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
-            targets: self.targets,
         }
     }
 
@@ -61,7 +57,6 @@ impl<T, H> Proof<T, H> {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
-            targets: self.targets,
         }
     }
 
@@ -70,22 +65,11 @@ impl<T, H> Proof<T, H> {
         self.prefix_sets = prefix_sets;
         self
     }
-
-    /// Set the target account and slots.
-    pub fn with_target(self, target: (B256, HashSet<B256>)) -> Self {
-        self.with_targets(HashMap::from_iter([target]))
-    }
-
-    /// Set the target accounts and slots.
-    pub fn with_targets(mut self, targets: HashMap<B256, HashSet<B256>>) -> Self {
-        self.targets = targets;
-        self
-    }
 }
 
 impl<T, H> Proof<T, H>
 where
-    T: TrieCursorFactory,
+    T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
 {
     /// Generate an account proof from intermediate nodes.
@@ -95,23 +79,28 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .with_target((keccak256(address), slots.iter().map(keccak256).collect()))
-            .multiproof()?
+            .multiproof(HashMap::from_iter([(
+                keccak256(address),
+                slots.iter().map(keccak256).collect(),
+            )]))?
             .account_proof(address, slots)?)
     }
 
     /// Generate a state multiproof according to specified targets.
-    pub fn multiproof(&self) -> Result<MultiProof, StateProofError> {
+    pub fn multiproof(
+        mut self,
+        mut targets: HashMap<B256, HashSet<B256>>,
+    ) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
-        prefix_set.extend(self.targets.keys().map(Nibbles::unpack));
+        prefix_set.extend(targets.keys().map(Nibbles::unpack));
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = ProofRetainer::from_iter(self.targets.keys().map(Nibbles::unpack));
+        let retainer = ProofRetainer::from_iter(targets.keys().map(Nibbles::unpack));
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut storages = HashMap::default();
@@ -123,7 +112,19 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let storage_multiproof = self.storage_multiproof(hashed_address)?;
+                    let storage_prefix_set = self
+                        .prefix_sets
+                        .storage_prefix_sets
+                        .remove(&hashed_address)
+                        .unwrap_or_default();
+                    let proof_targets = targets.remove(&hashed_address).unwrap_or_default();
+                    let storage_multiproof = StorageProof::new_hashed(
+                        self.trie_cursor_factory.clone(),
+                        self.hashed_cursor_factory.clone(),
+                        hashed_address,
+                    )
+                    .with_prefix_set_mut(storage_prefix_set)
+                    .storage_proof(proof_targets)?;
 
                     // Encode account
                     account_rlp.clear();
@@ -138,30 +139,67 @@ where
         let _ = hash_builder.root();
         Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
     }
+}
 
-    /// Generate a storage multiproof according to specified targets.
-    pub fn storage_multiproof(
-        &self,
-        hashed_address: B256,
+/// Generates storage merkle proofs.
+#[derive(Debug)]
+pub struct StorageProof<T, H> {
+    /// The factory for traversing trie nodes.
+    trie_cursor_factory: T,
+    /// The factory for hashed cursors.
+    hashed_cursor_factory: H,
+    /// The hashed address of an account.
+    hashed_address: B256,
+    /// The set of storage slot prefixes that have changed.
+    prefix_set: PrefixSetMut,
+}
+
+impl<T, H> StorageProof<T, H> {
+    /// Create a new [`StorageProof`] instance.
+    pub fn new(t: T, h: H, address: Address) -> Self {
+        Self::new_hashed(t, h, keccak256(address))
+    }
+
+    /// Create a new [`StorageProof`] instance with hashed address.
+    pub fn new_hashed(t: T, h: H, hashed_address: B256) -> Self {
+        Self {
+            trie_cursor_factory: t,
+            hashed_cursor_factory: h,
+            hashed_address,
+            prefix_set: PrefixSetMut::default(),
+        }
+    }
+
+    /// Set the changed prefixes.
+    pub fn with_prefix_set_mut(mut self, prefix_set: PrefixSetMut) -> Self {
+        self.prefix_set = prefix_set;
+        self
+    }
+}
+
+impl<T, H> StorageProof<T, H>
+where
+    T: TrieCursorFactory,
+    H: HashedCursorFactory,
+{
+    /// Generate storage proof.
+    pub fn storage_proof(
+        mut self,
+        targets: HashSet<B256>,
     ) -> Result<StorageMultiProof, StateProofError> {
         let mut hashed_storage_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             return Ok(StorageMultiProof::default())
         }
 
-        let target_nibbles = self
-            .targets
-            .get(&hashed_address)
-            .map_or(Vec::new(), |slots| slots.iter().map(Nibbles::unpack).collect());
+        let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
+        self.prefix_set.extend(target_nibbles.clone());
 
-        let mut prefix_set =
-            self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
-        prefix_set.extend(target_nibbles.clone());
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(hashed_address)?;
-        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
+        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
+        let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
