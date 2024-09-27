@@ -18,17 +18,17 @@ pub struct BlockCache {
     /// the cache with the same file ID. I.e. for each notification, there may be multiple blocks
     /// in the cache.
     files: RwLock<BTreeMap<u64, VecDeque<CachedBlock>>>,
-    /// A mapping of `Block Hash -> Block`.
+    /// A mapping of committed blocks `Block Hash -> Block`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
     /// block.
-    blocks: DashMap<B256, CachedBlock>,
+    committed_blocks: DashMap<B256, (u64, CachedBlock)>,
 }
 
 impl BlockCache {
     /// Creates a new instance of [`BlockCache`].
     pub(super) fn new() -> Self {
-        Self { files: RwLock::new(BTreeMap::new()), blocks: DashMap::new() }
+        Self { files: RwLock::new(BTreeMap::new()), committed_blocks: DashMap::new() }
     }
 
     /// Returns `true` if the cache is empty.
@@ -95,6 +95,12 @@ impl BlockCache {
         Some((key, last_block))
     }
 
+    /// Returns the file ID for the notification containing the given committed block hash, if it
+    /// exists.
+    pub(super) fn get_file_id_by_committed_block_hash(&self, block_hash: &B256) -> Option<u64> {
+        self.committed_blocks.get(block_hash).map(|entry| entry.0)
+    }
+
     /// Inserts the blocks from the notification into the cache with the given file ID.
     ///
     /// First, inserts the reverted blocks (if any), then the committed blocks (if any).
@@ -126,7 +132,7 @@ impl BlockCache {
                     parent_hash: block.parent_hash,
                 };
                 files.entry(file_id).or_default().push_back(cached_block);
-                self.blocks.insert(block.hash(), cached_block);
+                self.committed_blocks.insert(block.hash(), (file_id, cached_block));
             }
         }
     }
