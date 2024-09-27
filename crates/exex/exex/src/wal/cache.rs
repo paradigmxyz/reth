@@ -94,7 +94,7 @@ impl BlockCache {
         Some((key, last_block))
     }
 
-    /// Returns the file ID for the notification contaning the given committed block hash, if it
+    /// Returns the file ID for the notification containing the given committed block hash, if it
     /// exists.
     pub(super) fn get_file_id_by_committed_block_hash(&self, block_hash: &B256) -> Option<u64> {
         self.committed_blocks.get(block_hash).map(|entry| entry.0)
