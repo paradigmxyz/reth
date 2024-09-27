@@ -1,11 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
-
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use reth_exex_types::ExExNotification;
 use dashmap::DashMap;
-
+use reth_exex_types::ExExNotification;
 
 /// The block cache of the WAL.
 ///
