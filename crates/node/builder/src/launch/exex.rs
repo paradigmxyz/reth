@@ -107,6 +107,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         debug!(target: "reth::cli", "spawning exex manager");
         // todo(onbjerg): rm magic number
         let exex_manager = ExExManager::new(
+            components.provider().clone(),
             exex_handles,
             1024,
             exex_wal,
