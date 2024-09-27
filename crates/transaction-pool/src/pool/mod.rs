@@ -463,6 +463,7 @@ where
                 }
 
                 if let Some(replaced) = added.replaced_blob_transaction() {
+                    debug!(target: "txpool", "[{:?}] delete replaced blob sidecar", replaced);
                     // delete the replaced transaction from the blob store
                     self.delete_blob(replaced);
                 }
@@ -798,6 +799,7 @@ where
 
     /// Inserts a blob transaction into the blob store
     fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
+        debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         if let Err(err) = self.blob_store.insert(hash, blob) {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
