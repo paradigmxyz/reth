@@ -226,7 +226,7 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
 
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
     pub fn post_block_withdrawal_requests_contract_call(
-        self,
+        &mut self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
@@ -242,7 +242,7 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
 
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
     pub fn apply_withdrawal_requests_contract_call(
-        mut self,
+        &mut self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
@@ -308,7 +308,7 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
 
     /// Applies the post-block call to the EIP-7251 consolidation requests contract.
     pub fn post_block_consolidation_requests_contract_call(
-        self,
+        &mut self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
@@ -324,7 +324,7 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
 
     /// Applies the post-block call to the EIP-7251 consolidation requests contract.
     pub fn apply_consolidation_requests_contract_call(
-        mut self,
+        &mut self,
     ) -> Result<Vec<Request>, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
