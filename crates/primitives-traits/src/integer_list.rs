@@ -16,22 +16,19 @@ pub struct IntegerList(pub RoaringTreemap);
 
 impl fmt::Debug for IntegerList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let vec: Vec<u64> = self.0.iter().collect();
-        write!(f, "IntegerList {vec:?}")
+        f.write_str("IntegerList")?;
+        f.debug_list().entries(self.0.iter()).finish()
     }
 }
 
 impl IntegerList {
     /// Creates an `IntegerList` from a list of integers.
     ///
-    /// # Returns
-    ///
     /// Returns an error if the list is empty or not pre-sorted.
-    pub fn new<T: AsRef<[u64]>>(list: T) -> Result<Self, RoaringBitmapError> {
-        Ok(Self(
-            RoaringTreemap::from_sorted_iter(list.as_ref().iter().copied())
-                .map_err(|_| RoaringBitmapError::InvalidInput)?,
-        ))
+    pub fn new(list: impl IntoIterator<Item = u64>) -> Result<Self, RoaringBitmapError> {
+        RoaringTreemap::from_sorted_iter(list)
+            .map(Self)
+            .map_err(|_| RoaringBitmapError::InvalidInput)
     }
 
     // Creates an IntegerList from a pre-sorted list of integers.
@@ -39,11 +36,10 @@ impl IntegerList {
     /// # Panics
     ///
     /// Panics if the list is empty or not pre-sorted.
-    pub fn new_pre_sorted<T: AsRef<[u64]>>(list: T) -> Self {
-        Self(
-            RoaringTreemap::from_sorted_iter(list.as_ref().iter().copied())
-                .expect("IntegerList must be pre-sorted and non-empty"),
-        )
+    #[inline]
+    #[track_caller]
+    pub fn new_pre_sorted(list: impl IntoIterator<Item = u64>) -> Self {
+        Self::new(list).expect("IntegerList must be pre-sorted and non-empty")
     }
 
     /// Serializes a [`IntegerList`] into a sequence of bytes.
@@ -67,28 +63,13 @@ impl IntegerList {
     }
 }
 
-macro_rules! impl_uint {
-    ($($w:tt),+) => {
-        $(
-            impl From<Vec<$w>> for IntegerList {
-                fn from(v: Vec<$w>) -> Self {
-                    Self::new_pre_sorted(v.iter().map(|v| *v as u64).collect::<Vec<_>>())
-                }
-            }
-        )+
-    };
-}
-
-impl_uint!(usize, u64, u32, u8, u16);
-
 impl Serialize for IntegerList {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let vec = self.0.iter().collect::<Vec<u64>>();
         let mut seq = serializer.serialize_seq(Some(self.len() as usize))?;
-        for e in vec {
+        for e in &self.0 {
             seq.serialize_element(&e)?;
         }
         seq.end()
@@ -107,11 +88,10 @@ impl<'de> Visitor<'de> for IntegerListVisitor {
     where
         E: SeqAccess<'de>,
     {
-        let mut list = Vec::new();
+        let mut list = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(1024));
         while let Some(item) = seq.next_element()? {
             list.push(item);
         }
-
         IntegerList::new(list).map_err(|_| serde::de::Error::invalid_value(Unexpected::Seq, &self))
     }
 }
@@ -132,7 +112,7 @@ use arbitrary::{Arbitrary, Unstructured};
 impl<'a> Arbitrary<'a> for IntegerList {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
         let mut nums: Vec<u64> = Vec::arbitrary(u)?;
-        nums.sort();
+        nums.sort_unstable();
         Self::new(nums).map_err(|_| arbitrary::Error::IncorrectFormat)
     }
 }

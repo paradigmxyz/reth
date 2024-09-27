@@ -2762,7 +2762,6 @@ dependencies = [
  "futures-util",
  "reth",
  "reth-node-ethereum",
- "reth-rpc-types",
 ]
 
 [[package]]

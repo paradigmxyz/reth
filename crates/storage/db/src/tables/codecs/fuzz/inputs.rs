@@ -10,12 +10,13 @@ pub struct IntegerListInput(pub Vec<u64>);
 impl From<IntegerListInput> for IntegerList {
     fn from(list: IntegerListInput) -> Self {
         let mut v = list.0;
-
         // Empty lists are not supported by `IntegerList`, so we want to skip these cases.
-        if v.is_empty() {
-            return vec![1u64].into()
-        }
-        v.sort();
-        v.into()
+        let list = if v.is_empty() {
+            &[1u64][..]
+        } else {
+            v.sort_unstable();
+            &v
+        };
+        IntegerList::new_pre_sorted(list.iter().copied())
     }
 }
