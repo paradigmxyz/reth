@@ -233,7 +233,7 @@ impl CanonicalInMemoryState {
     pub fn set_pending_block(&self, pending: ExecutedBlock) {
         // fetch the state of the pending block's parent block
         let parent = self.state_by_hash(pending.block().parent_hash);
-        let pending = BlockState::with_parent(pending, parent.map(|p| (*p).clone()));
+        let pending = BlockState::with_parent(pending, parent);
         self.inner.in_memory_state.pending.send_modify(|p| {
             p.replace(pending);
         });
@@ -261,8 +261,7 @@ impl CanonicalInMemoryState {
             // insert the new blocks
             for block in new_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state =
-                    BlockState::with_parent(block.clone(), parent.map(|p| (*p).clone()));
+                let block_state = BlockState::with_parent(block.clone(), parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
@@ -329,8 +328,7 @@ impl CanonicalInMemoryState {
 
             for block in old_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
-                let block_state =
-                    BlockState::with_parent(block.clone(), parent.map(|p| (*p).clone()));
+                let block_state = BlockState::with_parent(block.clone(), parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
@@ -342,10 +340,7 @@ impl CanonicalInMemoryState {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks
-                        .get(&p.block().block.parent_hash)
-                        .cloned()
-                        .map(|p| Box::new((*p).clone()));
+                    p.parent = blocks.get(&p.block().block.parent_hash).cloned();
                 }
             });
         }
@@ -595,7 +590,7 @@ pub struct BlockState {
     /// The executed block that determines the state after this block has been executed.
     block: ExecutedBlock,
     /// The block's parent block if it exists.
-    parent: Option<Box<BlockState>>,
+    parent: Option<Arc<BlockState>>,
 }
 
 #[allow(dead_code)]
@@ -606,8 +601,8 @@ impl BlockState {
     }
 
     /// [`BlockState`] constructor with parent.
-    pub fn with_parent(block: ExecutedBlock, parent: Option<Self>) -> Self {
-        Self { block, parent: parent.map(Box::new) }
+    pub const fn with_parent(block: ExecutedBlock, parent: Option<Arc<Self>>) -> Self {
+        Self { block, parent }
     }
 
     /// Returns the hash and block of the on disk block this state can be traced back to.
@@ -875,7 +870,7 @@ mod tests {
         for i in 1..=num_blocks {
             let mut state = create_mock_state(test_block_builder, i, parent_hash);
             if let Some(parent) = parent_state {
-                state.parent = Some(Box::new(parent));
+                state.parent = Some(Arc::new(parent));
             }
             parent_hash = state.hash();
             parent_state = Some(state.clone());
@@ -1171,7 +1166,7 @@ mod tests {
         // Check the pending state
         assert_eq!(
             state.pending_state().unwrap(),
-            BlockState::with_parent(block2.clone(), Some(BlockState::new(block1)))
+            BlockState::with_parent(block2.clone(), Some(Arc::new(BlockState::new(block1))))
         );
 
         // Check the pending block
@@ -1206,14 +1201,14 @@ mod tests {
         let block2 = test_block_builder.get_executed_block_with_number(2, block1.block().hash());
         let block3 = test_block_builder.get_executed_block_with_number(3, block2.block().hash());
 
-        let state1 = BlockState::new(block1.clone());
-        let state2 = BlockState::with_parent(block2.clone(), Some(state1.clone()));
-        let state3 = BlockState::with_parent(block3.clone(), Some(state2.clone()));
+        let state1 = Arc::new(BlockState::new(block1.clone()));
+        let state2 = Arc::new(BlockState::with_parent(block2.clone(), Some(state1.clone())));
+        let state3 = Arc::new(BlockState::with_parent(block3.clone(), Some(state2.clone())));
 
         let mut blocks = HashMap::default();
-        blocks.insert(block1.block().hash(), Arc::new(state1));
-        blocks.insert(block2.block().hash(), Arc::new(state2));
-        blocks.insert(block3.block().hash(), Arc::new(state3));
+        blocks.insert(block1.block().hash(), state1);
+        blocks.insert(block2.block().hash(), state2);
+        blocks.insert(block3.block().hash(), state3);
 
         let mut numbers = BTreeMap::new();
         numbers.insert(1, block1.block().hash());
