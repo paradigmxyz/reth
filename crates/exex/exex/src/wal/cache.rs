@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use reth_exex_types::ExExNotification;
 use reth_primitives::{BlockNumHash, B256};
 
@@ -15,7 +16,7 @@ pub struct BlockCache {
     /// For each notification written to the WAL, there will be an entry per block written to
     /// the cache with the same file ID. I.e. for each notification, there may be multiple blocks
     /// in the cache.
-    files: BTreeMap<u64, VecDeque<CachedBlock>>,
+    files: RwLock<BTreeMap<u64, VecDeque<CachedBlock>>>,
     /// A mapping of `Block Hash -> Block`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
@@ -26,45 +27,52 @@ pub struct BlockCache {
 impl BlockCache {
     /// Creates a new instance of [`BlockCache`].
     pub(super) fn new() -> Self {
-        Self { files: BTreeMap::new(), blocks: DashMap::new() }
+        Self { files: RwLock::new(BTreeMap::new()), blocks: DashMap::new() }
     }
 
     /// Returns `true` if the cache is empty.
     pub(super) fn is_empty(&self) -> bool {
-        self.files.is_empty()
+        self.files.read().is_empty()
     }
 
     /// Returns a front-to-back iterator.
     pub(super) fn iter(&self) -> impl Iterator<Item = (u64, CachedBlock)> + '_ {
-        self.files.iter().flat_map(|(k, v)| v.iter().map(move |b| (*k, *b)))
+        self.files
+            .read()
+            .iter()
+            .flat_map(|(k, v)| v.iter().map(move |b| (*k, *b)))
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     /// Provides a reference to the first block from the cache, or `None` if the cache is
     /// empty.
     pub(super) fn front(&self) -> Option<(u64, CachedBlock)> {
-        self.files.first_key_value().and_then(|(k, v)| v.front().map(|b| (*k, *b)))
+        self.files.read().first_key_value().and_then(|(k, v)| v.front().map(|b| (*k, *b)))
     }
 
     /// Provides a reference to the last block from the cache, or `None` if the cache is
     /// empty.
     pub(super) fn back(&self) -> Option<(u64, CachedBlock)> {
-        self.files.last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
+        self.files.read().last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
     }
 
     /// Removes the notification with the given file ID.
-    pub(super) fn remove_notification(&mut self, key: u64) -> Option<VecDeque<CachedBlock>> {
-        self.files.remove(&key)
+    pub(super) fn remove_notification(&self, key: u64) -> Option<VecDeque<CachedBlock>> {
+        self.files.write().remove(&key)
     }
 
     /// Pops the first block from the cache. If it resulted in the whole file entry being empty,
     /// it will also remove the file entry.
-    pub(super) fn pop_front(&mut self) -> Option<(u64, CachedBlock)> {
-        let first_entry = self.files.first_entry()?;
+    pub(super) fn pop_front(&self) -> Option<(u64, CachedBlock)> {
+        let mut files = self.files.write();
+
+        let first_entry = files.first_entry()?;
         let key = *first_entry.key();
         let blocks = first_entry.into_mut();
         let first_block = blocks.pop_front().unwrap();
         if blocks.is_empty() {
-            self.files.remove(&key);
+            files.remove(&key);
         }
 
         Some((key, first_block))
@@ -72,44 +80,40 @@ impl BlockCache {
 
     /// Pops the last block from the cache. If it resulted in the whole file entry being empty,
     /// it will also remove the file entry.
-    pub(super) fn pop_back(&mut self) -> Option<(u64, CachedBlock)> {
-        let last_entry = self.files.last_entry()?;
+    pub(super) fn pop_back(&self) -> Option<(u64, CachedBlock)> {
+        let mut files = self.files.write();
+
+        let last_entry = files.last_entry()?;
         let key = *last_entry.key();
         let blocks = last_entry.into_mut();
         let last_block = blocks.pop_back().unwrap();
         if blocks.is_empty() {
-            self.files.remove(&key);
+            files.remove(&key);
         }
 
         Some((key, last_block))
-    }
-
-    /// Appends a block to the back of the specified file entry.
-    pub(super) fn insert(&mut self, file_id: u64, block: CachedBlock) {
-        self.files.entry(file_id).or_default().push_back(block);
     }
 
     /// Inserts the blocks from the notification into the cache with the given file ID.
     ///
     /// First, inserts the reverted blocks (if any), then the committed blocks (if any).
     pub(super) fn insert_notification_blocks_with_file_id(
-        &mut self,
+        &self,
         file_id: u64,
         notification: &ExExNotification,
     ) {
+        let mut files = self.files.write();
+
         let reverted_chain = notification.reverted_chain();
         let committed_chain = notification.committed_chain();
 
         if let Some(reverted_chain) = reverted_chain {
             for block in reverted_chain.blocks().values() {
-                self.insert(
-                    file_id,
-                    CachedBlock {
-                        action: CachedBlockAction::Revert,
-                        block: (block.number, block.hash()).into(),
-                        parent_hash: block.parent_hash,
-                    },
-                );
+                files.entry(file_id).or_default().push_back(CachedBlock {
+                    action: CachedBlockAction::Revert,
+                    block: (block.number, block.hash()).into(),
+                    parent_hash: block.parent_hash,
+                });
             }
         }
 
@@ -120,7 +124,7 @@ impl BlockCache {
                     block: (block.number, block.hash()).into(),
                     parent_hash: block.parent_hash,
                 };
-                self.insert(file_id, cached_block);
+                files.entry(file_id).or_default().push_back(cached_block);
                 self.blocks.insert(block.hash(), cached_block);
             }
         }
