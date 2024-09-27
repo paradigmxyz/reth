@@ -25,6 +25,8 @@ use bytes::{Buf, BufMut};
 extern crate alloc;
 use alloc::vec::Vec;
 
+pub use reth_db_serialization::{Decode, DecodeError, Encode};
+
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
 

@@ -1,6 +1,6 @@
 use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::Compact;
+use reth_codecs::{Compact, Decode, DecodeError, Encode};
 use serde::{Deserialize, Serialize};
 
 pub use nybbles::Nibbles;
@@ -72,6 +72,24 @@ impl Compact for StoredNibbles {
     }
 }
 
+impl Encode for StoredNibbles {
+    type Encoded = Vec<u8>;
+
+    // Delegate to the Compact implementation
+    fn encode(self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(self.0.len());
+        self.to_compact(&mut buf);
+        buf
+    }
+}
+
+impl Decode for StoredNibbles {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        let buf = value.as_ref();
+        Ok(Self::from_compact(buf, buf.len()).0)
+    }
+}
+
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
 pub struct StoredNibblesSubKey(pub Nibbles);
@@ -116,5 +134,23 @@ impl Compact for StoredNibblesSubKey {
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
         (Self(Nibbles::from_nibbles_unchecked(&buf[..len])), &buf[65..])
+    }
+}
+
+impl Encode for StoredNibblesSubKey {
+    type Encoded = Vec<u8>;
+
+    // Delegate to the Compact implementation
+    fn encode(self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(65);
+        self.to_compact(&mut buf);
+        buf
+    }
+}
+
+impl Decode for StoredNibblesSubKey {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        let buf = value.as_ref();
+        Ok(Self::from_compact(buf, buf.len()).0)
     }
 }

@@ -1,9 +1,6 @@
 //! Sharded key
-use crate::{
-    table::{Decode, Encode},
-    DatabaseError,
-};
 use alloy_primitives::BlockNumber;
+use reth_codecs::{Decode, DecodeError, Encode};
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
@@ -61,14 +58,13 @@ impl<T> Decode for ShardedKey<T>
 where
     T: Decode,
 {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
         let value = value.as_ref();
 
         let tx_num_index = value.len() - 8;
 
-        let highest_tx_number = u64::from_be_bytes(
-            value[tx_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
-        );
+        let highest_tx_number =
+            u64::from_be_bytes(value[tx_num_index..].try_into().map_err(|_| DecodeError)?);
         let key = T::decode(&value[..tx_num_index])?;
 
         Ok(Self::new(key, highest_tx_number))

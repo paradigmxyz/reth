@@ -35,12 +35,10 @@ serde = { workspace = true, default-features = false }
 metrics.workspace = true
 
 # misc
-derive_more.workspace = true
 bytes.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth libs with arbitrary
@@ -61,6 +59,5 @@ arbitrary = [
     "reth-primitives/arbitrary",
     "reth-db-models/arbitrary",
     "dep:arbitrary",
-    "dep:proptest",
 ]
 optimism = ["reth-primitives/optimism"]
