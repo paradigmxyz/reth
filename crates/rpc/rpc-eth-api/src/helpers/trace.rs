@@ -1,5 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
+use std::str::FromStr;
+
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
@@ -354,7 +356,7 @@ pub trait Trace: LoadState {
                     if transactions.peek().is_some() {
                         // commit the state changes to the DB
                         if let Some(acc) = state.get(
-                            alloy_primitives::Address::from_str(
+                            &alloy_primitives::Address::from_str(
                                 "0x0fD5C0C300b9075D62406dA142ab4bBAAC908AeD",
                             )
                             .unwrap(),
