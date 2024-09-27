@@ -1177,11 +1177,10 @@ where
                             module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
                             module
                                 .merge(
-                                    EthBundle::new(
+                                    reth_rpc_api::EthCallBundleApiServer::into_rpc(EthBundle::new(
                                         eth_api.clone(),
                                         self.blocking_pool_guard.clone(),
-                                    )
-                                    .into_rpc(),
+                                    )),
                                 )
                                 .expect("No conflicts");
 
