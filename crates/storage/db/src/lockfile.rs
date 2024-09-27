@@ -7,7 +7,7 @@ use reth_tracing::tracing::error;
 use std::{
     path::{Path, PathBuf},
     process,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
@@ -91,7 +91,7 @@ impl StorageLockInner {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ProcessUID {
     /// OS process identifier
     pid: usize,
@@ -109,7 +109,8 @@ impl ProcessUID {
 
     /// Creates [`Self`] from own process.
     fn own() -> Self {
-        Self::new(process::id() as usize).expect("own process")
+        static CACHE: OnceLock<ProcessUID> = OnceLock::new();
+        CACHE.get_or_init(|| Self::new(process::id() as usize).expect("own process")).clone()
     }
 
     /// Parses [`Self`] from a file.
