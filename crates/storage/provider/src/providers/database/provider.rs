@@ -1340,6 +1340,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         P: Copy,
         T: Table<Value = BlockNumberList>,
     {
+        let mut number_list = BlockNumberList::empty();
         for (partial_key, indices) in index_updates {
             let mut last_shard =
                 self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
@@ -1354,9 +1355,11 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                     // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
+                number_list.clear();
+                number_list.append(list.iter().copied()).unwrap();
                 self.tx.put::<T>(
                     sharded_key_factory(partial_key, highest_block_number),
-                    BlockNumberList::new_pre_sorted(list.iter().copied()),
+                    number_list.clone(), // TODO: remove clone
                 )?;
             }
         }
@@ -3022,6 +3025,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
 
         // Unwind the account history index.
         let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
+        let mut number_list = BlockNumberList::empty();
         for &(address, rem_index) in &last_indices {
             let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
                 &mut cursor,
@@ -3033,9 +3037,11 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
             // Check the last returned partial shard.
             // If it's not empty, the shard needs to be reinserted.
             if !partial_shard.is_empty() {
+                number_list.clear();
+                number_list.append(partial_shard).unwrap();
                 cursor.insert(
                     ShardedKey::last(address),
-                    BlockNumberList::new_pre_sorted(partial_shard),
+                    number_list.clone(), // TODO: Remove number_list clone
                 )?;
             }
         }
@@ -3068,6 +3074,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
             .collect::<Result<Vec<_>, _>>()?;
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
+        let mut number_list = BlockNumberList::empty();
         let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
         for &(address, storage_key, rem_index) in &storage_changesets {
             let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
@@ -3083,10 +3090,11 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
             // Check the last returned partial shard.
             // If it's not empty, the shard needs to be reinserted.
             if !partial_shard.is_empty() {
-                cursor.insert(
-                    StorageShardedKey::last(address, storage_key),
-                    BlockNumberList::new_pre_sorted(partial_shard),
-                )?;
+                number_list.clear();
+                number_list.append(partial_shard).unwrap();
+                // TODO: Remove number_list clone
+                cursor
+                    .insert(StorageShardedKey::last(address, storage_key), number_list.clone())?;
             }
         }
 

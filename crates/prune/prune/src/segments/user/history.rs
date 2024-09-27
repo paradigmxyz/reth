@@ -36,6 +36,7 @@ where
     T::Key: AsRef<ShardedKey<SK>>,
 {
     let mut outcomes = PrunedIndices::default();
+    let mut number_list = BlockNumberList::empty();
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
 
     for sharded_key in highest_sharded_keys {
@@ -54,7 +55,14 @@ where
             };
 
             if key_matches(&key, &sharded_key) {
-                match prune_shard(&mut cursor, key, block_nums, to_block, &key_matches)? {
+                match prune_shard(
+                    &mut cursor,
+                    key,
+                    block_nums,
+                    to_block,
+                    &key_matches,
+                    &mut number_list,
+                )? {
                     PruneShardOutcome::Deleted => outcomes.deleted += 1,
                     PruneShardOutcome::Updated => outcomes.updated += 1,
                     PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
@@ -84,6 +92,7 @@ fn prune_shard<C, T, SK>(
     raw_blocks: RawValue<T::Value>,
     to_block: BlockNumber,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
+    number_list: &mut BlockNumberList,
 ) -> Result<PruneShardOutcome, DatabaseError>
 where
     C: DbCursorRO<RawTable<T>> + DbCursorRW<RawTable<T>>,
@@ -149,9 +158,11 @@ where
                 Ok(PruneShardOutcome::Deleted)
             }
         } else {
+            number_list.clear();
+            number_list.append(higher_blocks).unwrap();
             cursor.upsert(
                 RawKey::new(key),
-                RawValue::new(BlockNumberList::new_pre_sorted(higher_blocks)),
+                RawValue::new(number_list.clone()), // TODO: Remove number_list clone
             )?;
             Ok(PruneShardOutcome::Updated)
         }

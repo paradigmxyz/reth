@@ -53,12 +53,16 @@ where
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
+    let mut number_list = BlockNumberList::empty();
     let mut collect = |cache: &HashMap<P, Vec<u64>>| {
+        let mut number_list = BlockNumberList::empty();
         for (key, indices) in cache {
             let last = indices.last().expect("qed");
+            number_list.clear();
+            number_list.append(indices.iter().copied()).unwrap();
             collector.insert(
                 sharded_key_factory(*key, *last),
-                BlockNumberList::new_pre_sorted(indices.iter().copied()),
+                number_list.clone(), // TODO: Remove number_list clone
             )?;
         }
         Ok::<(), StageError>(())
@@ -206,6 +210,7 @@ where
             .map(|chunks| chunks.to_vec())
             .collect::<Vec<Vec<u64>>>();
 
+        let mut number_list = BlockNumberList::empty();
         let mut iter = chunks.into_iter().peekable();
         while let Some(chunk) = iter.next() {
             let mut highest = *chunk.last().expect("at least one index");
@@ -217,7 +222,9 @@ where
                     highest = u64::MAX;
                 }
                 let key = sharded_key_factory(partial_key, highest);
-                let value = BlockNumberList::new_pre_sorted(chunk);
+                number_list.clear();
+                number_list.append(chunk).unwrap();
+                let value = number_list.clone(); // TODO: Remove number_list clone
 
                 if append_only {
                     cursor.append(key, value)?;
