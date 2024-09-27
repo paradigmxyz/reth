@@ -7544,6 +7544,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_xorshift",
  "reth-mdbx-sys",
+ "smallvec",
  "tempfile",
  "thiserror",
  "tracing",
