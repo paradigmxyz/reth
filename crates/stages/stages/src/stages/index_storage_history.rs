@@ -153,6 +153,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
+    use alloy_primitives::{Address, BlockNumber};
     use itertools::Itertools;
     use reth_db::BlockNumberList;
     use reth_db_api::{
@@ -163,7 +164,7 @@ mod tests {
         },
         transaction::DbTx,
     };
-    use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
+    use reth_primitives::{address, b256, StorageEntry, B256, U256};
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,

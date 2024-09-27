@@ -16,9 +16,6 @@ reth-network-types = { workspace = true, features = ["serde"] }
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 
-# alloy
-alloy-primitives.workspace = true
-
 # serde
 serde.workspace = true
 humantime-serde.workspace = true
@@ -30,3 +27,4 @@ eyre.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 reth-network-peers.workspace = true
+alloy-primitives.workspace = true

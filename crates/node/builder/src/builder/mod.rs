@@ -10,7 +10,7 @@ pub use states::*;
 use std::sync::Arc;
 
 use futures::Future;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
@@ -633,7 +633,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn build_network_config(
         &self,
         network_builder: NetworkConfigBuilder,
-    ) -> NetworkConfig<Node::Provider> {
+    ) -> NetworkConfig<Node::Provider>
+    where
+        Node::Types: NodeTypes<ChainSpec: Hardforks>,
+    {
         network_builder.build(self.provider.clone())
     }
 }

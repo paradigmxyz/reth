@@ -1,10 +1,7 @@
 //! Helper for handling execution of multiple blocks.
 
-use crate::{
-    precompile::{Address, HashSet},
-    primitives::alloy_primitives::BlockNumber,
-};
 use alloc::vec::Vec;
+use alloy_primitives::{map::HashSet, Address, BlockNumber};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
@@ -152,7 +149,7 @@ impl BlockBatchRecord {
 
         if !contract_log_pruner.is_empty() {
             let (prev_block, filter) =
-                self.pruning_address_filter.get_or_insert_with(|| (0, HashSet::new()));
+                self.pruning_address_filter.get_or_insert_with(|| (0, Default::default()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
                 filter.extend(addresses.iter().copied());
             }
@@ -182,7 +179,8 @@ impl BlockBatchRecord {
 mod tests {
     use super::*;
     use alloc::collections::BTreeMap;
-    use reth_primitives::{Address, Log, Receipt};
+    use alloy_primitives::Address;
+    use reth_primitives::{Log, Receipt};
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
 
     #[test]

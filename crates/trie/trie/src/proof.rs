@@ -6,13 +6,16 @@ use crate::{
     walker::TrieWalker,
     HashBuilder, Nibbles,
 };
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Address, B256,
+};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
-use std::collections::{HashMap, HashSet};
 
 /// A struct for generating merkle proofs.
 ///
@@ -70,7 +73,7 @@ impl<T, H> Proof<T, H> {
 
     /// Set the target account and slots.
     pub fn with_target(self, target: (B256, HashSet<B256>)) -> Self {
-        self.with_targets(HashMap::from([target]))
+        self.with_targets(HashMap::from_iter([target]))
     }
 
     /// Set the target accounts and slots.
@@ -133,7 +136,7 @@ where
             }
         }
         let _ = hash_builder.root();
-        Ok(MultiProof { account_subtree: hash_builder.take_proofs(), storages })
+        Ok(MultiProof { account_subtree: hash_builder.take_proof_nodes(), storages })
     }
 
     /// Generate a storage multiproof according to specified targets.
@@ -178,6 +181,6 @@ where
         }
 
         let root = hash_builder.root();
-        Ok(StorageMultiProof { root, subtree: hash_builder.take_proofs() })
+        Ok(StorageMultiProof { root, subtree: hash_builder.take_proof_nodes() })
     }
 }

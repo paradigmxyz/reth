@@ -589,7 +589,7 @@ where
         // Find all forks of given block.
         let mut dependent_block =
             self.block_indices().fork_to_child().get(block).cloned().unwrap_or_default();
-        let mut dependent_chains = HashSet::new();
+        let mut dependent_chains = HashSet::default();
 
         while let Some(block) = dependent_block.pop_back() {
             // Get chain of dependent block.
@@ -2180,7 +2180,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2.hash()])),
             ]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         assert_matches!(tree.make_canonical(block1a_hash), Ok(_));
@@ -2204,7 +2204,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1.hash()])),
                 (block1.hash(), HashSet::from([block2.hash()])),
             ]))
-            .with_pending_blocks((block1a.number + 1, HashSet::new()))
+            .with_pending_blocks((block1a.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
@@ -2241,7 +2241,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2a_hash])),
             ]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
@@ -2310,7 +2310,7 @@ mod tests {
             .with_chain_num(1)
             .with_block_to_chain(HashMap::from([(block2a_hash, 4.into())]))
             .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
