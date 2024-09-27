@@ -5,7 +5,9 @@ use std::{fmt, fmt::Debug};
 use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
-use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal};
+use reth_exex::{
+    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal, DEFAULT_EXEX_MANAGER_CAPACITY,
+};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
@@ -108,7 +110,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         // todo(onbjerg): rm magic number
         let exex_manager = ExExManager::new(
             exex_handles,
-            1024,
+            DEFAULT_EXEX_MANAGER_CAPACITY,
             exex_wal,
             components.provider().finalized_block_stream(),
         );
