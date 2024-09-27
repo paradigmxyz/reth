@@ -54,8 +54,8 @@ impl OnStateHook for NoopHook {
 ///
 /// This can be used to chain system transaction calls.
 #[allow(missing_debug_implementations)]
-pub struct SystemCaller<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook = NoopHook> {
-    evm: Evm<'a, Ext, DB>,
+pub struct SystemCaller<'a, EvmConfig, DB: Database, Chainspec, Hook = NoopHook> {
+    evm: Evm<'a, (), DB>,
     evm_config: EvmConfig,
     chain_spec: Chainspec,
     /// Optional hook to be called after each state change.
@@ -63,28 +63,18 @@ pub struct SystemCaller<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook = Noop
     hook: Option<Hook>,
 }
 
-impl<'a, EvmConfig, Ext, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, Ext, DB, Chainspec> {
-    /// Create a new system caller with the given EVM, EVM config, database, and chain spec.
-    pub const fn new_with_evm(
-        evm_config: EvmConfig,
-        chain_spec: Chainspec,
-        evm: Evm<'a, Ext, DB>,
-    ) -> Self {
-        Self { evm_config, chain_spec, evm, hook: None }
-    }
+impl<'a, EvmConfig, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, DB, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub fn new_with_initialized_config_and_block_env(
+    pub fn new(
         evm_config: EvmConfig,
         db: DB,
         chain_spec: Chainspec,
         initialized_cfg: &CfgEnvWithHandlerCfg,
         initialized_block_env: &BlockEnv,
-        external_context: Ext,
     ) -> Self {
         let evm = Evm::builder()
             .with_db(db)
-            .with_external_context(external_context)
             .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
@@ -96,14 +86,14 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, Ex
     }
 }
 
-impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
-    SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, Hook>
+impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
+    SystemCaller<'a, EvmConfig, DB, Chainspec, Hook>
 {
     /// Installs a custom hook to be called after each state change.
     pub fn with_state_hook<H: OnStateHook>(
         self,
         hook: H,
-    ) -> SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, H> {
+    ) -> SystemCaller<'a, EvmConfig, DB, Chainspec, H> {
         let Self { evm_config, chain_spec, evm, .. } = self;
         SystemCaller { evm_config, chain_spec, evm, hook: Some(hook) }
     }
@@ -111,15 +101,15 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
     pub fn finish(self) {}
 }
 
-impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
-    SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, Hook>
+impl<'a, EvmConfig, DB: Database, Chainspec, Hook>
+    SystemCaller<'a, EvmConfig, DB, Chainspec, Hook>
 {
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn pre_block_blockhashes_contract_call(
-        mut self,
+        &mut self,
         initialized_block_env: &BlockEnv,
         parent_block_hash: B256,
-    ) -> Result<Self, BlockExecutionError>
+    ) -> Result<(), BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
@@ -133,7 +123,7 @@ impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
             parent_block_hash,
         )?;
 
-        Ok(self)
+        Ok(())
     }
 
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
