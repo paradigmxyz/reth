@@ -42,7 +42,7 @@ pub struct OptimismBeaconConsensus {
 
 impl OptimismBeaconConsensus {
     /// Create a new instance of [`OptimismBeaconConsensus`]
-    pub fn new(chain_spec: Arc<OpChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
