@@ -172,6 +172,7 @@ where
 
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification>> {
         if self.provider.header(&self.exex_head.block.hash)?.is_some() {
+            debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
             return Ok(None)
         }
 
@@ -189,7 +190,11 @@ where
         };
 
         // Update the head block hash to the parent hash of the first committed block.
-        self.exex_head.block = notification.committed_chain().unwrap().first().num_hash();
+        let committed_chain = notification.committed_chain().unwrap();
+        let new_exex_head =
+            (committed_chain.first().parent_hash, committed_chain.first().number - 1).into();
+        debug!(target: "exex::notifications", old_exex_head = ?self.exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
+        self.exex_head.block = new_exex_head;
 
         // Return an inverted notification. See the documentation for
         // `ExExNotification::into_inverted`.
@@ -282,8 +287,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::future::poll_fn;
-
     use crate::Wal;
 
     use super::*;
@@ -452,10 +455,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_notifications_ahead_of_head() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
         let mut rng = generators::rng();
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
+        let mut wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
@@ -470,6 +474,17 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
+        let exex_head_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![exex_head_block
+                    .clone()
+                    .seal_with_senders()
+                    .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                None,
+            )),
+        };
+        wal.commit(&exex_head_notification)?;
 
         let node_head =
             Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
@@ -477,20 +492,23 @@ mod tests {
             block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
         };
 
+        let new_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    genesis_block.number + 1,
+                    BlockParams { parent: Some(genesis_hash), ..Default::default() },
+                )
+                .seal_with_senders()
+                .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                None,
+            )),
+        };
+
         let (notifications_tx, notifications_rx) = mpsc::channel(1);
 
-        notifications_tx
-            .send(ExExNotification::ChainCommitted {
-                new: Arc::new(Chain::new(
-                    vec![exex_head_block
-                        .clone()
-                        .seal_with_senders()
-                        .ok_or_eyre("failed to recover senders")?],
-                    Default::default(),
-                    None,
-                )),
-            })
-            .await?;
+        notifications_tx.send(new_notification.clone()).await?;
 
         let mut notifications = ExExNotifications::new(
             node_head,
@@ -501,29 +519,14 @@ mod tests {
         )
         .with_head(exex_head);
 
-        // First notification is skipped because the node is catching up with the ExEx
-        let new_notification = poll_fn(|cx| Poll::Ready(notifications.poll_next_unpin(cx))).await;
-        assert!(new_notification.is_pending());
+        // First notification is the revert of the ExEx head block
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(exex_head_notification.into_inverted())
+        );
 
-        // Imitate the node catching up with the ExEx by sending a notification for the missing
-        // block
-        let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![random_block(
-                    &mut rng,
-                    exex_head_block.number + 1,
-                    BlockParams { parent: Some(exex_head_block.hash()), ..Default::default() },
-                )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
-                Default::default(),
-                None,
-            )),
-        };
-        notifications_tx.send(notification.clone()).await?;
-
-        // Second notification is received because the node caught up with the ExEx
-        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+        // Second notification is the block from the notifications channel
+        assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
 
         Ok(())
     }
