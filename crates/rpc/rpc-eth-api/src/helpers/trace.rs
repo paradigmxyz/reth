@@ -302,6 +302,7 @@ pub trait Trace: LoadState {
                 // on top of its parent block's state
                 let state_at = block.parent_hash;
                 let block_hash = block.hash();
+                let block_number = block.number;
 
                 let block_number = block_env.number.saturating_to::<u64>();
                 let base_fee = block_env.basefee.saturating_to::<u128>();
@@ -341,7 +342,7 @@ pub trait Trace: LoadState {
                     let env =
                         EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
 
-                    println!("tracing block {} tx {:?}", block.number, tx_info.hash);
+                    println!("tracing block {} tx {:?}", block_number, tx_info.hash);
 
                     let mut inspector = inspector_setup();
                     let (res, _) =
