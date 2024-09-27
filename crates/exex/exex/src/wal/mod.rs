@@ -212,7 +212,7 @@ pub struct WalHandle {
 }
 
 impl WalHandle {
-    /// Returns the notification for the given block hash if it exists.
+    /// Returns the notification for the given committed block hash if it exists.
     pub fn get_committed_notification_by_block_hash(
         &self,
         block_hash: &B256,
