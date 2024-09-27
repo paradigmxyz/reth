@@ -32,7 +32,7 @@ macro_rules! impl_fuzzer_with_input {
                 /// This method is used for benchmarking, so its parameter should be the actual type that is being tested.
                 pub fn encode_and_decode(obj: $name) -> (usize, $name)
                 {
-                    let data = table::$encode::$encode_method(obj);
+                    let data = table::$encode::$encode_method(&obj);
                     let size = data.len();
 
                     // Some `data` might be a fixed array.

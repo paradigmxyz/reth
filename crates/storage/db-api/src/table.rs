@@ -25,14 +25,14 @@ pub trait Compress: Send + Sync + Sized + Debug {
     }
 
     /// Compresses data going into the database.
-    fn compress(self) -> Self::Compressed {
+    fn compress(&self) -> Self::Compressed {
         let mut buf = Self::Compressed::default();
         self.compress_to_buf(&mut buf);
         buf
     }
 
     /// Compresses data to a given buffer.
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B);
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B);
 }
 
 /// Trait that will transform the data to be read from the DB.
@@ -52,7 +52,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
     type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync + Ord + Debug;
 
     /// Encodes data going into the database.
-    fn encode(self) -> Self::Encoded;
+    fn encode(&self) -> Self::Encoded;
 }
 
 /// Trait that will transform the data to be read from the DB.

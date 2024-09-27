@@ -36,7 +36,7 @@ macro_rules! impl_uints {
             impl Encode for $name {
                 type Encoded = [u8; std::mem::size_of::<$name>()];
 
-                fn encode(self) -> Self::Encoded {
+                fn encode(&self) -> Self::Encoded {
                     self.to_be_bytes()
                 }
             }
@@ -59,8 +59,8 @@ impl_uints!(u64, u32, u16, u8);
 impl Encode for Vec<u8> {
     type Encoded = Self;
 
-    fn encode(self) -> Self::Encoded {
-        self
+    fn encode(&self) -> Self::Encoded {
+        self.clone()
     }
 }
 
@@ -73,7 +73,7 @@ impl Decode for Vec<u8> {
 impl Encode for Address {
     type Encoded = [u8; 20];
 
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         self.0 .0
     }
 }
@@ -87,7 +87,7 @@ impl Decode for Address {
 impl Encode for B256 {
     type Encoded = [u8; 32];
 
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         self.0
     }
 }
@@ -101,8 +101,8 @@ impl Decode for B256 {
 impl Encode for String {
     type Encoded = Vec<u8>;
 
-    fn encode(self) -> Self::Encoded {
-        self.into_bytes()
+    fn encode(&self) -> Self::Encoded {
+        self.clone().into_bytes()
     }
 }
 
@@ -116,7 +116,7 @@ impl Encode for StoredNibbles {
     type Encoded = Vec<u8>;
 
     // Delegate to the Compact implementation
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         let mut buf = Vec::with_capacity(self.0.len());
         self.to_compact(&mut buf);
         buf
@@ -134,7 +134,7 @@ impl Encode for StoredNibblesSubKey {
     type Encoded = Vec<u8>;
 
     // Delegate to the Compact implementation
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         let mut buf = Vec::with_capacity(65);
         self.to_compact(&mut buf);
         buf
@@ -151,7 +151,7 @@ impl Decode for StoredNibblesSubKey {
 impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         let mut buf = [0u8];
         self.to_compact(&mut buf.as_mut());
         buf
@@ -169,7 +169,7 @@ impl Encode for ClientVersion {
     type Encoded = Vec<u8>;
 
     // Delegate to the Compact implementation
-    fn encode(self) -> Self::Encoded {
+    fn encode(&self) -> Self::Encoded {
         let mut buf = vec![];
         self.to_compact(&mut buf);
         buf
@@ -190,7 +190,7 @@ macro_rules! impl_compression_for_compact {
             impl Compress for $name {
                 type Compressed = Vec<u8>;
 
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
                     let _ = Compact::to_compact(&self, buf);
                 }
             }
@@ -240,7 +240,7 @@ macro_rules! impl_compression_fixed_compact {
             {
                 type Compressed = Vec<u8>;
 
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
                     let _  = Compact::to_compact(&self, buf);
                 }
 

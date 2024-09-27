@@ -9,10 +9,10 @@ use reth_primitives_traits::IntegerList;
 impl Compress for IntegerList {
     type Compressed = Vec<u8>;
 
-    fn compress(self) -> Self::Compressed {
+    fn compress(&self) -> Self::Compressed {
         self.to_bytes()
     }
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
         self.to_mut_bytes(buf)
     }
 }
