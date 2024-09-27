@@ -321,7 +321,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // handle incoming exex events
+        // Handle incoming ExEx events
         for exex in &mut this.exex_handles {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
                 debug!(exex_id = %exex.id, ?event, "Received event from ExEx");
@@ -379,7 +379,7 @@ where
             }
         }
 
-        // drain handle notifications
+        // Drain handle notifications
         while this.buffer.len() < this.max_capacity {
             if let Poll::Ready(Some(notification)) = this.handle_rx.poll_recv(cx) {
                 debug!(
@@ -393,15 +393,15 @@ where
             break
         }
 
-        // update capacity
+        // Update capacity
         this.update_capacity();
 
-        // advance all poll senders
+        // Advance all poll senders
         let mut min_id = usize::MAX;
         for idx in (0..this.exex_handles.len()).rev() {
             let mut exex = this.exex_handles.swap_remove(idx);
 
-            // it is a logic error for this to ever underflow since the manager manages the
+            // It is a logic error for this to ever underflow since the manager manages the
             // notification IDs
             let notification_index = exex
                 .next_notification_id
@@ -409,7 +409,7 @@ where
                 .expect("exex expected notification ID outside the manager's range");
             if let Some(notification) = this.buffer.get(notification_index) {
                 if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
-                    // the channel was closed, which is irrecoverable for the manager
+                    // The channel was closed, which is irrecoverable for the manager
                     return Poll::Ready(Err(err.into()))
                 }
             }
@@ -417,15 +417,15 @@ where
             this.exex_handles.push(exex);
         }
 
-        // remove processed buffered notifications
+        // Remove processed buffered notifications
         debug!(%min_id, "Updating lowest notification id in buffer");
         this.buffer.retain(|&(id, _)| id >= min_id);
         this.min_id = min_id;
 
-        // update capacity
+        // Update capacity
         this.update_capacity();
 
-        // update watch channel block number
+        // Update watch channel block number
         let finished_height = this.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
             exex.finished_height.map_or(Err(()), |height| Ok(height.number.min(curr)))
         });
