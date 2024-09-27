@@ -3,12 +3,14 @@
 mod cache;
 pub use cache::BlockCache;
 mod storage;
+use eyre::OptionExt;
 pub use storage::Storage;
 
 use std::{path::Path, sync::Arc};
 
 use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExNotification;
+use reth_primitives::B256;
 use reth_tracing::tracing::{debug, instrument};
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
@@ -135,7 +137,10 @@ impl WalInner {
                     block.block.number == to_block.number &&
                     block.block.hash == to_block.hash
                 {
-                    let notification = self.storage.read_notification(file_id)?;
+                    let notification = self
+                        .storage
+                        .read_notification(file_id)?
+                        .ok_or_eyre("notification not found")?;
                     if notification.committed_chain().unwrap().blocks().len() == 1 {
                         unfinalized_from_file_id = Some(
                             block_cache.peek().map(|(file_id, _)| *file_id).unwrap_or(u64::MAX),
@@ -205,6 +210,21 @@ impl WalInner {
 #[derive(Debug)]
 pub struct WalHandle {
     wal: Arc<WalInner>,
+}
+
+impl WalHandle {
+    /// Returns the notification for the given committed block hash if it exists.
+    pub fn get_committed_notification_by_block_hash(
+        &self,
+        block_hash: &B256,
+    ) -> eyre::Result<Option<ExExNotification>> {
+        let Some(file_id) = self.wal.block_cache.get_file_id_by_committed_block_hash(block_hash)
+        else {
+            return Ok(None)
+        };
+
+        self.wal.storage.read_notification(file_id)
+    }
 }
 
 #[cfg(test)]
