@@ -316,7 +316,7 @@ impl<P> ExExManager<P>
 where
     P: HeaderProvider,
 {
-    /// Finalizes the WAL accodring to the passed finalized header.
+    /// Finalizes the WAL according to the passed finalized header.
     ///
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
