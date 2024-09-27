@@ -30,8 +30,8 @@ impl<T> Decompress for T
 where
     T: ScaleValue + parity_scale_codec::Decode + Sync + Send + std::fmt::Debug,
 {
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<T, DatabaseError> {
-        parity_scale_codec::Decode::decode(&mut value.as_ref()).map_err(|_| DatabaseError::Decode)
+    fn decompress(mut value: &[u8]) -> Result<T, DatabaseError> {
+        parity_scale_codec::Decode::decode(&mut value).map_err(|_| DatabaseError::Decode)
     }
 }
 

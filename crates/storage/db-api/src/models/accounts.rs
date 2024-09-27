@@ -64,11 +64,9 @@ impl Encode for BlockNumberAddress {
 }
 
 impl Decode for BlockNumberAddress {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let value = value.as_ref();
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
-
         Ok(Self((num, hash)))
     }
 }
@@ -97,11 +95,9 @@ impl Encode for AddressStorageKey {
 }
 
 impl Decode for AddressStorageKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let value = value.as_ref();
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let address = Address::from_slice(&value[..20]);
         let storage_key = StorageKey::from_slice(&value[20..]);
-
         Ok(Self((address, storage_key)))
     }
 }
@@ -127,7 +123,7 @@ mod tests {
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
-        let decoded: BlockNumberAddress = Decode::decode(encoded).unwrap();
+        let decoded: BlockNumberAddress = Decode::decode(&encoded).unwrap();
         assert_eq!(decoded, key);
     }
 
@@ -152,7 +148,7 @@ mod tests {
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
-        let decoded: AddressStorageKey = Decode::decode(encoded).unwrap();
+        let decoded: AddressStorageKey = Decode::decode(&encoded).unwrap();
         assert_eq!(decoded, key);
     }
 
