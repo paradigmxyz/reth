@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{keccak256, U256};
+use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
@@ -161,7 +161,7 @@ where
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
                 let mut total_gas_fess = U256::ZERO;
-                let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
+                let mut hasher = Keccak256::new();
 
                 let mut evm = Call::evm_config(&eth_api).evm_with_env(db, env);
 
@@ -179,7 +179,7 @@ where
 
                     let tx = tx.into_transaction();
 
-                    hash_bytes.extend_from_slice(tx.hash().as_slice());
+                    hasher.update(tx.hash());
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
@@ -244,7 +244,7 @@ where
                     coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
                 let res = EthCallBundleResponse {
                     bundle_gas_price,
-                    bundle_hash: keccak256(&hash_bytes),
+                    bundle_hash: hasher.finalize(),
                     coinbase_diff,
                     eth_sent_to_coinbase,
                     gas_fees: total_gas_fess,
