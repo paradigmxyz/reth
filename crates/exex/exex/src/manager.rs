@@ -312,12 +312,76 @@ impl<P> ExExManager<P> {
     }
 }
 
+impl<P> ExExManager<P>
+where
+    P: HeaderProvider,
+{
+    /// Finalizes the WAL accodring to the passed finalized header.
+    ///
+    /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
+    /// necessary.
+    fn finalize_wal(&self, finalized_header: SealedHeader) -> eyre::Result<()> {
+        debug!(header = ?finalized_header.num_hash(), "Received finalized header");
+
+        // Check if all ExExes are on the canonical chain
+        let exex_finished_heights = self
+            .exex_handles
+            .iter()
+            // Get ExEx ID and hash of the finished height for each ExEx
+            .map(|exex_handle| {
+                (&exex_handle.id, exex_handle.finished_height.map(|block| block.hash))
+            })
+            // Deduplicate all hashes
+            .unique_by(|(_, hash)| *hash)
+            // Check if hashes are canonical
+            .map(|(exex_id, hash)| {
+                hash.map_or(Ok((exex_id, hash, false)), |hash| {
+                    self.provider
+                        .header(&hash)
+                        // Save the ExEx ID, hash of the finished height, and whether the hash
+                        // is canonical
+                        .map(|header| (exex_id, Some(hash), header.is_some()))
+                })
+            })
+            // We collect here to be able to log the unfinalized ExExes below
+            .collect::<Result<Vec<_>, _>>()?;
+        if exex_finished_heights.iter().all(|(_, _, is_canonical)| *is_canonical) {
+            // If there is a finalized header and all ExExs are on the canonical chain, finalize
+            // the WAL with the new finalized header
+            self.wal.finalize(finalized_header.num_hash())?;
+        } else {
+            let unfinalized_exexes = exex_finished_heights
+                .into_iter()
+                .filter_map(|(exex_id, hash, is_canonical)| {
+                    is_canonical.not().then_some((exex_id, hash))
+                })
+                .collect::<Vec<_>>();
+            debug!(
+                ?unfinalized_exexes,
+                "Not all ExExes are on the canonical chain, can't finalize the WAL"
+            );
+        }
+
+        Ok(())
+    }
+}
+
 impl<P> Future for ExExManager<P>
 where
     P: HeaderProvider + Unpin + 'static,
 {
     type Output = eyre::Result<()>;
 
+    /// Main loop of the [`ExExManager`]. The order of operations is as follows:
+    /// 1. Handle incoming ExEx events.
+    /// 2. Finalize the WAL with the finalized header, if necessary.
+    /// 3. Drain [`ExExManagerHandle`] notifications, push them to the internal buffer and update
+    ///    the internal buffer capacity.
+    /// 5. Send notifications from the internal buffer to those ExExes that are ready to receive new
+    ///    notifications.
+    /// 5. Remove notifications from the internal buffer that have been sent to **all** ExExes and
+    ///    update the internal buffer capacity.
+    /// 6. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -332,51 +396,13 @@ where
             }
         }
 
-        // Drain the finalized header stream and grab the last finalized header
+        // Drain the finalized header stream and finalize the WAL with the last header
         let mut last_finalized_header = None;
         while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
             last_finalized_header = finalized_header;
         }
         if let Some(header) = last_finalized_header {
-            debug!(header = ?header.num_hash(), "Received finalized header");
-
-            // Check if all ExExes are on the canonical chain
-            let exex_finished_heights = this
-                .exex_handles
-                .iter()
-                // Get ExEx ID and hash of the finished height for each ExEx
-                .map(|exex_handle| {
-                    (&exex_handle.id, exex_handle.finished_height.map(|block| block.hash))
-                })
-                // Deduplicate all hashes
-                .unique_by(|(_, hash)| *hash)
-                // Check if hashes are canonical
-                .map(|(exex_id, hash)| {
-                    hash.map_or(Ok((exex_id, hash, false)), |hash| {
-                        this.provider
-                            .header(&hash)
-                            // Save the ExEx ID, hash of the finished height, and whether the hash
-                            // is canonical
-                            .map(|header| (exex_id, Some(hash), header.is_some()))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if exex_finished_heights.iter().all(|(_, _, is_canonical)| *is_canonical) {
-                // If there is a finalized header and all ExExs are on the canonical chain, finalize
-                // the WAL with the new finalized header
-                this.wal.finalize(header.num_hash())?;
-            } else {
-                let unfinalized_exexes = exex_finished_heights
-                    .into_iter()
-                    .filter_map(|(exex_id, hash, is_canonical)| {
-                        is_canonical.not().then_some((exex_id, hash))
-                    })
-                    .collect::<Vec<_>>();
-                debug!(
-                    ?unfinalized_exexes,
-                    "Not all ExExes are on the canonical chain, can't finalize the WAL"
-                );
-            }
+            this.finalize_wal(header)?;
         }
 
         // Drain handle notifications
