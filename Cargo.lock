@@ -10826,9 +10826,9 @@ dependencies = [
 
 [[package]]
 name = "tracy-client"
-version = "0.17.3"
+version = "0.17.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "373db47331c3407b343538df77eea2516884a0b126cdfb4b135acfd400015dd7"
+checksum = "746b078c6a09ebfd5594609049e07116735c304671eaab06ce749854d23435bc"
 dependencies = [
  "loom",
  "once_cell",
@@ -10838,9 +10838,9 @@ dependencies = [
 
 [[package]]
 name = "tracy-client-sys"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49cf0064dcb31c99aa1244c1b93439359e53f72ed217eef5db50abd442241e9a"
+checksum = "68613466112302fdbeabc5fa55f7d57462a0b247d5a6b7d7e09401fb471a144d"
 dependencies = [
  "cc",
 ]
