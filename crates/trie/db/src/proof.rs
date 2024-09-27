@@ -78,7 +78,6 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX>
                 &state_sorted,
             ))
             .with_prefix_sets_mut(input.prefix_sets)
-            .with_targets(targets)
-            .multiproof()
+            .multiproof(targets)
     }
 }
