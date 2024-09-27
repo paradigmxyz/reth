@@ -734,16 +734,15 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a46c9c4fdccda7982e7928904bd85fe235a0404ee3d7e197fff13d61eac8b4f"
+checksum = "e9703ce68b97f8faae6f7739d1e003fc97621b856953cbcdbb2b515743f23288"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "derive_arbitrary",
  "derive_more",
- "hashbrown 0.14.5",
  "nybbles",
  "proptest",
  "proptest-derive",
