@@ -683,27 +683,11 @@ impl BlockState {
         chain.extend(self.parent_state_chain());
     }
 
-    /// Returns an iterator over the chain of blocks in memory.
-    pub const fn iter(self: Arc<Self>) -> BlockStateIter {
-        BlockStateIter { current: Some(self) }
-    }
-}
-
-/// An iterator over the atomically captured chain of in memory blocks.
-///
-/// This yields the blocks from newest to oldest (highest to lowest).
-#[derive(Debug, Clone)]
-pub struct BlockStateIter {
-    current: Option<Arc<BlockState>>,
-}
-
-impl Iterator for BlockStateIter {
-    type Item = Arc<BlockState>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current.take()?;
-        self.current = current.parent.clone();
-        Some(current)
+    /// Returns an iterator over the atomically captured chain of in memory blocks.
+    ///
+    /// This yields the blocks from newest to oldest (highest to lowest).
+    pub fn iter(self: Arc<Self>) -> impl Iterator<Item = Arc<Self>> {
+        std::iter::successors(Some(self), |state| state.parent.clone())
     }
 }
 
