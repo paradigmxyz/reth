@@ -5,7 +5,7 @@ pub use cache::BlockCache;
 mod storage;
 pub use storage::Storage;
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
@@ -15,23 +15,62 @@ use reth_tracing::tracing::{debug, instrument};
 ///
 /// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
 /// represented by [`BlockCache`]. The role of the block cache is to avoid walking the WAL directory
-/// and decoding notifications every time we want to rollback/finalize the WAL.
+/// and decoding notifications every time we want to iterate or finalize the WAL.
 ///
 /// The expected mode of operation is as follows:
 /// 1. On every new canonical chain notification, call [`Wal::commit`].
 /// 2. When the chain is finalized, call [`Wal::finalize`] to prevent the infinite growth of the
 ///    WAL.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Wal {
+    inner: Arc<WalInner>,
+}
+
+impl Wal {
+    /// Creates a new instance of [`Wal`].
+    pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+        Ok(Self { inner: Arc::new(WalInner::new(directory)?) })
+    }
+
+    /// Returns a read-only handle to the WAL.
+    pub fn handle(&self) -> WalHandle {
+        WalHandle { wal: self.inner.clone() }
+    }
+
+    /// Commits the notification to WAL.
+    pub fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
+        self.inner.commit(notification)
+    }
+
+    /// Finalizes the WAL to the given block, inclusive.
+    ///
+    /// 1. Finds a notification with first unfinalized block (first notification containing a
+    ///    committed block higher than `to_block`).
+    /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
+    ///    notification includes both finalized and non-finalized blocks, it will not be removed.
+    pub fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
+        self.inner.finalize(to_block)
+    }
+
+    /// Returns an iterator over all notifications in the WAL.
+    pub fn iter_notifications(
+        &self,
+    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
+        self.inner.iter_notifications()
+    }
+}
+
+/// Inner type for the WAL.
+#[derive(Debug)]
+struct WalInner {
     /// The underlying WAL storage backed by a file.
     storage: Storage,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
     block_cache: BlockCache,
 }
 
-impl Wal {
-    /// Creates a new instance of [`Wal`].
-    pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+impl WalInner {
+    fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self { storage: Storage::new(directory)?, block_cache: BlockCache::new() };
         wal.fill_block_cache()?;
         Ok(wal)
@@ -62,12 +101,11 @@ impl Wal {
         Ok(())
     }
 
-    /// Commits the notification to WAL.
     #[instrument(target = "exex::wal", skip_all, fields(
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
-    pub fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
+    fn commit(&self, notification: &ExExNotification) -> eyre::Result<()> {
         let file_id = self.block_cache.back().map_or(0, |block| block.0 + 1);
         self.storage.write_notification(file_id, notification)?;
 
@@ -84,7 +122,7 @@ impl Wal {
     /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
     ///    notification includes both finalized and non-finalized blocks, it will not be removed.
     #[instrument(target = "exex::wal", skip(self))]
-    pub fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
+    fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the file ID of the notification with the finalized block and
         // save the file ID with the first unfinalized block. Do not remove any notifications
         // yet.
@@ -152,7 +190,7 @@ impl Wal {
     }
 
     /// Returns an iterator over all notifications in the WAL.
-    pub(crate) fn iter_notifications(
+    fn iter_notifications(
         &self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification>> + '_>> {
         let Some(range) = self.storage.files_range()? else {
@@ -161,6 +199,12 @@ impl Wal {
 
         Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
     }
+}
+
+/// A read-only handle to the WAL that can be shared.
+#[derive(Debug)]
+pub struct WalHandle {
+    wal: Arc<WalInner>,
 }
 
 #[cfg(test)]
@@ -180,9 +224,10 @@ mod tests {
     };
 
     fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
-        let Some(files_range) = wal.storage.files_range()? else { return Ok(Vec::new()) };
+        let Some(files_range) = wal.inner.storage.files_range()? else { return Ok(Vec::new()) };
 
-        wal.storage
+        wal.inner
+            .storage
             .iter_notifications(files_range)
             .map(|entry| Ok(entry?.1))
             .collect::<eyre::Result<_>>()
@@ -197,7 +242,7 @@ mod tests {
         // Create an instance of the WAL in a temporary directory
         let temp_dir = tempfile::tempdir()?;
         let mut wal = Wal::new(&temp_dir)?;
-        assert!(wal.block_cache.is_empty());
+        assert!(wal.inner.block_cache.is_empty());
 
         // Create 4 canonical blocks and one reorged block with number 2
         let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
@@ -275,7 +320,10 @@ mod tests {
             ),
         ];
         wal.commit(&committed_notification_1)?;
-        assert_eq!(wal.block_cache.iter().collect::<Vec<_>>(), committed_notification_1_cache);
+        assert_eq!(
+            wal.inner.block_cache.iter().collect::<Vec<_>>(),
+            committed_notification_1_cache
+        );
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
 
         // Second notification (revert block 1)
@@ -290,7 +338,7 @@ mod tests {
             },
         )];
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.inner.block_cache.iter().collect::<Vec<_>>(),
             [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
         );
         assert_eq!(
@@ -320,7 +368,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.inner.block_cache.iter().collect::<Vec<_>>(),
             [
                 committed_notification_1_cache.clone(),
                 reverted_notification_cache.clone(),
@@ -367,7 +415,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.inner.block_cache.iter().collect::<Vec<_>>(),
             [
                 committed_notification_1_cache,
                 reverted_notification_cache,
@@ -392,7 +440,7 @@ mod tests {
         // the notifications before it.
         wal.finalize((block_1_reorged.number, block_1_reorged.hash()).into())?;
         assert_eq!(
-            wal.block_cache.iter().collect::<Vec<_>>(),
+            wal.inner.block_cache.iter().collect::<Vec<_>>(),
             [committed_notification_2_cache, reorged_notification_cache].concat()
         );
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_2, reorged_notification]);
