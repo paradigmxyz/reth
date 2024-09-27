@@ -262,6 +262,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (blocks[0].number, blocks[0].hash()).into(),
+                    parent_hash: blocks[0].parent_hash,
                 },
             ),
             (
@@ -269,6 +270,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (blocks[1].number, blocks[1].hash()).into(),
+                    parent_hash: blocks[1].parent_hash,
                 },
             ),
         ];
@@ -284,6 +286,7 @@ mod tests {
             CachedBlock {
                 action: CachedBlockAction::Revert,
                 block: (blocks[1].number, blocks[1].hash()).into(),
+                parent_hash: blocks[1].parent_hash,
             },
         )];
         assert_eq!(
@@ -304,6 +307,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (block_1_reorged.number, block_1_reorged.hash()).into(),
+                    parent_hash: block_1_reorged.parent_hash,
                 },
             ),
             (
@@ -311,6 +315,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (blocks[2].number, blocks[2].hash()).into(),
+                    parent_hash: blocks[2].parent_hash,
                 },
             ),
         ];
@@ -341,6 +346,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Revert,
                     block: (blocks[2].number, blocks[2].hash()).into(),
+                    parent_hash: blocks[2].parent_hash,
                 },
             ),
             (
@@ -348,6 +354,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (block_2_reorged.number, block_2_reorged.hash()).into(),
+                    parent_hash: block_2_reorged.parent_hash,
                 },
             ),
             (
@@ -355,6 +362,7 @@ mod tests {
                 CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (blocks[3].number, blocks[3].hash()).into(),
+                    parent_hash: blocks[3].parent_hash,
                 },
             ),
         ];
