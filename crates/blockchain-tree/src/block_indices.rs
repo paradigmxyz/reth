@@ -2,10 +2,11 @@
 
 use super::state::SidechainId;
 use crate::canonical_chain::CanonicalChain;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
 use linked_hash_set::LinkedHashSet;
 use reth_execution_types::Chain;
-use reth_primitives::{BlockNumHash, SealedBlockWithSenders};
+use reth_primitives::SealedBlockWithSenders;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
