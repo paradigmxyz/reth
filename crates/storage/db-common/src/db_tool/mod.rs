@@ -24,7 +24,7 @@ pub struct DbTool<N: NodeTypesWithDB> {
 }
 
 impl<N: NodeTypesWithDB> DbTool<N> {
-    /// Get an [`Arc`] to the [`ChainSpec`].
+    /// Get an [`Arc`] to the underlying chainspec.
     pub fn chain(&self) -> Arc<N::ChainSpec> {
         self.provider_factory.chain_spec()
     }
