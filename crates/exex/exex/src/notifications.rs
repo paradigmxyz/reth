@@ -137,7 +137,11 @@ pub struct ExExNotificationsWithHead<P, E> {
     notifications: Receiver<ExExNotification>,
     wal_handle: WalHandle,
     exex_head: ExExHead,
+    /// If true, then we need to check if the ExEx head is on the canonical chain and if not,
+    /// revert its head.
     pending_check_canonical: bool,
+    /// If true, then we need to check if the ExEx head is behind the node head and if so, backfill
+    /// the missing blocks.
     pending_check_backfill: bool,
     /// The backfill job to run before consuming any notifications.
     backfill_job: Option<StreamBackfillJob<E, P, Chain>>,
@@ -170,6 +174,10 @@ where
         }
     }
 
+    /// Checks if the ExEx head is on the canonical chain.
+    ///
+    /// If the head block is not found in the database, it means we're not on the canonical chain
+    /// and we need to revert the notification with the ExEx head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification>> {
         if self.provider.header(&self.exex_head.block.hash)?.is_some() {
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
@@ -201,7 +209,7 @@ where
         Ok(Some(notification.into_inverted()))
     }
 
-    /// Compares the node head against the ExEx head, and synchronizes them in case of a mismatch.
+    /// Compares the node head against the ExEx head, and backfills if needed.
     ///
     /// CAUTON: This method assumes that the ExEx head is <= the node head, and that it's on the
     /// canonical chain.
@@ -251,6 +259,8 @@ where
             if let Some(canonical_notification) = this.check_canonical()? {
                 return Poll::Ready(Some(Ok(canonical_notification)))
             }
+
+            // ExEx head is on the canonical chain, we no longer need to check it
             this.pending_check_canonical = false;
         }
 
