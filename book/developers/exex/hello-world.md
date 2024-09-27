@@ -125,7 +125,7 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
 
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
-                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
         }
     }
 

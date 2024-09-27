@@ -41,7 +41,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Head, SealedBlockWithSenders};
+use reth_primitives::{BlockNumHash, Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
@@ -223,7 +223,7 @@ impl TestExExHandle {
     /// Asserts that the Execution Extension emitted a `FinishedHeight` event with the correct
     /// height.
     #[track_caller]
-    pub fn assert_event_finished_height(&mut self, height: u64) -> eyre::Result<()> {
+    pub fn assert_event_finished_height(&mut self, height: BlockNumHash) -> eyre::Result<()> {
         let event = self.events_rx.try_recv()?;
         assert_eq!(event, ExExEvent::FinishedHeight(height));
         Ok(())
