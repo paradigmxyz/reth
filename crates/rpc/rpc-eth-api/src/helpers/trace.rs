@@ -302,7 +302,6 @@ pub trait Trace: LoadState {
                 // on top of its parent block's state
                 let state_at = block.parent_hash;
                 let block_hash = block.hash();
-                let block_number = block.number;
 
                 let block_number = block_env.number.saturating_to::<u64>();
                 let base_fee = block_env.basefee.saturating_to::<u128>();
@@ -354,6 +353,14 @@ pub trait Trace: LoadState {
                     // next transaction, but only if there's a next transaction
                     if transactions.peek().is_some() {
                         // commit the state changes to the DB
+                        if let Some(acc) = state.get(
+                            std::str::FromStr::<alloy_primitives::Address>::from_str(
+                                "0x0fD5C0C300b9075D62406dA142ab4bBAAC908AeD",
+                            )
+                            .unwrap(),
+                        ) {
+                            println!("state after {:?}: {acc:?}", tx_info.hash)
+                        }
                         db.commit(state)
                     }
                 }
