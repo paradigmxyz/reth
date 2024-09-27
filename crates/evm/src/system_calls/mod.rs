@@ -1,9 +1,15 @@
 //! System contract call functions.
 
-mod eip2935;
+use crate::ConfigureEvm;
+use core::fmt::Display;
+use reth_chainspec::ChainSpec;
+use reth_execution_errors::BlockExecutionError;
+use reth_primitives::Header;
+use revm::{Database, DatabaseCommit, Evm};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
 
+mod eip2935;
 pub use eip2935::*;
-use revm_primitives::ResultAndState;
 
 mod eip4788;
 pub use eip4788::*;
@@ -13,7 +19,6 @@ pub use eip7002::*;
 
 mod eip7251;
 pub use eip7251::*;
-use reth_execution_errors::BlockExecutionError;
 
 /// A hook that is called after each state change.
 // TODO impl for &mut
@@ -55,7 +60,7 @@ pub struct SystemCaller<EvmConfig, DB, Chainspec, Hook = NoopHook> {
 
 impl<EvmConfig, DB, Chainspec> SystemCaller<EvmConfig, DB, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec.
-    pub fn new(evm_config: EvmConfig, db: DB, chain_spec: Chainspec) -> Self {
+    pub const fn new(evm_config: EvmConfig, db: DB, chain_spec: Chainspec) -> Self {
         Self { evm_config, db, chain_spec, hook: None }
     }
 }
@@ -74,15 +79,54 @@ impl<EvmConfig, DB, Chainspec, Hook> SystemCaller<EvmConfig, DB, Chainspec, Hook
 }
 
 impl<EvmConfig, DB, Chainspec, Hook> SystemCaller<EvmConfig, DB, Chainspec, Hook> {
-    // TODO add apply functions that are chainable
-
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
-    pub fn pre_block_blockhashes_contract_call(self) -> Result<Self, BlockExecutionError> {
-        // TODO:
-        // transact
-        // apply hook
-        // commit
-        todo!()
+    pub fn pre_block_blockhashes_contract_call(
+        mut self,
+        initialized_cfg: &CfgEnvWithHandlerCfg,
+        initialized_block_env: &BlockEnv,
+        parent_block_hash: B256,
+    ) -> Result<Self, BlockExecutionError>
+    where
+        DB: Database + DatabaseCommit + Clone,
+        DB::Error: Display,
+        EvmConfig: ConfigureEvm<Header = Header>,
+        Chainspec: AsRef<ChainSpec>,
+        Hook: OnStateHook,
+    {
+        let mut evm = Evm::builder()
+            .with_db(self.db.clone())
+            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+                initialized_cfg.clone(),
+                initialized_block_env.clone(),
+                Default::default(),
+            ))
+            .build();
+
+        let result_and_state = eip2935::transact_blockhashes_contract_call(
+            &self.evm_config,
+            self.chain_spec.as_ref(),
+            initialized_block_env.timestamp.to(),
+            initialized_block_env.number.to(),
+            parent_block_hash,
+            &mut evm,
+        )?;
+
+        if let Some(ref mut hook) = self.hook {
+            if let Some(res) = result_and_state {
+                hook.on_state(&res);
+            }
+        }
+
+        eip2935::apply_blockhashes_contract_call(
+            &self.evm_config,
+            self.chain_spec.as_ref(),
+            initialized_block_env.timestamp.to(),
+            initialized_block_env.number.to(),
+            parent_block_hash,
+            &mut evm,
+        )?;
+
+        Ok(self)
     }
 
     // TODO add other system calls
