@@ -13,7 +13,7 @@ use tracing::instrument;
 ///
 /// Each notification is represented by a single file that contains a MessagePack-encoded
 /// notification.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Storage {
     /// The path to the WAL file.
     path: PathBuf,

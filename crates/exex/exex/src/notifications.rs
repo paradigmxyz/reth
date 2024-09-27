@@ -1,4 +1,4 @@
-use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob};
+use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
 use alloy_primitives::U256;
 use eyre::OptionExt;
 use futures::{Stream, StreamExt};
@@ -21,6 +21,7 @@ pub struct ExExNotifications<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
+    wal_handle: WalHandle,
 }
 
 impl<P: Debug, E: Debug> Debug for ExExNotifications<P, E> {
@@ -40,8 +41,9 @@ impl<P, E> ExExNotifications<P, E> {
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification>,
+        wal_handle: WalHandle,
     ) -> Self {
-        Self { node_head, provider, executor, notifications }
+        Self { node_head, provider, executor, notifications, wal_handle }
     }
 
     /// Receives the next value for this receiver.
@@ -113,6 +115,7 @@ where
             self.provider,
             self.executor,
             self.notifications,
+            self.wal_handle,
             head,
         )
     }
@@ -134,6 +137,8 @@ pub struct ExExNotificationsWithHead<P, E> {
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification>,
+    #[allow(dead_code)]
+    wal_handle: WalHandle,
     exex_head: ExExHead,
     pending_sync: bool,
     /// The backfill job to run before consuming any notifications.
@@ -154,6 +159,7 @@ where
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification>,
+        wal_handle: WalHandle,
         exex_head: ExExHead,
     ) -> Self {
         Self {
@@ -161,6 +167,7 @@ where
             provider,
             executor,
             notifications,
+            wal_handle,
             exex_head,
             pending_sync: true,
             backfill_job: None,
@@ -344,6 +351,8 @@ where
 mod tests {
     use std::future::poll_fn;
 
+    use crate::Wal;
+
     use super::*;
     use alloy_consensus::Header;
     use eyre::OptionExt;
@@ -361,6 +370,9 @@ mod tests {
     #[tokio::test]
     async fn exex_notifications_behind_head_canonical() -> eyre::Result<()> {
         let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
@@ -412,6 +424,7 @@ mod tests {
             provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
+            wal.handle(),
         )
         .with_head(exex_head);
 
@@ -445,6 +458,9 @@ mod tests {
 
     #[tokio::test]
     async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
@@ -485,6 +501,7 @@ mod tests {
             provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
+            wal.handle(),
         )
         .with_head(exex_head);
 
@@ -503,6 +520,9 @@ mod tests {
     #[tokio::test]
     async fn test_notifications_ahead_of_head() -> eyre::Result<()> {
         let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
@@ -544,6 +564,7 @@ mod tests {
             provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
+            wal.handle(),
         )
         .with_head(exex_head);
 
