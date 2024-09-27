@@ -15,7 +15,7 @@ use reth_tracing::tracing::{debug, instrument};
 ///
 /// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
 /// represented by [`BlockCache`]. The role of the block cache is to avoid walking the WAL directory
-/// and decoding notifications every time we want to rollback/finalize the WAL.
+/// and decoding notifications every time we want to iterate or finalize the WAL.
 ///
 /// The expected mode of operation is as follows:
 /// 1. On every new canonical chain notification, call [`Wal::commit`].
@@ -60,6 +60,7 @@ impl Wal {
     }
 }
 
+/// Inner type for the WAL.
 #[derive(Debug)]
 struct WalInner {
     /// The underlying WAL storage backed by a file.
