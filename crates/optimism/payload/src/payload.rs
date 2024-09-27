@@ -53,12 +53,17 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                TransactionSigned::decode_2718(&mut data.as_ref())
-                    .map_err(|err| match err {
-                        Eip2718Error::RlpError(err) => err,
-                        _ => alloy_rlp::Error::Custom("invalid transaction"),
-                    })
-                    .map(|tx| WithEncoded::new(data, tx))
+                let mut buf = data.as_ref();
+                let tx = TransactionSigned::decode_2718(&mut buf).map_err(|err| match err {
+                    Eip2718Error::RlpError(err) => err,
+                    _ => alloy_rlp::Error::Custom("invalid transaction"),
+                })?;
+
+                if !buf.is_empty() {
+                    return Err(alloy_rlp::Error::UnexpectedLength);
+                }
+
+                Ok(WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;
 

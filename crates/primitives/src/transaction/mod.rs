@@ -1982,30 +1982,4 @@ mod tests {
 
         assert!(res.is_err());
     }
-
-    #[test]
-    fn decode_envelope_fails_on_trailing_bytes_legacy() {
-        let data = [201, 3, 56, 56, 128, 43, 36, 27, 128, 3, 192];
-
-        let result = TransactionSigned::decode_2718(&mut data.as_ref());
-
-        assert!(result.is_err());
-        let Err(Eip2718Error::RlpError(err)) = result else {
-            panic!("Expected RlpError, got {:?}", result);
-        };
-        assert_eq!(err, RlpError::UnexpectedLength);
-    }
-
-    #[test]
-    fn decode_envelope_fails_on_trailing_bytes_eip2718() {
-        let data = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d900");
-
-        let result = TransactionSigned::decode_2718(&mut data.as_ref());
-
-        assert!(result.is_err());
-        let Err(Eip2718Error::RlpError(err)) = result else {
-            panic!("Expected RlpError, got {:?}", result);
-        };
-        assert_eq!(err, RlpError::UnexpectedLength);
-    }
 }
