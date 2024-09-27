@@ -698,28 +698,28 @@ impl Iterator for BlockRangeInclusiveIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
+    use reth_testing_utils::generators;
 
     #[test]
     fn test_block_range_iter() {
-        for _ in 0..100 {
-            let mut rng = thread_rng();
-            let start = rng.gen::<u32>() as u64;
-            let end = start.saturating_add(rng.gen::<u32>() as u64);
-            let step = rng.gen::<u16>() as u64;
-            let range = start..=end;
-            let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
-            let (from, mut end) = iter.next().unwrap();
-            assert_eq!(from, start);
-            assert_eq!(end, (from + step).min(*range.end()));
+        let mut rng = generators::rng();
 
-            for (next_from, next_end) in iter {
-                // ensure range starts with previous end + 1
-                assert_eq!(next_from, end + 1);
-                end = next_end;
-            }
+        let start = rng.gen::<u32>() as u64;
+        let end = start.saturating_add(rng.gen::<u32>() as u64);
+        let step = rng.gen::<u16>() as u64;
+        let range = start..=end;
+        let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
+        let (from, mut end) = iter.next().unwrap();
+        assert_eq!(from, start);
+        assert_eq!(end, (from + step).min(*range.end()));
 
-            assert_eq!(end, *range.end());
+        for (next_from, next_end) in iter {
+            // ensure range starts with previous end + 1
+            assert_eq!(next_from, end + 1);
+            end = next_end;
         }
+
+        assert_eq!(end, *range.end());
     }
 }
