@@ -73,9 +73,7 @@ impl Storage {
     ///
     /// Number of removed notifications.
     pub(super) fn remove_notifications(&self, range: RangeInclusive<u64>) -> eyre::Result<usize> {
-        for id in range.clone() {
-            self.remove_notification(id);
-        }
+        range.clone().for_each(|id| self.remove_notification(id));
 
         Ok(range.count())
     }

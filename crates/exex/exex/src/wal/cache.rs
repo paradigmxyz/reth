@@ -108,17 +108,17 @@ impl BlockCache {
         let committed_chain = notification.committed_chain();
 
         if let Some(reverted_chain) = reverted_chain {
-            for block in reverted_chain.blocks().values() {
+            reverted_chain.blocks().values().for_each(|block| {
                 files.entry(file_id).or_default().push_back(CachedBlock {
                     action: CachedBlockAction::Revert,
                     block: (block.number, block.hash()).into(),
                     parent_hash: block.parent_hash,
-                });
-            }
+                })
+            });
         }
 
         if let Some(committed_chain) = committed_chain {
-            for block in committed_chain.blocks().values() {
+            committed_chain.blocks().values().for_each(|block| {
                 let cached_block = CachedBlock {
                     action: CachedBlockAction::Commit,
                     block: (block.number, block.hash()).into(),
@@ -126,7 +126,7 @@ impl BlockCache {
                 };
                 files.entry(file_id).or_default().push_back(cached_block);
                 self.blocks.insert(block.hash(), cached_block);
-            }
+            });
         }
     }
 }
