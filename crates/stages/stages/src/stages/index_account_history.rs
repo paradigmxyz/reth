@@ -118,7 +118,7 @@ where
             collector,
             first_sync,
             ShardedKey::new,
-            ShardedKey::<Address>::decode,
+            ShardedKey::<Address>::decode_owned,
             |key| key.key,
         )?;
 

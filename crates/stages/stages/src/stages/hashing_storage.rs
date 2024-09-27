@@ -134,7 +134,7 @@ where
                     B256::from_slice(&addr_key[..32]),
                     StorageEntry {
                         key: B256::from_slice(&addr_key[32..]),
-                        value: CompactU256::decompress(value)?.into(),
+                        value: CompactU256::decompress_owned(value)?.into(),
                     },
                 )?;
             }

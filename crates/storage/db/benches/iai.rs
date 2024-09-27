@@ -25,7 +25,7 @@ macro_rules! impl_iai_callgrind_inner {
                 #[library_benchmark]
                 pub fn $decompress() {
                     for (_, _, _, comp) in black_box(load_vectors::<reth_db::tables::$name>()) {
-                        let _ = black_box(<reth_db::tables::$name as Table>::Value::decompress(comp));
+                        let _ = black_box(<reth_db::tables::$name as Table>::Value::decompress(&comp));
                     }
                 }
 
@@ -39,7 +39,7 @@ macro_rules! impl_iai_callgrind_inner {
                 #[library_benchmark]
                 pub fn $decode() {
                     for (_, enc, _, _) in black_box(load_vectors::<reth_db::tables::$name>()) {
-                        let _ = black_box(<reth_db::tables::$name as Table>::Key::decode(enc));
+                        let _ = black_box(<reth_db::tables::$name as Table>::Key::decode(&enc));
                     }
                 }
 
