@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof,
-    trie_cursor::TrieCursorFactory, HashedPostState,
+    hashed_cursor::HashedCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof::{Proof, StorageProof},
+    trie_cursor::TrieCursorFactory,
+    HashedPostState,
 };
 use alloy_primitives::{
     keccak256,
@@ -100,8 +103,7 @@ where
         let mut account_multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_targets(proof_targets.clone())
-                .multiproof()?;
+                .multiproof(proof_targets.clone())?;
 
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
@@ -162,13 +164,19 @@ where
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
                 let target_key = B256::from_slice(&padded_key);
-                let proof = Proof::new(
+                let storage_prefix_set = self
+                    .prefix_sets
+                    .storage_prefix_sets
+                    .get(&hashed_address)
+                    .cloned()
+                    .unwrap_or_default();
+                let proof = StorageProof::new_hashed(
                     self.trie_cursor_factory.clone(),
                     self.hashed_cursor_factory.clone(),
+                    hashed_address,
                 )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_target((hashed_address, HashSet::from_iter([target_key])))
-                .storage_multiproof(hashed_address)?;
+                .with_prefix_set_mut(storage_prefix_set)
+                .storage_proof(HashSet::from_iter([target_key]))?;
 
                 // The subtree only contains the proof for a single target.
                 let node =
@@ -182,11 +190,11 @@ where
             // Right pad the target with 0s.
             let mut padded_key = key.pack();
             padded_key.resize(32, 0);
+            let targets = HashMap::from_iter([(B256::from_slice(&padded_key), HashSet::default())]);
             let proof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .with_target((B256::from_slice(&padded_key), HashSet::default()))
-                    .multiproof()?;
+                    .multiproof(targets)?;
 
             // The subtree only contains the proof for a single target.
             let node =
