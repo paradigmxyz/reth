@@ -6,7 +6,7 @@ use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::Header;
 use revm::{Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
+use revm_primitives::{BlockEnv, ResultAndState, B256};
 
 mod eip2935;
 pub use eip2935::*;
@@ -48,8 +48,9 @@ impl OnStateHook for NoopHook {
 /// An ephemeral helper type for executing system calls.
 ///
 /// This can be used to chain system transaction calls.
-#[derive(Debug)]
-pub struct SystemCaller<EvmConfig, DB, Chainspec, Hook = NoopHook> {
+#[allow(missing_debug_implementations)]
+pub struct SystemCaller<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook = NoopHook> {
+    evm: Evm<'a, Ext, DB>,
     evm_config: EvmConfig,
     db: DB,
     chain_spec: Chainspec,
@@ -58,31 +59,39 @@ pub struct SystemCaller<EvmConfig, DB, Chainspec, Hook = NoopHook> {
     hook: Option<Hook>,
 }
 
-impl<EvmConfig, DB, Chainspec> SystemCaller<EvmConfig, DB, Chainspec> {
+impl<'a, EvmConfig, Ext, DB: Database, Chainspec> SystemCaller<'a, EvmConfig, Ext, DB, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec.
-    pub const fn new(evm_config: EvmConfig, db: DB, chain_spec: Chainspec) -> Self {
-        Self { evm_config, db, chain_spec, hook: None }
+    pub const fn new(
+        evm_config: EvmConfig,
+        db: DB,
+        chain_spec: Chainspec,
+        evm: Evm<'a, Ext, DB>,
+    ) -> Self {
+        Self { evm_config, db, chain_spec, evm, hook: None }
     }
 }
 
-impl<EvmConfig, DB, Chainspec, Hook> SystemCaller<EvmConfig, DB, Chainspec, Hook> {
+impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
+    SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, Hook>
+{
     /// Installs a custom hook to be called after each state change.
     pub fn with_state_hook<H: OnStateHook>(
         self,
         hook: H,
-    ) -> SystemCaller<EvmConfig, DB, Chainspec, H> {
-        let Self { evm_config, db, chain_spec, .. } = self;
-        SystemCaller { evm_config, db, chain_spec, hook: Some(hook) }
+    ) -> SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, H> {
+        let Self { evm_config, db, chain_spec, evm, .. } = self;
+        SystemCaller { evm_config, db, chain_spec, evm, hook: Some(hook) }
     }
-    /// Convenience type to consume the type and drop borrowed fields
+    /// Convenience method to consume the type and drop borrowed fields
     pub fn finish(self) {}
 }
 
-impl<EvmConfig, DB, Chainspec, Hook> SystemCaller<EvmConfig, DB, Chainspec, Hook> {
+impl<'a, EvmConfig, Ext, DB: Database, Chainspec, Hook>
+    SystemCaller<'a, EvmConfig, Ext, DB, Chainspec, Hook>
+{
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
-    pub fn pre_block_blockhashes_contract_call(
+    pub fn pre_block_blockhashes_contract_call<EXT>(
         mut self,
-        initialized_cfg: &CfgEnvWithHandlerCfg,
         initialized_block_env: &BlockEnv,
         parent_block_hash: B256,
     ) -> Result<Self, BlockExecutionError>
@@ -93,29 +102,20 @@ impl<EvmConfig, DB, Chainspec, Hook> SystemCaller<EvmConfig, DB, Chainspec, Hook
         Chainspec: AsRef<ChainSpec>,
         Hook: OnStateHook,
     {
-        let mut evm = Evm::builder()
-            .with_db(self.db.clone())
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                initialized_cfg.clone(),
-                initialized_block_env.clone(),
-                Default::default(),
-            ))
-            .build();
-
         let result_and_state = eip2935::transact_blockhashes_contract_call(
             &self.evm_config,
             self.chain_spec.as_ref(),
             initialized_block_env.timestamp.to(),
             initialized_block_env.number.to(),
             parent_block_hash,
-            &mut evm,
+            &mut self.evm,
         )?;
 
         if let Some(res) = result_and_state {
             if let Some(ref mut hook) = self.hook {
                 hook.on_state(&res);
             }
-            evm.context.evm.db.commit(res.state);
+            self.evm.context.evm.db.commit(res.state);
         }
 
         Ok(self)
