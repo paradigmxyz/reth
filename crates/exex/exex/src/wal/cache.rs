@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, VecDeque};
 
+use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_exex_types::ExExNotification;
-use reth_primitives::{BlockNumHash, B256};
 
 /// The block cache of the WAL.
 ///
