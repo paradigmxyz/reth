@@ -52,7 +52,7 @@ pub struct ExExHandle {
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
-    /// The finished block number of the `ExEx`.
+    /// The finished block of the `ExEx`.
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumHash>,
