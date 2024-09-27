@@ -21,7 +21,7 @@ pub mod account;
 pub use account::{Account, Bytecode};
 
 mod integer_list;
-pub use integer_list::{IntegerList, RoaringBitmapError};
+pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod request;
 pub use request::{Request, Requests};
