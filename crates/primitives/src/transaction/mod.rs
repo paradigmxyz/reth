@@ -1583,7 +1583,7 @@ mod tests {
         Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, B256, U256,
     };
-    use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
+    use alloy_eips::eip2718::{Decodable2718, Encodable2718};
     use alloy_primitives::{address, b256, bytes, Address, Parity};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
