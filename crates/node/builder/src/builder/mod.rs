@@ -10,7 +10,7 @@ pub use states::*;
 use std::sync::Arc;
 
 use futures::Future;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
@@ -641,7 +641,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 }
 
-impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>> BuilderContext<Node> {
+impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext<Node> {
     /// Creates the [`NetworkBuilder`] for the node.
     pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
         let network_config = self.network_config()?;

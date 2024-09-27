@@ -162,21 +162,19 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
-            .with_head_timestamp(ctx.head().timestamp)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(
-                ctx.provider().clone(),
-                ctx.task_executor().clone(),
-                blob_store.clone(),
-            )
-            .map(|validator| {
-                OpTransactionValidator::new(validator)
-                    // In --dev mode we can't require gas fees because we're unable to decode the L1
-                    // block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
-            });
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
+            ctx.chain_spec().inner.clone(),
+        ))
+        .with_head_timestamp(ctx.head().timestamp)
+        .kzg_settings(ctx.kzg_settings()?)
+        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+        .build_with_tasks(ctx.provider().clone(), ctx.task_executor().clone(), blob_store.clone())
+        .map(|validator| {
+            OpTransactionValidator::new(validator)
+                // In --dev mode we can't require gas fees because we're unable to decode
+                // the L1 block info
+                .require_l1_data_gas_fee(!ctx.config().dev.dev)
+        });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
             validator,
@@ -298,11 +296,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        self.spawn(
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*ctx.chain_spec()).clone() })),
-            ctx,
-            pool,
-        )
+        self.spawn(OptimismEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 

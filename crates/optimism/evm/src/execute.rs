@@ -505,12 +505,8 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
-                inner: (*chain_spec).clone(),
-            })),
-            chain_spec,
-        }
+        let chain_spec = Arc::new(OpChainSpec::new(Arc::unwrap_or_clone(chain_spec)));
+        OpExecutorProvider { evm_config: OptimismEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
     #[test]

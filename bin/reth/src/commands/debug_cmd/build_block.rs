@@ -79,7 +79,7 @@ pub struct Command<C: ChainSpecParser> {
     blobs_bundle_path: Option<PathBuf>,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.

@@ -28,12 +28,14 @@ pub use op_sepolia::OP_SEPOLIA;
 
 use derive_more::{Constructor, Deref, Into};
 use reth_chainspec::{
-    BaseFeeParams, ChainSpec, DepositContract, EthChainSpec, EthereumHardforks, Hardforks,
+    BaseFeeParams, ChainSpec, DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId,
+    Hardforks, Head,
 };
+use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
 
 /// OP stack chain spec type.
-#[derive(Debug, Clone, Deref, Into, Constructor)]
+#[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,
@@ -52,6 +54,10 @@ impl EthChainSpec for OpChainSpec {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
+        self.inner.base_fee_params_at_block(block_number)
     }
 
     fn deposit_contract(&self) -> Option<&DepositContract> {
@@ -81,6 +87,10 @@ impl EthChainSpec for OpChainSpec {
     fn max_gas_limit(&self) -> u64 {
         self.inner.max_gas_limit()
     }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.inner.bootnodes()
+    }
 }
 
 impl Hardforks for OpChainSpec {
@@ -92,6 +102,18 @@ impl Hardforks for OpChainSpec {
         &self,
     ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
         self.inner.forks_iter()
+    }
+
+    fn fork_id(&self, head: &Head) -> ForkId {
+        self.inner.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> ForkId {
+        self.inner.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: Head) -> ForkFilter {
+        self.inner.fork_filter(head)
     }
 }
 

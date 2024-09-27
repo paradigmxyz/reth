@@ -35,7 +35,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     ReplayEngine(replay_engine::Command<C>),
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
     pub async fn execute<
         N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,

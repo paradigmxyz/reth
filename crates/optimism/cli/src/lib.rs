@@ -35,7 +35,7 @@ use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
 use futures_util::Future;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_cli_runner::CliRunner;
@@ -55,7 +55,7 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<SpeC: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<Spec, Ext>,
@@ -109,9 +109,9 @@ impl Cli {
     }
 }
 
-impl<Spec, Ext> Cli<Spec, Ext>
+impl<C, Ext> Cli<C, Ext>
 where
-    Spec: ChainSpecParser,
+    C: ChainSpecParser<ChainSpec: EthChainSpec>,
     Ext: clap::Args + fmt::Debug,
 {
     /// Execute the configured cli command.
@@ -125,7 +125,7 @@ where
     {
         // add network name to logs dir
         self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain.to_string());
+            self.logs.log_file_directory.join(self.chain.chain().to_string());
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);

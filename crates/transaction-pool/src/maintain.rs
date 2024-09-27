@@ -13,7 +13,7 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
@@ -74,12 +74,7 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone
-        + Send
-        + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -100,12 +95,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    Client: StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone
-        + Send
-        + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,

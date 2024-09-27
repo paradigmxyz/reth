@@ -57,7 +57,7 @@ pub struct Command<C: ChainSpecParser> {
     pub interval: u64,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>, Client>(
         &self,
         config: &Config,

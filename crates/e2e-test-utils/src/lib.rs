@@ -10,7 +10,7 @@ use reth::{
     rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
     tasks::TaskManager,
 };
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
@@ -47,11 +47,11 @@ mod traits;
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,

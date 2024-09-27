@@ -40,7 +40,7 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser> ImportOpCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,

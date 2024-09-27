@@ -582,7 +582,7 @@ struct GenesisAccountWithAddress {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, HOLESKY, MAINNET, SEPOLIA};
+    use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
