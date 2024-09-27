@@ -83,6 +83,10 @@ where
         mut self,
         state: HashedPostState,
     ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
+        if state.is_empty() {
+            return Ok(self.witness)
+        }
+
         let proof_targets = HashMap::from_iter(
             state
                 .accounts
@@ -92,6 +96,7 @@ where
                     (*hashed_address, storage.storage.keys().copied().collect())
                 })),
         );
+
         let mut account_multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
