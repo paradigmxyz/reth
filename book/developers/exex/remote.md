@@ -271,7 +271,6 @@ Don't forget to emit `ExExEvent::FinishedHeight`
 
 use futures_util::StreamExt;
 use reth_exex::{ExExContext, ExExEvent};
-use reth_primitives::BlockNumHash;
 
 async fn remote_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
@@ -279,9 +278,8 @@ async fn remote_exex<Node: FullNodeComponents>(
 ) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.next().await {
         if let Some(committed_chain) = notification.committed_chain() {
-            let tip = BlockNumHash::new(committed_chain.tip().number, committed_chain.tip().hash);
             ctx.events
-                .send(ExExEvent::FinishedHeight(tip))?;
+                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
         }
 
         info!("Notification sent to the gRPC server");
@@ -350,7 +348,6 @@ use reth_tracing::tracing::info;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
-use reth_primitives::BlockNumHash;
 
 struct ExExService {
     notifications: Arc<broadcast::Sender<ExExNotification>>,
@@ -390,9 +387,8 @@ async fn remote_exex<Node: FullNodeComponents>(
 ) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.next().await {
         if let Some(committed_chain) = notification.committed_chain() {
-            let tip = BlockNumHash::new(committed_chain.tip().number, committed_chain.tip().hash);
             ctx.events
-                .send(ExExEvent::FinishedHeight(tip))?;
+                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
         }
 
         info!(?notification, "Notification sent to the gRPC server");
