@@ -1319,7 +1319,7 @@ mod tests {
 
         for i in 1..5 {
             let key = ShardedKey::new(real_key, i * 100);
-            let list: IntegerList = vec![i * 100u64].into();
+            let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
                 .unwrap();
@@ -1340,7 +1340,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 200), key);
-            let list200: IntegerList = vec![200u64].into();
+            let list200 = IntegerList::new_pre_sorted([200u64]);
             assert_eq!(list200, list);
         }
         // Seek greatest index
@@ -1357,7 +1357,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 400), key);
-            let list400: IntegerList = vec![400u64].into();
+            let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
     }

@@ -182,7 +182,7 @@ mod tests {
     }
 
     fn list(list: &[u64]) -> BlockNumberList {
-        BlockNumberList::new(list).unwrap()
+        BlockNumberList::new(list.iter().copied()).unwrap()
     }
 
     fn cast(
