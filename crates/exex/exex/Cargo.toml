@@ -41,6 +41,7 @@ tokio-util.workspace = true
 tokio.workspace = true
 
 ## misc
+dashmap.workspace = true
 eyre.workspace = true
 metrics.workspace = true
 serde_json.workspace = true

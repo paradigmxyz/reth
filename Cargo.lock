@@ -7396,6 +7396,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
+ "dashmap 6.1.0",
  "eyre",
  "futures",
  "metrics",
