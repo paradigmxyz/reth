@@ -108,6 +108,7 @@ use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
+use reth_primitives::BlockNumHash;
 
 async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.next().await {
@@ -124,8 +125,9 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
         };
 
         if let Some(committed_chain) = notification.committed_chain() {
+            let tip = BlockNumHash::new(committed_chain.tip().number, committed_chain.tip().hash);
             ctx.events
-                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                .send(ExExEvent::FinishedHeight(tip))?;
         }
     }
 

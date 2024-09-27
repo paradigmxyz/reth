@@ -30,6 +30,7 @@ use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
+use reth_primitives::BlockNumHash;
 
 struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
@@ -55,9 +56,10 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
             };
 
             if let Some(committed_chain) = notification.committed_chain() {
+                let tip = BlockNumHash::new(committed_chain.tip().number, committed_chain.tip().hash);
                 this.ctx
                     .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                    .send(ExExEvent::FinishedHeight(tip))?;
             }
         }
 
@@ -107,6 +109,7 @@ use reth::{api::FullNodeComponents, primitives::BlockNumber};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
+use reth_primitives::BlockNumHash;
 
 struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
@@ -150,9 +153,11 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
                     .map(|b| b.body.len() as u64)
                     .sum::<u64>();
 
+                let tip = BlockNumHash::new(committed_chain.tip().number, committed_chain.tip().hash);
+
                 this.ctx
                     .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                    .send(ExExEvent::FinishedHeight(tip))?;
             }
 
             if let Some(first_block) = this.first_block {
