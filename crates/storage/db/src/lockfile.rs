@@ -102,9 +102,10 @@ struct ProcessUID {
 impl ProcessUID {
     /// Creates [`Self`] for the provided PID.
     fn new(pid: usize) -> Option<Self> {
-        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()))
-            .process(pid.into())
-            .map(|process| Self { pid, start_time: process.start_time() })
+        let mut system = System::new();
+        let pid2 = sysinfo::Pid::from(pid);
+        system.refresh_process_specifics(pid2, ProcessRefreshKind::new());
+        system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })
     }
 
     /// Creates [`Self`] from own process.
