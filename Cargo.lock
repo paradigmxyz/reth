@@ -7400,6 +7400,7 @@ dependencies = [
  "eyre",
  "futures",
  "metrics",
+ "parking_lot 0.12.3",
  "reth-blockchain-tree",
  "reth-chain-state",
  "reth-chainspec",

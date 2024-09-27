@@ -1,9 +1,7 @@
-use std::{
-    collections::{BTreeMap, VecDeque},
-    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
-};
+use std::collections::{BTreeMap, VecDeque};
 
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use reth_exex_types::ExExNotification;
 use reth_primitives::{BlockNumHash, B256};
 
@@ -11,14 +9,14 @@ use reth_primitives::{BlockNumHash, B256};
 ///
 /// This cache is needed to avoid walking the WAL directory every time we want to find a
 /// notification corresponding to a block or a block corresponding to a hash.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlockCache {
     /// A mapping of `File ID -> List of Blocks`.
     ///
     /// For each notification written to the WAL, there will be an entry per block written to
     /// the cache with the same file ID. I.e. for each notification, there may be multiple blocks
     /// in the cache.
-    files: Arc<RwLock<BTreeMap<u64, VecDeque<CachedBlock>>>>,
+    files: RwLock<BTreeMap<u64, VecDeque<CachedBlock>>>,
     /// A mapping of `Block Hash -> Block`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
@@ -29,25 +27,18 @@ pub struct BlockCache {
 impl BlockCache {
     /// Creates a new instance of [`BlockCache`].
     pub(super) fn new() -> Self {
-        Self { files: Arc::new(RwLock::new(BTreeMap::new())), blocks: DashMap::new() }
-    }
-
-    fn read_files(&self) -> RwLockReadGuard<'_, BTreeMap<u64, VecDeque<CachedBlock>>> {
-        self.files.read().unwrap()
-    }
-
-    fn write_files(&self) -> RwLockWriteGuard<'_, BTreeMap<u64, VecDeque<CachedBlock>>> {
-        self.files.write().unwrap()
+        Self { files: RwLock::new(BTreeMap::new()), blocks: DashMap::new() }
     }
 
     /// Returns `true` if the cache is empty.
     pub(super) fn is_empty(&self) -> bool {
-        self.read_files().is_empty()
+        self.files.read().is_empty()
     }
 
     /// Returns a front-to-back iterator.
     pub(super) fn iter(&self) -> impl Iterator<Item = (u64, CachedBlock)> + '_ {
-        self.read_files()
+        self.files
+            .read()
             .iter()
             .flat_map(|(k, v)| v.iter().map(move |b| (*k, *b)))
             .collect::<Vec<_>>()
@@ -57,24 +48,24 @@ impl BlockCache {
     /// Provides a reference to the first block from the cache, or `None` if the cache is
     /// empty.
     pub(super) fn front(&self) -> Option<(u64, CachedBlock)> {
-        self.read_files().first_key_value().and_then(|(k, v)| v.front().map(|b| (*k, *b)))
+        self.files.read().first_key_value().and_then(|(k, v)| v.front().map(|b| (*k, *b)))
     }
 
     /// Provides a reference to the last block from the cache, or `None` if the cache is
     /// empty.
     pub(super) fn back(&self) -> Option<(u64, CachedBlock)> {
-        self.read_files().last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
+        self.files.read().last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
     }
 
     /// Removes the notification with the given file ID.
     pub(super) fn remove_notification(&self, key: u64) -> Option<VecDeque<CachedBlock>> {
-        self.write_files().remove(&key)
+        self.files.write().remove(&key)
     }
 
     /// Pops the first block from the cache. If it resulted in the whole file entry being empty,
     /// it will also remove the file entry.
     pub(super) fn pop_front(&self) -> Option<(u64, CachedBlock)> {
-        let mut files = self.write_files();
+        let mut files = self.files.write();
 
         let first_entry = files.first_entry()?;
         let key = *first_entry.key();
@@ -90,7 +81,7 @@ impl BlockCache {
     /// Pops the last block from the cache. If it resulted in the whole file entry being empty,
     /// it will also remove the file entry.
     pub(super) fn pop_back(&self) -> Option<(u64, CachedBlock)> {
-        let mut files = self.write_files();
+        let mut files = self.files.write();
 
         let last_entry = files.last_entry()?;
         let key = *last_entry.key();
@@ -111,7 +102,7 @@ impl BlockCache {
         file_id: u64,
         notification: &ExExNotification,
     ) {
-        let mut files = self.write_files();
+        let mut files = self.files.write();
 
         let reverted_chain = notification.reverted_chain();
         let committed_chain = notification.committed_chain();
