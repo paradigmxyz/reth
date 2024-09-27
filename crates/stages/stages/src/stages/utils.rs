@@ -54,11 +54,11 @@ where
     let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
     let mut collect = |cache: &HashMap<P, Vec<u64>>| {
-        for (key, indice_list) in cache {
-            let last = indice_list.last().expect("qed");
+        for (key, indices) in cache {
+            let last = indices.last().expect("qed");
             collector.insert(
                 sharded_key_factory(*key, *last),
-                BlockNumberList::new_pre_sorted(indice_list),
+                BlockNumberList::new_pre_sorted(indices.iter().copied()),
             )?;
         }
         Ok::<(), StageError>(())
