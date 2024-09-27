@@ -1,4 +1,5 @@
 use crate::utils::{test_address, test_rpc_builder};
+use alloy_rpc_types::{Block, Receipt, Transaction};
 use jsonrpsee::{
     server::{middleware::rpc::RpcServiceT, RpcServiceBuilder},
     types::Request,
@@ -8,7 +9,6 @@ use reth_rpc::EthApi;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_rpc_types::{Block, Receipt, Transaction};
 use std::{
     future::Future,
     pin::Pin,

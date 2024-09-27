@@ -9,14 +9,14 @@
 
 extern crate alloc;
 
-pub mod constants;
-
 mod base;
 mod base_sepolia;
+pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
 
+use alloy_primitives::{Parity, Signature, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use dev::OP_DEV;
@@ -33,15 +33,19 @@ pub struct OpChainSpec {
     pub inner: ChainSpec,
 }
 
+/// Returns the signature for the optimism deposit transactions, which don't include a
+/// signature.
+pub fn optimism_deposit_tx_signature() -> Signature {
+    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
-    use reth_ethereum_forks::{
-        EthereumHardfork, ForkCondition, ForkHash, ForkId, Head, OptimismHardfork,
-        OptimismHardforks,
-    };
+    use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
+    use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
 
     use crate::*;
 

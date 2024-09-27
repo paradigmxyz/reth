@@ -311,7 +311,7 @@ mod tests {
 
         let mut receipts = Vec::new();
         for block in &blocks {
-            for transaction in &block.body {
+            for transaction in &block.body.transactions {
                 receipts
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
             }

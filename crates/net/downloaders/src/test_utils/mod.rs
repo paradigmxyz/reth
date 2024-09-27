@@ -29,20 +29,7 @@ pub(crate) fn generate_bodies(
     );
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
-    let bodies = blocks
-        .into_iter()
-        .map(|block| {
-            (
-                block.hash(),
-                BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                    requests: block.requests,
-                },
-            )
-        })
-        .collect();
+    let bodies = blocks.into_iter().map(|block| (block.hash(), block.body)).collect();
 
     (headers, bodies)
 }

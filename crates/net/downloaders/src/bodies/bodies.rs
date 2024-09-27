@@ -607,7 +607,6 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::BlockBody;
     use reth_provider::{
         providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
     };
@@ -661,20 +660,8 @@ mod tests {
         );
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
-        let bodies = blocks
-            .into_iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body,
-                        ommers: block.ommers,
-                        withdrawals: None,
-                        requests: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+        let bodies =
+            blocks.into_iter().map(|block| (block.hash(), block.body)).collect::<HashMap<_, _>>();
 
         insert_headers(db.db(), &headers);
 

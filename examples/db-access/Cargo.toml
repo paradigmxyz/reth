@@ -15,5 +15,7 @@ reth-rpc-types.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-types.workspace = true
 
+alloy-rpc-types.workspace = true
+
 
 eyre.workspace = true

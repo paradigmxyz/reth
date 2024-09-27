@@ -1,5 +1,6 @@
 //! Engine node related functionality.
 
+use alloy_rpc_types::engine::ClientVersionV1;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -31,7 +32,6 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -146,7 +146,7 @@ where
             ctx.configs().clone(),
         )
         .launch()
-        .await;
+        .await?;
 
         // create pipeline
         let network_client = ctx.components().network().fetch_client().await?;
@@ -275,6 +275,7 @@ where
             Box::new(ctx.task_executor().clone()),
             client,
             EngineCapabilities::default(),
+            ctx.components().engine_validator().clone(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 

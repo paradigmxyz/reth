@@ -133,7 +133,7 @@ where
             // Header validation
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
-                    block: Box::new(header.clone().seal(header_hash)),
+                    block: Box::new(SealedHeader::new(header.clone(), header_hash)),
                     error: BlockErrorKind::Validation(error),
                 }
             })?;
@@ -379,7 +379,9 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
+    use reth_primitives::{
+        alloy_primitives::Sealable, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
+    };
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
@@ -489,7 +491,9 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let header = header.unwrap().seal_slow();
+                            let sealed = header.unwrap().seal_slow();
+                            let (header, seal) = sealed.into_parts();
+                            let header = SealedHeader::new(header, seal);
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty

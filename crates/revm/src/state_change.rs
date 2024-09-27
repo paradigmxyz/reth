@@ -20,21 +20,21 @@ pub fn post_block_balance_increments(
         calc::base_block_reward(chain_spec, block.number, block.difficulty, total_difficulty)
     {
         // Ommer rewards
-        for ommer in &block.ommers {
+        for ommer in &block.body.ommers {
             *balance_increments.entry(ommer.beneficiary).or_default() +=
                 calc::ommer_reward(base_block_reward, block.number, ommer.number);
         }
 
         // Full block reward
         *balance_increments.entry(block.beneficiary).or_default() +=
-            calc::block_reward(base_block_reward, block.ommers.len());
+            calc::block_reward(base_block_reward, block.body.ommers.len());
     }
 
     // process withdrawals
     insert_post_block_withdrawals_balance_increments(
         chain_spec,
         block.timestamp,
-        block.withdrawals.as_ref().map(Withdrawals::as_ref),
+        block.body.withdrawals.as_ref().map(Withdrawals::as_ref),
         &mut balance_increments,
     );
 

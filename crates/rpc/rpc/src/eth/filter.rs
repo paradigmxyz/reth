@@ -11,11 +11,15 @@ use std::{
 };
 
 use alloy_primitives::TxHash;
+use alloy_rpc_types::{
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    PendingTransactionFilterKind,
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_node_api::EthApiTypes;
-use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered};
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
@@ -23,10 +27,6 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::ToRpcResult;
-use reth_rpc_types::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind,
-};
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};

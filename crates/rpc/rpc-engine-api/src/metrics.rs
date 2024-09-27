@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use crate::EngineApiError;
+use alloy_rpc_types_engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
 use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
-use reth_rpc_types::engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
 
 /// All beacon consensus engine metrics
 #[derive(Default)]
@@ -61,16 +61,16 @@ pub(crate) struct ForkchoiceUpdatedResponseMetrics {
     /// The total count of forkchoice updated messages received.
     pub(crate) forkchoice_updated_messages: Counter,
     /// The total count of forkchoice updated messages that we responded to with
-    /// [Invalid](reth_rpc_types::engine::PayloadStatusEnum#Invalid).
+    /// [`Invalid`](alloy_rpc_types_engine::PayloadStatusEnum#Invalid).
     pub(crate) forkchoice_updated_invalid: Counter,
     /// The total count of forkchoice updated messages that we responded to with
-    /// [Valid](reth_rpc_types::engine::PayloadStatusEnum#Valid).
+    /// [`Valid`](alloy_rpc_types_engine::PayloadStatusEnum#Valid).
     pub(crate) forkchoice_updated_valid: Counter,
     /// The total count of forkchoice updated messages that we responded to with
-    /// [Syncing](reth_rpc_types::engine::PayloadStatusEnum#Syncing).
+    /// [`Syncing`](alloy_rpc_types_engine::PayloadStatusEnum#Syncing).
     pub(crate) forkchoice_updated_syncing: Counter,
     /// The total count of forkchoice updated messages that we responded to with
-    /// [Accepted](reth_rpc_types::engine::PayloadStatusEnum#Accepted).
+    /// [`Accepted`](alloy_rpc_types_engine::PayloadStatusEnum#Accepted).
     pub(crate) forkchoice_updated_accepted: Counter,
     /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
     /// with an error type that is not a [`PayloadStatusEnum`].
@@ -84,16 +84,16 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
-    /// [Invalid](reth_rpc_types::engine::PayloadStatusEnum#Invalid).
+    /// [Invalid](alloy_rpc_types_engine::PayloadStatusEnum#Invalid).
     pub(crate) new_payload_invalid: Counter,
     /// The total count of new payload messages that we responded to with
-    /// [Valid](reth_rpc_types::engine::PayloadStatusEnum#Valid).
+    /// [Valid](alloy_rpc_types_engine::PayloadStatusEnum#Valid).
     pub(crate) new_payload_valid: Counter,
     /// The total count of new payload messages that we responded to with
-    /// [Syncing](reth_rpc_types::engine::PayloadStatusEnum#Syncing).
+    /// [Syncing](alloy_rpc_types_engine::PayloadStatusEnum#Syncing).
     pub(crate) new_payload_syncing: Counter,
     /// The total count of new payload messages that we responded to with
-    /// [Accepted](reth_rpc_types::engine::PayloadStatusEnum#Accepted).
+    /// [Accepted](alloy_rpc_types_engine::PayloadStatusEnum#Accepted).
     pub(crate) new_payload_accepted: Counter,
     /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
     /// error type that is not a [`PayloadStatusEnum`].

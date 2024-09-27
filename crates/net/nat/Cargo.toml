@@ -18,6 +18,7 @@ serde_with = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time"] }
 if-addrs.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true

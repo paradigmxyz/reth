@@ -17,3 +17,5 @@ futures-util.workspace = true
 eyre.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
+
+alloy-genesis.workspace = true

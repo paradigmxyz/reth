@@ -1,7 +1,7 @@
 //! Loads OP pending block for a RPC response.
 
 use alloy_primitives::{BlockNumber, B256};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
@@ -23,14 +23,14 @@ use crate::OpEthApi;
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
     fn provider(
         &self,
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + ChainSpecProvider<ChainSpec: EthereumHardforks>
            + StateProviderFactory {
         self.inner.provider()
     }

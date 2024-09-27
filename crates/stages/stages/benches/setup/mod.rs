@@ -6,7 +6,9 @@ use reth_db_api::{
     cursor::DbCursorRO,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, Address, SealedBlock, B256, U256};
+use reth_primitives::{
+    alloy_primitives::Sealable, Account, Address, SealedBlock, SealedHeader, B256, U256,
+};
 use reth_provider::{DatabaseProvider, DatabaseProviderFactory, TrieWriter};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
@@ -143,7 +145,9 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
         updated_header.state_root = root;
-        *second_block = SealedBlock { header: updated_header.seal_slow(), ..cloned_second };
+        let sealed = updated_header.seal_slow();
+        let (header, seal) = sealed.into_parts();
+        *second_block = SealedBlock { header: SealedHeader::new(header, seal), ..cloned_second };
 
         let offset = transitions.len() as u64;
 
@@ -176,7 +180,9 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let cloned_last = last_block.clone();
         let mut updated_header = cloned_last.header.unseal();
         updated_header.state_root = root;
-        *last_block = SealedBlock { header: updated_header.seal_slow(), ..cloned_last };
+        let sealed = updated_header.seal_slow();
+        let (header, seal) = sealed.into_parts();
+        *last_block = SealedBlock { header: SealedHeader::new(header, seal), ..cloned_last };
 
         db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
 

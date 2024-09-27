@@ -119,7 +119,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         Ok(self
             .cursor()?
             .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-            .map(|(header, hash)| header.seal(hash)))
+            .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
     fn sealed_headers_while(
@@ -136,7 +136,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {
-                let sealed = header.seal(hash);
+                let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {
                     break
                 }

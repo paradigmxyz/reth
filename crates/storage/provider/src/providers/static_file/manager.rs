@@ -12,7 +12,7 @@ use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNum
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chainspec::{Chain, ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -533,15 +533,16 @@ impl StaticFileProvider {
                             })
                             .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                     }
-                } else if tx_index.get(&segment).map(|index| index.len()) == Some(1) {
-                    // Only happens if we unwind all the txs/receipts from the first static file.
-                    // Should only happen in test scenarios.
-                    if jar.user_header().expected_block_start() == 0 &&
-                        matches!(
-                            segment,
-                            StaticFileSegment::Receipts | StaticFileSegment::Transactions
-                        )
-                    {
+                } else if segment.is_tx_based() {
+                    // The unwinded file has no more transactions/receipts. However, the highest
+                    // block is within this files' block range. We only retain
+                    // entries with block ranges before the current one.
+                    tx_index.entry(segment).and_modify(|index| {
+                        index.retain(|_, block_range| block_range.start() < fixed_range.start());
+                    });
+
+                    // If the index is empty, just remove it.
+                    if tx_index.get(&segment).is_some_and(|index| index.is_empty()) {
                         tx_index.remove(&segment);
                     }
                 }
@@ -632,14 +633,23 @@ impl StaticFileProvider {
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
     {
-        // OVM chain contains duplicate transactions, so is inconsistent by default since reth db
-        // not designed for duplicate transactions (see <https://github.com/paradigmxyz/reth/blob/v1.0.3/crates/optimism/primitives/src/bedrock_import.rs>). Undefined behaviour for queries
-        // to OVM chain is also in op-erigon.
-        if provider.chain_spec().chain() == Chain::optimism_mainnet() {
+        // OVM historical import is broken and does not work with this check. It's importing
+        // duplicated receipts resulting in having more receipts than the expected transaction
+        // range.
+        //
+        // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
+        // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
+        #[cfg(feature = "optimism")]
+        if reth_chainspec::EthChainSpec::chain(&provider.chain_spec()) ==
+            reth_chainspec::Chain::optimism_mainnet() &&
+            provider
+                .block_number(reth_optimism_primitives::bedrock::OVM_HEADER_1_HASH)?
+                .is_some()
+        {
             info!(target: "reth::cli",
                 "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
             );
-            return Ok(None);
+            return Ok(None)
         }
 
         info!(target: "reth::cli", "Verifying storage consistency.");
@@ -1136,10 +1146,16 @@ impl StaticFileProvider {
         Ok(data)
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Returns `static_files` directory
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns `static_files` transaction index
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
+        &self.static_files_tx_index
     }
 }
 
@@ -1271,7 +1287,7 @@ impl HeaderProvider for StaticFileProvider {
             |cursor, number| {
                 Ok(cursor
                     .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-                    .map(|(header, hash)| header.seal(hash)))
+                    .map(|(header, hash)| SealedHeader::new(header, hash)))
             },
             predicate,
         )

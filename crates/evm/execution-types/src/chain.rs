@@ -231,7 +231,7 @@ impl Chain {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
-            for (tx, receipt) in block.body.iter().zip(receipts.iter()) {
+            for (tx, receipt) in block.body.transactions().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -412,7 +412,7 @@ impl<'a> ChainBlocks<'a> {
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.blocks.values().flat_map(|block| block.body.iter())
+        self.blocks.values().flat_map(|block| block.body.transactions())
     }
 
     /// Returns an iterator over all transactions and their senders.

@@ -315,24 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_dev() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["reth", "--dev"]);
-        let chain = reth_chainspec::DEV.clone();
-        assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-        assert_eq!(
-            cmd.chain.paris_block_and_final_difficulty,
-            chain.paris_block_and_final_difficulty
-        );
-        assert_eq!(cmd.chain.hardforks, chain.hardforks);
-
-        assert!(cmd.rpc.http);
-        assert!(cmd.network.discovery.disable_discovery);
-
-        assert!(cmd.dev.dev);
-    }
-
-    #[test]
     fn parse_instance() {
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);

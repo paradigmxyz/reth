@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use alloy_genesis::Genesis;
 use futures_util::StreamExt;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
@@ -15,7 +16,7 @@ use reth::{
 use reth_chainspec::ChainSpec;
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{b256, hex, Genesis};
+use reth_primitives::{b256, hex};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

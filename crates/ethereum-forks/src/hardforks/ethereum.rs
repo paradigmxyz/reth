@@ -52,6 +52,9 @@ pub trait EthereumHardforks: Hardforks {
         }
     }
 
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    fn get_final_paris_total_difficulty(&self) -> Option<U256>;
+
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this

@@ -1,5 +1,6 @@
 //! Contains RPC handler implementations specific to blocks.
 
+use alloy_rpc_types::{AnyTransactionReceipt, BlockId};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -7,7 +8,6 @@ use reth_rpc_eth_api::{
     RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 
 use crate::EthApi;
 
@@ -41,6 +41,7 @@ where
 
             return block
                 .body
+                .transactions
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()
@@ -50,8 +51,9 @@ where
                         index: idx as u64,
                         block_hash,
                         block_number,
-                        base_fee,
-                        excess_blob_gas,
+                        base_fee: base_fee.map(|base_fee| base_fee as u64),
+                        excess_blob_gas: excess_blob_gas
+                            .map(|excess_blob_gas| excess_blob_gas as u64),
                         timestamp,
                     };
 

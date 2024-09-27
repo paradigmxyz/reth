@@ -1,6 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_primitives::{Bytes, B256};
+use alloy_rpc_types::TransactionInfo;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
@@ -11,7 +12,6 @@ use reth_rpc_eth_api::{
     FromEthApiError, FullEthApiTypes, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
-use reth_rpc_types::TransactionInfo;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};

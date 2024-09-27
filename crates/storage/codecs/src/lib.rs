@@ -28,6 +28,9 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
+
 /// Trait that implements the `Compact` codec.
 ///
 /// When deriving the trait for custom structs, be aware of certain limitations/recommendations:

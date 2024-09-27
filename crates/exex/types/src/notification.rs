@@ -43,6 +43,20 @@ impl ExExNotification {
             Self::ChainCommitted { .. } => None,
         }
     }
+
+    /// Converts the notification into a notification that is the inverse of the original one.
+    ///
+    /// - For [`Self::ChainCommitted`], it's [`Self::ChainReverted`].
+    /// - For [`Self::ChainReverted`], it's [`Self::ChainCommitted`].
+    /// - For [`Self::ChainReorged`], it's [`Self::ChainReorged`] with the new chain as the old
+    ///   chain and the old chain as the new chain.
+    pub fn into_inverted(self) -> Self {
+        match self {
+            Self::ChainCommitted { new } => Self::ChainReverted { old: new },
+            Self::ChainReverted { old } => Self::ChainCommitted { new: old },
+            Self::ChainReorged { old, new } => Self::ChainReorged { old: new, new: old },
+        }
+    }
 }
 
 impl From<CanonStateNotification> for ExExNotification {

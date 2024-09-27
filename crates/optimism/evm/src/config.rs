@@ -1,5 +1,6 @@
-use reth_chainspec::{ChainSpec, OptimismHardfork};
+use reth_chainspec::ChainSpec;
 use reth_ethereum_forks::{EthereumHardfork, Head};
+use reth_optimism_forks::OptimismHardfork;
 
 /// Returns the revm [`SpecId`](revm_primitives::SpecId) at the given timestamp.
 ///

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
 #[derive(Debug, Clone, PartialEq, Eq, Compact)]
-struct GenesisAccountRef<'a> {
+pub(crate) struct GenesisAccountRef<'a> {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
     /// The balance of the account at genesis.
@@ -26,7 +26,7 @@ struct GenesisAccountRef<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct GenesisAccount {
+pub(crate) struct GenesisAccount {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
     /// The balance of the account at genesis.
@@ -42,14 +42,14 @@ struct GenesisAccount {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct StorageEntries {
+pub(crate) struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct StorageEntry {
+pub(crate) struct StorageEntry {
     key: B256,
     value: B256,
 }

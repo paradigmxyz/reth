@@ -1,6 +1,6 @@
 //! This crate defines abstractions to create and update payloads (blocks):
 //! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
-//!   on [`PayloadAttributes`](reth_rpc_types::engine::PayloadAttributes).
+//!   on [`PayloadAttributes`](alloy_rpc_types::engine::PayloadAttributes).
 //! - [`PayloadJob`]: a type that yields (better) payloads over time.
 //!
 //! This crate comes with the generic [`PayloadBuilderService`] responsible for managing payload
@@ -110,8 +110,8 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_primitives::PayloadBuilderError;
-pub use reth_rpc_types::engine::PayloadId;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };

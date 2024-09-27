@@ -59,6 +59,7 @@ reth-evm-ethereum.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 alloy-genesis.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 test-utils = []

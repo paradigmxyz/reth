@@ -178,11 +178,11 @@ mod tests {
     struct TestPayloadAttributesBuilder;
 
     impl PayloadAttributesBuilder for TestPayloadAttributesBuilder {
-        type PayloadAttributes = reth_rpc_types::engine::PayloadAttributes;
+        type PayloadAttributes = alloy_rpc_types_engine::PayloadAttributes;
         type Error = Infallible;
 
         fn build(&self) -> Result<Self::PayloadAttributes, Self::Error> {
-            Ok(reth_rpc_types::engine::PayloadAttributes {
+            Ok(alloy_rpc_types_engine::PayloadAttributes {
                 timestamp: 0,
                 prev_randao: Default::default(),
                 suggested_fee_recipient: Default::default(),

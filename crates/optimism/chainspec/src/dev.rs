@@ -6,7 +6,7 @@ use alloy_chains::Chain;
 use alloy_primitives::U256;
 use once_cell::sync::Lazy;
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
-use reth_ethereum_forks::DEV_HARDFORKS;
+use reth_optimism_forks::DEV_HARDFORKS;
 use reth_primitives_traits::constants::DEV_GENESIS_HASH;
 
 use crate::OpChainSpec;

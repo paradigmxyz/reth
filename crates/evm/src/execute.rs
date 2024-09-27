@@ -6,9 +6,9 @@ pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, Execut
 pub use reth_storage_errors::provider::ProviderError;
 
 use core::fmt::Display;
-
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
+use revm::State;
 use revm_primitives::db::Database;
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
@@ -32,6 +32,16 @@ pub trait Executor<DB> {
     /// # Returns
     /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+
+    /// Executes the EVM with the given input and accepts a witness closure that is invoked with the
+    /// EVM state after execution.
+    fn execute_with_state_witness<F>(
+        self,
+        input: Self::Input<'_>,
+        witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>);
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
@@ -141,7 +151,6 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::Block;
     use revm::db::{CacheDB, EmptyDBTyped};
     use revm_primitives::U256;
     use std::marker::PhantomData;
@@ -178,6 +187,17 @@ mod tests {
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
+
+        fn execute_with_state_witness<F>(
+            self,
+            _: Self::Input<'_>,
+            _: F,
+        ) -> Result<Self::Output, Self::Error>
+        where
+            F: FnMut(&State<DB>),
+        {
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
+        }
     }
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
@@ -211,14 +231,6 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let block = Block {
-            header: Default::default(),
-            body: vec![],
-            ommers: vec![],
-            withdrawals: None,
-            requests: None,
-        };
-        let block = BlockWithSenders::new(block, Default::default()).unwrap();
-        let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
+        let _ = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
     }
 }

@@ -213,9 +213,9 @@ mod tests {
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             self.db.insert_transaction_senders(
-                blocks.iter().flat_map(|block| block.body.iter()).enumerate().map(|(i, tx)| {
-                    (i as u64, tx.recover_signer().expect("failed to recover signer"))
-                }),
+                blocks.iter().flat_map(|block| block.body.transactions.iter()).enumerate().map(
+                    |(i, tx)| (i as u64, tx.recover_signer().expect("failed to recover signer")),
+                ),
             )?;
             Ok(blocks)
         }

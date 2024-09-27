@@ -1,9 +1,8 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types::{Block, BlockTransactionsKind};
 use futures::StreamExt;
-use reth_node_core::rpc::types::Block;
-use reth_rpc_types::BlockTransactionsKind;
 use tokio::sync::mpsc::Sender;
 
 /// Block provider that fetches new blocks from an RPC endpoint using a websocket connection.

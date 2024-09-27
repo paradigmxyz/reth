@@ -7,6 +7,8 @@ use crate::{
     CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
     ValidPoolTransaction,
 };
+use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
@@ -16,9 +18,8 @@ use rand::{
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     transaction::TryFromRecoveredTransactionError,
-    AccessList, BlobTransactionSidecar, BlobTransactionValidationError,
-    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
+    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElementEcRecovered,
+    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 
@@ -893,7 +894,7 @@ impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx = TransactionSigned {
             hash: *tx.hash(),
-            signature: Signature::default(),
+            signature: Signature::test_signature(),
             transaction: tx.clone().into(),
         };
 

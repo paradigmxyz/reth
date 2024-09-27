@@ -66,6 +66,7 @@ eyre.workspace = true
 tempfile.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
+reth-cli-commands.workspace = true
 
 [features]
 optimism = [

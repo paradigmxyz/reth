@@ -1,6 +1,6 @@
 use alloy_primitives::U256;
+use alloy_rpc_types_anvil::MineOptions;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_rpc_types::anvil::MineOptions;
 
 /// Ganache rpc interface.
 /// https://github.com/trufflesuite/ganache/tree/develop/docs

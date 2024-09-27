@@ -252,8 +252,13 @@ where
                 self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
             let mut storage_writer =
                 UnifiedStorageWriter::from(self.database(), transactions_writer);
-            let no_hash_transactions =
-                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
+            let no_hash_transactions = block
+                .body
+                .transactions
+                .clone()
+                .into_iter()
+                .map(TransactionSignedNoHash::from)
+                .collect();
             storage_writer.append_transactions_from_blocks(
                 block.header().number,
                 std::iter::once(&no_hash_transactions),

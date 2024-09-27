@@ -6,7 +6,8 @@ use alloy_chains::{Chain, NamedChain};
 use alloy_primitives::{b256, U256};
 use once_cell::sync::Lazy;
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
-use reth_ethereum_forks::{EthereumHardfork, OptimismHardfork};
+use reth_ethereum_forks::EthereumHardfork;
+use reth_optimism_forks::OptimismHardfork;
 use reth_primitives_traits::constants::ETHEREUM_BLOCK_GAS_LIMIT;
 
 use crate::OpChainSpec;

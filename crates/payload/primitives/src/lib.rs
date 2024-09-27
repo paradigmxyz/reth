@@ -49,7 +49,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 ///
 /// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     version: EngineApiMessageVersion,
     timestamp: u64,
 ) -> Result<(), EngineObjectValidationError> {

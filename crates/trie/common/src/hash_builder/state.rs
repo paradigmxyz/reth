@@ -2,14 +2,17 @@ use crate::TrieMask;
 use alloy_trie::{hash_builder::HashBuilderValue, HashBuilder};
 use bytes::Buf;
 use nybbles::Nibbles;
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(compact)]
+#[cfg_attr(
+    feature = "arbitrary",
+    derive(arbitrary::Arbitrary),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 pub struct HashBuilderState {
     /// The current key.
     pub key: Vec<u8>,
@@ -147,8 +150,6 @@ impl Compact for HashBuilderState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
-    use proptest_arbitrary_interop::arb;
 
     #[test]
     fn hash_builder_state_regression() {
@@ -160,9 +161,10 @@ mod tests {
         assert_eq!(state, decoded);
     }
 
-    proptest! {
+    #[cfg(feature = "arbitrary")]
+    proptest::proptest! {
         #[test]
-        fn hash_builder_state_roundtrip(state in arb::<HashBuilderState>()) {
+        fn hash_builder_state_roundtrip(state in proptest_arbitrary_interop::arb::<HashBuilderState>()) {
             let mut buf = vec![];
             let len = state.to_compact(&mut buf);
             let (decoded, _) = HashBuilderState::from_compact(&buf, len);

@@ -115,7 +115,7 @@ where
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),
                         block_number: block.number,
-                        gas_used: block.gas_used,
+                        gas_used: block.gas_used as u64,
                     };
                     actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
                         transaction,
@@ -194,7 +194,7 @@ where
                                         let block_metadata = BlockMetadata {
                                             block_hash: new.tip().block.hash(),
                                             block_number: new.tip().block.number,
-                                            gas_used: new.tip().block.gas_used,
+                                            gas_used: new.tip().block.gas_used as u64,
                                         };
                                         BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,
@@ -267,7 +267,7 @@ async fn fetch_blobs_for_block(
                 let block_metadata = BlockMetadata {
                     block_hash: block.hash(),
                     block_number: block.number,
-                    gas_used: block.gas_used,
+                    gas_used: block.gas_used as u64,
                 };
                 BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata })
             })

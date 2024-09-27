@@ -1,6 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use alloy_primitives::B256;
+use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::Header;
@@ -9,7 +10,6 @@ use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
-use reth_rpc_types::{BlockId, TransactionInfo};
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
@@ -291,7 +291,7 @@ pub trait Trace: LoadState {
 
             let Some(block) = block else { return Ok(None) };
 
-            if block.body.is_empty() {
+            if block.body.transactions.is_empty() {
                 // nothing to trace
                 return Ok(Some(Vec::new()))
             }
@@ -308,10 +308,11 @@ pub trait Trace: LoadState {
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
-                let max_transactions = highest_index.map_or(block.body.len(), |highest| {
-                    // we need + 1 because the index is 0-based
-                    highest as usize + 1
-                });
+                let max_transactions =
+                    highest_index.map_or(block.body.transactions.len(), |highest| {
+                        // we need + 1 because the index is 0-based
+                        highest as usize + 1
+                    });
                 let mut results = Vec::with_capacity(max_transactions);
 
                 let mut transactions = block

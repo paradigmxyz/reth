@@ -77,14 +77,16 @@ impl Command {
             call_new_payload(&auth_provider, payload, parent_beacon_block_root, versioned_hashes)
                 .await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let new_payload_result =
+                NewPayloadResult { gas_used: gas_used as u64, latency: start.elapsed() };
             info!(%new_payload_result);
 
             // current duration since the start of the benchmark
             let current_duration = total_benchmark_duration.elapsed();
 
             // record the current result
-            let row = TotalGasRow { block_number, gas_used, time: current_duration };
+            let row =
+                TotalGasRow { block_number, gas_used: gas_used as u64, time: current_duration };
             results.push((row, new_payload_result));
         }
 

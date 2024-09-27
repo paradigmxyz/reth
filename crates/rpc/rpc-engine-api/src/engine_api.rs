@@ -3,25 +3,25 @@ use crate::{
 };
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
-use async_trait::async_trait;
-use jsonrpsee_core::RpcResult;
-use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_chainspec::ChainSpec;
-use reth_engine_primitives::EngineTypes;
-use reth_evm::provider::EvmEnvProvider;
-use reth_payload_builder::PayloadStore;
-use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
-    PayloadBuilderAttributes, PayloadOrAttributes,
-};
-use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
-use reth_rpc_api::EngineApiServer;
-use reth_rpc_types::engine::{
+use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
     TransitionConfiguration,
 };
+use async_trait::async_trait;
+use jsonrpsee_core::RpcResult;
+use reth_beacon_consensus::BeaconConsensusEngineHandle;
+use reth_chainspec::{EthereumHardforks, Hardforks};
+use reth_engine_primitives::{EngineTypes, EngineValidator};
+use reth_evm::provider::EvmEnvProvider;
+use reth_payload_builder::PayloadStore;
+use reth_payload_primitives::{
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
+    PayloadOrAttributes,
+};
+use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
+use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
 };
@@ -43,11 +43,11 @@ const MAX_BLOB_LIMIT: usize = 128;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider, EngineT: EngineTypes, Pool> {
-    inner: Arc<EngineApiInner<Provider, EngineT, Pool>>,
+pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
+    inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>>,
 }
 
-struct EngineApiInner<Provider, EngineT: EngineTypes, Pool> {
+struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
@@ -66,13 +66,18 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool> {
     capabilities: EngineCapabilities,
     /// Transaction pool.
     tx_pool: Pool,
+    /// Engine validator.
+    validator: Validator,
 }
 
-impl<Provider, EngineT, Pool> EngineApi<Provider, EngineT, Pool>
+impl<Provider, EngineT, Pool, Validator, ChainSpec>
+    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
+    Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Create new instance of [`EngineApi`].
     #[allow(clippy::too_many_arguments)]
@@ -85,6 +90,7 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
+        validator: Validator,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -96,6 +102,7 @@ where
             client,
             capabilities,
             tx_pool,
+            validator,
         });
         Self { inner }
     }
@@ -131,11 +138,9 @@ where
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
-        EngineT::validate_version_specific_fields(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V1,
-            payload_or_attrs,
-        )?;
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
@@ -149,11 +154,9 @@ where
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
-        EngineT::validate_version_specific_fields(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V2,
-            payload_or_attrs,
-        )?;
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
@@ -170,11 +173,9 @@ where
                 &payload,
                 Some(parent_beacon_block_root),
             );
-        EngineT::validate_version_specific_fields(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V3,
-            payload_or_attrs,
-        )?;
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
@@ -194,11 +195,9 @@ where
                 &payload,
                 Some(parent_beacon_block_root),
             );
-        EngineT::validate_version_specific_fields(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V4,
-            payload_or_attrs,
-        )?;
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
@@ -588,7 +587,7 @@ where
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
-                attrs.ensure_well_formed_attributes(&self.inner.chain_spec, version);
+                self.inner.validator.ensure_well_formed_attributes(version, attrs);
 
             // From the engine API spec:
             //
@@ -619,11 +618,14 @@ where
 }
 
 #[async_trait]
-impl<Provider, EngineT, Pool> EngineApiServer<EngineT> for EngineApi<Provider, EngineT, Pool>
+impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
+    Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -933,7 +935,8 @@ where
     }
 }
 
-impl<Provider, EngineT, Pool> std::fmt::Debug for EngineApi<Provider, EngineT, Pool>
+impl<Provider, EngineT, Pool, Validator, ChainSpec> std::fmt::Debug
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
 {
@@ -945,14 +948,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
-    use reth_chainspec::MAINNET;
-    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::random_block;
@@ -960,9 +963,16 @@ mod tests {
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn setup_engine_api(
-    ) -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes, NoopTransactionPool>)
-    {
+    fn setup_engine_api() -> (
+        EngineApiTestHandle,
+        EngineApi<
+            Arc<MockEthProvider>,
+            EthEngineTypes,
+            NoopTransactionPool,
+            EthereumEngineValidator,
+            ChainSpec,
+        >,
+    ) {
         let client = ClientVersionV1 {
             code: ClientCode::RH,
             name: "Reth".to_string(),
@@ -985,6 +995,7 @@ mod tests {
             task_executor,
             client,
             EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec.clone()),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)

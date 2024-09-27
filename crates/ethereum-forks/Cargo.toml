@@ -40,7 +40,6 @@ proptest.workspace = true
 [features]
 default = ["std", "serde", "rustc-hash"]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-optimism = []
 serde = ["dep:serde"]
 std = ["thiserror-no-std/std", "rustc-hash/std"]
 rustc-hash = ["dep:rustc-hash"]

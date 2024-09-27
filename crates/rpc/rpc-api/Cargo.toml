@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-peers.workspace = true
@@ -23,6 +22,17 @@ reth-network-peers.workspace = true
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-debug.workspace = true
+alloy-rpc-types-trace.workspace = true
+alloy-rpc-types-anvil.workspace = true
+alloy-rpc-types-mev.workspace = true
+alloy-rpc-types-txpool.workspace = true
+alloy-rpc-types-admin.workspace = true
+alloy-serde.workspace = true
+alloy-rpc-types-beacon.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

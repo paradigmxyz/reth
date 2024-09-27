@@ -139,7 +139,7 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 
 #### Utilities Crates
 
-- [`rpc/rpc-types-compat`](../../crates/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
+- [`rpc/rpc-types-compat`](../../crates/rpc/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
 - [`rpc/layer`](../../crates/rpc/rpc-layer/): Some RPC middleware layers (e.g. `AuthValidator`, `JwtAuthValidator`)
 - [`rpc/rpc-testing-util`](../../crates/rpc/rpc-testing-util/): Reth RPC testing helpers
 

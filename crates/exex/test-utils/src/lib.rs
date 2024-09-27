@@ -17,6 +17,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
+use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications};
@@ -33,7 +34,10 @@ use reth_node_builder::{
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
-    node::{EthereumAddOns, EthereumNetworkBuilder, EthereumPayloadBuilder},
+    node::{
+        EthereumAddOns, EthereumEngineValidatorBuilder, EthereumNetworkBuilder,
+        EthereumPayloadBuilder,
+    },
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
@@ -133,6 +137,7 @@ where
         EthereumNetworkBuilder,
         TestExecutorBuilder,
         TestConsensusBuilder,
+        EthereumEngineValidatorBuilder,
     >;
     type AddOns = EthereumAddOns;
 
@@ -144,6 +149,7 @@ where
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
+            .engine_validator(EthereumEngineValidatorBuilder::default())
     }
 }
 
@@ -246,7 +252,7 @@ pub async fn test_exex_context_with_chain_spec(
     let db = create_test_rw_db();
     let provider_factory = ProviderFactory::new(
         db,
-        chain_spec,
+        chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
     );
 
@@ -266,6 +272,8 @@ pub async fn test_exex_context_with_chain_spec(
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
 
+    let engine_validator = EthereumEngineValidator::new(chain_spec.clone());
+
     let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
         components: Components {
             transaction_pool,
@@ -274,6 +282,7 @@ pub async fn test_exex_context_with_chain_spec(
             consensus,
             network,
             payload_builder,
+            engine_validator,
         },
         task_executor,
         provider,

@@ -15,10 +15,10 @@ workspace = true
 reth-errors.workspace = true
 reth-network-api.workspace = true
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true

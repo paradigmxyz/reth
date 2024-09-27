@@ -8,7 +8,7 @@ use reth_db::{
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives::Header;
+use reth_primitives::{hex, Header};
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
@@ -92,14 +92,14 @@ impl Command {
                 match content {
                     Some(content) => {
                         if raw {
-                            println!("{content:?}");
+                            println!("{}", hex::encode_prefixed(&content[0]));
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
                                     let header = Header::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
-                                        "{}\n{}",
+                                        "Header\n{}\n\nBlockHash\n{}",
                                         serde_json::to_string_pretty(&header)?,
                                         serde_json::to_string_pretty(&block_hash)?
                                     );
@@ -157,7 +157,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TableViewer<()> for GetValueView
         let content = if self.raw {
             self.tool
                 .get::<RawTable<T>>(RawKey::from(key))?
-                .map(|content| format!("{:?}", content.raw_value()))
+                .map(|content| hex::encode_prefixed(content.raw_value()))
         } else {
             self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
         };

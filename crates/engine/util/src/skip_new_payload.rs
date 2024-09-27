@@ -1,9 +1,9 @@
 //! Stream wrapper that skips specified number of new payload messages.
 
+use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
-use reth_rpc_types::engine::{PayloadStatus, PayloadStatusEnum};
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},

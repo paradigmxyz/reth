@@ -112,10 +112,12 @@ mod tests {
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
         HeadersDirection,
     };
+    use alloy_consensus::TxLegacy;
     use alloy_primitives::{hex, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned, TxLegacy,
+        alloy_primitives::Parity, BlockHashOrNumber, Header, Signature, Transaction,
+        TransactionSigned,
     };
     use std::str::FromStr;
 
@@ -267,12 +269,12 @@ mod tests {
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                     difficulty: U256::from(0x8aeu64),
                     number: 0xd05u64,
-                    gas_limit: 0x115cu64,
-                    gas_used: 0x15b3u64,
+                    gas_limit: 0x115cu128,
+                    gas_used: 0x15b3u128,
                     timestamp: 0x1a0au64,
                     extra_data: hex!("7788")[..].into(),
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    nonce: 0x0000000000000000u64,
+                    nonce: 0x0000000000000000u64.into(),
                     base_fee_per_gas: None,
                     withdrawals_root: None,
                     blob_gas_used: None,
@@ -302,12 +304,12 @@ mod tests {
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                     difficulty: U256::from(0x8aeu64),
                     number: 0xd05u64,
-                    gas_limit: 0x115cu64,
-                    gas_used: 0x15b3u64,
+                    gas_limit: 0x115cu128,
+                    gas_used: 0x15b3u128,
                     timestamp: 0x1a0au64,
                     extra_data: hex!("7788")[..].into(),
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    nonce: 0x0000000000000000u64,
+                    nonce: 0x0000000000000000u64.into(),
                     base_fee_per_gas: None,
                     withdrawals_root: None,
                     blob_gas_used: None,
@@ -370,12 +372,11 @@ mod tests {
                             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x200u64),
                             input: Default::default(),
-                        }),
-                        Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
-                                s: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                            }
+                        }), Signature::new(
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
+                                Parity::Parity(false),
+                            ),
                         ),
                         TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
@@ -385,11 +386,11 @@ mod tests {
                             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x2d9u64),
                             input: Default::default(),
-                        }), Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                s: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                            },
+                        }), Signature::new(
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                Parity::Parity(false),
+                            ),
                         ),
                     ],
                     ommers: vec![
@@ -403,12 +404,12 @@ mod tests {
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
-                            gas_limit: 0x115cu64,
-                            gas_used: 0x15b3u64,
+                            gas_limit: 0x115cu128,
+                            gas_used: 0x15b3u128,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
                             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            nonce: 0x0000000000000000u64,
+                            nonce: 0x0000000000000000u64.into(),
                             base_fee_per_gas: None,
                             withdrawals_root: None,
                             blob_gas_used: None,
@@ -445,11 +446,11 @@ mod tests {
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
                             }),
-                            Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
-                                s: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
-                            }
+                            Signature::new(
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
+                                U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
+                                Parity::Eip155(37),
+                            ),
                         ),
                         TransactionSigned::from_transaction_and_signature(
                             Transaction::Legacy(TxLegacy {
@@ -461,11 +462,11 @@ mod tests {
                                 value: U256::from(0x2d9u64),
                                 input: Default::default(),
                             }),
-                            Signature {
-                                odd_y_parity: false,
-                                r: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                                s: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
-                            }
+                            Signature::new(
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
+                                Parity::Eip155(37),
+                            ),
                         ),
                     ],
                     ommers: vec![
@@ -479,12 +480,12 @@ mod tests {
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
-                            gas_limit: 0x115cu64,
-                            gas_used: 0x15b3u64,
+                            gas_limit: 0x115cu128,
+                            gas_used: 0x15b3u128,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
                             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            nonce: 0x0000000000000000u64,
+                            nonce: 0x0000000000000000u64.into(),
                             base_fee_per_gas: None,
                             withdrawals_root: None,
                             blob_gas_used: None,

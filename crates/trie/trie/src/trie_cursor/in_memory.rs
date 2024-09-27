@@ -49,7 +49,6 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
 /// The cursor to iterate over account trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct InMemoryAccountTrieCursor<'a, C> {
     /// The database cursor.
     cursor: C,

@@ -1,31 +1,31 @@
 use std::sync::Arc;
 
 use alloy_genesis::ChainConfig;
+use alloy_rpc_types_admin::{
+    EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
+    Ports, ProtocolInfo,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks, ForkCondition};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{id2pk, AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
-use reth_rpc_types::admin::{
-    EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
-    Ports, ProtocolInfo,
-};
 
 /// `admin` API implementation.
 ///
 /// This type provides the functionality for handling `admin` related requests.
-pub struct AdminApi<N> {
+pub struct AdminApi<N, ChainSpec> {
     /// An interface to interact with the network
     network: N,
     /// The specification of the blockchain's configuration.
     chain_spec: Arc<ChainSpec>,
 }
 
-impl<N> AdminApi<N> {
+impl<N, ChainSpec> AdminApi<N, ChainSpec> {
     /// Creates a new instance of `AdminApi`.
     pub const fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
         Self { network, chain_spec }
@@ -33,9 +33,10 @@ impl<N> AdminApi<N> {
 }
 
 #[async_trait]
-impl<N> AdminApiServer for AdminApi<N>
+impl<N, ChainSpec> AdminApiServer for AdminApi<N, ChainSpec>
 where
     N: NetworkInfo + Peers + 'static,
+    ChainSpec: EthChainSpec + EthereumHardforks + Send + Sync + 'static,
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
@@ -108,16 +109,12 @@ where
         let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
         let mut config = ChainConfig {
-            chain_id: self.chain_spec.chain.id(),
+            chain_id: self.chain_spec.chain().id(),
             terminal_total_difficulty_passed: self
                 .chain_spec
                 .get_final_paris_total_difficulty()
                 .is_some(),
-            terminal_total_difficulty: self
-                .chain_spec
-                .hardforks
-                .fork(EthereumHardfork::Paris)
-                .ttd(),
+            terminal_total_difficulty: self.chain_spec.fork(EthereumHardfork::Paris).ttd(),
             ..self.chain_spec.genesis().config.clone()
         };
 
@@ -127,7 +124,12 @@ where
                 $(
                     // don't overwrite if already set
                     if $config.$field.is_none() {
-                        $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
+                        $config.$field = match self.chain_spec.fork(EthereumHardfork::$fork) {
+                            ForkCondition::Block(block) => Some(block),
+                            ForkCondition::TTD { fork_block, .. } => fork_block,
+                            ForkCondition::Timestamp(ts) => Some(ts),
+                            ForkCondition::Never => None,
+                        };
                     }
                 )*
             };
@@ -185,7 +187,7 @@ where
     }
 }
 
-impl<N> std::fmt::Debug for AdminApi<N> {
+impl<N, ChainSpec> std::fmt::Debug for AdminApi<N, ChainSpec> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdminApi").finish_non_exhaustive()
     }

@@ -29,7 +29,6 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
-reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie.workspace = true
@@ -38,6 +37,7 @@ reth-trie-parallel.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # common
 futures.workspace = true
