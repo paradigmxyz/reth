@@ -589,7 +589,7 @@ where
         // Find all forks of given block.
         let mut dependent_block =
             self.block_indices().fork_to_child().get(block).cloned().unwrap_or_default();
-        let mut dependent_chains = HashSet::new();
+        let mut dependent_chains = HashSet::default();
 
         while let Some(block) = dependent_block.pop_back() {
             // Get chain of dependent block.
@@ -1375,6 +1375,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, Sealable, B256};
     use assert_matches::assert_matches;
@@ -1390,7 +1391,7 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, TxEip1559, Withdrawals,
+        TransactionSignedEcRecovered, Withdrawals,
     };
     use reth_provider::{
         test_utils::{
@@ -2179,7 +2180,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2.hash()])),
             ]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         assert_matches!(tree.make_canonical(block1a_hash), Ok(_));
@@ -2203,7 +2204,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1.hash()])),
                 (block1.hash(), HashSet::from([block2.hash()])),
             ]))
-            .with_pending_blocks((block1a.number + 1, HashSet::new()))
+            .with_pending_blocks((block1a.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
@@ -2240,7 +2241,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2a_hash])),
             ]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
@@ -2309,7 +2310,7 @@ mod tests {
             .with_chain_num(1)
             .with_block_to_chain(HashMap::from([(block2a_hash, 4.into())]))
             .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.

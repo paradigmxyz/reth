@@ -4,7 +4,7 @@
 use crate::{
     AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
 };
-use alloy_eips::eip1559::calc_next_block_base_fee;
+use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -20,7 +20,6 @@ use reth_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
     },
-    transaction::AccessListResult,
     Header, TransactionSignedEcRecovered,
 };
 use reth_provider::{ChainSpecProvider, HeaderProvider, StateProvider};

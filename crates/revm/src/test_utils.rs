@@ -1,10 +1,10 @@
-use std::collections::HashSet;
-
-use crate::precompile::HashMap;
 use alloc::vec::Vec;
-use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Address, BlockNumber, StorageKey,
 };
+use reth_primitives::{Account, Bytecode, Bytes, B256, U256};
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     StorageRootProvider,
@@ -136,7 +136,7 @@ impl StateProvider for StateProviderTest {
         &self,
         account: Address,
         storage_key: StorageKey,
-    ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 

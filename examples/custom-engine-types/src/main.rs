@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use alloy_genesis::Genesis;
+use alloy_primitives::Address;
 use alloy_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -45,7 +46,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
-use reth_chainspec::{Chain, ChainSpec};
+use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, EngineTypes, EngineValidator, PayloadAttributes,
@@ -63,7 +64,7 @@ use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, Withdrawals, B256};
+use reth_primitives::{Withdrawals, B256};
 use reth_tracing::{RethTracer, Tracer};
 
 /// A custom payload attributes type.
@@ -285,7 +286,6 @@ where
             pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            ctx.chain_spec(),
             payload_builder,
         );
         let (payload_service, payload_builder) =
@@ -304,7 +304,7 @@ pub struct CustomPayloadBuilder;
 
 impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
 {
     type Attributes = CustomPayloadBuilderAttributes;
@@ -315,7 +315,9 @@ where
         args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let BuildArguments { client, pool, cached_reads, config, cancel, best_payload } = args;
-        let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
+        let PayloadConfig { parent_block, extra_data, attributes } = config;
+
+        let chain_spec = client.chain_spec();
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
@@ -326,12 +328,7 @@ where
             client,
             pool,
             cached_reads,
-            config: PayloadConfig {
-                parent_block,
-                extra_data,
-                attributes: attributes.0,
-                chain_spec,
-            },
+            config: PayloadConfig { parent_block, extra_data, attributes: attributes.0 },
             cancel,
             best_payload,
         })
@@ -342,9 +339,10 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
+        let PayloadConfig { parent_block, extra_data, attributes } = config;
+        let chain_spec = client.chain_spec();
         <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(chain_spec.clone())),client,
-                                                                                                                     PayloadConfig { parent_block, extra_data, attributes: attributes.0, chain_spec })
+                                                                                                                     PayloadConfig { parent_block, extra_data, attributes: attributes.0})
     }
 }
 

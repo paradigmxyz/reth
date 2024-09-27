@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 ## reth
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
@@ -33,6 +34,7 @@ reth-tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 ## async
 futures.workspace = true
@@ -40,8 +42,10 @@ tokio-util.workspace = true
 tokio.workspace = true
 
 ## misc
+dashmap.workspace = true
 eyre.workspace = true
 metrics.workspace = true
+parking_lot.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
@@ -54,6 +58,9 @@ reth-node-api.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
+
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
 
 secp256k1.workspace = true
 tempfile.workspace = true

@@ -1,4 +1,8 @@
 use alloy_primitives::{BlockNumber, B256};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
+};
 use futures::{stream::BoxStream, Future, StreamExt};
 use itertools::Either;
 use reth_blockchain_tree_api::{
@@ -21,10 +25,6 @@ use reth_primitives::{
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
-};
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
@@ -1984,10 +1984,10 @@ mod tests {
         test_utils::{spawn_consensus_engine, TestConsensusEngineBuilder},
         BeaconForkChoiceUpdateError,
     };
+    use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
-    use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2180,11 +2180,11 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use alloy_primitives::U256;
+        use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use generators::BlockParams;
         use reth_db::{tables, test_utils::create_test_static_files_dir, Database};
         use reth_db_api::transaction::DbTxMut;
         use reth_provider::{providers::StaticFileProvider, test_utils::MockNodeTypesWithDB};
-        use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
         #[tokio::test]

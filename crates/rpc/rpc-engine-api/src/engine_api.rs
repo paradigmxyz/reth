@@ -3,6 +3,12 @@ use crate::{
 };
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
+    ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    TransitionConfiguration,
+};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -16,12 +22,6 @@ use reth_payload_primitives::{
 };
 use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
-};
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
 };
@@ -948,6 +948,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
     use reth_chainspec::{ChainSpec, MAINNET};
@@ -955,7 +956,6 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::random_block;

@@ -4,12 +4,13 @@ use alloc::{boxed::Box, string::ToString};
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
 use crate::ConfigureEvm;
+use alloy_primitives::B256;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
 
 /// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block contract call.
 ///

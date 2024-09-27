@@ -41,6 +41,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 arbitrary = [

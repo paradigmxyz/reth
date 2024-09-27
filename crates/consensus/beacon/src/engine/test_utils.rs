@@ -5,6 +5,9 @@ use crate::{
     BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -30,9 +33,6 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
-};
 use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;

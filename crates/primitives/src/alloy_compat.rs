@@ -2,10 +2,10 @@
 
 use crate::{
     constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, BlockBody, Signature,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 use alloc::{string::ToString, vec::Vec};
+use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
 use alloy_primitives::{Parity, TxKind};
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;

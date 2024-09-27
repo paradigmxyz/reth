@@ -1,7 +1,7 @@
-use crate::precompile::HashMap;
+use alloy_primitives::{map::HashMap, Address};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
-use reth_primitives::{Address, Block, Withdrawal, Withdrawals, U256};
+use reth_primitives::{Block, Withdrawal, Withdrawals, U256};
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -13,7 +13,7 @@ pub fn post_block_balance_increments(
     block: &Block,
     total_difficulty: U256,
 ) -> HashMap<Address, u128> {
-    let mut balance_increments = HashMap::new();
+    let mut balance_increments = HashMap::default();
 
     // Add block rewards if they are enabled.
     if let Some(base_block_reward) =
@@ -51,7 +51,8 @@ pub fn post_block_withdrawals_balance_increments<ChainSpec: EthereumHardforks>(
     block_timestamp: u64,
     withdrawals: &[Withdrawal],
 ) -> HashMap<Address, u128> {
-    let mut balance_increments = HashMap::with_capacity(withdrawals.len());
+    let mut balance_increments =
+        HashMap::with_capacity_and_hasher(withdrawals.len(), Default::default());
     insert_post_block_withdrawals_balance_increments(
         chain_spec,
         block_timestamp,
@@ -123,7 +124,7 @@ mod tests {
         ];
 
         // Create an empty HashMap to hold the balance increments
-        let mut balance_increments = HashMap::new();
+        let mut balance_increments = HashMap::default();
 
         // Act
         // Call the function with the prepared inputs
@@ -167,7 +168,7 @@ mod tests {
         let withdrawals = Vec::<Withdrawal>::new();
 
         // Create an empty HashMap to hold the balance increments
-        let mut balance_increments = HashMap::new();
+        let mut balance_increments = HashMap::default();
 
         // Act
         // Call the function with the prepared inputs
@@ -210,7 +211,7 @@ mod tests {
         ];
 
         // Create an empty HashMap to hold the balance increments
-        let mut balance_increments = HashMap::new();
+        let mut balance_increments = HashMap::default();
 
         // Act
         // Call the function with the prepared inputs
@@ -259,7 +260,7 @@ mod tests {
         ];
 
         // Create an empty HashMap to hold the balance increments
-        let mut balance_increments = HashMap::new();
+        let mut balance_increments = HashMap::default();
 
         // Act
         // Call the function with the prepared inputs
@@ -295,7 +296,7 @@ mod tests {
         let withdrawals = None; // No withdrawals provided
 
         // Create an empty HashMap to hold the balance increments
-        let mut balance_increments = HashMap::new();
+        let mut balance_increments = HashMap::default();
 
         // Act
         // Call the function with the prepared inputs

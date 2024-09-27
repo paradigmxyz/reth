@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{hex_literal::hex, keccak256, Address, B256, U256};
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
@@ -8,7 +8,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     transaction::DbTxMut,
 };
-use reth_primitives::{constants::EMPTY_ROOT_HASH, hex_literal::hex, Account, StorageEntry};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, Account, StorageEntry};
 use reth_provider::{
     test_utils::create_test_provider_factory, DatabaseProviderRW, StorageTrieWriter, TrieWriter,
 };

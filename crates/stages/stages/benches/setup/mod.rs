@@ -1,4 +1,5 @@
 #![allow(unreachable_pub)]
+use alloy_primitives::Address;
 use itertools::concat;
 use reth_chainspec::ChainSpec;
 use reth_db::{tables, test_utils::TempDatabase, Database, DatabaseEnv};
@@ -6,9 +7,7 @@ use reth_db_api::{
     cursor::DbCursorRO,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    alloy_primitives::Sealable, Account, Address, SealedBlock, SealedHeader, B256, U256,
-};
+use reth_primitives::{alloy_primitives::Sealable, Account, SealedBlock, SealedHeader, B256, U256};
 use reth_provider::{DatabaseProvider, DatabaseProviderFactory, TrieWriter};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},

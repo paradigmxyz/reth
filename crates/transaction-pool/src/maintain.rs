@@ -17,8 +17,8 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    alloy_primitives::Sealable, BlockNumberOrTag, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    alloy_primitives::Sealable, BlockNumberOrTag, PooledTransactionsElementEcRecovered,
+    SealedHeader, TransactionSigned,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -138,7 +138,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         FinalizedBlockTracker::new(client.finalized_block_number().ok().flatten());
 
     // keeps track of any dirty accounts that we know of are out of sync with the pool
-    let mut dirty_addresses = HashSet::new();
+    let mut dirty_addresses = HashSet::default();
 
     // keeps track of the state of the pool wrt to blocks
     let mut maintained_state = MaintainedPoolState::InSync;

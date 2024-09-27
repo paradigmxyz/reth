@@ -17,7 +17,7 @@ use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
-    fs::{File, OpenOptions},
+    fs::File,
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -250,35 +250,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        // Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
-        let mut tmp_path = self.config_path();
-        tmp_path.set_extension(".tmp");
-
-        // Write to temporary file
-        let mut file = File::create(&tmp_path)?;
-        bincode::serialize_into(&mut file, &self)?;
-
-        // fsync() file
-        file.sync_all()?;
-
-        // Rename file, not move
-        reth_fs_util::rename(&tmp_path, self.config_path())?;
-
-        // fsync() dir
-        if let Some(parent) = tmp_path.parent() {
-            //custom_flags() is only available on Windows
-            #[cfg(windows)]
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
-                .open(parent)?
-                .sync_all()?;
-
-            #[cfg(not(windows))]
-            OpenOptions::new().read(true).open(parent)?.sync_all()?;
-        }
-        Ok(())
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
+            bincode::serialize_into(file, &self)
+        })?)
     }
 }
 

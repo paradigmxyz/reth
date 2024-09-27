@@ -1,12 +1,12 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered, Withdrawals, B256,
+    Bytes, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
+    Withdrawals, B256,
 };
 use alloc::vec::Vec;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
-use alloy_primitives::Sealable;
+use alloy_primitives::{Address, Sealable};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -576,17 +576,8 @@ pub struct BlockBody {
 
 impl BlockBody {
     /// Create a [`Block`] from the body and its header.
-    // todo(onbjerg): should this not just take `self`? its used in one place
-    pub fn create_block(&self, header: Header) -> Block {
-        Block {
-            header,
-            body: Self {
-                transactions: self.transactions.clone(),
-                ommers: self.ommers.clone(),
-                withdrawals: self.withdrawals.clone(),
-                requests: self.requests.clone(),
-            },
-        }
+    pub const fn into_block(self, header: Header) -> Block {
+        Block { header, body: self }
     }
 
     /// Calculate the transaction root for the block body.
@@ -718,8 +709,8 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
 #[cfg(test)]
 mod tests {
     use super::{BlockNumberOrTag::*, *};
-    use crate::hex_literal::hex;
     use alloy_eips::eip1898::HexStringMissingPrefixError;
+    use alloy_primitives::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 

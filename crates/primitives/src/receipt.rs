@@ -1,11 +1,11 @@
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::{
-    logs_bloom, Bloom, Bytes, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    logs_bloom, Bytes, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    EIP7702_TX_TYPE_ID,
 };
 use alloc::{vec, vec::Vec};
-use alloy_primitives::Log;
+use alloy_primitives::{Bloom, Log};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
@@ -100,26 +100,11 @@ impl Receipts {
         self.receipt_vec.push(receipts);
     }
 
-    /// Retrieves the receipt root for all recorded receipts from index.
-    pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_no_memo(
-            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
-        ))
-    }
-
-    /// Retrieves the receipt root for all recorded receipts from index.
-    #[cfg(feature = "optimism")]
-    pub fn optimism_root_slow(
-        &self,
-        index: usize,
-        chain_spec: impl reth_chainspec::Hardforks,
-        timestamp: u64,
-    ) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_no_memo_optimism(
-            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
-            chain_spec,
-            timestamp,
-        ))
+    /// Retrieves all recorded receipts from index and calculates the root using the given closure.
+    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
+        let receipts =
+            self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
+        Some(f(receipts.as_slice()))
     }
 }
 
@@ -516,8 +501,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex_literal::hex;
-    use alloy_primitives::{address, b256, bytes};
+    use alloy_primitives::{address, b256, bytes, hex_literal::hex};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
