@@ -25,6 +25,12 @@ use tokio::sync::{
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
+/// Default max size of the internal state notifications buffer.
+///
+/// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
+/// or 17 minutes of 1-second blocks.
+pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
+
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
