@@ -1,7 +1,6 @@
 //! Command that initializes the node from a genesis file.
 
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment};
 use reth_db_common::init::init_from_state_dump;

@@ -10,7 +10,7 @@ use reth::{
     rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
     tasks::TaskManager,
 };
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
@@ -73,8 +73,7 @@ where
     let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
-        let node_config = NodeConfig::test()
-            .with_chain(chain_spec.clone())
+        let node_config = NodeConfig::new(chain_spec.clone())
             .with_network(network_config.clone())
             .with_unused_ports()
             .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())

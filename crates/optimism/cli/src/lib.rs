@@ -28,6 +28,7 @@ pub mod commands;
 pub mod receipt_file_codec;
 
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
+use reth_optimism_chainspec::OpChainSpec;
 
 use std::{ffi::OsString, fmt, sync::Arc};
 
@@ -35,7 +36,7 @@ use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
 use futures_util::Future;
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_cli_runner::CliRunner;
@@ -111,7 +112,7 @@ impl Cli {
 
 impl<C, Ext> Cli<C, Ext>
 where
-    C: ChainSpecParser<ChainSpec: EthChainSpec>,
+    C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
 {
     /// Execute the configured cli command.

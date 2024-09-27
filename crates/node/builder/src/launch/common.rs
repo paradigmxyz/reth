@@ -10,7 +10,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_chainspec::{Chain, ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -879,8 +879,8 @@ impl<T, CB>
     >
 where
     T: FullNodeTypes<
-        Provider: WithTree + StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-        Types: NodeTypes<ChainSpec = ChainSpec>,
+        Provider: WithTree + StateProviderFactory + ChainSpecProvider,
+        Types: NodeTypes<ChainSpec: EthereumHardforks>,
     >,
     CB: NodeComponentsBuilder<T>,
 {

@@ -14,7 +14,7 @@ use std::{fmt, sync::Arc};
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::Optimism;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
@@ -239,7 +239,7 @@ where
 
 impl<N> AddDevSigners for OpEthApi<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
