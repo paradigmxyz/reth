@@ -70,7 +70,7 @@ pub fn transact_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<Option<ResultAndState>, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
