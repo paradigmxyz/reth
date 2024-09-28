@@ -86,8 +86,7 @@ fn initialize_evm<'a, DB>(
     initialized_block_env: &'a BlockEnv,
 ) -> Evm<'a, (), &'a mut DB>
 where
-    DB: Database + DatabaseCommit,
-    DB::Error: Display,
+    DB: Database,
 {
     Evm::builder()
         .with_db(db)
