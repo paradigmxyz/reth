@@ -1,5 +1,5 @@
 use alloy_primitives::{map::HashMap, Address};
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
 use reth_primitives::{Block, Withdrawal, Withdrawals, U256};
 
@@ -8,7 +8,7 @@ use reth_primitives::{Block, Withdrawal, Withdrawals, U256};
 /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
 /// state changes (DAO fork).
 #[inline]
-pub fn post_block_balance_increments(
+pub fn post_block_balance_increments<ChainSpec: EthereumHardforks>(
     chain_spec: &ChainSpec,
     block: &Block,
     total_difficulty: U256,
@@ -89,6 +89,7 @@ pub fn insert_post_block_withdrawals_balance_increments<ChainSpec: EthereumHardf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_chainspec::ChainSpec;
     use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
     use reth_primitives::constants::GWEI_TO_WEI;
 

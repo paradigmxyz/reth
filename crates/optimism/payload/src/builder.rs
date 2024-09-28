@@ -5,12 +5,13 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpec, ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::{
     system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
     NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
@@ -94,7 +95,7 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -165,7 +166,7 @@ pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;

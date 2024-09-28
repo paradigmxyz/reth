@@ -3,7 +3,7 @@
 use alloy_primitives::B256;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
@@ -50,14 +50,14 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     pub db: DatabaseArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
     pub fn init<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         &self,
         access: AccessRights,
     ) -> eyre::Result<Environment<N>> {
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
 
@@ -93,7 +93,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
 
         let provider_factory = self.create_provider_factory(&config, db, sfp)?;
         if access.is_read_write() {
-            debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+            debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis(&provider_factory)?;
         }
 

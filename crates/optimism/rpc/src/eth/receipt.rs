@@ -7,6 +7,7 @@ use op_alloy_rpc_types::{
 };
 use reth_chainspec::ChainSpec;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
@@ -19,7 +20,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> LoadReceipt for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
@@ -205,7 +206,7 @@ pub struct OpReceiptBuilder {
 impl OpReceiptBuilder {
     /// Returns a new builder.
     pub fn new(
-        chain_spec: &ChainSpec,
+        chain_spec: &OpChainSpec,
         transaction: &TransactionSigned,
         meta: TransactionMeta,
         receipt: &Receipt,
