@@ -65,7 +65,7 @@ pub struct SystemCaller<EvmConfig, Chainspec, Hook = NoopHook> {
 impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub fn new(evm_config: EvmConfig, chain_spec: Chainspec) -> Self {
+    pub const fn new(evm_config: EvmConfig, chain_spec: Chainspec) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
 }
