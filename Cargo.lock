@@ -5213,8 +5213,8 @@ dependencies = [
  "clap",
  "reth-cli-util",
  "reth-node-builder",
- "reth-node-optimism",
  "reth-optimism-cli",
+ "reth-optimism-node",
  "reth-optimism-rpc",
  "reth-provider",
 ]
@@ -7338,30 +7338,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-evm-optimism"
-version = "1.0.7"
-dependencies = [
- "alloy-consensus",
- "alloy-genesis",
- "alloy-primitives",
- "reth-chainspec",
- "reth-ethereum-forks",
- "reth-evm",
- "reth-execution-errors",
- "reth-execution-types",
- "reth-optimism-chainspec",
- "reth-optimism-consensus",
- "reth-optimism-forks",
- "reth-primitives",
- "reth-prune-types",
- "reth-revm",
- "revm",
- "revm-primitives",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "reth-execution-errors"
 version = "1.0.7"
 dependencies = [
@@ -7974,58 +7950,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-node-optimism"
-version = "1.0.7"
-dependencies = [
- "alloy-genesis",
- "alloy-primitives",
- "alloy-rpc-types-engine",
- "async-trait",
- "clap",
- "eyre",
- "jsonrpsee",
- "jsonrpsee-types",
- "op-alloy-rpc-types-engine",
- "parking_lot 0.12.3",
- "reqwest",
- "reth",
- "reth-auto-seal-consensus",
- "reth-basic-payload-builder",
- "reth-beacon-consensus",
- "reth-chainspec",
- "reth-consensus",
- "reth-db",
- "reth-discv5",
- "reth-e2e-test-utils",
- "reth-evm",
- "reth-evm-optimism",
- "reth-network",
- "reth-node-api",
- "reth-node-builder",
- "reth-optimism-chainspec",
- "reth-optimism-consensus",
- "reth-optimism-forks",
- "reth-optimism-payload-builder",
- "reth-optimism-rpc",
- "reth-payload-builder",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-rpc",
- "reth-rpc-eth-api",
- "reth-rpc-eth-types",
- "reth-rpc-types",
- "reth-rpc-types-compat",
- "reth-tracing",
- "reth-transaction-pool",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "reth-node-types"
 version = "1.0.7"
 dependencies = [
@@ -8071,14 +7995,14 @@ dependencies = [
  "reth-db-common",
  "reth-downloaders",
  "reth-errors",
- "reth-evm-optimism",
  "reth-execution-types",
  "reth-network-p2p",
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
- "reth-node-optimism",
  "reth-optimism-chainspec",
+ "reth-optimism-evm",
+ "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
@@ -8110,6 +8034,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-evm"
+version = "1.0.7"
+dependencies = [
+ "alloy-consensus",
+ "alloy-genesis",
+ "alloy-primitives",
+ "reth-chainspec",
+ "reth-ethereum-forks",
+ "reth-evm",
+ "reth-execution-errors",
+ "reth-execution-types",
+ "reth-optimism-chainspec",
+ "reth-optimism-consensus",
+ "reth-optimism-forks",
+ "reth-primitives",
+ "reth-prune-types",
+ "reth-revm",
+ "revm",
+ "revm-primitives",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "reth-optimism-forks"
 version = "1.0.7"
 dependencies = [
@@ -8118,6 +8066,58 @@ dependencies = [
  "once_cell",
  "reth-ethereum-forks",
  "serde",
+]
+
+[[package]]
+name = "reth-optimism-node"
+version = "1.0.7"
+dependencies = [
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "async-trait",
+ "clap",
+ "eyre",
+ "jsonrpsee",
+ "jsonrpsee-types",
+ "op-alloy-rpc-types-engine",
+ "parking_lot 0.12.3",
+ "reqwest",
+ "reth",
+ "reth-auto-seal-consensus",
+ "reth-basic-payload-builder",
+ "reth-beacon-consensus",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-db",
+ "reth-discv5",
+ "reth-e2e-test-utils",
+ "reth-evm",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-optimism-chainspec",
+ "reth-optimism-consensus",
+ "reth-optimism-evm",
+ "reth-optimism-forks",
+ "reth-optimism-payload-builder",
+ "reth-optimism-rpc",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc",
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8132,9 +8132,9 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-evm",
- "reth-evm-optimism",
  "reth-execution-types",
  "reth-optimism-consensus",
+ "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -8176,12 +8176,12 @@ dependencies = [
  "reqwest",
  "reth-chainspec",
  "reth-evm",
- "reth-evm-optimism",
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
+ "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-primitives",
  "reth-provider",

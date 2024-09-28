@@ -2,7 +2,7 @@
 
 use alloy_rpc_types::error::EthRpcErrorCode;
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
-use reth_evm_optimism::OptimismBlockExecutionError;
+use reth_optimism_evm::OptimismBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;

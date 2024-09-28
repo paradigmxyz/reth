@@ -6,8 +6,8 @@ use op_alloy_rpc_types::{
     receipt::L1BlockInfo, OpTransactionReceipt, OptimismTransactionReceiptFields,
 };
 use reth_chainspec::ChainSpec;
-use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
@@ -42,7 +42,7 @@ where
 
         let block = block.unseal();
         let l1_block_info =
-            reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+            reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
         Ok(OpReceiptBuilder::new(
             &self.inner.provider().chain_spec(),
@@ -355,7 +355,7 @@ mod test {
         };
 
         let l1_block_info =
-            reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");
+            reth_optimism_evm::extract_l1_info(&block).expect("should extract l1 info");
 
         // test
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
