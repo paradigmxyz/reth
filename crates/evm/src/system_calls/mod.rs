@@ -99,7 +99,12 @@ where
         .build()
 }
 
-impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
+impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook>
+where
+    EvmConfig: ConfigureEvm<Header = Header>,
+    Chainspec: AsRef<ChainSpec>,
+    Hook: OnStateHook,
+{
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn pre_block_blockhashes_contract_call<DB>(
         &mut self,
@@ -111,9 +116,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let mut evm = initialize_evm(db, initialized_cfg, initialized_block_env);
         self.apply_blockhashes_contract_call(
@@ -137,9 +139,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let result_and_state = eip2935::transact_blockhashes_contract_call(
             &self.evm_config,
@@ -171,9 +170,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let mut evm = initialize_evm(db, initialized_cfg, initialized_block_env);
 
@@ -198,9 +194,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let result_and_state = eip4788::transact_beacon_root_contract_call(
             &self.evm_config,
@@ -231,9 +224,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let mut evm = initialize_evm(db, initialized_cfg, initialized_block_env);
 
@@ -250,9 +240,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let result_and_state =
             eip7002::transact_withdrawal_requests_contract_call(&self.evm_config, evm)?;
@@ -319,9 +306,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let mut evm = initialize_evm(db, initialized_cfg, initialized_block_env);
 
@@ -338,9 +322,6 @@ impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        EvmConfig: ConfigureEvm<Header = Header>,
-        Chainspec: AsRef<ChainSpec>,
-        Hook: OnStateHook,
     {
         let result_and_state =
             eip7251::transact_consolidation_requests_contract_call(&self.evm_config, evm)?;
