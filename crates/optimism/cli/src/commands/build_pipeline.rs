@@ -8,13 +8,13 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_errors::ProviderError;
-use reth_evm_optimism::OpExecutorProvider;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_events::node::NodeEvent;
+use reth_optimism_evm::OpExecutorProvider;
 use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderFactory};
 use reth_prune::PruneModes;
 use reth_stages::{sets::DefaultStages, Pipeline, StageSet};

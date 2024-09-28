@@ -3,7 +3,7 @@
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_node_optimism::node::{OptimismAddOns, OptimismNode};
+use reth_optimism_node::node::{OptimismAddOns, OptimismNode};
 
 #[test]
 fn test_basic_setup() {

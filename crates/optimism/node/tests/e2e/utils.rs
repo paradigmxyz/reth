@@ -5,10 +5,10 @@ use alloy_primitives::{Address, B256};
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
 use reth_chainspec::ChainSpecBuilder;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
-use reth_node_optimism::{
+use reth_optimism_chainspec::BASE_MAINNET;
+use reth_optimism_node::{
     node::OptimismAddOns, OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes,
 };
-use reth_optimism_chainspec::BASE_MAINNET;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use tokio::sync::Mutex;
 

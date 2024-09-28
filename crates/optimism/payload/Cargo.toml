@@ -28,8 +28,8 @@ reth-trie.workspace = true
 reth-chain-state.workspace = true
 
 # op-reth
-reth-evm-optimism.workspace = true
 reth-optimism-consensus.workspace = true
+reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
@@ -51,6 +51,6 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-evm-optimism/optimism",
+    "reth-optimism-evm/optimism",
     "reth-revm/optimism",
 ]
