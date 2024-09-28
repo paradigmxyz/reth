@@ -32,23 +32,20 @@ use tracing::trace;
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]
 pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     evm_config: EvmConfig,
 }
 
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
-    pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(
-            chain_spec.clone(),
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() })),
-        )
+    pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
+        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
     }
 }
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, evm_config }
     }
 }
@@ -98,7 +95,7 @@ where
 #[derive(Debug, Clone)]
 pub struct OpEvmExecutor<EvmConfig> {
     /// The chainspec
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
 }
@@ -240,7 +237,11 @@ pub struct OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     /// Creates a new Optimism block executor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(
+        chain_spec: Arc<OpChainSpec>,
+        evm_config: EvmConfig,
+        state: State<DB>,
+    ) -> Self {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 
@@ -504,12 +505,8 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
-                inner: (*chain_spec).clone(),
-            })),
-            chain_spec,
-        }
+        let chain_spec = Arc::new(OpChainSpec::new(Arc::unwrap_or_clone(chain_spec)));
+        OpExecutorProvider { evm_config: OptimismEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
     #[test]

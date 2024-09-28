@@ -1,7 +1,6 @@
 //! Command that initializes the node by importing OP Mainnet chain segment below Bedrock, from a
 //! file.
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_consensus::noop::NoopConsensus;
@@ -12,6 +11,7 @@ use reth_downloaders::file_client::{
 };
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::bedrock::is_dup_tx;
 use reth_provider::StageCheckpointReader;
 use reth_prune::PruneModes;
@@ -40,7 +40,7 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportOpCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,

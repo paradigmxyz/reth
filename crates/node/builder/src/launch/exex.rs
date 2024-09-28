@@ -5,7 +5,9 @@ use std::{fmt, fmt::Debug};
 use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
-use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal};
+use reth_exex::{
+    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal, DEFAULT_EXEX_MANAGER_CAPACITY,
+};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
@@ -45,6 +47,15 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             return Ok(None)
         }
 
+        let exex_wal = Wal::new(
+            config_container
+                .config
+                .datadir
+                .clone()
+                .resolve_datadir(config_container.config.chain.chain())
+                .exex_wal(),
+        )?;
+
         let mut exex_handles = Vec::with_capacity(extensions.len());
         let mut exexes = Vec::with_capacity(extensions.len());
 
@@ -55,6 +66,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 head,
                 components.provider().clone(),
                 components.block_executor().clone(),
+                exex_wal.handle(),
             );
             exex_handles.push(handle);
 
@@ -96,17 +108,9 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");
         // todo(onbjerg): rm magic number
-        let exex_wal = Wal::new(
-            config_container
-                .config
-                .datadir
-                .clone()
-                .resolve_datadir(config_container.config.chain.chain())
-                .exex_wal(),
-        )?;
         let exex_manager = ExExManager::new(
             exex_handles,
-            1024,
+            DEFAULT_EXEX_MANAGER_CAPACITY,
             exex_wal,
             components.provider().finalized_block_stream(),
         );

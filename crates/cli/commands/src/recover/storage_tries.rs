@@ -1,6 +1,6 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_db::tables;
@@ -21,7 +21,7 @@ pub struct Command<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `storage-tries` recovery command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,

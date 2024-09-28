@@ -6,8 +6,9 @@ use op_alloy_rpc_types::{
     receipt::L1BlockInfo, OpTransactionReceipt, OptimismTransactionReceiptFields,
 };
 use reth_chainspec::ChainSpec;
-use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
@@ -19,7 +20,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> LoadReceipt for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
@@ -42,7 +43,7 @@ where
 
         let block = block.unseal();
         let l1_block_info =
-            reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+            reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
         Ok(OpReceiptBuilder::new(
             &self.inner.provider().chain_spec(),
@@ -205,7 +206,7 @@ pub struct OpReceiptBuilder {
 impl OpReceiptBuilder {
     /// Returns a new builder.
     pub fn new(
-        chain_spec: &ChainSpec,
+        chain_spec: &OpChainSpec,
         transaction: &TransactionSigned,
         meta: TransactionMeta,
         receipt: &Receipt,
@@ -355,7 +356,7 @@ mod test {
         };
 
         let l1_block_info =
-            reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");
+            reth_optimism_evm::extract_l1_info(&block).expect("should extract l1 info");
 
         // test
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));

@@ -10,7 +10,7 @@ pub use states::*;
 use std::sync::Arc;
 
 use futures::Future;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
@@ -80,7 +80,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
 /// configured components and can interact with the node.
 ///
 /// There are convenience functions for networks that come with a preset of types and components via
-/// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_node_optimism::OptimismNode`.
+/// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_optimism_node::OptimismNode`.
 ///
 /// The [`NodeBuilder::node`] function configures the node's types and components in one step.
 ///
@@ -641,7 +641,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 }
 
-impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>> BuilderContext<Node> {
+impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext<Node> {
     /// Creates the [`NetworkBuilder`] for the node.
     pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
         let network_config = self.network_config()?;

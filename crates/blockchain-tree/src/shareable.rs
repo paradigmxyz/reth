@@ -1,6 +1,7 @@
 //! Wrapper around `BlockchainTree` that allows for it to be shared.
 
 use super::BlockchainTree;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
 use parking_lot::RwLock;
 use reth_blockchain_tree_api::{
@@ -10,7 +11,7 @@ use reth_blockchain_tree_api::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{BlockNumHash, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateSubscriptions,
     FullExecutionDataProvider, ProviderError,

@@ -20,7 +20,7 @@ use reth_db_common::init::init_genesis;
 use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
-use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications};
+use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
@@ -41,7 +41,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Head, SealedBlockWithSenders};
+use reth_primitives::{BlockNumHash, Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
@@ -49,6 +49,7 @@ use reth_provider::{
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::{
+    env::temp_dir,
     fmt::Debug,
     future::{poll_fn, Future},
     sync::Arc,
@@ -222,7 +223,7 @@ impl TestExExHandle {
     /// Asserts that the Execution Extension emitted a `FinishedHeight` event with the correct
     /// height.
     #[track_caller]
-    pub fn assert_event_finished_height(&mut self, height: u64) -> eyre::Result<()> {
+    pub fn assert_event_finished_height(&mut self, height: BlockNumHash) -> eyre::Result<()> {
         let event = self.events_rx.try_recv()?;
         assert_eq!(event, ExExEvent::FinishedHeight(height));
         Ok(())
@@ -310,6 +311,8 @@ pub async fn test_exex_context_with_chain_spec(
         components.provider.clone(),
         components.components.executor.clone(),
         notifications_rx,
+        // TODO(alexey): do we want to expose WAL to the user?
+        Wal::new(temp_dir())?.handle(),
     );
 
     let ctx = ExExContext {

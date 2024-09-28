@@ -14,7 +14,7 @@ reth-cli-util.workspace = true
 reth-optimism-cli.workspace = true
 reth-provider.workspace = true
 reth-optimism-rpc.workspace = true
-reth-node-optimism.workspace = true
+reth-optimism-node.workspace = true
 
 clap = { workspace = true, features = ["derive", "env"] }
 
@@ -28,9 +28,9 @@ jemalloc = ["reth-cli-util/jemalloc"]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
-asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-node-optimism/asm-keccak"]
+asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-optimism-node/asm-keccak"]
 
-optimism = ["reth-optimism-cli/optimism", "reth-node-optimism/optimism"]
+optimism = ["reth-optimism-cli/optimism", "reth-optimism-node/optimism"]
 
 [[bin]]
 name = "op-reth"

@@ -1,7 +1,7 @@
 //! Main node command for launching a node
 
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -112,7 +112,7 @@ pub struct NodeCommand<
     pub ext: Ext,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<C> {
+impl<C: ChainSpecParser> NodeCommand<C> {
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
@@ -128,7 +128,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<C> {
     }
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
+impl<
+        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
+        Ext: clap::Args + fmt::Debug,
+    > NodeCommand<C, Ext>
+{
     /// Launches the node
     ///
     /// This transforms the node command into a node config and launches the node using the given

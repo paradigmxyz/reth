@@ -1356,7 +1356,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                 };
                 self.tx.put::<T>(
                     sharded_key_factory(partial_key, highest_block_number),
-                    BlockNumberList::new_pre_sorted(list),
+                    BlockNumberList::new_pre_sorted(list.iter().copied()),
                 )?;
             }
         }

@@ -4,6 +4,7 @@ use crate::OptimismBlockExecutionError;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::Block;
 use revm::{
@@ -260,7 +261,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 /// deployer contract. This is done by directly setting the code of the create2 deployer account
 /// prior to executing any transactions on the timestamp activation of the fork.
 pub fn ensure_create2_deployer<DB>(
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
 ) -> Result<(), DB::Error>
@@ -352,7 +353,7 @@ mod tests {
         let expected_l1_blob_base_fee = U256::from_be_bytes(hex!(
             "0000000000000000000000000000000000000000000000000000000d5ea528d2" // 57422457042
         ));
-        let expecte_l1_blob_base_fee_scalar = U256::from(810949);
+        let expected_l1_blob_base_fee_scalar = U256::from(810949);
 
         // test
 
@@ -361,7 +362,7 @@ mod tests {
         assert_eq!(l1_block_info.l1_base_fee, expected_l1_base_fee);
         assert_eq!(l1_block_info.l1_base_fee_scalar, expected_l1_base_fee_scalar);
         assert_eq!(l1_block_info.l1_blob_base_fee, Some(expected_l1_blob_base_fee));
-        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, Some(expecte_l1_blob_base_fee_scalar));
+        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, Some(expected_l1_blob_base_fee_scalar));
     }
 
     #[test]

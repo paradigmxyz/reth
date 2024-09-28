@@ -463,6 +463,7 @@ where
                 }
 
                 if let Some(replaced) = added.replaced_blob_transaction() {
+                    debug!(target: "txpool", "[{:?}] delete replaced blob sidecar", replaced);
                     // delete the replaced transaction from the blob store
                     self.delete_blob(replaced);
                 }
@@ -579,9 +580,11 @@ where
 
     /// Notify all listeners about a blob sidecar for a newly inserted blob (eip4844) transaction.
     fn on_new_blob_sidecar(&self, tx_hash: &TxHash, sidecar: &BlobTransactionSidecar) {
-        let sidecar = Arc::new(sidecar.clone());
-
         let mut sidecar_listeners = self.blob_transaction_sidecar_listener.lock();
+        if sidecar_listeners.is_empty() {
+            return
+        }
+        let sidecar = Arc::new(sidecar.clone());
         sidecar_listeners.retain_mut(|listener| {
             let new_blob_event = NewBlobSidecar { tx_hash: *tx_hash, sidecar: sidecar.clone() };
             match listener.sender.try_send(new_blob_event) {
@@ -798,6 +801,7 @@ where
 
     /// Inserts a blob transaction into the blob store
     fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
+        debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         if let Err(err) = self.blob_store.insert(hash, blob) {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);

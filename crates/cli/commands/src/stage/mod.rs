@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_evm::execute::BlockExecutorProvider;
@@ -39,13 +39,13 @@ pub enum Subcommands<C: ChainSpecParser> {
     Unwind(unwind::Command<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
         N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
-        F: FnOnce(Arc<ChainSpec>) -> E,
+        F: FnOnce(Arc<C::ChainSpec>) -> E,
     {
         match self.command {
             Subcommands::Run(command) => command.execute::<N, _, _>(ctx, executor).await,

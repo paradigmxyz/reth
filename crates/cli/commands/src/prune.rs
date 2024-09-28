@@ -1,7 +1,7 @@
 //! Command that runs pruning without any limits.
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_prune::PrunerBuilder;
@@ -15,7 +15,7 @@ pub struct PruneCommand<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> PruneCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
     /// Execute the `prune` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
