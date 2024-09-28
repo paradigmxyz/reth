@@ -38,7 +38,7 @@ impl Compact for ClientVersion {
         let (git_sha, buf) = String::from_compact(buf, len);
         let (build_timestamp, buf) = String::from_compact(buf, len);
         let client_version = Self {
-            version: version.unwrap(), 
+            version: version.unwrap(), // Safely unwrap the result from String::from_utf8()
             git_sha: git_sha.unwrap(),
             build_timestamp: build_timestamp.unwrap(),
         };
