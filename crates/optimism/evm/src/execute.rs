@@ -1,8 +1,7 @@
 //! Optimism block executor.
 
-use crate::{
-    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
-};
+use std::{fmt::Display, sync::Arc};
+
 use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -14,7 +13,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_optimism_consensus::validate_block_post_execution;
+use reth_optimism_consensus::{proofs, validate_block_post_execution};
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
@@ -26,8 +25,11 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
+
+use crate::{
+    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
+};
 
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]
@@ -458,6 +460,53 @@ where
 
     fn size_hint(&self) -> Option<usize> {
         Some(self.executor.state.bundle_state.size_hint())
+    }
+}
+
+/// The output of an optimism block.
+///
+/// Contains the state changes, transaction receipts, and total gas used in the block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpBlockExecutionOutput {
+    /// The changed state of the block after execution.
+    pub state: BundleState,
+    /// All the receipts of the transactions in the block.
+    pub receipts: Vec<Receipt>,
+    /// All the EIP-7685 requests of the transactions in the block.
+    pub requests: Vec<Request>,
+    /// The total gas used by the block.
+    pub gas_used: u64,
+    /// Chain spec.
+    pub chain_spec: Arc<ChainSpec>,
+    /// Block timestamp.
+    pub timestamp: u64,
+}
+
+impl BlockExecOutput for OpBlockReceipts {
+    type Receipt = Receipt;
+
+    fn state(&self) -> &BundleState {
+        &self.state
+    }
+
+    fn receipts(&self) -> &[Self::Receipt] {
+        &self.receipts
+    }
+
+    fn requests(&self) -> &[Request] {
+        &self.requests
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.gas_used
+    }
+
+    fn receipts_root_slow(&self) -> Option<B256> {
+        Some(proofs::calculate_receipt_root_no_memo_optimism(
+            &self.receipts,
+            self.chain_spec,
+            self.block_timestamp,
+        ))
     }
 }
 

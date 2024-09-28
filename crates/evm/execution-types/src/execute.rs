@@ -1,5 +1,5 @@
 use alloy_primitives::{B256, U256};
-use reth_primitives::{Receipt, Request};
+use reth_primitives::{proofs, Receipt, Request};
 use revm::db::BundleState;
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -88,6 +88,6 @@ impl BlockExecOutput for EthBlockExecutionOutput {
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
     fn receipts_root_slow(&self) -> Option<B256> {
-        Some(reth_primitives::proofs::calculate_receipt_root_no_memo(&self.receipts))
+        Some(proofs::calculate_receipt_root_no_memo(&self.receipts))
     }
 }
