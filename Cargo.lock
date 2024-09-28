@@ -6394,6 +6394,7 @@ name = "reth-blockchain-tree"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "aquamarine",
