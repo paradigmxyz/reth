@@ -3,16 +3,18 @@ use std::sync::Arc;
 use super::setup;
 use alloy_primitives::BlockNumber;
 use eyre::Result;
-use reth_chainspec::ChainSpec;
 use reth_config::config::EtlConfig;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory, ProviderFactory};
+use reth_provider::{
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    DatabaseProviderFactory, ProviderFactory,
+};
 use reth_prune::PruneModes;
 use reth_stages::{
     stages::{
@@ -23,7 +25,7 @@ use reth_stages::{
 };
 use tracing::info;
 
-pub(crate) async fn dump_merkle_stage<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub(crate) async fn dump_merkle_stage<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
     to: BlockNumber,
@@ -66,7 +68,7 @@ pub(crate) async fn dump_merkle_stage<N: NodeTypesWithDB<ChainSpec = ChainSpec>>
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+fn unwind_and_copy<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     range: (u64, u64),
     tip_block_number: u64,
@@ -144,7 +146,7 @@ fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 }
 
 /// Try to re-execute the stage straight away
-fn dry_run<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+fn dry_run<N: ProviderNodeTypes>(
     output_provider_factory: ProviderFactory<N>,
     to: u64,
     from: u64,
