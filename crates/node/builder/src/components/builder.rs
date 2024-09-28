@@ -39,13 +39,13 @@ use super::EngineValidatorBuilder;
 /// launched.
 #[derive(Debug)]
 pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB> {
-    pool_builder: PoolB,
-    payload_builder: PayloadB,
-    network_builder: NetworkB,
-    executor_builder: ExecB,
-    consensus_builder: ConsB,
-    engine_validator_builder: EVB,
-    _marker: PhantomData<Node>,
+    pub pool_builder: PoolB,
+    pub payload_builder: PayloadB,
+    pub network_builder: NetworkB,
+    pub executor_builder: ExecB,
+    pub consensus_builder: ConsB,
+    pub engine_validator_builder: EVB,
+    pub _marker: PhantomData<Node>,
 }
 
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
@@ -448,5 +448,20 @@ where
         ctx: &BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send {
         self(ctx)
+    }
+}
+
+impl<N, T> NodeComponentsBuilder<N> for T
+where
+    N: FullNodeTypes,
+    T: BuilderProvider<Ctx = &BuilderContext<Node>>,
+{
+    type Components = Self;
+
+    fn build_components(
+        self,
+        ctx: &BuilderContext<N>,
+    ) -> impl Future<Output = eyre::Result<Self::Components>> + Send {
+        Self::builder(ctx)
     }
 }

@@ -239,7 +239,11 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
+    ) -> NodeBuilderWithComponents<
+        RethFullAdapter<DB, N>,
+        Box<dyn NodeComponentsBuilder<RethFullAdapter<DB, N>>>,
+        N::AddOns,
+    >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
     {
@@ -306,7 +310,11 @@ where
         self,
         node: N,
     ) -> WithLaunchContext<
-        NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        NodeBuilderWithComponents<
+            RethFullAdapter<DB, N>,
+            Box<dyn NodeComponentsBuilder<RethFullAdapter<DB, N>>>,
+            N::AddOns,
+        >,
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
@@ -322,30 +330,14 @@ where
     pub async fn launch_node<N>(
         self,
         node: N,
-    ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-            N::AddOns,
-        >,
-    >
+    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, N>, N::Components>, N::AddOns>>
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
         N::AddOns: NodeAddOns<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-            EthApi: EthApiBuilderProvider<
-                        NodeAdapter<
-                            RethFullAdapter<DB, N>,
-                            <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-                        >
-                    >
+            NodeAdapter<RethFullAdapter<DB, N>, N::Components>,
+            EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, N>, N::Components>>
                         + FullEthApiServer
-                        + AddDevSigners
+                        + AddDevSigners,
         >,
     {
         self.node(node).launch().await

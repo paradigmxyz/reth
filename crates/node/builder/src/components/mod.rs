@@ -58,6 +58,8 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     /// Validator for the engine API.
     type EngineValidator: EngineValidator<<T::Types as NodeTypesWithEngine>::Engine>;
 
+    type PayloadBuilder;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -74,10 +76,50 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns the engine validator.
     fn engine_validator(&self) -> &Self::EngineValidator;
+}
+
+/// Returns the builder for type.
+pub trait BuilderProvider<N: FullNodeComponents>: Send {
+    /// Context required to build type.
+    type Ctx<'a>;
+
+    /// Returns builder for type.
+    #[allow(clippy::type_complexity)]
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
+}
+
+impl<N, T> BuilderProvider<N> for T
+where
+    N: FullNodeTypes,
+    T: NodeComponents<
+        N,
+        Pool: BuilderProvider,
+        PayloadBuilder: BuilderProvider,
+        Network: BuilderProvider,
+        Executor: BuilderProvider,
+        Consensus: BuilderProvider,
+        EngineValidator: BuilderProvider,
+    >,
+{
+    type Ctx<'a> = &'a BuilderContext<N>;
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        let builder = ComponentsBuilder {
+            pool_builder: Self::Pool::builder(),
+            payload_builder: Self::PayloadBuilder::builder(),
+            network_builder: Self::Network::builder(),
+            executor_builder: Self::Executor::builder(),
+            consensus_builder: Self::Consensus::builder(),
+            engine_validator_builder: Self::EngineValidator::builder(),
+            _marker: PhantomData,
+        };
+
+        |x| builder.build_components(x) as Box<dyn Fn(&BuilderContext<N>) -> Self>
+    }
 }
 
 /// All the components of the node.

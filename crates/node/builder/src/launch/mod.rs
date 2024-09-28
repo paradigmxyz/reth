@@ -104,23 +104,21 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
+impl<Types, T, C, AO> LaunchNode<N> for DefaultNodeLauncher
 where
     Types: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec> + NodeTypesWithEngine,
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
-    CB: NodeComponentsBuilder<T>,
+    C: NodeComponents<T>,
     AO: NodeAddOns<
-        NodeAdapter<T, CB::Components>,
-        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
+        NodeAdapter<T, C>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, C>> + FullEthApiServer + AddDevSigners,
     >,
 {
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
+    type Node = NodeHandle<NodeAdapter<T, C>, AO>;
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<T, CB, AO>,
+        target: NodeBuilderWithComponents<T, Box<dyn NodeComponentsBuilder<T, Components = C>>, AO>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {

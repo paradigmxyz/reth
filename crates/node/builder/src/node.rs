@@ -25,15 +25,24 @@ use crate::{
 /// This can be used to configure the builder with a preset of components.
 pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
     /// The type that builds the node's components.
-    type ComponentsBuilder: NodeComponentsBuilder<N>;
+    type Components: NodeComponents<N>;
 
     /// Exposes the customizable node add-on types.
-    type AddOns: NodeAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-    >;
+    type AddOns: NodeAddOns<NodeAdapter<N, Self::Components>>;
 
     /// Returns a [`NodeComponentsBuilder`] for the node.
     fn components_builder(&self) -> Self::ComponentsBuilder;
+}
+
+impl<T, N: FullNodeTypes> BuilderProvider<N> for T
+where
+    T: Node<N, Components: BuilderProvider<N>>,
+{
+    type Ctx<'a> = ();
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        self::Components::builder()
+    }
 }
 
 /// A [`Node`] type builder
@@ -75,10 +84,10 @@ where
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
     N: FullNodeTypes + Clone,
-    C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
+    C: NodeComponents<N> + Clone + Sync + Unpin + 'static,
     AO: NodeAddOns<NodeAdapter<N, C::Components>>,
 {
-    type ComponentsBuilder = C;
+    type Components = C;
     type AddOns = AO;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {

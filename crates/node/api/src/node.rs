@@ -93,7 +93,7 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
 }
 
 /// Returns the builder for type.
-pub trait BuilderProvider<N: FullNodeComponents>: Send {
+pub trait BuilderProvider<N>: Send {
     /// Context required to build type.
     type Ctx<'a>;
 
@@ -102,7 +102,7 @@ pub trait BuilderProvider<N: FullNodeComponents>: Send {
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
 }
 
-impl<N: FullNodeComponents> BuilderProvider<N> for () {
+impl<N> BuilderProvider<N> for () {
     type Ctx<'a> = ();
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
