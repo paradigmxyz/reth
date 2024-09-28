@@ -219,7 +219,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "getBlobsV1")]
     async fn get_blobs_v1(
         &self,
-        transaction_ids: Vec<B256>,
+        versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 }
 
