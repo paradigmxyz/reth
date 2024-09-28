@@ -5,8 +5,10 @@ pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use alloy_primitives::BlockNumber;
 use core::fmt::Display;
+
+use alloy_primitives::BlockNumber;
+use reth_execution_types::BlockExecOutput;
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm::State;
@@ -121,7 +123,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output: BlockExecOutput,
         Error = BlockExecutionError,
     >;
 

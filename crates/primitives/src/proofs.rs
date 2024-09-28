@@ -44,9 +44,9 @@ pub fn calculate_receipt_root_ref(receipts: &[ReceiptWithBloomRef<'_>]) -> B256 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
 /// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
-pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
+pub fn calculate_receipt_root_no_memo(receipts: &[Receipt]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
+        ReceiptWithBloomRef::from(r).encode_inner(buf, false)
     })
 }
 

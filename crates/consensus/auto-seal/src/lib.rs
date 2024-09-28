@@ -392,6 +392,9 @@ impl StorageInner {
         let block_execution_output =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let gas_used = block_execution_output.gas_used;
+        // calculate the receipts root of the block
+        header.receipts_root = block_execution_output.receipts_root_slow();
+
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
         let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
 
@@ -415,25 +418,6 @@ impl StorageInner {
             receipts.iter().map(|r| r.as_ref().unwrap().bloom_slow()).collect::<Vec<Bloom>>();
         header.logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r);
 
-        // update receipts root
-        header.receipts_root = {
-            #[cfg(feature = "optimism")]
-            let receipts_root = execution_outcome
-                .generic_receipts_root_slow(header.number, |receipts| {
-                    reth_optimism_consensus::calculate_receipt_root_no_memo_optimism(
-                        receipts,
-                        &chain_spec,
-                        header.timestamp,
-                    )
-                })
-                .expect("Receipts is present");
-
-            #[cfg(not(feature = "optimism"))]
-            let receipts_root =
-                execution_outcome.receipts_root_slow(header.number).expect("Receipts is present");
-
-            receipts_root
-        };
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage

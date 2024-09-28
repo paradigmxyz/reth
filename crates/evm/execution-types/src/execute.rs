@@ -1,5 +1,5 @@
-use alloy_primitives::U256;
-use reth_primitives::Request;
+use alloy_primitives::{B256, U256};
+use reth_primitives::{Receipt, Request};
 use revm::db::BundleState;
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -37,4 +37,57 @@ pub struct BlockExecutionOutput<T> {
     pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
+}
+
+pub trait BlockExecOutput {
+    type Receipt;
+
+    fn state(&self) -> &BundleState;
+    fn receipts(&self) -> &[Self::Receipt];
+    fn requests(&self) -> &[Request];
+    fn gas_used(&self) -> u64;
+    /// Calculates the receipts root of the block.
+    fn receipts_root_slow(&self) -> Option<B256>;
+}
+
+/// The output of an ethereum block.
+///
+/// Contains the state changes, transaction receipts, and total gas used in the block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EthBlockExecutionOutput {
+    /// The changed state of the block after execution.
+    pub state: BundleState,
+    /// All the receipts of the transactions in the block.
+    pub receipts: Vec<Receipt>,
+    /// All the EIP-7685 requests of the transactions in the block.
+    pub requests: Vec<Request>,
+    /// The total gas used by the block.
+    pub gas_used: u64,
+}
+
+impl BlockExecOutput for EthBlockExecutionOutput {
+    type Receipt = Receipt;
+
+    fn state(&self) -> &BundleState {
+        &self.state
+    }
+
+    fn receipts(&self) -> &[Self::Receipt] {
+        &self.receipts
+    }
+
+    fn requests(&self) -> &[Request] {
+        &self.requests
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.gas_used
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    fn receipts_root_slow(&self) -> Option<B256> {
+        Some(reth_primitives::proofs::calculate_receipt_root_no_memo(&self.receipts))
+    }
 }
