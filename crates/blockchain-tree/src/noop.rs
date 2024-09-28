@@ -1,3 +1,4 @@
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_blockchain_tree_api::{
     self,
@@ -5,7 +6,7 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_primitives::{BlockNumHash, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions, FullExecutionDataProvider,
