@@ -409,6 +409,13 @@ impl StorageInner {
 
         // now we need to update certain header fields with the results of the execution
         header.state_root = db.state_root(hashed_state)?;
+
+        trace!(target: "consensus::auto",
+            state_root=?header.state_root,
+            ?body,
+            "calculated state root"
+        );
+
         header.gas_used = gas_used.into();
 
         let receipts = execution_outcome.receipts_by_block(header.number);
@@ -417,8 +424,6 @@ impl StorageInner {
         let receipts_with_bloom =
             receipts.iter().map(|r| r.as_ref().unwrap().bloom_slow()).collect::<Vec<Bloom>>();
         header.logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r);
-
-        trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage
         self.insert_new_block(header.clone(), body);
