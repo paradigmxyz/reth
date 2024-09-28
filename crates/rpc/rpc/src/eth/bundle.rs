@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::{keccak256, U256};
-use alloy_rpc_types_mev::{
-    EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult
-};
+use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
