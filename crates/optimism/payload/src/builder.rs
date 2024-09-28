@@ -216,7 +216,7 @@ where
         warn!(target: "payload_builder",
             parent_hash=%parent_block.hash(),
             %err,
-            "failed to apply beacon root contract call for empty payload"
+            "failed to apply beacon root contract call for payload"
         );
         PayloadBuilderError::Internal(err.into())
     })?;
@@ -459,7 +459,7 @@ where
             warn!(target: "payload_builder",
                 parent_hash=%parent_block.hash(),
                 %err,
-                "failed to calculate state root for empty payload"
+                "failed to calculate state root for payload"
             );
         })?
     };
