@@ -55,7 +55,7 @@ pub fn transact_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<ResultAndState, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
