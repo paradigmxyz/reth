@@ -46,6 +46,8 @@ use tracing::{debug, trace, warn};
 mod metrics;
 mod builder_stack;
 
+pub use builder_stack::{EitherError, EitherAttributes, PayloadBuilderStack};
+
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
