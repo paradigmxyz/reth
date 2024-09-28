@@ -26,7 +26,6 @@ use reth_rpc_eth_api::{
     EthCallBundleApiServer,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
-
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.
