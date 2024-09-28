@@ -337,10 +337,10 @@ where
             .map(|(exex_id, hash)| {
                 hash.map_or(Ok((exex_id, hash, false)), |hash| {
                     self.provider
-                        .header(&hash)
+                        .is_known(&hash)
                         // Save the ExEx ID, hash of the finished height, and whether the hash
                         // is canonical
-                        .map(|header| (exex_id, Some(hash), header.is_some()))
+                        .map(|is_canonical| (exex_id, Some(hash), is_canonical))
                 })
             })
             // We collect here to be able to log the unfinalized ExExes below
