@@ -13,6 +13,11 @@ impl ECIESError {
     pub fn into_inner(self) -> ECIESErrorImpl {
         *self.inner
     }
+
+    /// Returns a reference to the inner error
+    pub const fn inner(&self) -> &ECIESErrorImpl {
+        &self.inner
+    }
 }
 
 impl fmt::Display for ECIESError {

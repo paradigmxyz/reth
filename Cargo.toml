@@ -333,7 +333,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
-reth-evm-optimism = { path = "crates/optimism/evm" }
+reth-optimism-evm = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex/exex" }
@@ -360,7 +360,7 @@ reth-node-core = { path = "crates/node/core" }
 reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
-reth-node-optimism = { path = "crates/optimism/node" }
+reth-optimism-node = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }

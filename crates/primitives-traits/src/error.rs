@@ -19,8 +19,7 @@ impl<T: fmt::Display> fmt::Display for GotExpected<T> {
     }
 }
 
-#[cfg(feature = "std")]
-impl<T: fmt::Debug + fmt::Display> std::error::Error for GotExpected<T> {}
+impl<T: fmt::Debug + fmt::Display> core::error::Error for GotExpected<T> {}
 
 impl<T> From<(T, T)> for GotExpected<T> {
     #[inline]
@@ -57,8 +56,7 @@ impl<T: fmt::Display> fmt::Display for GotExpectedBoxed<T> {
     }
 }
 
-#[cfg(feature = "std")]
-impl<T: fmt::Debug + fmt::Display> std::error::Error for GotExpectedBoxed<T> {}
+impl<T: fmt::Debug + fmt::Display> core::error::Error for GotExpectedBoxed<T> {}
 
 impl<T> Deref for GotExpectedBoxed<T> {
     type Target = GotExpected<T>;
