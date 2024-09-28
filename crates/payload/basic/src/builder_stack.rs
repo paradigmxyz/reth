@@ -211,7 +211,6 @@ where
                     parent_block: args.config.parent_block.clone(),
                     extra_data: args.config.extra_data.clone(),
                     attributes: left_attr.clone(),
-                    chain_spec: args.config.chain_spec.clone(),
                 },
                 cancel: args.cancel.clone(),
                 best_payload: args.best_payload.clone().and_then(|p| {
@@ -250,7 +249,6 @@ where
                     parent_block: args.config.parent_block.clone(),
                     extra_data: args.config.extra_data.clone(),
                     attributes: right_attr.clone(),
-                    chain_spec: args.config.chain_spec.clone(),
                 },
                 cancel: args.cancel.clone(),
                 best_payload: args.best_payload.and_then(|p| {
@@ -294,7 +292,7 @@ where
                     attributes: left_attr,
                     parent_block: config.parent_block.clone(),
                     extra_data: config.extra_data.clone(),
-                    chain_spec: config.chain_spec.clone(),
+
                 };
                 self.left.build_empty_payload(client, left_config)
                     .map(|payload| EitherAttributes(EitherFuture::Left(payload)))
@@ -304,7 +302,6 @@ where
                     attributes: right_attr,
                     parent_block: config.parent_block.clone(),
                     extra_data: config.extra_data.clone(),
-                    chain_spec: config.chain_spec.clone(),
                 };
                 self.right.build_empty_payload(client, right_config)
                     .map(|payload| EitherAttributes(EitherFuture::Right(payload)))
