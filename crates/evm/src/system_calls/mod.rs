@@ -54,25 +54,28 @@ impl OnStateHook for NoopHook {
 ///
 /// This can be used to chain system transaction calls.
 #[allow(missing_debug_implementations)]
-pub struct SystemCaller<EvmConfig, Chainspec, Hook = NoopHook> {
-    evm_config: EvmConfig,
-    chain_spec: Chainspec,
+pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
+    evm_config: &'a EvmConfig,
+    chain_spec: &'a Chainspec,
     /// Optional hook to be called after each state change.
     // TODO do we want this optional?
     hook: Option<Hook>,
 }
 
-impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec> {
+impl<'a, EvmConfig, Chainspec> SystemCaller<'a, EvmConfig, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub const fn new(evm_config: EvmConfig, chain_spec: Chainspec) -> Self {
+    pub const fn new(evm_config: &'a EvmConfig, chain_spec: &'a Chainspec) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
 }
 
-impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook> {
+impl<'a, EvmConfig, Chainspec, Hook> SystemCaller<'a, EvmConfig, Chainspec, Hook> {
     /// Installs a custom hook to be called after each state change.
-    pub fn with_state_hook<H: OnStateHook>(self, hook: H) -> SystemCaller<EvmConfig, Chainspec, H> {
+    pub fn with_state_hook<H: OnStateHook>(
+        self,
+        hook: H,
+    ) -> SystemCaller<'a, EvmConfig, Chainspec, H> {
         let Self { evm_config, chain_spec, .. } = self;
         SystemCaller { evm_config, chain_spec, hook: Some(hook) }
     }
@@ -98,7 +101,7 @@ where
         .build()
 }
 
-impl<EvmConfig, Chainspec, Hook> SystemCaller<EvmConfig, Chainspec, Hook>
+impl<'a, EvmConfig, Chainspec, Hook> SystemCaller<'a, EvmConfig, Chainspec, Hook>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Chainspec: AsRef<ChainSpec>,
@@ -140,7 +143,7 @@ where
         DB::Error: Display,
     {
         let result_and_state = eip2935::transact_blockhashes_contract_call(
-            &self.evm_config,
+            &self.evm_config.clone(),
             self.chain_spec.as_ref(),
             timestamp,
             block_number,
@@ -195,7 +198,7 @@ where
         DB::Error: Display,
     {
         let result_and_state = eip4788::transact_beacon_root_contract_call(
-            &self.evm_config,
+            &self.evm_config.clone(),
             self.chain_spec.as_ref(),
             timestamp,
             block_number,
@@ -241,7 +244,7 @@ where
         DB::Error: Display,
     {
         let result_and_state =
-            eip7002::transact_withdrawal_requests_contract_call(&self.evm_config, evm)?;
+            eip7002::transact_withdrawal_requests_contract_call(&self.evm_config.clone(), evm)?;
 
         if let Some(ref mut hook) = self.hook {
             hook.on_state(&result_and_state);
@@ -323,7 +326,7 @@ where
         DB::Error: Display,
     {
         let result_and_state =
-            eip7251::transact_consolidation_requests_contract_call(&self.evm_config, evm)?;
+            eip7251::transact_consolidation_requests_contract_call(&self.evm_config.clone(), evm)?;
 
         if let Some(ref mut hook) = self.hook {
             hook.on_state(&result_and_state);
