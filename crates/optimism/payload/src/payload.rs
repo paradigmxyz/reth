@@ -4,18 +4,19 @@
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
+/// Re-export for use in downstream arguments.
+pub use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
+use op_alloy_rpc_types_engine::{
+    OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
+};
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
-};
-/// Re-export for use in downstream arguments.
-pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
-use reth_rpc_types::{
-    engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId},
-    optimism::{OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4},
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
@@ -119,7 +120,7 @@ pub struct OptimismBuiltPayload {
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
     /// The rollup's chainspec.
-    pub(crate) chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<OpChainSpec>,
     /// The payload attributes.
     pub(crate) attributes: OptimismPayloadBuilderAttributes,
 }
@@ -132,7 +133,7 @@ impl OptimismBuiltPayload {
         id: PayloadId,
         block: SealedBlock,
         fees: U256,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: Arc<OpChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
     ) -> Self {

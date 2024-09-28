@@ -1,10 +1,9 @@
 use crate::{Compact, CompactPlaceholder};
 use alloc::vec::Vec;
-use alloy_consensus::transaction::TxEip4844 as AlloyTxEip4844;
+use alloy_consensus::TxEip4844 as AlloyTxEip4844;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
 use reth_codecs_derive::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
@@ -13,9 +12,9 @@ use serde::{Deserialize, Serialize};
 /// By deriving `Compact` here, any future changes or enhancements to the `Compact` derive
 /// will automatically apply to this type.
 ///
-/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::transaction::TxEip4844`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip4844`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxEip4844 {
     chain_id: ChainId,

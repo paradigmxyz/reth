@@ -1,7 +1,7 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
-use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_db::tables;
 use reth_db_api::{
@@ -9,8 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry,
-    Withdrawals,
+    Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals,
 };
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
@@ -94,14 +93,14 @@ pub struct Header {
 impl From<Header> for SealedHeader {
     fn from(value: Header) -> Self {
         let header = RethHeader {
-            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to::<u64>()),
+            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to::<u64>().into()),
             beneficiary: value.coinbase,
             difficulty: value.difficulty,
             extra_data: value.extra_data,
-            gas_limit: value.gas_limit.to::<u64>(),
-            gas_used: value.gas_used.to::<u64>(),
+            gas_limit: value.gas_limit.to::<u64>().into(),
+            gas_used: value.gas_used.to::<u64>().into(),
             mix_hash: value.mix_hash,
-            nonce: u64::from_be_bytes(value.nonce.0),
+            nonce: u64::from_be_bytes(value.nonce.0).into(),
             number: value.number.to::<u64>(),
             timestamp: value.timestamp.to::<u64>(),
             transactions_root: value.transactions_trie,
@@ -111,12 +110,12 @@ impl From<Header> for SealedHeader {
             parent_hash: value.parent_hash,
             logs_bloom: value.bloom,
             withdrawals_root: value.withdrawals_root,
-            blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>()),
-            excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
+            blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>().into()),
+            excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>().into()),
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_root: value.requests_root,
         };
-        header.seal(value.hash)
+        Self::new(header, value.hash)
     }
 }
 

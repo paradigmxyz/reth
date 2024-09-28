@@ -4,7 +4,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
@@ -16,11 +16,13 @@ use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
+    state_change::post_block_balance_increments,
     DatabaseCommit, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
+use serde::Serialize;
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
@@ -50,7 +52,11 @@ impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
 
 impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
 where
-    P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
+    P: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + Send
+        + Sync
+        + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(
@@ -113,6 +119,17 @@ where
 
         drop(evm);
 
+        // use U256::MAX here for difficulty, because fetching it is annoying
+        // NOTE: This is not mut because we are not doing the DAO irregular state change here
+        let balance_increments = post_block_balance_increments(
+            self.provider.chain_spec().as_ref(),
+            &block.block.clone().unseal(),
+            U256::MAX,
+        );
+
+        // increment balances
+        db.increment_balances(balance_increments)?;
+
         // Merge all state transitions
         db.merge_transitions(BundleRetention::Reverts);
 
@@ -120,7 +137,7 @@ where
         let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
-        let mut state_preimages = HashMap::new();
+        let mut state_preimages = HashMap::default();
 
         // Grab all account proofs for the data accessed during block execution.
         //
@@ -157,38 +174,14 @@ where
         let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness { state, keys: Some(state_preimages) };
-        File::create_new(self.output_directory.join(format!(
-            "{}_{}.json",
-            block.number,
-            block.hash()
-        )))?
-        .write_all(serde_json::to_string(&response)?.as_bytes())?;
-
-        // The bundle state after re-execution should match the original one.
-        if bundle_state != output.state {
-            let filename = format!("{}_{}.bundle_state.diff", block.number, block.hash());
-            let path = self.save_diff(filename, &bundle_state, &output.state)?;
-            warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Bundle state mismatch after re-execution");
-        }
-
-        // Calculate the state root and trie updates after re-execution. They should match
-        // the original ones.
-        let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
-        if let Some(trie_updates) = trie_updates {
-            if state_root != trie_updates.1 {
-                let filename = format!("{}_{}.state_root.diff", block.number, block.hash());
-                let path = self.save_diff(filename, &state_root, &trie_updates.1)?;
-                warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "State root mismatch after re-execution");
-            }
-
-            if &trie_output != trie_updates.0 {
-                let filename = format!("{}_{}.trie_updates.diff", block.number, block.hash());
-                let path = self.save_diff(filename, &trie_output, trie_updates.0)?;
-                warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Trie updates mismatch after re-execution");
-            }
-        }
-
+        let response = ExecutionWitness {
+            state: std::collections::HashMap::from_iter(state),
+            keys: Some(state_preimages),
+        };
+        let re_executed_witness_path = self.save_file(
+            format!("{}_{}.witness.re_executed.json", block.number, block.hash()),
+            &response,
+        )?;
         if let Some(healthy_node_client) = &self.healthy_node_client {
             // Compare the witness against the healthy node.
             let healthy_node_witness = futures::executor::block_on(async move {
@@ -200,19 +193,82 @@ where
                 .await
             })?;
 
-            // Write the healthy node witness to the output directory.
-            File::create_new(self.output_directory.join(format!(
-                "{}_{}.healthy_witness.json",
-                block.number,
-                block.hash()
-            )))?
-            .write_all(serde_json::to_string(&healthy_node_witness)?.as_bytes())?;
+            let healthy_path = self.save_file(
+                format!("{}_{}.witness.healthy.json", block.number, block.hash()),
+                &healthy_node_witness,
+            )?;
 
             // If the witnesses are different, write the diff to the output directory.
             if response != healthy_node_witness {
-                let filename = format!("{}_{}.healthy_witness.diff", block.number, block.hash());
-                let path = self.save_diff(filename, &response, &healthy_node_witness)?;
-                warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Witness mismatch against healthy node");
+                let filename = format!("{}_{}.witness.diff", block.number, block.hash());
+                let diff_path = self.save_diff(filename, &response, &healthy_node_witness)?;
+                warn!(
+                    target: "engine::invalid_block_hooks::witness",
+                    diff_path = %diff_path.display(),
+                    re_executed_path = %re_executed_witness_path.display(),
+                    healthy_path = %healthy_path.display(),
+                    "Witness mismatch against healthy node"
+                );
+            }
+        }
+
+        // The bundle state after re-execution should match the original one.
+        if bundle_state != output.state {
+            let original_path = self.save_file(
+                format!("{}_{}.bundle_state.original.json", block.number, block.hash()),
+                &output.state,
+            )?;
+            let re_executed_path = self.save_file(
+                format!("{}_{}.bundle_state.re_executed.json", block.number, block.hash()),
+                &bundle_state,
+            )?;
+
+            let filename = format!("{}_{}.bundle_state.diff", block.number, block.hash());
+            let diff_path = self.save_diff(filename, &bundle_state, &output.state)?;
+
+            warn!(
+                target: "engine::invalid_block_hooks::witness",
+                diff_path = %diff_path.display(),
+                original_path = %original_path.display(),
+                re_executed_path = %re_executed_path.display(),
+                "Bundle state mismatch after re-execution"
+            );
+        }
+
+        // Calculate the state root and trie updates after re-execution. They should match
+        // the original ones.
+        let (re_executed_root, trie_output) =
+            state_provider.state_root_with_updates(hashed_state)?;
+        if let Some((original_updates, original_root)) = trie_updates {
+            if re_executed_root != original_root {
+                let filename = format!("{}_{}.state_root.diff", block.number, block.hash());
+                let diff_path = self.save_diff(filename, &re_executed_root, &original_root)?;
+                warn!(target: "engine::invalid_block_hooks::witness", ?original_root, ?re_executed_root, diff_path = %diff_path.display(), "State root mismatch after re-execution");
+            }
+
+            // If the re-executed state root does not match the _header_ state root, also log that.
+            if re_executed_root != block.state_root {
+                let filename = format!("{}_{}.header_state_root.diff", block.number, block.hash());
+                let diff_path = self.save_diff(filename, &re_executed_root, &block.state_root)?;
+                warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root, ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
+            }
+
+            if &trie_output != original_updates {
+                // Trie updates are too big to diff, so we just save the original and re-executed
+                let original_path = self.save_file(
+                    format!("{}_{}.trie_updates.original.json", block.number, block.hash()),
+                    original_updates,
+                )?;
+                let re_executed_path = self.save_file(
+                    format!("{}_{}.trie_updates.re_executed.json", block.number, block.hash()),
+                    &trie_output,
+                )?;
+                warn!(
+                    target: "engine::invalid_block_hooks::witness",
+                    original_path = %original_path.display(),
+                    re_executed_path = %re_executed_path.display(),
+                    "Trie updates mismatch after re-execution"
+                );
             }
         }
 
@@ -228,7 +284,14 @@ where
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        File::create_new(&path)?.write_all(diff.to_string().as_bytes())?;
+        File::create(&path)?.write_all(diff.to_string().as_bytes())?;
+
+        Ok(path)
+    }
+
+    fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
+        let path = self.output_directory.join(filename);
+        File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
 
         Ok(path)
     }
@@ -236,7 +299,11 @@ where
 
 impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
 where
-    P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
+    P: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + Send
+        + Sync
+        + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(

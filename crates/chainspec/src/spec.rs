@@ -304,19 +304,19 @@ impl ChainSpec {
         };
 
         Header {
-            gas_limit: self.genesis.gas_limit as u64,
+            gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce,
+            nonce: self.genesis.nonce.into(),
             extra_data: self.genesis.extra_data.clone(),
             state_root: state_root_ref_unhashed(&self.genesis.alloc),
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            base_fee_per_gas,
+            base_fee_per_gas: base_fee_per_gas.map(Into::into),
             withdrawals_root,
             parent_beacon_block_root,
-            blob_gas_used,
-            excess_blob_gas,
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: excess_blob_gas.map(Into::into),
             requests_root,
             ..Default::default()
         }
@@ -411,10 +411,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(
-            &self.hardforks,
-            self.paris_block_and_final_difficulty.map(|(block, _)| block),
-        )
+        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
     }
 
     /// Get the fork id for the given hardfork.
@@ -613,9 +610,25 @@ impl Hardforks for ChainSpec {
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.hardforks.forks_iter()
     }
+
+    fn fork_id(&self, head: &Head) -> ForkId {
+        self.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> ForkId {
+        self.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: Head) -> ForkFilter {
+        self.fork_filter(head)
+    }
 }
 
 impl EthereumHardforks for ChainSpec {
+    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.get_final_paris_total_difficulty()
+    }
+
     fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
         self.final_paris_total_difficulty(block_number)
     }
@@ -812,13 +825,13 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
     }
 }
 
-/// A trait for reading the current [`ChainSpec`].
+/// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
     /// The chain spec type.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec + 'static;
 
-    /// Get an [`Arc`] to the [`ChainSpec`].
+    /// Get an [`Arc`] to the chainspec.
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 }
 

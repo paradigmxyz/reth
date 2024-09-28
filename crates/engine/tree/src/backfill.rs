@@ -235,7 +235,7 @@ mod tests {
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::Header;
+    use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader};
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
@@ -267,12 +267,14 @@ mod tests {
 
             let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
             let client = TestFullBlockClient::default();
-            let header = Header {
+            let sealed = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: chain_spec.max_gas_limit.into(),
                 ..Default::default()
             }
             .seal_slow();
+            let (header, seal) = sealed.into_parts();
+            let header = SealedHeader::new(header, seal);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();

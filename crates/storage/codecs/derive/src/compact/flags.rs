@@ -53,12 +53,17 @@ pub(crate) fn generate_flag_struct(
     let docs =
         format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
+    let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
     let impl_bitflag_encoded_bytes = if has_lifetime {
         quote! {
             impl<'a> #ident<'a> {
                 #[doc = #bitflag_encoded_bytes]
                 pub const fn bitflag_encoded_bytes() -> usize {
                     #total_bytes as usize
+                }
+                #[doc = #bitflag_unused_bits]
+                pub const fn bitflag_unused_bits() -> usize {
+                    #unused_bits as usize
                 }
            }
         }
@@ -68,6 +73,10 @@ pub(crate) fn generate_flag_struct(
                 #[doc = #bitflag_encoded_bytes]
                 pub const fn bitflag_encoded_bytes() -> usize {
                     #total_bytes as usize
+                }
+                #[doc = #bitflag_unused_bits]
+                pub const fn bitflag_unused_bits() -> usize {
+                    #unused_bits as usize
                 }
            }
         }

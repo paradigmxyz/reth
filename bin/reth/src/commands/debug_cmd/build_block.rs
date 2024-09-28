@@ -1,5 +1,8 @@
 //! Command for debugging block building.
+use alloy_consensus::TxEip4844;
+use alloy_primitives::Address;
 use alloy_rlp::Decodable;
+use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
@@ -22,16 +25,15 @@ use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttribut
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    revm_primitives::KzgSettings, Address, BlobTransaction, BlobTransactionSidecar, Bytes,
+    revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar, Bytes,
     PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
-    TxEip4844, B256, U256,
+    B256, U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
-use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -226,7 +228,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 best_block.hash(),
                 payload_attrs,
             )?,
-            provider_factory.chain_spec(),
         );
 
         let args = BuildArguments::new(

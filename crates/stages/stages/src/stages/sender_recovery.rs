@@ -1,3 +1,4 @@
+use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
@@ -6,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
+use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -333,9 +334,10 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::BlockNumber;
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
+    use reth_primitives::{SealedBlock, TransactionSigned, B256};
     use reth_provider::{
         providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
         StaticFileProviderFactory, TransactionsProvider,
@@ -444,7 +446,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body.len();
+                tx_count += x.body.transactions.len();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -503,7 +505,7 @@ mod tests {
         let mut tx_senders = Vec::new();
         let mut tx_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body {
+            for transaction in &block.body.transactions {
                 if block.number > max_pruned_block {
                     tx_senders
                         .push((tx_number, transaction.recover_signer().expect("recover signer")));
@@ -522,7 +524,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.len() as u64)
+                            .map(|block| block.body.transactions.len() as u64)
                             .sum::<u64>(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -537,9 +539,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.len() as u64)
+                    .map(|block| block.body.transactions.len() as u64)
                     .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.len() as u64).sum::<u64>()
+                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
             }
         );
     }

@@ -101,6 +101,9 @@ pub enum TrieWitnessError {
     /// Missing target node.
     #[display("target node missing from proof {_0:?}")]
     MissingTargetNode(Nibbles),
+    /// Unexpected empty root.
+    #[display("unexpected empty root: {_0:?}")]
+    UnexpectedEmptyRoot(Nibbles),
 }
 
 impl From<TrieWitnessError> for ProviderError {

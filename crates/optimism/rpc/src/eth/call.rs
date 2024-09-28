@@ -1,6 +1,6 @@
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
@@ -18,7 +18,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> EthCall for OpEthApi<N>
 where
     Self: Call,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
 }
 

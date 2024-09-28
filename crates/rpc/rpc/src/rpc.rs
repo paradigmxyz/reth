@@ -1,6 +1,6 @@
+use alloy_rpc_types::RpcModules;
 use jsonrpsee::core::RpcResult;
 use reth_rpc_api::RpcApiServer;
-use reth_rpc_types::RpcModules;
 use std::{collections::HashMap, sync::Arc};
 
 /// `rpc` API implementation.

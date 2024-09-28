@@ -61,8 +61,7 @@ impl Encode for StorageShardedKey {
 }
 
 impl Decode for StorageShardedKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let value = value.as_ref();
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let tx_num_index = value.len() - 8;
 
         let highest_tx_number = u64::from_be_bytes(

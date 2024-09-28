@@ -2,6 +2,7 @@ use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
+use alloy_consensus::TxEip1559;
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
@@ -9,10 +10,11 @@ use rand::{thread_rng, Rng};
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
+    alloy_primitives::Sealable,
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders, Signature,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
+    BlockBody, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, Transaction, TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -97,15 +99,8 @@ impl TestBlockBuilder {
             let signature_hash = tx.signature_hash();
             let signature = self.signer_pk.sign_hash_sync(&signature_hash).unwrap();
 
-            TransactionSigned::from_transaction_and_signature(
-                tx,
-                Signature {
-                    r: signature.r(),
-                    s: signature.s(),
-                    odd_y_parity: signature.v().y_parity(),
-                },
-            )
-            .with_signer(self.signer)
+            TransactionSigned::from_transaction_and_signature(tx, signature)
+                .with_signer(self.signer)
         };
 
         let num_txs = rng.gen_range(0..5);
@@ -138,10 +133,10 @@ impl TestBlockBuilder {
         let header = Header {
             number,
             parent_hash,
-            gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
-            gas_limit: self.chain_spec.max_gas_limit,
+            gas_used: transactions.len() as u128 * MIN_TRANSACTION_GAS as u128,
+            gas_limit: self.chain_spec.max_gas_limit.into(),
             mix_hash: B256::random(),
-            base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
+            base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),
             transactions_root: calculate_transaction_root(&transactions),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
@@ -166,12 +161,17 @@ impl TestBlockBuilder {
             ..Default::default()
         };
 
+        let sealed = header.seal_slow();
+        let (header, seal) = sealed.into_parts();
+
         let block = SealedBlock {
-            header: header.seal_slow(),
-            body: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
-            ommers: Vec::new(),
-            withdrawals: Some(vec![].into()),
-            requests: None,
+            header: SealedHeader::new(header, seal),
+            body: BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+                ommers: Vec::new(),
+                withdrawals: Some(vec![].into()),
+                requests: None,
+            },
         };
 
         SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
@@ -257,6 +257,7 @@ impl TestBlockBuilder {
     pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
         let receipts = block
             .body
+            .transactions
             .iter()
             .enumerate()
             .map(|(idx, tx)| Receipt {
@@ -269,7 +270,7 @@ impl TestBlockBuilder {
 
         let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
 
-        for tx in &block.body {
+        for tx in &block.body.transactions {
             self.signer_execute_account_info.balance -= Self::single_tx_cost();
             bundle_state_builder = bundle_state_builder.state_present_account_info(
                 self.signer,

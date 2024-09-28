@@ -4,12 +4,13 @@ use alloc::{boxed::Box, string::ToString};
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
 use crate::ConfigureEvm;
+use alloy_primitives::B256;
 use core::fmt::Display;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
 
 /// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block contract call.
 ///
@@ -21,7 +22,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultA
 pub fn pre_block_blockhashes_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_block_hash: B256,
@@ -52,7 +53,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
-/// [`ChainSpec`], and EVM.
+/// chain specification, and EVM.
 ///
 /// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
@@ -66,14 +67,14 @@ where
 #[inline]
 pub fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_block_hash: B256,
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<Option<ResultAndState>, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -116,7 +117,7 @@ where
 }
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
-/// [`ChainSpec`], and EVM and commits the relevant state changes.
+/// chain specification, and EVM and commits the relevant state changes.
 ///
 /// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
@@ -125,7 +126,7 @@ where
 #[inline]
 pub fn apply_blockhashes_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_block_hash: B256,

@@ -37,6 +37,8 @@ reth-trie-db = { workspace = true, features = ["metrics"] }
 
 reth-testing-utils = { workspace = true, optional = true }
 
+alloy-primitives.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 futures-util.workspace = true

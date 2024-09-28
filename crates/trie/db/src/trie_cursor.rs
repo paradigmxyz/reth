@@ -209,8 +209,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
-    use reth_primitives::hex_literal::hex;
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]

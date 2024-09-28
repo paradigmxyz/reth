@@ -3,15 +3,14 @@
 use std::time::Duration;
 
 use alloy_primitives::{Address, Bytes, U256};
+use alloy_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
-use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
-};
+use reth_rpc_types::ToRpcError;
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,

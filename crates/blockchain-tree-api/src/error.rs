@@ -189,7 +189,7 @@ impl std::fmt::Debug for InsertBlockErrorData {
             .field("hash", &self.block.hash())
             .field("number", &self.block.number)
             .field("parent_hash", &self.block.parent_hash)
-            .field("num_txs", &self.block.body.len())
+            .field("num_txs", &self.block.body.transactions.len())
             .finish_non_exhaustive()
     }
 }
@@ -235,7 +235,7 @@ impl std::fmt::Debug for InsertBlockErrorDataTwo {
             .field("hash", &self.block.hash())
             .field("number", &self.block.number)
             .field("parent_hash", &self.block.parent_hash)
-            .field("num_txs", &self.block.body.len())
+            .field("num_txs", &self.block.body.transactions.len())
             .finish_non_exhaustive()
     }
 }
@@ -333,6 +333,9 @@ pub enum InsertBlockErrorKindTwo {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Other errors.
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl InsertBlockErrorKindTwo {
@@ -365,6 +368,7 @@ impl InsertBlockErrorKindTwo {
                 }
             }
             Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
+            Self::Other(err) => Err(InternalBlockExecutionError::Other(err).into()),
         }
     }
 }

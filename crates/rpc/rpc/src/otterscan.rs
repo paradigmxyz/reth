@@ -1,5 +1,13 @@
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
+use alloy_rpc_types_trace::{
+    otterscan::{
+        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    },
+    parity::{Action, CreateAction, CreateOutput, TraceOutput},
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{BlockId, BlockNumberOrTag};
@@ -10,16 +18,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use reth_rpc_types::{
-    trace::{
-        otterscan::{
-            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
-        },
-        parity::{Action, CreateAction, CreateOutput, TraceOutput},
-    },
-    BlockTransactions, Header, TransactionReceipt,
-};
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
@@ -68,7 +66,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthTransactions<TransactionCompat: TransactionCompat>
+        > + EthTransactions
         + TraceExt
         + 'static,
 {

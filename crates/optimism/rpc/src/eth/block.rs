@@ -1,9 +1,11 @@
 //! Loads and formats OP block RPC response.
 
+use alloy_rpc_types::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::ChainSpecProvider;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -11,7 +13,6 @@ use reth_rpc_eth_api::{
     RpcReceipt,
 };
 use reth_rpc_eth_types::EthStateCache;
-use reth_rpc_types::BlockId;
 
 use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
@@ -21,7 +22,7 @@ where
         Error = OpEthApiError,
         NetworkTypes: Network<ReceiptResponse = OpTransactionReceipt>,
     >,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl HeaderProvider {
@@ -44,10 +45,11 @@ where
             let block = block.unseal();
 
             let l1_block_info =
-                reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+                reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
             return block
                 .body
+                .transactions
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()
@@ -57,8 +59,9 @@ where
                         index: idx as u64,
                         block_hash,
                         block_number,
-                        base_fee,
-                        excess_blob_gas,
+                        base_fee: base_fee.map(|base_fee| base_fee as u64),
+                        excess_blob_gas: excess_blob_gas
+                            .map(|excess_blob_gas| excess_blob_gas as u64),
                         timestamp,
                     };
 

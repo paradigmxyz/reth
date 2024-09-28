@@ -150,7 +150,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
                     None
                 }
             })
-            .map(BlobExcessGasAndPrice::new);
+            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64));
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -209,12 +209,13 @@ impl ConfigureEvm for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Genesis, Header, BASE_MAINNET, KECCAK_EMPTY,
+        Header, BASE_MAINNET, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

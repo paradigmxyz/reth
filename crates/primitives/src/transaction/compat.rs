@@ -1,4 +1,5 @@
-use crate::{Address, Transaction, TransactionSigned, TxKind, U256};
+use crate::{Transaction, TransactionSigned, U256};
+use alloy_primitives::{Address, TxKind};
 use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Implements behaviour to fill a [`TxEnv`] from another transaction.

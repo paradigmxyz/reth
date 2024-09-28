@@ -5,8 +5,9 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvm, ConfigureEvmEnv,
@@ -19,8 +20,8 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
-    SealedHeader, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
+    TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -30,7 +31,6 @@ use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_rpc_types::BlockNumberOrTag;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -50,7 +50,7 @@ pub trait LoadPendingBlock: EthApiTypes {
         &self,
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
            + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
@@ -255,7 +255,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let (withdrawals, withdrawals_root) = match origin {
             PendingBlockEnvOrigin::ActualPending(ref block) => {
-                (block.withdrawals.clone(), block.withdrawals_root)
+                (block.body.withdrawals.clone(), block.withdrawals_root)
             }
             PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
         };
@@ -443,14 +443,14 @@ pub trait LoadPendingBlock: EthApiTypes {
             logs_bloom,
             timestamp: block_env.timestamp.to::<u64>(),
             mix_hash: block_env.prevrandao.unwrap_or_default(),
-            nonce: BEACON_NONCE,
-            base_fee_per_gas: Some(base_fee),
+            nonce: BEACON_NONCE.into(),
+            base_fee_per_gas: Some(base_fee.into()),
             number: block_number,
-            gas_limit: block_gas_limit,
+            gas_limit: block_gas_limit.into(),
             difficulty: U256::ZERO,
-            gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas: block_env.get_blob_excess_gas(),
+            gas_used: cumulative_gas_used.into(),
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
             extra_data: Default::default(),
             parent_beacon_block_root,
             requests_root,
@@ -460,7 +460,10 @@ pub trait LoadPendingBlock: EthApiTypes {
         let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
+        let block = Block {
+            header,
+            body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests },
+        };
         Ok((SealedBlockWithSenders { block: block.seal_slow(), senders }, receipts))
     }
 }

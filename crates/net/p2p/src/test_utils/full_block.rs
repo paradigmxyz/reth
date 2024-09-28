@@ -106,8 +106,8 @@ pub struct TestFullBlockClient {
 impl Default for TestFullBlockClient {
     fn default() -> Self {
         Self {
-            headers: Arc::new(Mutex::new(HashMap::new())),
-            bodies: Arc::new(Mutex::new(HashMap::new())),
+            headers: Arc::new(Mutex::new(HashMap::default())),
+            bodies: Arc::new(Mutex::new(HashMap::default())),
             soft_limit: 20,
         }
     }
@@ -130,10 +130,9 @@ impl TestFullBlockClient {
     pub fn highest_block(&self) -> Option<SealedBlock> {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
-                self.bodies
-                    .lock()
-                    .get(hash)
-                    .map(|body| SealedBlock::new(header.clone().seal(*hash), body.clone()))
+                self.bodies.lock().get(hash).map(|body| {
+                    SealedBlock::new(SealedHeader::new(header.clone(), *hash), body.clone())
+                })
             },
         )
     }

@@ -4,12 +4,12 @@ use core::fmt::Display;
 
 use crate::ConfigureEvm;
 use alloy_eips::eip7002::{WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
+use alloy_primitives::{Address, Bytes, FixedBytes};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{Buf, Header, Request};
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{
-    Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, FixedBytes,
-    ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState,
 };
 
 /// Apply the [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) post block contract call.
@@ -46,15 +46,16 @@ where
 
 /// Applies the post-block call to the EIP-7002 withdrawal requests contract.
 ///
-/// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
-/// returned. Otherwise, the withdrawal requests are returned.
+/// If Prague is not active at the given timestamp, then this is a no-op.
+///
+/// Note: this does not commit the state changes to the database, it only transact the call.
 #[inline]
-pub fn apply_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
+pub fn transact_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
     evm: &mut Evm<'_, EXT, DB>,
-) -> Result<Vec<Request>, BlockExecutionError>
+) -> Result<ResultAndState, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -76,7 +77,7 @@ where
         Bytes::new(),
     );
 
-    let ResultAndState { result, mut state } = match evm.transact() {
+    let mut res = match evm.transact() {
         Ok(res) => res,
         Err(e) => {
             evm.context.evm.env = previous_env;
@@ -88,12 +89,34 @@ where
     };
 
     // cleanup the state
-    state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-    evm.context.evm.db.commit(state);
+    res.state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
+    res.state.remove(&evm.block().coinbase);
 
     // re-set the previous env
     evm.context.evm.env = previous_env;
+
+    Ok(res)
+}
+
+/// Applies the post-block call to the EIP-7002 withdrawal requests contract.
+///
+/// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
+/// returned. Otherwise, the withdrawal requests are returned.
+#[inline]
+pub fn apply_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<Vec<Request>, BlockExecutionError>
+where
+    DB: Database + DatabaseCommit,
+    DB::Error: core::fmt::Display,
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    let ResultAndState { result, state } =
+        transact_withdrawal_requests_contract_call(evm_config, evm)?;
+
+    // commit the state
+    evm.context.evm.db.commit(state);
 
     let mut data = match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),

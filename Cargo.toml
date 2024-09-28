@@ -79,6 +79,7 @@ members = [
     "crates/optimism/payload/",
     "crates/optimism/primitives/",
     "crates/optimism/rpc/",
+    "crates/optimism/storage",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/primitives/",
@@ -332,7 +333,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
-reth-evm-optimism = { path = "crates/optimism/evm" }
+reth-optimism-evm = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex/exex" }
@@ -359,7 +360,7 @@ reth-node-core = { path = "crates/node/core" }
 reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
-reth-node-optimism = { path = "crates/optimism/node" }
+reth-optimism-node = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
@@ -368,6 +369,7 @@ reth-optimism-forks = { path = "crates/optimism/hardforks" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-optimism-primitives = { path = "crates/optimism/primitives" }
 reth-optimism-rpc = { path = "crates/optimism/rpc" }
+reth-optimism-storage = { path = "crates/optimism/storage" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
@@ -408,23 +410,23 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "14.0.2", features = [
+revm = { version = "14.0.3", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.7"
-revm-primitives = { version = "9.0.2", features = [
+revm-inspectors = "0.7.6"
+revm-primitives = { version = "10.0.0", features = [
     "std",
 ], default-features = false }
 
 # eth
 alloy-chains = "0.1.32"
 alloy-dyn-abi = "0.8.0"
-alloy-primitives = { version = "0.8.0", default-features = false }
+alloy-primitives = { version = "0.8.4", default-features = false }
 alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
-alloy-trie = { version = "0.5", default-features = false }
+alloy-trie = { version = "0.6", default-features = false }
 
 alloy-consensus = { version = "0.3.6", default-features = false }
 alloy-eips = { version = "0.3.6", default-features = false }

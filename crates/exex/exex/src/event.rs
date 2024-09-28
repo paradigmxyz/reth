@@ -1,4 +1,4 @@
-use reth_primitives::BlockNumber;
+use reth_primitives::BlockNumHash;
 
 /// Events emitted by an `ExEx`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,5 +9,5 @@ pub enum ExExEvent {
     /// meaning that Reth is allowed to prune them.
     ///
     /// On reorgs, it's possible for the height to go down.
-    FinishedHeight(BlockNumber),
+    FinishedHeight(BlockNumHash),
 }
