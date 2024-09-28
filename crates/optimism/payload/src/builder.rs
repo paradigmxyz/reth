@@ -28,9 +28,9 @@ use reth_transaction_pool::{
 };
 use reth_trie::HashedPostState;
 use revm::{
-    db::states::bundle_state::BundleRetention,
+    db::{states::bundle_state::BundleRetention, State},
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
-    DatabaseCommit, State,
+    DatabaseCommit,
 };
 use revm_primitives::calc_excess_blob_gas;
 use tracing::{debug, trace, warn};
