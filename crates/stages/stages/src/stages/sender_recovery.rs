@@ -334,10 +334,10 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::BlockNumber;
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{SealedBlock, TransactionSigned, B256};
+    use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_provider::{
         providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
         StaticFileProviderFactory, TransactionsProvider,

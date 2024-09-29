@@ -2635,6 +2635,7 @@ checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 name = "example-beacon-api-sidecar-fetcher"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types-beacon",
  "clap",
  "eyre",
@@ -2665,6 +2666,7 @@ dependencies = [
 name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
  "reth-network",
@@ -2683,6 +2685,7 @@ name = "example-custom-dev-node"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "futures-util",
  "reth",
@@ -2779,6 +2782,7 @@ dependencies = [
 name = "example-custom-rlpx-subprotocol"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures",
  "rand 0.8.5",
@@ -2874,6 +2878,7 @@ dependencies = [
 name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
  "reth-network",
@@ -6311,6 +6316,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-eips",
  "alloy-json-rpc",
+ "alloy-primitives",
  "alloy-provider",
  "alloy-pubsub",
  "alloy-rpc-client",
@@ -6616,6 +6622,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
@@ -6624,7 +6631,6 @@ dependencies = [
  "futures",
  "reqwest",
  "reth-node-api",
- "reth-node-core",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-tracing",

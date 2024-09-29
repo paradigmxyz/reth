@@ -1,4 +1,5 @@
-use crate::{GotExpectedBoxed, U256};
+use crate::GotExpectedBoxed;
+use alloy_primitives::U256;
 
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)

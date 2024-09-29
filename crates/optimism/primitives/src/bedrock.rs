@@ -1,7 +1,7 @@
 //! OP mainnet bedrock related data.
 
-use alloy_primitives::{b256, bloom, bytes, B256, B64, U256};
-use reth_primitives::{address, Header};
+use alloy_primitives::{address, b256, bloom, bytes, B256, B64, U256};
+use reth_primitives::Header;
 use reth_primitives_traits::constants::EMPTY_OMMER_ROOT_HASH;
 
 /// Transaction 0x9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9 in block 985,

@@ -11,13 +11,14 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
+use alloy_primitives::B256;
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::{Block, B256};
+use reth_primitives::Block;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};

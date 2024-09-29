@@ -1,6 +1,6 @@
 //! Command for debugging block building.
 use alloy_consensus::TxEip4844;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
@@ -27,7 +27,6 @@ use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar, Bytes,
     PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
-    B256, U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
