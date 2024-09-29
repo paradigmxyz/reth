@@ -221,7 +221,6 @@ where
 
                 match self.left.try_build(left_args) {
                     Ok(BuildOutcome::Better { payload, cached_reads }) => {
-                        // Wrap the payload in Either::Left and return
                         return Ok(BuildOutcome::Better {
                             payload: Either::Left(payload),
                             cached_reads,
