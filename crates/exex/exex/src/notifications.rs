@@ -179,7 +179,7 @@ where
     /// If the head block is not found in the database, it means we're not on the canonical chain
     /// and we need to revert the notification with the ExEx head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification>> {
-        if self.provider.header(&self.exex_head.block.hash)?.is_some() {
+        if self.provider.is_known(&self.exex_head.block.hash)? {
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
             return Ok(None)
         }
