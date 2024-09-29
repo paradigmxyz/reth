@@ -1,14 +1,13 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Block, Header, Request};
 use revm::{Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
-use std::sync::Arc;
 
 mod eip2935;
 pub use eip2935::*;
