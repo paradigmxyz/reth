@@ -10,7 +10,8 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, Bytes, Sealable, StorageKey, StorageValue, TxHash, TxNumber,
+    B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
@@ -19,8 +20,8 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    alloy_primitives::Sealable, Account, Block, BlockWithSenders, Bytecode, GotExpected, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_stages_types::{StageCheckpoint, StageId};

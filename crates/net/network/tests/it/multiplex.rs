@@ -26,9 +26,8 @@ use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
 /// A simple Rlpx subprotocol that sends pings and pongs
 mod proto {
     use super::*;
-    use alloy_primitives::bytes::BufMut;
+    use alloy_primitives::bytes::{Buf, BufMut};
     use reth_eth_wire::Capability;
-    use reth_primitives::Buf;
 
     #[repr(u8)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

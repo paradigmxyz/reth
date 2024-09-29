@@ -101,7 +101,7 @@ fn compare_receipts_root_and_logs_bloom(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::hex;
+    use alloy_primitives::hex;
 
     use super::*;
 

@@ -1,8 +1,8 @@
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::Serialize;
 
-use alloy_primitives::Address;
-use reth_primitives::{Account, Buf};
+use alloy_primitives::{bytes::Buf, Address};
+use reth_primitives::Account;
 
 /// Account as it is saved in the database.
 ///

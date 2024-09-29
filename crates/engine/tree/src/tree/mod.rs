@@ -2558,14 +2558,13 @@ pub enum AdvancePersistenceError {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
-    use alloy_primitives::Bytes;
+    use alloy_primitives::{Bytes, Sealable};
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::alloy_primitives::Sealable;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::updates::TrieUpdates;

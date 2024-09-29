@@ -1,12 +1,12 @@
 //! Transaction types.
 
-use crate::{BlockHashOrNumber, Bytes, TxHash};
+use crate::BlockHashOrNumber;
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{keccak256, Address, TxKind, B256, U256};
 
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::eip2930::AccessList;
-use alloy_primitives::Parity;
+use alloy_primitives::{Bytes, Parity, TxHash};
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -1705,12 +1705,10 @@ impl<T> WithEncoded<Option<T>> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        hex,
         transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
-        Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        TransactionSignedNoHash,
+        Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     };
-    use alloy_primitives::{address, b256, bytes, Address, Parity, B256, U256};
+    use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
