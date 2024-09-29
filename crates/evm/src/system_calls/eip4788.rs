@@ -6,7 +6,7 @@ use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
 
@@ -124,6 +124,28 @@ where
     evm.context.evm.env = previous_env;
 
     Ok(Some(res))
+}
+
+#[inline]
+pub(crate) fn transact<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
+    chain_spec: impl EthereumHardforks,
+    block: &Block,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<Option<ResultAndState>, BlockExecutionError>
+where
+    DB: Database + DatabaseCommit,
+    DB::Error: core::fmt::Display,
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
+    transact_beacon_root_contract_call(
+        evm_config,
+        &chain_spec,
+        block.timestamp,
+        block.number,
+        block.parent_beacon_block_root,
+        evm,
+    )
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,

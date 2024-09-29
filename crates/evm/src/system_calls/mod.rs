@@ -7,7 +7,7 @@ use alloy_primitives::{Address, FixedBytes};
 use core::fmt::Display;
 use reth_chainspec::ChainSpec;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Buf, Header, Request};
+use reth_primitives::{Block, Buf, Header, Request};
 use revm::{Database, DatabaseCommit, Evm};
 use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState, B256,
@@ -107,6 +107,33 @@ where
     Chainspec: AsRef<ChainSpec>,
     Hook: OnStateHook,
 {
+    /// Apply pre execution changes.
+    pub fn apply_pre_execution_changes<DB, Ext>(
+        &mut self,
+        block: &Block,
+        evm: &mut Evm<'_, Ext, DB>,
+    ) -> Result<(), BlockExecutionError>
+    where
+        DB: Database + DatabaseCommit,
+        DB::Error: Display,
+    {
+        let transacts = vec![eip2935::transact, eip4788::transact];
+
+        for tx in transacts {
+            let result_and_state =
+                tx(&self.evm_config.clone(), self.chain_spec.as_ref(), block, evm)?;
+
+            if let Some(res) = result_and_state {
+                if let Some(ref mut hook) = self.hook {
+                    hook.on_state(&res);
+                }
+                evm.context.evm.db.commit(res.state);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn pre_block_blockhashes_contract_call<DB>(
         &mut self,
@@ -167,7 +194,7 @@ where
         db: &mut DB,
         initialized_cfg: &CfgEnvWithHandlerCfg,
         initialized_block_env: &BlockEnv,
-        parent_block_hash: Option<B256>,
+        parent_beacon_block_root: Option<B256>,
     ) -> Result<(), BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
@@ -178,7 +205,7 @@ where
         self.apply_beacon_root_contract_call(
             initialized_block_env.timestamp.to(),
             initialized_block_env.number.to(),
-            parent_block_hash,
+            parent_beacon_block_root,
             &mut evm,
         )?;
 
