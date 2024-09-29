@@ -1,8 +1,8 @@
+use alloy_primitives::{b256, B256};
 use reth_chainspec::{
     once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
 };
 use reth_network_peers::NodeRecord;
-use reth_primitives::{b256, B256};
 
 use std::sync::Arc;
 

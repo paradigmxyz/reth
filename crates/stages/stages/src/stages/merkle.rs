@@ -1,9 +1,9 @@
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_primitives::{alloy_primitives::Sealable, GotExpected, SealedHeader, B256};
+use reth_primitives::{alloy_primitives::Sealable, GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
     StatsReader, TrieWriter,
@@ -374,10 +374,10 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::keccak256;
+    use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry, U256};
+    use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{

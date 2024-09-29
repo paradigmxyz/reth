@@ -2,11 +2,11 @@
 
 use crate::{
     constants::EMPTY_OMMER_ROOT_HASH, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
-    Request, TransactionSigned, Withdrawal, B256,
+    Request, TransactionSigned, Withdrawal,
 };
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Encodable7685;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 /// Calculate a transaction root.
@@ -65,9 +65,9 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{constants::EMPTY_ROOT_HASH, Block, U256};
+    use crate::{constants::EMPTY_ROOT_HASH, Block};
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, hex_literal::hex, Address};
+    use alloy_primitives::{b256, hex_literal::hex, Address, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};

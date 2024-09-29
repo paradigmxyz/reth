@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::Address;
+use alloy_primitives::{address, Address, U256};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
@@ -11,7 +11,6 @@ use reth::{
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
     primitives::{
-        address,
         revm_primitives::{Env, PrecompileResult},
         Bytes,
     },
@@ -39,7 +38,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{
     revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
-    Header, TransactionSigned, U256,
+    Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
