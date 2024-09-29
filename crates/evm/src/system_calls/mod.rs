@@ -1,7 +1,7 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::fmt::Display;
 use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;

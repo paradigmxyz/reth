@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Block, Header};
+use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
 
