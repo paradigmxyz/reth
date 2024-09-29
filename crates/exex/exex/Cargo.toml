@@ -44,6 +44,7 @@ tokio.workspace = true
 ## misc
 dashmap.workspace = true
 eyre.workspace = true
+itertools.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 serde_json.workspace = true
@@ -62,6 +63,7 @@ reth-testing-utils.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
+rand.workspace = true
 secp256k1.workspace = true
 tempfile.workspace = true
 

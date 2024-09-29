@@ -117,12 +117,6 @@ impl WalInner {
         Ok(())
     }
 
-    /// Finalizes the WAL to the given block, inclusive.
-    ///
-    /// 1. Finds a notification with first unfinalized block (first notification containing a
-    ///    committed block higher than `to_block`).
-    /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
-    ///    notification includes both finalized and non-finalized blocks, it will not be removed.
     #[instrument(target = "exex::wal", skip(self))]
     fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
         // First, walk cache to find the file ID of the notification with the finalized block and
