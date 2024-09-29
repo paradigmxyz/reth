@@ -1,4 +1,7 @@
 //! Command for debugging block building.
+
+use std::{path::PathBuf, str::FromStr, sync::Arc};
+
 use alloy_consensus::TxEip4844;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Decodable;
@@ -26,7 +29,8 @@ use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar, Bytes,
-    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
+    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SignedTransaction, Transaction,
+    TransactionSigned,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
@@ -40,7 +44,6 @@ use reth_transaction_pool::{
 };
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
-use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
 /// `reth debug build-block` command

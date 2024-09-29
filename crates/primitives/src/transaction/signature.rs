@@ -1,11 +1,11 @@
-use crate::transaction::util::secp256k1;
-use alloy_primitives::{Address, Parity, B256, U256};
-use alloy_rlp::{Decodable, Error as RlpError};
-
 pub use alloy_primitives::Signature;
 
+use alloy_primitives::{Address, Parity, B256, U256};
+use alloy_rlp::{Decodable, Error as RlpError};
 #[cfg(feature = "optimism")]
 use reth_optimism_chainspec::optimism_deposit_tx_signature;
+
+use crate::transaction::util::secp256k1;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -90,7 +90,7 @@ pub fn legacy_parity(signature: &Signature, chain_id: Option<u64>) -> Parity {
 }
 
 /// Returns a signature with the given chain ID applied to the `v` value.
-pub(crate) fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
+pub fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
     Signature::new(signature.r(), signature.s(), legacy_parity(signature, chain_id))
 }
 

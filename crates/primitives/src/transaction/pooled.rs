@@ -1,16 +1,8 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 
-use super::{
-    error::TransactionConversionError,
-    signature::{recover_signer, with_eip155_parity},
-    TxEip7702,
-};
-use crate::{
-    BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, EIP4844_TX_TYPE_ID,
-};
 use alloc::vec::Vec;
+
 use alloy_consensus::{
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
@@ -20,6 +12,17 @@ use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, EIP4844_TX_TYPE_ID,
+};
+
+use super::{
+    error::TransactionConversionError,
+    signature::{recover_signer, with_eip155_parity},
+    SignedTransaction, TxEip7702,
+};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.

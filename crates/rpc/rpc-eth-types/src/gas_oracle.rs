@@ -6,7 +6,7 @@ use std::fmt::{self, Debug, Formatter};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
-use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, SignedTransaction};
 use reth_rpc_server_types::constants;
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};

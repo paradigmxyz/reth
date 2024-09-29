@@ -1,11 +1,14 @@
 //!  Helper enum functions  for `Transaction`, `TransactionSigned` and
 //! `TransactionSignedEcRecovered`
 
-use crate::{
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-};
-use alloy_primitives::{Address, B256};
 use core::ops::Deref;
+
+use alloy_primitives::{Address, B256};
+
+use crate::{
+    SignedTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash,
+};
 
 /// Represents various different transaction formats used in reth.
 ///

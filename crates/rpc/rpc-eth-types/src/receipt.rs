@@ -5,7 +5,7 @@ use alloy_rpc_types::{
     AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,
 };
 use alloy_serde::{OtherFields, WithOtherFields};
-use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
+use reth_primitives::{Receipt, SignedTransaction, TransactionMeta, TransactionSigned};
 use revm_primitives::calc_blob_gasprice;
 
 use super::{EthApiError, EthResult};

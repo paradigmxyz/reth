@@ -8,3 +8,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod bedrock;
+pub mod signed_transaction;
+
+pub use signed_transaction::OpTransactionSigned;

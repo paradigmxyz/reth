@@ -10,7 +10,7 @@ use reth_evm::{
     system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
     ConfigureEvm,
 };
-use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
