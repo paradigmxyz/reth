@@ -11,7 +11,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
-use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
+use reth_provider::{BlockExecOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
@@ -63,7 +63,7 @@ where
         &self,
         parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        output: impl BlockExecOutput,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
@@ -213,10 +213,10 @@ where
         }
 
         // The bundle state after re-execution should match the original one.
-        if bundle_state != output.state {
+        if bundle_state != *output.state() {
             let original_path = self.save_file(
                 format!("{}_{}.bundle_state.original.json", block.number, block.hash()),
-                &output.state,
+                output.state(),
             )?;
             let re_executed_path = self.save_file(
                 format!("{}_{}.bundle_state.re_executed.json", block.number, block.hash()),
@@ -224,7 +224,7 @@ where
             )?;
 
             let filename = format!("{}_{}.bundle_state.diff", block.number, block.hash());
-            let diff_path = self.save_diff(filename, &bundle_state, &output.state)?;
+            let diff_path = self.save_diff(filename, &bundle_state, output.state())?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
@@ -310,7 +310,7 @@ where
         &self,
         parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        output: impl BlockExecOutput,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {

@@ -1,12 +1,12 @@
 //! Helpers for testing.
 
 use crate::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecOutput, BlockExecutionInput, BlockExecutorProvider, Executor,
 };
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{EthBlockExecOutput, ExecutionOutcome};
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
@@ -49,13 +49,13 @@ impl BlockExecutorProvider for MockExecutorProvider {
 
 impl<DB> Executor<DB> for MockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = EthBlockExecOutput;
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
             self.exec_results.lock().pop().unwrap();
-        Ok(BlockExecutionOutput {
+        Ok(EthBlockExecOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
             requests: requests.into_iter().flatten().collect(),

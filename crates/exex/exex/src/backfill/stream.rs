@@ -10,7 +10,7 @@ use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
-use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
+use reth_evm::execute::{BlockExecOutput, BlockExecutionError, BlockExecutorProvider};
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
@@ -24,7 +24,7 @@ const DEFAULT_BATCH_SIZE: usize = 100;
 
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<Result<T, BlockExecutionError>>>;
 
-type SingleBlockStreamItem = (BlockWithSenders, BlockExecutionOutput<Receipt>);
+type SingleBlockStreamItem = (BlockWithSenders, BlockExecOutput);
 type BatchBlockStreamItem = Chain;
 
 /// Stream for processing backfill jobs asynchronously.

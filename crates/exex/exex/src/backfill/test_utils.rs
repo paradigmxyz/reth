@@ -6,7 +6,7 @@ use alloy_primitives::{b256, Address, TxKind, U256};
 use eyre::OptionExt;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_evm::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecOutput, BlockExecutionInput, BlockExecutorProvider, Executor,
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{
@@ -23,7 +23,7 @@ use secp256k1::Keypair;
 
 pub(crate) fn to_execution_outcome(
     block_number: u64,
-    block_execution_output: &BlockExecutionOutput<Receipt>,
+    block_execution_output: impl BlockExecOutput,
 ) -> ExecutionOutcome {
     ExecutionOutcome {
         bundle: block_execution_output.state.clone(),
@@ -56,7 +56,7 @@ pub(crate) fn execute_block_and_commit_to_database<N>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     block: &BlockWithSenders,
-) -> eyre::Result<BlockExecutionOutput<Receipt>>
+) -> eyre::Result<BlockExecOutput>
 where
     N: ProviderNodeTypes,
 {
@@ -163,7 +163,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
+) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecOutput)>>
 where
     N: ProviderNodeTypes,
 {

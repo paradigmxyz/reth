@@ -24,21 +24,6 @@ impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
     }
 }
 
-/// The output of an ethereum block.
-///
-/// Contains the state changes, transaction receipts, and total gas used in the block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockExecutionOutput<T> {
-    /// The changed state of the block after execution.
-    pub state: BundleState,
-    /// All the receipts of the transactions in the block.
-    pub receipts: Vec<T>,
-    /// All the EIP-7685 requests of the transactions in the block.
-    pub requests: Vec<Request>,
-    /// The total gas used by the block.
-    pub gas_used: u64,
-}
-
 pub trait BlockExecOutput {
     type Receipt;
 
@@ -48,13 +33,15 @@ pub trait BlockExecOutput {
     fn gas_used(&self) -> u64;
     /// Calculates the receipts root of the block.
     fn receipts_root_slow(&self) -> Option<B256>;
+    /// Consumes instance and returns non-trivially state, receipts and requests.
+    fn deconstruct(self) -> (BundleState, Vec<Self::Receipt>, Vec<Request>);
 }
 
 /// The output of an ethereum block.
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthBlockExecutionOutput {
+pub struct EthBlockExecOutput {
     /// The changed state of the block after execution.
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
@@ -65,7 +52,7 @@ pub struct EthBlockExecutionOutput {
     pub gas_used: u64,
 }
 
-impl BlockExecOutput for EthBlockExecutionOutput {
+impl BlockExecOutput for EthBlockExecOutput {
     type Receipt = Receipt;
 
     fn state(&self) -> &BundleState {
@@ -89,5 +76,11 @@ impl BlockExecOutput for EthBlockExecutionOutput {
     /// of receipt. This is a expensive operation.
     fn receipts_root_slow(&self) -> Option<B256> {
         Some(proofs::calculate_receipt_root_no_memo(&self.receipts))
+    }
+
+    fn deconstruct(self) -> (BundleState, Vec<Self::Receipt>, Vec<Request>) {
+        let Self { state, receipts, requests, .. } = self;
+
+        (state, receipts, requests)
     }
 }

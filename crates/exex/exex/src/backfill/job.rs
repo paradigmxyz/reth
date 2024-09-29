@@ -6,7 +6,7 @@ use std::{
 
 use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
-    BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecOutput, BlockExecutionError, BlockExecutorProvider, Executor,
 };
 use reth_primitives::{Block, BlockBody, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
@@ -153,7 +153,7 @@ where
 /// Single block Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] which executes a block each time the
-/// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
+/// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecOutput`])
 #[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
     pub(crate) executor: E,
@@ -167,7 +167,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError>;
+    type Item = Result<(BlockWithSenders, BlockExecOutput), BlockExecutionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range.next().map(|block_number| self.execute_block(block_number))
@@ -180,16 +180,14 @@ where
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
-    pub fn into_stream(
-        self,
-    ) -> StreamBackfillJob<E, P, (BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+    pub fn into_stream(self) -> StreamBackfillJob<E, P, (BlockWithSenders, BlockExecOutput)> {
         self.into()
     }
 
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
-    ) -> Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError> {
+    ) -> Result<(BlockWithSenders, BlockExecOutput), BlockExecutionError> {
         let td = self
             .provider
             .header_td_by_number(block_number)?

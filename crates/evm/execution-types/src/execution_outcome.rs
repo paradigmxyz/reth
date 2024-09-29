@@ -1,12 +1,16 @@
-use crate::BlockExecutionOutput;
+use std::collections::HashMap;
+
 use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
+use reth_primitives::{
+    logs_bloom, proofs, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry,
+};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
-use std::collections::HashMap;
+
+use crate::BlockExecOutput;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,30 +193,6 @@ impl ExecutionOutcome {
         Some(logs_bloom(self.logs(block_number)?))
     }
 
-    /// Returns the receipt root for all recorded receipts.
-    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
-    }
-
-    /// Returns the receipt root for all recorded receipts.
-    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
-    pub fn generic_receipts_root_slow(
-        &self,
-        block_number: BlockNumber,
-        f: impl FnOnce(&[&Receipt]) -> B256,
-    ) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
-    }
-
     /// Returns reference to receipts.
     pub const fn receipts(&self) -> &Receipts {
         &self.receipts
@@ -351,13 +331,14 @@ impl ExecutionOutcome {
     }
 }
 
-impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
-    fn from(value: (BlockExecutionOutput<Receipt>, BlockNumber)) -> Self {
+impl<T: BlockExecOutput<Receipt = Receipt>> From<(T, BlockNumber)> for ExecutionOutcome {
+    fn from(value: (T, BlockNumber)) -> Self {
+        let (bundle, receipts, requests) = value.0.deconstruct();
         Self {
-            bundle: value.0.state,
-            receipts: Receipts::from(value.0.receipts),
+            bundle,
+            receipts: Receipts::from(receipts),
             first_block: value.1,
-            requests: vec![Requests::from(value.0.requests)],
+            requests: vec![Requests::from(requests)],
         }
     }
 }

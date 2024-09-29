@@ -3,7 +3,7 @@
 use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+use reth_execution_types::{BlockExecOutput, BlockExecutionInput, EthBlockExecOutput, ExecutionOutcome};
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
@@ -41,7 +41,7 @@ impl BlockExecutorProvider for NoopBlockExecutorProvider {
 
 impl<DB> Executor<DB> for NoopBlockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = EthBlockExecOutput;
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {

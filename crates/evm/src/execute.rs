@@ -2,14 +2,13 @@
 
 // Re-export execution types
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+pub use reth_execution_types::{BlockExecOutput, EthBlockExecOutput, BlockExecutionInput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
 use core::fmt::Display;
 
 use alloy_primitives::BlockNumber;
-use reth_execution_types::BlockExecOutput;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use revm::State;
 use revm_primitives::db::Database;
@@ -184,7 +183,7 @@ mod tests {
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BlockExecutionOutput<Receipt>;
+        type Output = EthBlockExecOutput;
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {

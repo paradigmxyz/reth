@@ -11,7 +11,7 @@ use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
-        BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
+        BatchExecutor, BlockExecOutput, BlockExecutionError, BlockExecutionInput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::{
@@ -80,13 +80,13 @@ impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>, O> =
         EthBlockExecutor<EvmConfig, DB>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBatchExecutor<EvmConfig, DB>;
 
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB, impl>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
@@ -355,7 +355,7 @@ where
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = EthBlockExecOutput;
     type Error = BlockExecutionError;
 
     /// Executes the block and commits the changes to the internal state.
@@ -371,7 +371,7 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 
     fn execute_with_state_witness<F>(
@@ -389,7 +389,7 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
 /// An executor for a batch of blocks.
@@ -1263,7 +1263,7 @@ mod tests {
 
         let executor = provider.executor(StateProviderDatabase::new(&db));
 
-        let BlockExecutionOutput { receipts, requests, .. } = executor
+        let BlockExecOutput { receipts, requests, .. } = executor
             .execute(
                 (
                     &Block {

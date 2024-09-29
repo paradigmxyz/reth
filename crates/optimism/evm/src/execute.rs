@@ -6,7 +6,7 @@ use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
-        BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
+        BatchExecutor, BlockExecOutput, BlockExecutionError, BlockExecutionInput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::apply_beacon_root_contract_call,
@@ -338,7 +338,7 @@ where
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = OpBlockExecOutput;
     type Error = BlockExecutionError;
 
     /// Executes the block and commits the state changes.
@@ -355,7 +355,7 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput {
+        Ok(BlockExecOutput {
             state: self.state.take_bundle(),
             receipts,
             requests: vec![],
@@ -378,7 +378,7 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
 
-        Ok(BlockExecutionOutput {
+        Ok(BlockExecOutput {
             state: self.state.take_bundle(),
             receipts,
             requests: vec![],
@@ -467,7 +467,7 @@ where
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpBlockExecutionOutput {
+pub struct OpBlockExecOutput {
     /// The changed state of the block after execution.
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
@@ -507,6 +507,12 @@ impl BlockExecOutput for OpBlockReceipts {
             self.chain_spec,
             self.block_timestamp,
         ))
+    }
+
+    fn deconstruct(self) -> (BundleState, Vec<Self::Receipt>, Vec<Request>) {
+        let Self { state, receipts, requests, .. } = self;
+
+        (state, receipts, requests)
     }
 }
 
