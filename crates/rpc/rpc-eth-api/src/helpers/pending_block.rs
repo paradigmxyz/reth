@@ -4,14 +4,12 @@
 use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
+
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::{
-    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
-    ConfigureEvm, ConfigureEvmEnv,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
@@ -262,31 +260,27 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let chain_spec = self.provider().chain_spec();
 
+        let evm_config = self.evm_config().clone();
+        let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+
         let parent_beacon_block_root = if origin.is_actual_pending() {
             // apply eip-4788 pre block contract call if we got the block from the CL with the real
             // parent beacon block root
-            pre_block_beacon_root_contract_call(
-                &mut db,
-                self.evm_config(),
-                chain_spec.as_ref(),
-                &cfg,
-                &block_env,
-                origin.header().parent_beacon_block_root,
-            )
-            .map_err(|err| EthApiError::Internal(err.into()))?;
+            system_caller
+                .pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &cfg,
+                    &block_env,
+                    origin.header().parent_beacon_block_root,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
             origin.header().parent_beacon_block_root
         } else {
             None
         };
-        pre_block_blockhashes_contract_call(
-            &mut db,
-            self.evm_config(),
-            chain_spec.as_ref(),
-            &cfg,
-            &block_env,
-            origin.header().hash(),
-        )
-        .map_err(|err| EthApiError::Internal(err.into()))?;
+        system_caller
+            .pre_block_blockhashes_contract_call(&mut db, &cfg, &block_env, origin.header().hash())
+            .map_err(|err| EthApiError::Internal(err.into()))?;
 
         let mut receipts = Vec::new();
 
