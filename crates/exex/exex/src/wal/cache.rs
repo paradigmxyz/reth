@@ -39,7 +39,8 @@ impl BlockCache {
 
         while let Some(block @ Reverse((max_block, file_id))) = self.blocks.peek().copied() {
             if max_block <= block_number {
-                debug_assert_eq!(self.blocks.pop().unwrap(), block);
+                let popped_block = self.blocks.pop().unwrap();
+                debug_assert_eq!(popped_block, block);
                 file_ids.insert(file_id);
             } else {
                 break
