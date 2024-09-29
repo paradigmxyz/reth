@@ -104,7 +104,7 @@ impl Storage {
         })
     }
 
-    /// Reads the notification from the file with the given id.
+    /// Reads the notification from the file with the given ID.
     #[instrument(target = "exex::wal::storage", skip(self))]
     pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<Option<ExExNotification>> {
         let file_path = self.file_path(file_id);
@@ -120,7 +120,7 @@ impl Storage {
         Ok(serde_json::from_reader(&mut file)?)
     }
 
-    /// Writes the notification to the file with the given id.
+    /// Writes the notification to the file with the given ID.
     #[instrument(target = "exex::wal::storage", skip(self, notification))]
     pub(super) fn write_notification(
         &self,

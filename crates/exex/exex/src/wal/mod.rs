@@ -50,12 +50,10 @@ impl Wal {
         self.inner.commit(notification)
     }
 
-    /// Finalizes the WAL to the given block, inclusive.
+    /// Finalizes the WAL up to the given canonical block, inclusive.
     ///
-    /// 1. Finds a notification with first unfinalized block (first notification containing a
-    ///    committed block higher than `to_block`).
-    /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
-    ///    notification includes both finalized and non-finalized blocks, it will not be removed.
+    /// The caller should check that all ExExes are on the canonical chain and will not need any
+    /// blocks from the WAL below the provided block, inclusive.
     pub fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
         self.inner.finalize(to_block)
     }
