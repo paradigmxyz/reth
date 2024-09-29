@@ -355,9 +355,9 @@ where
                 .filter_map(|(exex_id, hash, is_canonical)| {
                     is_canonical.not().then_some((exex_id, hash))
                 })
-                .collect::<Vec<_>>();
+                .format_with(", ", |(exex_id, hash), f| f(&format_args!("{exex_id:?} = {hash:?}")));
             debug!(
-                ?unfinalized_exexes,
+                %unfinalized_exexes,
                 "Not all ExExes are on the canonical chain, can't finalize the WAL"
             );
         }
