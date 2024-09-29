@@ -10,7 +10,7 @@ pub type PoolResult<T> = Result<T, PoolError>;
 ///
 /// For example during validation
 /// [`TransactionValidator::validate_transaction`](crate::validate::TransactionValidator::validate_transaction)
-pub trait PoolTransactionError: std::error::Error + Send + Sync {
+pub trait PoolTransactionError: core::error::Error + Send + Sync {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
@@ -19,8 +19,8 @@ pub trait PoolTransactionError: std::error::Error + Send + Sync {
 }
 
 // Needed for `#[error(transparent)]`
-impl std::error::Error for Box<dyn PoolTransactionError> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for Box<dyn PoolTransactionError> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         (**self).source()
     }
 }
@@ -63,7 +63,7 @@ pub enum PoolErrorKind {
     /// Any other error that occurred while inserting/validating a transaction. e.g. IO database
     /// error
     #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 // === impl PoolError ===
@@ -75,7 +75,10 @@ impl PoolError {
     }
 
     /// Creates a new pool error with the `Other` kind.
-    pub fn other(hash: TxHash, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+    pub fn other(
+        hash: TxHash,
+        error: impl Into<Box<dyn core::error::Error + Send + Sync>>,
+    ) -> Self {
         Self { hash, kind: PoolErrorKind::Other(error.into()) }
     }
 

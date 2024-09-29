@@ -84,7 +84,7 @@ pub enum EngineApiError {
     NewPayload(#[from] BeaconOnNewPayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),

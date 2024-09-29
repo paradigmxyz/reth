@@ -50,11 +50,10 @@ pub enum DatabaseError {
     Other(String),
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for DatabaseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for DatabaseError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Write(err) => std::error::Error::source(err),
+            Self::Write(err) => core::error::Error::source(err),
             _ => Option::None,
         }
     }
@@ -113,8 +112,7 @@ impl fmt::Display for DatabaseWriteError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for DatabaseWriteError {}
+impl core::error::Error for DatabaseWriteError {}
 
 /// Database write operation type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
