@@ -3,11 +3,12 @@
 use crate::ConfigureEvm;
 use alloc::vec::Vec;
 use core::fmt::Display;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Block, Header, Request};
 use revm::{Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
+use std::sync::Arc;
 
 mod eip2935;
 pub use eip2935::*;
@@ -52,7 +53,7 @@ impl OnStateHook for NoopHook {
 #[allow(missing_debug_implementations)]
 pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
     evm_config: &'a EvmConfig,
-    chain_spec: &'a Chainspec,
+    chain_spec: Arc<Chainspec>,
     /// Optional hook to be called after each state change.
     // TODO do we want this optional?
     hook: Option<Hook>,
@@ -61,7 +62,7 @@ pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
 impl<'a, EvmConfig, Chainspec> SystemCaller<'a, EvmConfig, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub const fn new(evm_config: &'a EvmConfig, chain_spec: &'a Chainspec) -> Self {
+    pub const fn new(evm_config: &'a EvmConfig, chain_spec: Arc<Chainspec>) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
 }
@@ -100,7 +101,7 @@ where
 impl<'a, EvmConfig, Chainspec, Hook> SystemCaller<'a, EvmConfig, Chainspec, Hook>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Chainspec: AsRef<ChainSpec>,
+    Chainspec: EthereumHardforks,
     Hook: OnStateHook,
 {
     /// Apply pre execution changes.
