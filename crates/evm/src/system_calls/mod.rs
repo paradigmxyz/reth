@@ -134,6 +134,23 @@ where
         Ok(())
     }
 
+    /// Apply post execution changes.
+    pub fn apply_post_execution_changes<DB, Ext>(
+        &mut self,
+        evm: &mut Evm<'_, Ext, DB>,
+    ) -> Result<Vec<Request>, BlockExecutionError>
+    where
+        DB: Database + DatabaseCommit,
+        DB::Error: Display,
+    {
+        // Collect all EIP-7685 requests
+        let withdrawal_requests = self.apply_withdrawal_requests_contract_call(evm)?;
+
+        // Collect all EIP-7251 requests
+        let consolidation_requests = self.apply_consolidation_requests_contract_call(evm)?;
+        Ok([withdrawal_requests, consolidation_requests].concat())
+    }
+
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn pre_block_blockhashes_contract_call<DB>(
         &mut self,
