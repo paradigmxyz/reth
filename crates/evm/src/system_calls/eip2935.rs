@@ -116,28 +116,6 @@ where
     Ok(Some(res))
 }
 
-#[inline]
-pub(crate) fn transact<EvmConfig, EXT, DB>(
-    evm_config: &EvmConfig,
-    chain_spec: impl EthereumHardforks,
-    block: &Block,
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<Option<ResultAndState>, BlockExecutionError>
-where
-    DB: Database + DatabaseCommit,
-    DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
-{
-    transact_blockhashes_contract_call(
-        evm_config,
-        chain_spec,
-        block.timestamp,
-        block.number,
-        block.parent_hash,
-        evm,
-    )
-}
-
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
 /// chain specification, and EVM and commits the relevant state changes.
 ///

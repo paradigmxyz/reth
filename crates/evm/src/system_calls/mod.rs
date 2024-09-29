@@ -1,17 +1,13 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{format, string::ToString, vec, vec::Vec};
-use alloy_eips::{eip7002::WithdrawalRequest, eip7251::ConsolidationRequest};
-use alloy_primitives::{Address, FixedBytes};
+use alloc::{vec, vec::Vec};
 use core::fmt::Display;
 use reth_chainspec::ChainSpec;
-use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Block, Buf, Header, Request};
+use reth_execution_errors::BlockExecutionError;
+use reth_primitives::{Block, Header, Request};
 use revm::{Database, DatabaseCommit, Evm};
-use revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState, B256,
-};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
 
 mod eip2935;
 pub use eip2935::*;
@@ -117,19 +113,18 @@ where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
     {
-        let transacts = vec![eip2935::transact, eip4788::transact];
-
-        for tx in transacts {
-            let result_and_state =
-                tx(&self.evm_config.clone(), self.chain_spec.as_ref(), block, evm)?;
-
-            if let Some(res) = result_and_state {
-                if let Some(ref mut hook) = self.hook {
-                    hook.on_state(&res);
-                }
-                evm.context.evm.db.commit(res.state);
-            }
-        }
+        self.apply_blockhashes_contract_call(
+            block.timestamp,
+            block.number,
+            block.parent_hash,
+            evm,
+        )?;
+        self.apply_beacon_root_contract_call(
+            block.timestamp,
+            block.number,
+            block.parent_beacon_block_root,
+            evm,
+        )?;
 
         Ok(())
     }
@@ -295,51 +290,7 @@ where
         }
         evm.context.evm.db.commit(result_and_state.state);
 
-        let mut data = match result_and_state.result {
-            ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-            ExecutionResult::Revert { output, .. } => {
-                Err(BlockValidationError::WithdrawalRequestsContractCall {
-                    message: format!("execution reverted: {output}"),
-                })
-            }
-            ExecutionResult::Halt { reason, .. } => {
-                Err(BlockValidationError::WithdrawalRequestsContractCall {
-                    message: format!("execution halted: {reason:?}"),
-                })
-            }
-        }?;
-
-        // Withdrawals are encoded as a series of withdrawal requests, each with the following
-        // format:
-        //
-        // +------+--------+--------+
-        // | addr | pubkey | amount |
-        // +------+--------+--------+
-        //    20      48        8
-
-        const WITHDRAWAL_REQUEST_SIZE: usize = 20 + 48 + 8;
-        let mut withdrawal_requests = Vec::with_capacity(data.len() / WITHDRAWAL_REQUEST_SIZE);
-        while data.has_remaining() {
-            if data.remaining() < WITHDRAWAL_REQUEST_SIZE {
-                return Err(BlockValidationError::WithdrawalRequestsContractCall {
-                    message: "invalid withdrawal request length".to_string(),
-                }
-                .into())
-            }
-
-            let mut source_address = Address::ZERO;
-            data.copy_to_slice(source_address.as_mut_slice());
-
-            let mut validator_pubkey = FixedBytes::<48>::ZERO;
-            data.copy_to_slice(validator_pubkey.as_mut_slice());
-
-            let amount = data.get_u64();
-
-            withdrawal_requests
-                .push(WithdrawalRequest { source_address, validator_pubkey, amount }.into());
-        }
-
-        Ok(withdrawal_requests)
+        eip7002::post_commit(result_and_state.result)
     }
 
     /// Applies the post-block call to the EIP-7251 consolidation requests contract.
@@ -377,55 +328,6 @@ where
         }
         evm.context.evm.db.commit(result_and_state.state);
 
-        let mut data = match result_and_state.result {
-            ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-            ExecutionResult::Revert { output, .. } => {
-                Err(BlockValidationError::ConsolidationRequestsContractCall {
-                    message: format!("execution reverted: {output}"),
-                })
-            }
-            ExecutionResult::Halt { reason, .. } => {
-                Err(BlockValidationError::ConsolidationRequestsContractCall {
-                    message: format!("execution halted: {reason:?}"),
-                })
-            }
-        }?;
-
-        // Consolidations are encoded as a series of consolidation requests, each with the following
-        // format:
-        //
-        // +------+--------+---------------+
-        // | addr | pubkey | target pubkey |
-        // +------+--------+---------------+
-        //    20      48        48
-
-        const CONSOLIDATION_REQUEST_SIZE: usize = 20 + 48 + 48;
-        let mut consolidation_requests =
-            Vec::with_capacity(data.len() / CONSOLIDATION_REQUEST_SIZE);
-        while data.has_remaining() {
-            if data.remaining() < CONSOLIDATION_REQUEST_SIZE {
-                return Err(BlockValidationError::ConsolidationRequestsContractCall {
-                    message: "invalid consolidation request length".to_string(),
-                }
-                .into())
-            }
-
-            let mut source_address = Address::ZERO;
-            data.copy_to_slice(source_address.as_mut_slice());
-
-            let mut source_pubkey = FixedBytes::<48>::ZERO;
-            data.copy_to_slice(source_pubkey.as_mut_slice());
-
-            let mut target_pubkey = FixedBytes::<48>::ZERO;
-            data.copy_to_slice(target_pubkey.as_mut_slice());
-
-            consolidation_requests.push(Request::ConsolidationRequest(ConsolidationRequest {
-                source_address,
-                source_pubkey,
-                target_pubkey,
-            }));
-        }
-
-        Ok(consolidation_requests)
+        eip7251::post_commit(result_and_state.result)
     }
 }
