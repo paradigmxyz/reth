@@ -1,7 +1,7 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{format, string::ToString, vec::Vec};
+use alloc::{format, string::ToString, vec, vec::Vec};
 use alloy_eips::{eip7002::WithdrawalRequest, eip7251::ConsolidationRequest};
 use alloy_primitives::{Address, FixedBytes};
 use core::fmt::Display;
