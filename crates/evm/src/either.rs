@@ -18,8 +18,7 @@ use revm::State;
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
     A: BlockExecutorProvider,
-    B: for<DB> BlockExecutorProvider<Executor<DB,
-    Output = A::Output>,
+    B: BlockExecutorProvider,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         Either<A::Executor<DB>, B::Executor<DB>>;

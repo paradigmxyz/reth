@@ -72,14 +72,18 @@ impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        OpBlockExecutor<EvmConfig, DB>;
+    type Executor<DB, O>
+        = OpBlockExecutor<EvmConfig, DB>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>,
+        O: BlockExecOutput;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         OpBatchExecutor<EvmConfig, DB>;
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    fn executor<DB, O>(&self, db: DB) -> Self::Executor<DB, O>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
+        O: BlockExecOutput,
     {
         self.op_executor(db)
     }

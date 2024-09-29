@@ -2,7 +2,9 @@
 
 // Re-export execution types
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-pub use reth_execution_types::{BlockExecOutput, EthBlockExecOutput, BlockExecutionInput, ExecutionOutcome};
+pub use reth_execution_types::{
+    BlockExecOutput, BlockExecutionInput, EthBlockExecOutput, ExecutionOutcome,
+};
 pub use reth_storage_errors::provider::ProviderError;
 
 use core::fmt::Display;

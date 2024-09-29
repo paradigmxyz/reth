@@ -47,7 +47,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
     }
 }
 
-impl<DB> Executor<DB> for MockExecutorProvider {
+impl<DB, O> Executor<DB, O> for MockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = EthBlockExecOutput;
     type Error = BlockExecutionError;

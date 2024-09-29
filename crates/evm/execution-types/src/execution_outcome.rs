@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{
-    logs_bloom, proofs, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry,
-};
+use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},

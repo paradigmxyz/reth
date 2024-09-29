@@ -1,10 +1,11 @@
 //! A no operation block executor implementation.
 
-use alloy_primitives::BlockNumber;
 use core::fmt::Display;
+
+use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecOutput, BlockExecutionInput, EthBlockExecOutput, ExecutionOutcome};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_execution_types::{BlockExecutionInput, EthBlockExecOutput, ExecutionOutcome};
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
