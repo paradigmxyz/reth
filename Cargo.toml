@@ -519,7 +519,7 @@ zstd = "0.13"
 metrics = "0.23.0"
 metrics-exporter-prometheus = { version = "0.15.0", default-features = false }
 metrics-process = "2.1.0"
-metrics-util = "0.17.0"
+metrics-util = { default-features = false, version = "0.17.0" }
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -581,8 +581,8 @@ iai-callgrind = "0.11"
 pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.5"
-serial_test = "3"
-similar-asserts = "1.5.0"
+serial_test = { default-features = false, version = "3" }
+similar-asserts = { default-features = false, version = "1.5.0" }
 tempfile = "3.8"
 test-fuzz = "5"
 
