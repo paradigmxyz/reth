@@ -18,7 +18,7 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{NodeTypes, NodeTypesWithDB};
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
@@ -35,7 +35,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::{DatabaseProvider, ProviderNodeTypes};
+use super::ProviderNodeTypes;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -122,11 +122,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         (start, end)
     }
 
-    /// Fetches a range of data from both in-memory state and storage.
+    /// Fetches a range of data from both in-memory state and storage while a predicate is met.
     ///
-    /// - `fetch_db_range`: Retrieves a range of items from the database.
-    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
-    ///   is returned.
+    /// Creates a snapshot of the in-memory chain state and database provider to prevent
+    /// inconsistencies. Splits the range into in-memory and storage sections, prioritizing
+    /// recent in-memory blocks in case of overlaps.
+    ///
+    /// * `fetch_db_range` function (`F`) provides access to the database provider, allowing the
+    /// user to retrieve the required range of items from the database.
+    /// * `map_block_state_item` function (`G`) provides each block of the range in the in-memory state,
+    /// allowing for selection or filtering for the desired data.
     fn fetch_db_mem_range_while<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -136,21 +141,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProvider<
-                <<N as NodeTypesWithDB>::DB as reth_db_api::Database>::TX,
-                <N as NodeTypes>::ChainSpec,
-            >,
+            &DatabaseProviderRO<N::DB, N::ChainSpec>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
-        G: Fn(
-            &DatabaseProvider<
-                <<N as NodeTypesWithDB>::DB as reth_db_api::Database>::TX,
-                <N as NodeTypes>::ChainSpec,
-            >,
-            Arc<BlockState>,
-            &mut P,
-        ) -> Option<T>,
+        G: Fn(Arc<BlockState>, &mut P) -> Option<T>,
         P: FnMut(&T) -> bool,
     {
         // Each one provides a snapshot at the time of instantiation, but its order matters.
@@ -171,22 +166,20 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
         });
 
-        // Split range into storage_range and in-memory range. If the in-memory range is not necessary drop it early.
+        // Split range into storage_range and in-memory range. If the in-memory range is not
+        // necessary drop it early.
         //
         // The last block of `in_memory_chain` is the lowest block number.
         let (in_memory, storage_range) = match in_memory_chain.last() {
-            Some(lowest_memory_block) if (start..=end).contains(&lowest_memory_block.number())   => {
-                // There is a small chance that database may overlap with in-memory-chain blocks, in
-                // case of a re-org. This happens because on re-org handling we
-                // schedule the disk blocks to be deleted, while inserting the new
-                // ones into memory right away.
-                //
-                // Ensures that we choose the newer versions of the overlapped blocks.
+            Some(lowest_memory_block) if (start..=end).contains(&lowest_memory_block.number()) => {
+                // Database will for a time overlap with in-memory-chain blocks. In
+                // case of a re-org, it can mean that the database blocks are of a forked chain, and
+                // so, we should prioritize the in-memory overlapped blocks.
                 let in_memory_range = lowest_memory_block.number()..=
                     end.min(in_memory_chain.first().expect("qed").number());
                 let storage_range =
                     (*in_memory_range.start() > start).then(|| start..=in_memory_range.start() - 1);
-                    
+
                 (Some((in_memory_chain, in_memory_range)), storage_range)
             }
             _ => {
@@ -203,8 +196,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             let mut db_items = fetch_db_range(&db_provider, storage_range.clone(), &mut predicate)?;
             items.append(&mut db_items);
 
-            // If the number of items differs from the expected one, then the predicate was not met,
-            // and we should stop and return what we have.
+            // The predicate was not met, if the number of items differs from the expected. So, we
+            // return what we have.
             if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
                 return Ok(items)
             }
@@ -213,7 +206,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         if let Some((in_memory_chain, in_memory_range)) = in_memory {
             for (num, block) in in_memory_range.zip(in_memory_chain) {
                 debug_assert!(num == block.number());
-                if let Some(item) = map_block_state_item(&db_provider, block, &mut predicate) {
+                if let Some(item) = map_block_state_item(block, &mut predicate) {
                     items.push(item);
                 } else {
                     break
@@ -382,14 +375,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.headers_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.header().clone())
-            },
+            |db_provider, range, _| db_provider.headers_range(range),
+            |block_state, _| Some(block_state.block().block().header.header().clone()),
             |_| true,
         )
     }
@@ -406,14 +395,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.sealed_headers_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.clone())
-            },
+            |db_provider, range, _| db_provider.sealed_headers_range(range),
+            |block_state, _| Some(block_state.block().block().header.clone()),
             |_| true,
         )
     }
@@ -423,14 +408,11 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, predicate| self.database.sealed_headers_while(range, predicate),
-            |num, predicate| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.clone())
-                    .filter(|header| predicate(header))
+            |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
+            |block_state, predicate| {
+                Some(block_state.block().block().header.clone()).filter(|header| predicate(header))
             },
             predicate,
         )
@@ -451,14 +433,12 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             start..=end,
-            |range, _| self.database.canonical_hashes_range(*range.start(), *range.end()),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.hash())
+            |db_provider, range, _| {
+                db_provider.canonical_hashes_range(*range.start(), *range.end())
             },
+            |block_state, _| Some(block_state.hash()),
             |_| true,
         )
     }
@@ -650,14 +630,10 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.block_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().clone().unseal())
-            },
+            |db_provider, range, _| db_provider.block_range(range),
+            |block_state, _| Some(block_state.block().block().clone().unseal()),
             |_| true,
         )
     }
@@ -666,15 +642,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.block_with_senders_range(range),
-            |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    BlockWithSenders { block: block.unseal(), senders }
-                })
+            |db_provider, range, _| db_provider.block_with_senders_range(range),
+            |block_state, _| {
+                let block = block_state.block().block().clone();
+                let senders = block_state.block().senders().clone();
+                Some(BlockWithSenders { block: block.unseal(), senders })
             },
             |_| true,
         )
@@ -684,15 +658,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.sealed_block_with_senders_range(range),
-            |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    SealedBlockWithSenders { block, senders }
-                })
+            |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
+            |block_state, _| {
+                let block = block_state.block().block().clone();
+                let senders = block_state.block().senders().clone();
+                Some(SealedBlockWithSenders { block, senders })
             },
             |_| true,
         )
