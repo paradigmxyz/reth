@@ -226,9 +226,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         block_range_end: BlockNumber,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
         let mut state: BundleStateInit = HashMap::new();
         let mut reverts: RevertsInit = HashMap::new();
         let state_provider = self.state_by_block_number_or_tag(block_range_end.into())?;
