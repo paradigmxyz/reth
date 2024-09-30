@@ -33,7 +33,12 @@ pub fn generate_from_to(
     } else {
         quote! {
             // Encode a placeholder for the flags which we fill later.
+            let start_ptr = buffer.chunk_mut().as_mut_ptr();
             if Self::BITFLAG_ENCODED_BYTES > 0 {
+                debug_assert!(
+                    buffer.chunk_mut().len() >= Self::BITFLAG_ENCODED_BYTES,
+                    "`BufMut` chunk is too small to encode flags; plz use contiguous buffers",
+                );
                 buffer.put_slice(&[0; Self::BITFLAG_ENCODED_BYTES]);
             }
 
@@ -41,7 +46,11 @@ pub fn generate_from_to(
             debug_assert_eq!(Self::BITFLAG_ENCODED_BYTES, flags.len());
 
             if Self::BITFLAG_ENCODED_BYTES > 0 {
-                buffer.as_mut()[start_len..start_len + flags.len()].copy_from_slice(&flags);
+                // SAFETY: We checked that the first chunk is at least `Self::BITFLAG_ENCODED_BYTES`
+                // long.
+                let flag_bytes = unsafe { std::slice::from_raw_parts_mut(start_ptr, flags.len()) };
+                debug_assert_eq!(flag_bytes, &[0; Self::BITFLAG_ENCODED_BYTES][..]);
+                flag_bytes.copy_from_slice(&flags);
             }
         }
     };
@@ -113,9 +122,9 @@ pub fn generate_from_to(
 
         #impl_compact {
             fn to_compact<B>(&self, buffer: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
-                let start_len = buffer.as_mut().len();
+                let start_rem = buffer.remaining_mut();
                 #to_compact
-                buffer.as_mut().len() - start_len
+                start_rem - buffer.remaining_mut()
             }
 
             fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -126,7 +135,7 @@ pub fn generate_from_to(
         #normal_impl {
             fn to_compact_inner<B>(&self, buffer: &mut B) -> #flags where B: bytes::BufMut + AsMut<[u8]> {
                 let mut flags = #flags::default();
-                let start_len = buffer.as_mut().len();
+                let start_rem = buffer.remaining_mut();
                 #(#to_compact_inner)*
                 flags
             }
@@ -241,7 +250,7 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     // compressed or not.
     if is_zstd {
         lines.push(quote! {
-            if (buffer.as_mut().len() - start_len) > 7 {
+            if start_rem - buffer.remaining_mut() > 7 {
                 flags.set___zstd(1);
             }
         });

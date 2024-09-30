@@ -95,3 +95,25 @@ impl Default for PruneSegment {
         Self::SenderRecovery
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_segment_compact() {
+        let mut vec = vec![];
+        let value = PruneSegment::ContractLogs;
+        let n = value.to_compact(&mut vec);
+        assert_eq!(n, 1);
+        assert_eq!(vec, [value as u8]);
+
+        let mut array = [0u8];
+        let buf = &mut array.as_mut();
+        let value = PruneSegment::ContractLogs;
+        let n = value.to_compact(buf);
+        assert_eq!(n, 1);
+        assert!(buf.is_empty());
+        assert_eq!(array, [value as u8]);
+    }
+}
