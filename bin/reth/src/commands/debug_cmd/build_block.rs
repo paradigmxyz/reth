@@ -30,8 +30,7 @@ use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar,
-    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SignedTransaction, Transaction,
-    TransactionSigned,
+    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,

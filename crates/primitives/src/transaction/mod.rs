@@ -45,11 +45,13 @@ use alloc::vec::Vec;
 use core::mem;
 
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
-use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use alloy_primitives::{keccak256, Address, Parity, TxKind, B256, U256};
-use alloy_rlp::{
-    Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
+use alloy_eips::{
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
 };
+use alloy_primitives::{keccak256, Address, Bytes, Parity, TxHash, TxKind, B256, U256};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
@@ -64,7 +66,7 @@ use tx_type::{
     COMPACT_IDENTIFIER_LEGACY,
 };
 
-use crate::{BlockHashOrNumber, Bytes, TxHash};
+use crate::BlockHashOrNumber;
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;

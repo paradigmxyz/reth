@@ -15,14 +15,14 @@ use derive_more::{AsRef, Deref};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, EIP4844_TX_TYPE_ID,
+    BlobTransaction, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, EIP4844_TX_TYPE_ID,
 };
 
 use super::{
     error::TransactionConversionError,
     signature::{recover_signer, with_eip155_parity},
-    SignedTransaction, TxEip7702,
+    TxEip7702,
 };
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
