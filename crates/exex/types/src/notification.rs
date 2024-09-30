@@ -94,13 +94,10 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    #[allow(clippy::enum_variant_names)]
+    #[allow(missing_docs)]
     pub enum ExExNotification<'a> {
-        /// See the documentation for [`super::ExExNotification::ChainCommitted`]
         ChainCommitted { new: Chain<'a> },
-        /// See the documentation for [`super::ExExNotification::ChainReorged`]
         ChainReorged { old: Chain<'a>, new: Chain<'a> },
-        /// See the documentation for [`super::ExExNotification::ChainReverted`]
         ChainReverted { old: Chain<'a> },
     }
 

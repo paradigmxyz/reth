@@ -2159,19 +2159,14 @@ pub mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
     pub enum Transaction<'a> {
-        /// See the documentation for [`super::Transaction::Legacy`]
         Legacy(TxLegacy<'a>),
-        /// See the documentation for [`super::Transaction::Eip2930`]
         Eip2930(TxEip2930<'a>),
-        /// See the documentation for [`super::Transaction::Eip1559`]
         Eip1559(TxEip1559<'a>),
-        /// See the documentation for [`super::Transaction::Eip4844`]
         Eip4844(Cow<'a, TxEip4844>),
-        /// See the documentation for [`super::Transaction::Eip7702`]
         Eip7702(Cow<'a, TxEip7702>),
         #[cfg(feature = "optimism")]
-        /// See the documentation for [`super::Transaction::Deposit`]
         #[cfg(feature = "optimism")]
         Deposit(TxDeposit<'a>),
     }
