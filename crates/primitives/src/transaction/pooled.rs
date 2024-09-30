@@ -15,6 +15,7 @@ use alloy_consensus::{
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
+use alloy_eips::eip2718::{Decodable2718, Eip2718Error};
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
@@ -222,6 +223,9 @@ impl PooledTransactionsElement {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
             let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
 
+            // First, we advance the buffer past the type byte
+            data.advance(1);
+
             if tx_type == EIP4844_TX_TYPE_ID {
                 // Recall that the blob transaction response `TransactionPayload` is encoded like
                 // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
@@ -231,18 +235,17 @@ impl PooledTransactionsElement {
                 //
                 // This makes the full encoding:
                 // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
-                //
-                // First, we advance the buffer past the type byte
-                data.advance(1);
 
                 // Now, we decode the inner blob transaction:
                 // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
                 let blob_tx = BlobTransaction::decode_inner(data)?;
                 Ok(Self::BlobTransaction(blob_tx))
             } else {
-                // DO NOT advance the buffer for the type, since we want the enveloped decoding to
-                // decode it again and advance the buffer on its own.
-                let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(data)?;
+                let typed_tx =
+                    TransactionSigned::typed_decode(tx_type, data).map_err(|err| match err {
+                        Eip2718Error::RlpError(err) => err,
+                        _ => RlpError::Custom("failed to decode EIP-2718 transaction"),
+                    })?;
 
                 // because we checked the tx type, we can be sure that the transaction is not a
                 // blob transaction or legacy
@@ -337,7 +340,7 @@ impl PooledTransactionsElement {
 
     /// Returns the enveloped encoded transactions.
     ///
-    /// See also [`TransactionSigned::encode_enveloped`]
+    /// See also [`alloy_eips::eip2718::Encodable2718::encoded_2718`]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
@@ -591,6 +594,9 @@ impl Decodable for PooledTransactionsElement {
             let tx_type = *buf.first().ok_or(RlpError::InputTooShort)?;
             let remaining_len = buf.len();
 
+            // Aadvance the buffer past the type byte
+            buf.advance(1);
+
             if tx_type == EIP4844_TX_TYPE_ID {
                 // Recall that the blob transaction response `TransactionPayload` is encoded like
                 // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
@@ -600,11 +606,8 @@ impl Decodable for PooledTransactionsElement {
                 //
                 // This makes the full encoding:
                 // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
-                //
-                // First, we advance the buffer past the type byte
-                buf.advance(1);
 
-                // Now, we decode the inner blob transaction:
+                // Decode the inner blob transaction:
                 // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
                 let blob_tx = BlobTransaction::decode_inner(buf)?;
 
@@ -616,9 +619,8 @@ impl Decodable for PooledTransactionsElement {
 
                 Ok(Self::BlobTransaction(blob_tx))
             } else {
-                // DO NOT advance the buffer for the type, since we want the enveloped decoding to
-                // decode it again and advance the buffer on its own.
-                let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+                let typed_tx =
+                    TransactionSigned::typed_decode(tx_type, buf).map_err(RlpError::from)?;
 
                 // check that the bytes consumed match the payload length
                 let bytes_consumed = remaining_len - buf.len();

@@ -1,6 +1,6 @@
 use crate::EthPooledTransaction;
 use alloy_consensus::{TxEip1559, TxEip4844, TxLegacy};
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
@@ -106,7 +106,7 @@ impl<R: Rng> TransactionGenerator<R> {
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.
     pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
         let tx = self.gen_eip4844().into_ecrecovered().unwrap();
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         EthPooledTransaction::new(tx, encoded_length)
     }
 }
