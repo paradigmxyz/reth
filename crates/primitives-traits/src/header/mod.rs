@@ -11,6 +11,11 @@ pub use alloy_consensus::Header;
 
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    pub use super::sealed::serde_bincode_compat::SealedHeader;
+}
+
 /// Trait for extracting specific Ethereum block data from a header
 pub trait BlockHeader {
     /// Retrieves the beneficiary (miner) of the block
