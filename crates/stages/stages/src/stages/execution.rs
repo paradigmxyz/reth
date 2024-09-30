@@ -1,5 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, Sealable};
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
@@ -10,7 +10,7 @@ use reth_evm::{
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader, StaticFileSegment};
+use reth_primitives::{Header, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},

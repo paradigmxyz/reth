@@ -232,7 +232,7 @@ where
     S: Serializer,
 {
     let mut storage_nodes =
-        Vec::from_iter(map.iter().map(|elem| reth_primitives::hex::encode(elem.pack())));
+        Vec::from_iter(map.iter().map(|elem| alloy_primitives::hex::encode(elem.pack())));
     storage_nodes.sort_unstable();
     storage_nodes.serialize(serializer)
 }
@@ -252,7 +252,7 @@ where
     storage_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
     for (k, v) in storage_nodes {
         // pack, then hex encode the Nibbles
-        let packed = reth_primitives::hex::encode(k.pack());
+        let packed = alloy_primitives::hex::encode(k.pack());
         map_serializer.serialize_entry(&packed, &v)?;
     }
     map_serializer.end()

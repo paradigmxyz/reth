@@ -4,9 +4,9 @@ use core::fmt::Display;
 
 use crate::ConfigureEvm;
 use alloy_eips::eip7002::{WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
-use alloy_primitives::{Address, Bytes, FixedBytes};
+use alloy_primitives::{bytes::Buf, Address, Bytes, FixedBytes};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Buf, Header, Request};
+use reth_primitives::{Header, Request};
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState,

@@ -3,17 +3,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, U256};
+use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
-    primitives::{
-        revm_primitives::{Env, PrecompileResult},
-        Bytes,
-    },
+    primitives::revm_primitives::{Env, PrecompileResult},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,

@@ -7,15 +7,15 @@ use super::{
     TxEip7702,
 };
 use crate::{
-    BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, EIP4844_TX_TYPE_ID,
+    BlobTransaction, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, EIP4844_TX_TYPE_ID,
 };
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};

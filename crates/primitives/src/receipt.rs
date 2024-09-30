@@ -1,11 +1,11 @@
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::{
-    logs_bloom, Bytes, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    logs_bloom, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     EIP7702_TX_TYPE_ID,
 };
 use alloc::{vec, vec::Vec};
-use alloy_primitives::{Bloom, Log, B256};
+use alloy_primitives::{Bloom, Bytes, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
