@@ -3838,10 +3838,7 @@ mod tests {
 
         // Retrieve the block number for this transaction
         let result = provider.transaction_block(tx_id)?;
-        assert!(
-            result.is_none(),
-            "`get_in_memory_or_storage_by_tx_id` should be None if the block is in database"
-        );
+        assert_eq!(Some(0), result, "The block number should match the database block number");
 
         // Ensure that invalid transaction ID returns None
         let result = provider.transaction_block(67675657)?;
