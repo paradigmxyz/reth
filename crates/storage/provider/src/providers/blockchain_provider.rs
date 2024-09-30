@@ -155,7 +155,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // mean that our database provider would not have access to the flushed blocks (since it's
         // working under an older view), while the in-memory state may have deleted them
         // entirely. Resulting in gaps on the range.
-        let in_memory_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let mut in_memory_chain =
+            self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
         let db_provider = self.database_provider_ro()?;
 
         let (start, end) = self.convert_range_bounds(range, || {
@@ -170,15 +171,27 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // necessary drop it early.
         //
         // The last block of `in_memory_chain` is the lowest block number.
-        let (in_memory, storage_range) = match in_memory_chain.last() {
-            Some(lowest_memory_block) if (start..=end).contains(&lowest_memory_block.number()) => {
+        let (in_memory, storage_range) = match in_memory_chain.last().as_ref().map(|b| b.number()) {
+            Some(lowest_memory_block) if lowest_memory_block <= end => {
+                let highest_memory_block =
+                    in_memory_chain.first().as_ref().map(|b| b.number()).expect("qed");
+
                 // Database will for a time overlap with in-memory-chain blocks. In
                 // case of a re-org, it can mean that the database blocks are of a forked chain, and
                 // so, we should prioritize the in-memory overlapped blocks.
-                let in_memory_range = lowest_memory_block.number()..=
-                    end.min(in_memory_chain.first().expect("qed").number());
+                let in_memory_range =
+                    lowest_memory_block.max(start)..=end.min(highest_memory_block);
+
+                // If requested range is in the middle of the in-memory range, remove the necessary
+                // lowest blocks
+                in_memory_chain.truncate(
+                    in_memory_chain
+                        .len()
+                        .saturating_sub(start.saturating_sub(lowest_memory_block) as usize),
+                );
+
                 let storage_range =
-                    (*in_memory_range.start() > start).then(|| start..=in_memory_range.start() - 1);
+                    (lowest_memory_block > start).then(|| start..=lowest_memory_block - 1);
 
                 (Some((in_memory_chain, in_memory_range)), storage_range)
             }
@@ -436,7 +449,8 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
         self.fetch_db_mem_range_while(
             start..end,
             |db_provider, inclusive_range, _| {
-                db_provider.canonical_hashes_range(*inclusive_range.start(), *inclusive_range.end() + 1)
+                db_provider
+                    .canonical_hashes_range(*inclusive_range.start(), *inclusive_range.end() + 1)
             },
             |block_state, _| Some(block_state.hash()),
             |_| true,
@@ -2227,6 +2241,25 @@ mod tests {
         assert_eq!(blocks.len(), in_memory_blocks.len());
         // Check if the blocks are equal
         for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter()) {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        // Check for partial in-memory ranges
+        let blocks = provider.block_range(start_block_number + 1..=end_block_number)?;
+        assert_eq!(blocks.len(), in_memory_blocks.len() - 1);
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1)) {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        let blocks = provider.block_range(start_block_number + 1..=end_block_number - 1)?;
+        assert_eq!(blocks.len(), in_memory_blocks.len() - 2);
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1)) {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        let blocks = provider.block_range(start_block_number + 1..=end_block_number + 1)?;
+        assert_eq!(blocks.len(), in_memory_blocks.len() - 1);
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1)) {
             assert_eq!(retrieved_block, &expected_block.clone().unseal());
         }
 
