@@ -120,6 +120,12 @@ where
     // commit the state
     evm.context.evm.db.commit(state);
 
+    post_commit(result)
+}
+
+/// Parses the consolidation requests from the execution output.
+#[inline]
+pub(crate) fn post_commit(result: ExecutionResult) -> Result<Vec<Request>, BlockExecutionError> {
     let mut data = match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
