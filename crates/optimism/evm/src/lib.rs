@@ -10,12 +10,13 @@
 #![cfg(feature = "optimism")]
 
 use alloy_primitives::{Address, U256};
+use reth_ethereum_forks::Head;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
-    Head, Header, TransactionSigned,
+    Header, TransactionSigned,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use std::sync::Arc;

@@ -33,6 +33,7 @@ reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -56,7 +57,9 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
-notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
+notify = { workspace = true, default-features = false, features = [
+    "macos_fsevent",
+] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
@@ -85,7 +88,11 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-execution-types/optimism", "reth-optimism-primitives"]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-execution-types/optimism",
+    "reth-optimism-primitives",
+]
 serde = ["reth-execution-types/serde"]
 test-utils = [
     "reth-db/test-utils",

@@ -11,6 +11,7 @@ use reth_blockchain_tree_api::{
 };
 use reth_engine_primitives::{EngineTypes, PayloadTypes};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
+use reth_ethereum_forks::Head;
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     BlockClient,
@@ -19,9 +20,7 @@ use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{constants::EPOCH_SLOTS, BlockNumHash, Header, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -2583,7 +2582,7 @@ mod tests {
         use alloy_primitives::U256;
         use generators::BlockParams;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_primitives::EthereumHardfork;
+        use reth_ethereum_forks::EthereumHardfork;
         use reth_provider::{
             providers::StaticFileProvider,
             test_utils::{blocks::BlockchainTestData, MockNodeTypesWithDB},

@@ -7,7 +7,8 @@ use crate::{
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_primitives::{ForkFilter, GotExpected};
+use reth_ethereum_forks::ForkFilter;
+use reth_primitives::GotExpected;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -355,8 +356,8 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use reth_chainspec::NamedChain;
     use reth_ecies::stream::ECIESStream;
+    use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
-    use reth_primitives::{ForkFilter, Head};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};

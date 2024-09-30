@@ -15,6 +15,7 @@ reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
+reth-ethereum-forks.workspace = true
 
 secp256k1 = { workspace = true, features = [
     "global-context",

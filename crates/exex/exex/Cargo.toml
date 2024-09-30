@@ -31,6 +31,7 @@ reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
+reth-ethereum-forks.workspace = true
 
 # alloy
 alloy-primitives.workspace = true

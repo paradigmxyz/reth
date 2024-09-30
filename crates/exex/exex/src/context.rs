@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
+use reth_ethereum_forks::Head;
 use reth_node_api::{FullNodeComponents, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::node_config::NodeConfig;
-use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::UnboundedSender;
 

@@ -7,9 +7,9 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
+use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_primitives::{ForkFilter, Head};
 use reth_storage_api::{noop::NoopBlockReader, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
@@ -597,7 +597,7 @@ mod tests {
     use rand::thread_rng;
     use reth_chainspec::{Chain, MAINNET};
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::ForkHash;
+    use reth_ethereum_forks::ForkHash;
     use reth_provider::test_utils::NoopProvider;
 
     fn builder() -> NetworkConfigBuilder {

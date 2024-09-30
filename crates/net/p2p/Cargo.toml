@@ -19,6 +19,7 @@ reth-consensus.workspace = true
 reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-storage-errors.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

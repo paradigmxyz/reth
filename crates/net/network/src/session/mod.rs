@@ -30,11 +30,11 @@ use reth_eth_wire::{
     Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, Status,
     UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequestSender;
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
