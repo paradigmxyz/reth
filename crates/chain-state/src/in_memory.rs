@@ -552,18 +552,9 @@ impl CanonicalInMemoryState {
                     index: index as u64,
                     block_hash: block_state.hash(),
                     block_number: block_state.block().block.number,
-                    base_fee: block_state
-                        .block()
-                        .block()
-                        .header
-                        .base_fee_per_gas
-                        .map(|base_fee| base_fee as u64),
+                    base_fee: block_state.block().block().header.base_fee_per_gas,
                     timestamp: block_state.block().block.timestamp,
-                    excess_blob_gas: block_state
-                        .block()
-                        .block
-                        .excess_blob_gas
-                        .map(|excess_blob| excess_blob as u64),
+                    excess_blob_gas: block_state.block().block.excess_blob_gas,
                 };
                 return Some((tx.clone(), meta))
             }

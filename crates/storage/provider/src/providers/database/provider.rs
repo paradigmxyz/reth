@@ -1958,10 +1958,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
                                 index,
                                 block_hash,
                                 block_number,
-                                base_fee: header.base_fee_per_gas.map(|base_fee| base_fee as u64),
-                                excess_blob_gas: header
-                                    .excess_blob_gas
-                                    .map(|excess_blob| excess_blob as u64),
+                                base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                                 timestamp: header.timestamp,
                             };
 

@@ -42,7 +42,7 @@ impl Compact for AlloyTxEip4844 {
         let tx = TxEip4844 {
             chain_id: self.chain_id,
             nonce: self.nonce,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             max_fee_per_gas: self.max_fee_per_gas,
             max_priority_fee_per_gas: self.max_priority_fee_per_gas,
             placeholder: Some(()),
@@ -61,7 +61,7 @@ impl Compact for AlloyTxEip4844 {
         let alloy_tx = Self {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
-            gas_limit: tx.gas_limit as u128,
+            gas_limit: tx.gas_limit,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             to: tx.to,

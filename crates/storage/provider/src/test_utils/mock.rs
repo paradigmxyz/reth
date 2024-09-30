@@ -288,14 +288,8 @@ impl TransactionsProvider for MockEthProvider {
                         index: index as u64,
                         block_hash: *block_hash,
                         block_number: block.header.number,
-                        base_fee: block
-                            .header
-                            .base_fee_per_gas
-                            .map(|base_fer_per_gas| base_fer_per_gas as u64),
-                        excess_blob_gas: block
-                            .header
-                            .excess_blob_gas
-                            .map(|excess_blob_gas| excess_blob_gas as u64),
+                        base_fee: block.header.base_fee_per_gas,
+                        excess_blob_gas: block.header.excess_blob_gas,
                         timestamp: block.header.timestamp,
                     };
                     return Ok(Some((tx.clone(), meta)))

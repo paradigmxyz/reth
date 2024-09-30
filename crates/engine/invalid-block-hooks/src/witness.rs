@@ -175,7 +175,8 @@ where
 
         // Write the witness to the output directory.
         let response = ExecutionWitness {
-            state: std::collections::HashMap::from_iter(state),
+            state: HashMap::from_iter(state),
+            codes: Default::default(),
             keys: Some(state_preimages),
         };
         let re_executed_witness_path = self.save_file(

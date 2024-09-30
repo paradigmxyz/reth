@@ -666,7 +666,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: self.new_tip.gas_limit as u64,
+            block_gas_limit: self.new_tip.gas_limit,
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,

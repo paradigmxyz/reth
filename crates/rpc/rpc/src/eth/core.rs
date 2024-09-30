@@ -455,8 +455,8 @@ mod tests {
 
             let header = Header {
                 number: newest_block - i,
-                gas_limit: gas_limit.into(),
-                gas_used: gas_used.into(),
+                gas_limit,
+                gas_used,
                 base_fee_per_gas: base_fee_per_gas.map(Into::into),
                 parent_hash,
                 ..Default::default()
@@ -473,7 +473,7 @@ mod tests {
                         transaction: reth_primitives::Transaction::Eip1559(
                             alloy_consensus::TxEip1559 {
                                 max_priority_fee_per_gas: random_fee,
-                                max_fee_per_gas: random_fee + base_fee_per_gas,
+                                max_fee_per_gas: random_fee + base_fee_per_gas as u128,
                                 ..Default::default()
                             },
                         ),
@@ -511,7 +511,7 @@ mod tests {
             last_header.gas_used,
             last_header.gas_limit,
             last_header.base_fee_per_gas.unwrap_or_default(),
-        ));
+        ) as u128);
 
         let eth_api = build_test_eth_api(mock_provider);
 

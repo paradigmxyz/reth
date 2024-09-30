@@ -241,7 +241,7 @@ mod tests {
             chain_id: Some(1u64),
             from: Some(from),
             to: Some(TxKind::Create),
-            gas: Some(1000u128),
+            gas: Some(1000),
             gas_price: Some(1000u128),
             value: Some(U256::from(1000)),
             input: TransactionInput {

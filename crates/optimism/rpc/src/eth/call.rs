@@ -86,10 +86,7 @@ where
 
         #[allow(clippy::needless_update)]
         let env = TxEnv {
-            gas_limit: gas_limit
-                .try_into()
-                .map_err(|_| RpcInvalidTransactionError::GasUintOverflow)
-                .map_err(Self::Error::from_eth_err)?,
+            gas_limit,
             nonce,
             caller: from.unwrap_or_default(),
             gas_price,

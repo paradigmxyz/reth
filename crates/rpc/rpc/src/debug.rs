@@ -417,9 +417,7 @@ where
                                 let frame: FlatCallFrame = inspector
                                     .with_transaction_gas_limit(env.tx.gas_limit)
                                     .into_parity_builder()
-                                    .into_localized_transaction_traces(tx_info)
-                                    .pop()
-                                    .unwrap();
+                                    .into_localized_transaction_traces(tx_info);
                                 Ok(frame)
                             })
                             .await?;
@@ -667,7 +665,8 @@ where
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
                 Ok(ExecutionWitness {
-                    state: std::collections::HashMap::from_iter(state.into_iter()),
+                    state: HashMap::from_iter(state.into_iter()),
+                    codes: Default::default(),
                     keys: include_preimages.then_some(keys),
                 })
             })
@@ -772,9 +771,7 @@ where
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info)
-                            .pop()
-                            .unwrap();
+                            .into_localized_transaction_traces(tx_info);
 
                         return Ok((frame.into(), res.state));
                     }
