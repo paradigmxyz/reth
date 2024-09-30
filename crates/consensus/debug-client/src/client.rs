@@ -197,8 +197,8 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                 logs_bloom: block.header.logs_bloom,
                 prev_randao: block.header.mix_hash.unwrap(),
                 block_number: block.header.number,
-                gas_limit: block.header.gas_limit.try_into().unwrap(),
-                gas_used: block.header.gas_used.try_into().unwrap(),
+                gas_limit: block.header.gas_limit,
+                gas_used: block.header.gas_used,
                 timestamp: block.header.timestamp,
                 extra_data: block.header.extra_data.clone(),
                 base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
@@ -215,8 +215,8 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
             },
             withdrawals: block.withdrawals.clone().unwrap_or_default(),
         },
-        blob_gas_used: block.header.blob_gas_used.unwrap().try_into().unwrap(),
-        excess_blob_gas: block.header.excess_blob_gas.unwrap().try_into().unwrap(),
+        blob_gas_used: block.header.blob_gas_used.unwrap(),
+        excess_blob_gas: block.header.excess_blob_gas.unwrap(),
     };
 
     ExecutionNewPayload {

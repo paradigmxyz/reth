@@ -3766,10 +3766,7 @@ mod tests {
             index: 0,
             block_hash: in_memory_blocks[0].header.hash(),
             block_number: in_memory_blocks[0].header.number,
-            base_fee: in_memory_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: in_memory_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: in_memory_blocks[0].header.timestamp,
         };
@@ -3797,10 +3794,7 @@ mod tests {
             index: 0,
             block_hash: database_blocks[0].header.hash(),
             block_number: database_blocks[0].header.number,
-            base_fee: database_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: database_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: database_blocks[0].header.timestamp,
         };

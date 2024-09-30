@@ -1568,7 +1568,7 @@ mod tests {
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
                     nonce,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: Address::ZERO.into(),
                     max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                     ..Default::default()
@@ -1604,10 +1604,10 @@ mod tests {
             let sealed = Header {
                 number,
                 parent_hash: parent.unwrap_or_default(),
-                gas_used: (body.len() as u64 * MIN_TRANSACTION_GAS) as u128,
-                gas_limit: chain_spec.max_gas_limit.into(),
+                gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
+                gas_limit: chain_spec.max_gas_limit,
                 mix_hash: B256::random(),
-                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),
+                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                 transactions_root,
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(

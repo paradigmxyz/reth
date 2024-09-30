@@ -619,7 +619,7 @@ mod tests {
         let client = TestFullBlockClient::default();
         let sealed = Header {
             base_fee_per_gas: Some(7),
-            gas_limit: chain_spec.max_gas_limit.into(),
+            gas_limit: chain_spec.max_gas_limit,
             ..Default::default()
         }
         .seal_slow();
