@@ -1,12 +1,9 @@
 //! Ethereum block executor.
 
-use crate::{
-    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    EthEvmConfig,
-};
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
+
+use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
@@ -18,7 +15,9 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Request};
+use reth_primitives::{
+    BlockWithSenders, EthereumHardfork, Header, Receipt, Request, SignedTransaction,
+};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
@@ -29,6 +28,11 @@ use reth_revm::{
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+};
+
+use crate::{
+    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    EthEvmConfig,
 };
 
 /// Provides executors to execute regular ethereum blocks

@@ -1,8 +1,7 @@
 //! Optimism block executor.
 
-use crate::{
-    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
-};
+use std::{fmt::Display, sync::Arc};
+
 use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -16,7 +15,7 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
+use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, SignedTransaction, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
@@ -26,8 +25,11 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
+
+use crate::{
+    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
+};
 
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]

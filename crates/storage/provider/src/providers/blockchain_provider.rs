@@ -1405,20 +1405,11 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
 #[cfg(test)]
 mod tests {
     use std::{
-        ops::{Range, RangeBounds},
+        ops::{Bound, Range, RangeBounds},
         sync::Arc,
         time::Instant,
     };
 
-    use crate::{
-        providers::BlockchainProvider2,
-        test_utils::{
-            create_test_provider_factory, create_test_provider_factory_with_chain_spec,
-            MockNodeTypesWithDB,
-        },
-        writer::UnifiedStorageWriter,
-        BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
-    };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::B256;
     use itertools::Itertools;
@@ -1433,8 +1424,8 @@ mod tests {
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
-        TransactionMeta, TransactionSignedNoHash, Withdrawals,
+        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, SignedTransaction,
+        StaticFileSegment, TransactionMeta, TransactionSignedNoHash, Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -1447,7 +1438,16 @@ mod tests {
         random_receipt, BlockParams, BlockRangeParams,
     };
     use revm::db::BundleState;
-    use std::ops::Bound;
+
+    use crate::{
+        providers::BlockchainProvider2,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
+        writer::UnifiedStorageWriter,
+        BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
+    };
 
     const TEST_BLOCKS_COUNT: usize = 5;
 

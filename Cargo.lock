@@ -159,9 +159,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7702"
-version = "0.1.1"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea59dc42102bc9a1905dc57901edc6dd48b9f38115df86c7d252acba70d71d04"
+checksum = "37d319bb544ca6caeab58c39cea8921c55d924d4f68f2c60f24f914673f9a74a"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -8123,10 +8123,15 @@ name = "reth-optimism-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "derive_more",
  "modular-bitfield",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "reth-codecs",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
@@ -8371,6 +8376,7 @@ dependencies = [
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
+ "reth-primitives",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
@@ -9442,10 +9448,11 @@ dependencies = [
 
 [[package]]
 name = "rustls-pemfile"
-version = "2.2.0"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
+checksum = "196fe16b00e106300d3e45ecfcb764fa292a535d7326a29a5875c579c7417425"
 dependencies = [
+ "base64 0.22.1",
  "rustls-pki-types",
 ]
 

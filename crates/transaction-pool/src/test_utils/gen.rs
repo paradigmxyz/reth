@@ -1,12 +1,14 @@
-use crate::EthPooledTransaction;
 use alloy_consensus::{TxEip1559, TxEip4844, TxLegacy};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, Transaction, TransactionSigned,
+    constants::MIN_PROTOCOL_BASE_FEE, sign_message, SignedTransaction, Transaction,
+    TransactionSigned,
 };
+
+use crate::EthPooledTransaction;
 
 /// A generator for transactions for testing purposes.
 #[derive(Debug)]

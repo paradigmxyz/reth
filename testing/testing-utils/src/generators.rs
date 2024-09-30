@@ -1,25 +1,28 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::TxLegacy;
-use alloy_eips::{
-    eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
-};
-use alloy_primitives::{Address, BlockNumber, Bytes, Parity, Sealable, TxKind, B256, U256};
 pub use rand::Rng;
-use rand::{
-    distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
-};
-use reth_primitives::{
-    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionSigned, Withdrawal, Withdrawals,
-};
-use secp256k1::{Keypair, Secp256k1};
+
 use std::{
     cmp::{max, min},
     collections::{hash_map::DefaultHasher, BTreeMap},
     hash::Hasher,
     ops::{Range, RangeInclusive},
 };
+
+use alloy_consensus::TxLegacy;
+use alloy_eips::{
+    eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
+};
+use alloy_primitives::{Address, BlockNumber, Bytes, Parity, Sealable, TxKind, B256, U256};
+use rand::{
+    distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
+};
+use reth_primitives::{
+    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
+    SealedHeader, SignedTransaction, StorageEntry, Transaction, TransactionSigned, Withdrawal,
+    Withdrawals,
+};
+use secp256k1::{Keypair, Secp256k1};
 
 /// Used to pass arguments for random block generation function in tests
 #[derive(Debug, Default)]
@@ -497,12 +500,14 @@ pub fn random_request<R: Rng>(rng: &mut R) -> Request {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::str::FromStr;
+
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, Parity};
-    use reth_primitives::{public_key_to_address, Signature};
-    use std::str::FromStr;
+    use reth_primitives::{public_key_to_address, Signature, SignedTransaction};
+
+    use super::*;
 
     #[test]
     fn test_sign_message() {

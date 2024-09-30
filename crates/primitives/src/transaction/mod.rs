@@ -1191,86 +1191,10 @@ impl TransactionSigned {
         self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
-    /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
-    /// tx type.
-    pub fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
-    }
-
-    /// Create a new signed transaction from a transaction and its signature.
-    ///
-    /// This will also calculate the transaction hash using its encoding.
-    pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
-        initial_tx
-    }
-
     /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
-    }
-
-    /// Decodes legacy transaction from the data buffer into a tuple.
-    ///
-    /// This expects `rlp(legacy_tx)`
-    ///
-    /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
-    /// format expected.
-    pub(crate) fn decode_rlp_legacy_transaction_tuple(
-        data: &mut &[u8],
-    ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
-        // keep this around, so we can use it to calculate the hash
-        let original_encoding = *data;
-
-        let header = Header::decode(data)?;
-        let remaining_len = data.len();
-
-        let transaction_payload_len = header.payload_length;
-
-        if transaction_payload_len > remaining_len {
-            return Err(RlpError::InputTooShort)
-        }
-
-        let mut transaction = TxLegacy {
-            nonce: Decodable::decode(data)?,
-            gas_price: Decodable::decode(data)?,
-            gas_limit: Decodable::decode(data)?,
-            to: Decodable::decode(data)?,
-            value: Decodable::decode(data)?,
-            input: Decodable::decode(data)?,
-            chain_id: None,
-        };
-        let (signature, extracted_id) = decode_with_eip155_chain_id(data)?;
-        transaction.chain_id = extracted_id;
-
-        // check the new length, compared to the original length and the header length
-        let decoded = remaining_len - data.len();
-        if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength)
-        }
-
-        let tx_length = header.payload_length + header.length();
-        let hash = keccak256(&original_encoding[..tx_length]);
-        Ok((transaction, hash, signature))
-    }
-
-    /// Decodes legacy transaction from the data buffer.
-    ///
-    /// This should be used _only_ be used in general transaction decoding methods, which have
-    /// already ensured that the input is a legacy transaction with the following format:
-    /// `rlp(legacy_tx)`
-    ///
-    /// Legacy transactions are encoded as lists, so the input should start with a RLP list header.
-    ///
-    /// This expects `rlp(legacy_tx)`
-    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
-    // so decoding methods do not need to manually advance the buffer
-    pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
-        Ok(signed)
     }
 
     /// Decodes the "raw" format of transaction (similar to `eth_sendRawTransaction`).
@@ -1563,6 +1487,18 @@ impl SignedTransaction for TransactionSigned {
             Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
         }
     }
+
+    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
+        Ok(signed)
+    }
+
+    fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
+        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
+        initial_tx.hash = initial_tx.recalculate_hash();
+        initial_tx
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -1719,16 +1655,19 @@ impl<T> WithEncoded<Option<T>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    };
+    use std::str::FromStr;
+
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
     use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
-    use std::str::FromStr;
+
+    use crate::{
+        transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
+        SignedTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        TransactionSignedNoHash,
+    };
 
     #[test]
     fn test_decode_empty_typed_tx() {

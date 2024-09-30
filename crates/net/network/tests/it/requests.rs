@@ -16,7 +16,9 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
-use reth_primitives::{Block, Header, Signature, Transaction, TransactionSigned};
+use reth_primitives::{
+    Block, Header, Signature, SignedTransaction, Transaction, TransactionSigned,
+};
 use reth_provider::test_utils::MockEthProvider;
 
 /// Returns a new [`TransactionSigned`] with some random parameters

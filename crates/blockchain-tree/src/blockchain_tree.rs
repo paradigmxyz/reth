@@ -1,10 +1,10 @@
 //! Implementation of [`BlockchainTree`]
 
-use crate::{
-    metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
-    state::{SidechainId, TreeState},
-    AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
+use std::{
+    collections::{btree_map::Entry, BTreeMap, HashSet},
+    sync::Arc,
 };
+
 use alloy_eips::{BlockNumHash, ForkBlock};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use reth_blockchain_tree_api::{
@@ -30,11 +30,13 @@ use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
-use std::{
-    collections::{btree_map::Entry, BTreeMap, HashSet},
-    sync::Arc,
-};
 use tracing::{debug, error, info, instrument, trace, warn};
+
+use crate::{
+    metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
+    state::{SidechainId, TreeState},
+    AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A Tree of chains.
@@ -1375,7 +1377,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashMap;
+
     use alloy_consensus::TxEip1559;
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, Sealable, B256};
@@ -1391,7 +1394,7 @@ mod tests {
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
-        Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
+        Account, BlockBody, Header, Signature, SignedTransaction, Transaction, TransactionSigned,
         TransactionSignedEcRecovered, Withdrawals,
     };
     use reth_provider::{
@@ -1403,7 +1406,8 @@ mod tests {
     };
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
-    use std::collections::HashMap;
+
+    use super::*;
 
     fn setup_externals(
         exec_res: Vec<ExecutionOutcome>,

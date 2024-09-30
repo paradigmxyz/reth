@@ -1,11 +1,9 @@
-use crate::{
-    traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
-    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+use std::{
+    collections::BTreeMap,
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
 };
+
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
@@ -22,7 +20,7 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    SealedBlockWithSenders, SealedHeader, SignedTransaction, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -34,10 +32,14 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
-use std::{
-    collections::BTreeMap,
-    ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+
+use crate::{
+    traits::{BlockSource, ReceiptProvider},
+    AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
+    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// A mock implementation for Provider interfaces.

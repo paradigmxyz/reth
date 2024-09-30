@@ -164,11 +164,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
-    };
+    use reth_primitives::SignedTransaction;
+
     use alloy_primitives::B256;
     use reth_primitives::SealedBlock;
     use reth_provider::{
@@ -176,6 +173,13 @@ mod tests {
     };
     use reth_prune::PruneMode;
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+    };
+
+    use super::*;
 
     stage_test_suite_ext!(PruneTestRunner, prune);
 

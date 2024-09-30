@@ -1,15 +1,17 @@
-use crate::{
-    providers::{state::latest::LatestStateProvider, StaticFileProvider},
-    to_range,
-    traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
-    PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+mod metrics;
+mod provider;
+
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+
+use core::fmt;
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    path::Path,
+    sync::Arc,
 };
+
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
-use core::fmt;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -26,20 +28,20 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
-use std::{
-    ops::{RangeBounds, RangeInclusive},
-    path::Path,
-    sync::Arc,
-};
 use tokio::sync::watch;
 use tracing::trace;
 
-mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+use crate::{
+    providers::{state::latest::LatestStateProvider, StaticFileProvider},
+    to_range,
+    traits::{BlockSource, ReceiptProvider},
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
+    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
+    PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+};
 
 use super::ProviderNodeTypes;
-
-mod metrics;
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -628,12 +630,8 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
-        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
-    };
+    use std::{ops::RangeInclusive, sync::Arc};
+
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
@@ -643,12 +641,19 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_primitives::StaticFileSegment;
+    use reth_primitives::{SignedTransaction, StaticFileSegment};
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
-    use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
+
+    use crate::{
+        providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
+    };
+
+    use super::*;
 
     #[test]
     fn common_history_provider() {
