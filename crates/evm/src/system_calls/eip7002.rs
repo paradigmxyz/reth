@@ -121,6 +121,7 @@ where
     post_commit(result)
 }
 
+/// Parses the withdrawal requests from the execution output.
 #[inline]
 pub(crate) fn post_commit(result: ExecutionResult) -> Result<Vec<Request>, BlockExecutionError> {
     let mut data = match result {
