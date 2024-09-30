@@ -643,8 +643,6 @@ impl EnvironmentBuilder {
                 }
                 for (opt, v) in [
                     (ffi::MDBX_opt_max_db, self.max_dbs),
-                    (ffi::MDBX_opt_sync_bytes, self.sync_bytes),
-                    (ffi::MDBX_opt_sync_period, self.sync_period),
                     (ffi::MDBX_opt_rp_augment_limit, self.rp_augment_limit),
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
                     (ffi::MDBX_opt_dp_reserve_limit, self.dp_reserve_limit),
@@ -697,6 +695,15 @@ impl EnvironmentBuilder {
                     self.flags.make_flags() | self.kind.extra_flags(),
                     mode,
                 ))?;
+
+                for (opt, v) in [
+                    (ffi::MDBX_opt_sync_bytes, self.sync_bytes),
+                    (ffi::MDBX_opt_sync_period, self.sync_period),
+                ] {
+                    if let Some(v) = v {
+                        mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
+                    }
+                }
 
                 Ok(())
             })() {

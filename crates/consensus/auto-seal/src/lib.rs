@@ -301,7 +301,7 @@ impl StorageInner {
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             difficulty: U256::from(2),
             number: self.best_block + 1,
-            gas_limit: chain_spec.max_gas_limit().into(),
+            gas_limit: chain_spec.max_gas_limit(),
             timestamp,
             base_fee_per_gas,
             blob_gas_used: blob_gas_used.map(Into::into),
@@ -326,10 +326,8 @@ impl StorageInner {
                 }
                 _ => (0, 0),
             };
-            header.excess_blob_gas = Some(
-                calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64)
-                    .into(),
-            )
+            header.excess_blob_gas =
+                Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         }
 
         header
@@ -406,7 +404,7 @@ impl StorageInner {
 
         // now we need to update certain header fields with the results of the execution
         header.state_root = db.state_root(hashed_state)?;
-        header.gas_used = gas_used.into();
+        header.gas_used = gas_used;
 
         let receipts = execution_outcome.receipts_by_block(header.number);
 
@@ -594,7 +592,7 @@ mod tests {
         assert_eq!(header.parent_hash, best_block_hash);
         assert_eq!(header.number, best_block_number + 1);
         assert_eq!(header.timestamp, timestamp);
-        assert_eq!(header.gas_limit, chain_spec.max_gas_limit.into());
+        assert_eq!(header.gas_limit, chain_spec.max_gas_limit);
     }
 
     #[test]
@@ -688,7 +686,7 @@ mod tests {
                 withdrawals_root: None,
                 difficulty: U256::from(2),
                 number: 1,
-                gas_limit: chain_spec.max_gas_limit.into(),
+                gas_limit: chain_spec.max_gas_limit,
                 timestamp,
                 base_fee_per_gas: None,
                 blob_gas_used: Some(0),

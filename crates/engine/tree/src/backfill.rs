@@ -230,12 +230,12 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 mod tests {
     use super::*;
     use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{BlockNumber, Sealable, B256};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader};
+    use reth_primitives::{Header, SealedHeader};
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
@@ -269,7 +269,7 @@ mod tests {
             let client = TestFullBlockClient::default();
             let sealed = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: chain_spec.max_gas_limit.into(),
+                gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
             }
             .seal_slow();

@@ -8,7 +8,7 @@ use crate::{
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
@@ -20,9 +20,9 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    alloy_primitives::Sealable, Account, Block, BlockWithSenders, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
+    Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

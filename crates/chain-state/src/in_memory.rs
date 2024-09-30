@@ -498,6 +498,20 @@ impl CanonicalInMemoryState {
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider_from_state(
+        &self,
+        state: &BlockState,
+        historical: StateProviderBox,
+    ) -> MemoryOverlayStateProvider {
+        let in_memory = state.chain().into_iter().map(|block_state| block_state.block()).collect();
+
+        MemoryOverlayStateProvider::new(historical, in_memory)
+    }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the requested block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(
         &self,
         hash: B256,
@@ -552,18 +566,9 @@ impl CanonicalInMemoryState {
                     index: index as u64,
                     block_hash: block_state.hash(),
                     block_number: block_state.block().block.number,
-                    base_fee: block_state
-                        .block()
-                        .block()
-                        .header
-                        .base_fee_per_gas
-                        .map(|base_fee| base_fee as u64),
+                    base_fee: block_state.block().block().header.base_fee_per_gas,
                     timestamp: block_state.block().block.timestamp,
-                    excess_blob_gas: block_state
-                        .block()
-                        .block
-                        .excess_blob_gas
-                        .map(|excess_blob| excess_blob as u64),
+                    excess_blob_gas: block_state.block().block.excess_blob_gas,
                 };
                 return Some((tx.clone(), meta))
             }

@@ -150,7 +150,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
                     None
                 }
             })
-            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64));
+            .map(BlobExcessGasAndPrice::new);
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),

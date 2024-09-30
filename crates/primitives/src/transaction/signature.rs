@@ -115,13 +115,13 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
 #[cfg(test)]
 mod tests {
     use crate::{
-        hex,
         transaction::signature::{
             legacy_parity, recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
         },
         Signature,
     };
-    use alloy_primitives::{Address, Parity, B256, U256};
+    use alloy_eips::eip2718::Decodable2718;
+    use alloy_primitives::{hex, Address, Parity, B256, U256};
     use std::str::FromStr;
 
     #[test]
@@ -165,7 +165,7 @@ mod tests {
         //
         // Block number: 46170
         let raw_tx = hex!("f86d8085746a52880082520894c93f2250589a6563f5359051c1ea25746549f0d889208686e75e903bc000801ba034b6fdc33ea520e8123cf5ac4a9ff476f639cab68980cd9366ccae7aef437ea0a0e517caa5f50e27ca0d1e9a92c503b4ccb039680c6d9d0c71203ed611ea4feb33");
-        let tx = crate::transaction::TransactionSigned::decode_enveloped(&mut &raw_tx[..]).unwrap();
+        let tx = crate::transaction::TransactionSigned::decode_2718(&mut &raw_tx[..]).unwrap();
         let signature = tx.signature();
 
         // make sure we know it's greater than SECP256K1N_HALF

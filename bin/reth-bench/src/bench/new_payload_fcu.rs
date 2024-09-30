@@ -101,8 +101,7 @@ impl Command {
             )
             .await?;
 
-            let new_payload_result =
-                NewPayloadResult { gas_used: gas_used as u64, latency: start.elapsed() };
+            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
             call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
                 .await?;
@@ -120,8 +119,7 @@ impl Command {
             info!(%combined_result);
 
             // record the current result
-            let gas_row =
-                TotalGasRow { block_number, gas_used: gas_used as u64, time: current_duration };
+            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
         }
 

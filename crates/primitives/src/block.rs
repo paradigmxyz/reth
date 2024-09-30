@@ -1,12 +1,12 @@
 use crate::{
-    Bytes, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
-    Withdrawals,
+    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
 };
 use alloc::vec::Vec;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
-use alloy_primitives::{Address, Sealable, B256};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Address, Bytes, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -213,22 +213,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
             .collect::<arbitrary::Result<Vec<_>>>()?;
 
         // then generate up to 2 ommers
-        let ommers = (0..2)
-            .map(|_| {
-                let mut header = Header::arbitrary(u)?;
-                header.gas_limit = (header.gas_limit as u64).into();
-                header.gas_used = (header.gas_used as u64).into();
-                header.base_fee_per_gas = header
-                    .base_fee_per_gas
-                    .map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
-                header.blob_gas_used =
-                    header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
-                header.excess_blob_gas =
-                    header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
-
-                Ok(header)
-            })
-            .collect::<arbitrary::Result<Vec<_>>>()?;
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
 
         Ok(Self {
             header: u.arbitrary()?,
@@ -479,9 +464,10 @@ impl SealedBlock {
         Ok(())
     }
 
-    /// Returns a vector of transactions RLP encoded with [`TransactionSigned::encode_enveloped`].
+    /// Returns a vector of transactions RLP encoded with
+    /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.transactions().map(|tx| tx.envelope_encoded()).collect()
+        self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
     }
 }
 
@@ -686,16 +672,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
         // then generate up to 2 ommers
         let ommers = (0..2)
             .map(|_| {
-                let mut header = Header::arbitrary(u)?;
-                header.gas_limit = (header.gas_limit as u64).into();
-                header.gas_used = (header.gas_used as u64).into();
-                header.base_fee_per_gas = header
-                    .base_fee_per_gas
-                    .map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
-                header.blob_gas_used =
-                    header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
-                header.excess_blob_gas =
-                    header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
+                let header = Header::arbitrary(u)?;
 
                 Ok(header)
             })

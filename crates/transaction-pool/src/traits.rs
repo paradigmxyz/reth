@@ -668,7 +668,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: self.new_tip.gas_limit as u64,
+            block_gas_limit: self.new_tip.gas_limit,
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
@@ -1253,7 +1253,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
         };
 
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let transaction = Self::new(tx, encoded_length);
         Ok(transaction)
     }

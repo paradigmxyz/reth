@@ -127,7 +127,7 @@ where
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start(),
                 bundle_size_hint,
-                cumulative_gas as u64,
+                cumulative_gas,
                 batch_start.elapsed(),
             ) {
                 break
@@ -140,7 +140,7 @@ where
             range = ?*self.range.start()..=last_block_number,
             block_fetch = ?fetch_block_duration,
             execution = ?execution_duration,
-            throughput = format_gas_throughput(cumulative_gas as u64, execution_duration),
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
             "Finished executing block range"
         );
         self.range = last_block_number + 1..=*self.range.end();
