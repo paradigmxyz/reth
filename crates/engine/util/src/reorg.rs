@@ -10,7 +10,7 @@ use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnFork
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{system_calls::apply_beacon_root_contract_call, ConfigureEvm};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
@@ -286,9 +286,9 @@ where
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    apply_beacon_root_contract_call(
-        evm_config,
-        chain_spec,
+    let mut system_caller = SystemCaller::new(evm_config, chain_spec);
+
+    system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
         reorg_target.number,
         reorg_target.parent_beacon_block_root,

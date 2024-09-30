@@ -6,10 +6,7 @@ use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::{
-    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
-    NextBlockEnvAttributes,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -204,22 +201,23 @@ where
     );
 
     // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &evm_config,
-        &chain_spec,
-        &initialized_cfg,
-        &initialized_block_env,
-        attributes.payload_attributes.parent_beacon_block_root,
-    )
-    .map_err(|err| {
-        warn!(target: "payload_builder",
-            parent_hash=%parent_block.hash(),
-            %err,
-            "failed to apply beacon root contract call for payload"
-        );
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    let mut system_caller = SystemCaller::new(&evm_config, &chain_spec);
+
+    system_caller
+        .pre_block_beacon_root_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+            attributes.payload_attributes.parent_beacon_block_root,
+        )
+        .map_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to apply beacon root contract call for payload"
+            );
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
     // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     // blocks will always have at least a single transaction in them (the L1 info transaction),
