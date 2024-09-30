@@ -238,7 +238,7 @@ mod tests {
     async fn get_external_ip() {
         reth_tracing::init_test_tracing();
         let ip = external_ip().await;
-        dbg!(ip);
+        dbg!(ip)
     }
 
     #[tokio::test]
@@ -250,7 +250,7 @@ mod tests {
         let ip = interval.tick().await;
         dbg!(ip);
         let ip = interval.tick().await;
-        dbg!(ip);
+        dbg!(ip)
     }
 
     #[test]

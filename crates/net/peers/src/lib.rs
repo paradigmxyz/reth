@@ -117,7 +117,7 @@ pub enum AnyNode {
 
 impl AnyNode {
     /// Returns the peer id of the node.
-    pub fn peer_id(&self) -> PeerId {
+    pub const fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
             #[cfg(feature = "secp256k1")]
@@ -127,7 +127,7 @@ impl AnyNode {
     }
 
     /// Returns the full node record if available.
-    pub fn node_record(&self) -> Option<NodeRecord> {
+    pub const fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
             #[cfg(feature = "secp256k1")]

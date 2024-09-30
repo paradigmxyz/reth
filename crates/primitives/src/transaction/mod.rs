@@ -1,9 +1,7 @@
 //! Transaction types.
 
-use crate::BlockHashOrNumber;
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{keccak256, Address, TxKind, B256, U256};
-
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -18,6 +16,8 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
 
+use crate::BlockHashOrNumber;
+
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
 };
@@ -28,7 +28,6 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
-
 pub use compat::FillTxEnv;
 pub use signature::{
     extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, Signature,
