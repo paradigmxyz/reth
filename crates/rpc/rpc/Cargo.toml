@@ -39,6 +39,7 @@ reth-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
+alloy-eips.workspace = true
 alloy-dyn-abi.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
