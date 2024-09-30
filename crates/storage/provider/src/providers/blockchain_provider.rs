@@ -171,8 +171,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         else {
             return Ok(None)
         };
-        let Some(to_transaction_num) = block_bodies.last().map(|body| body.1.last_tx_num())
-        else {
+        let Some(to_transaction_num) = block_bodies.last().map(|body| body.1.last_tx_num()) else {
             return Ok(None)
         };
 
@@ -200,10 +199,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                if let Some(receipt) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
-                }
+            for tx_num in block_body.tx_num_range() {
+                let receipt =
+                    receipt_iter.next().ok_or(ProviderError::ReceiptNotFound(tx_num.into()))?;
+                block_receipts.push(Some(receipt));
             }
             receipts.push(block_receipts);
         }
@@ -232,12 +231,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
         let mut state: BundleStateInit = HashMap::new();
-
-        // This is not working for blocks that are not at tip. as plain state is not the last
-        // state of end range. We should rename the functions or add support to access
-        // History state. Accessing history state can be tricky but we are not gaining
-        // anything.
-
         let mut reverts: RevertsInit = HashMap::new();
         let state_provider = self.state_by_block_number_or_tag(block_range_end.into())?;
 
