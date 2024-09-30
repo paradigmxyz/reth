@@ -53,7 +53,6 @@ pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
     evm_config: &'a EvmConfig,
     chain_spec: Arc<Chainspec>,
     /// Optional hook to be called after each state change.
-    // TODO do we want this optional?
     hook: Option<Hook>,
 }
 
