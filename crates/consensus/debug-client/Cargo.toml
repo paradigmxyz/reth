@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-node-api.workspace = true
-reth-node-core.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-tracing.workspace = true
@@ -24,6 +23,7 @@ alloy-eips.workspace = true
 alloy-provider = { workspace = true, features = ["ws"] }
 alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-primitives.workspace = true
 
 auto_impl.workspace = true
 futures.workspace = true

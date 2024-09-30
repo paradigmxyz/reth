@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
@@ -15,12 +14,13 @@ use reth_downloaders::{
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::bedrock::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
-    StaticFileWriter, StatsReader,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -46,7 +46,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
@@ -88,7 +88,7 @@ pub async fn import_receipts_from_file<N, P, F>(
     filter: F,
 ) -> eyre::Result<()>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: NodeTypesWithDB<ChainSpec = OpChainSpec>,
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
@@ -126,7 +126,7 @@ pub async fn import_receipts_from_reader<N, F>(
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
     let static_file_provider = provider_factory.static_file_provider();

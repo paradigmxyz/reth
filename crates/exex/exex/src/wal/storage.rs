@@ -41,10 +41,16 @@ impl Storage {
 
     /// Removes notification for the given file ID from the storage.
     #[instrument(target = "exex::wal::storage", skip(self))]
-    fn remove_notification(&self, file_id: u64) {
+    fn remove_notification(&self, file_id: u64) -> bool {
         match reth_fs_util::remove_file(self.file_path(file_id)) {
-            Ok(()) => debug!("Notification was removed from the storage"),
-            Err(err) => debug!(?err, "Failed to remove notification from the storage"),
+            Ok(()) => {
+                debug!("Notification was removed from the storage");
+                true
+            }
+            Err(err) => {
+                debug!(?err, "Failed to remove notification from the storage");
+                false
+            }
         }
     }
 
@@ -67,17 +73,24 @@ impl Storage {
         Ok(min_id.zip(max_id).map(|(min_id, max_id)| min_id..=max_id))
     }
 
-    /// Removes notifications from the storage according to the given range.
+    /// Removes notifications from the storage according to the given list of file IDs.
     ///
     /// # Returns
     ///
     /// Number of removed notifications.
-    pub(super) fn remove_notifications(&self, range: RangeInclusive<u64>) -> eyre::Result<usize> {
-        for id in range.clone() {
-            self.remove_notification(id);
+    pub(super) fn remove_notifications(
+        &self,
+        file_ids: impl IntoIterator<Item = u64>,
+    ) -> eyre::Result<usize> {
+        let mut deleted = 0;
+
+        for id in file_ids {
+            if self.remove_notification(id) {
+                deleted += 1;
+            }
         }
 
-        Ok(range.count())
+        Ok(deleted)
     }
 
     pub(super) fn iter_notifications(
@@ -91,7 +104,7 @@ impl Storage {
         })
     }
 
-    /// Reads the notification from the file with the given id.
+    /// Reads the notification from the file with the given ID.
     #[instrument(target = "exex::wal::storage", skip(self))]
     pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<Option<ExExNotification>> {
         let file_path = self.file_path(file_id);
@@ -107,7 +120,7 @@ impl Storage {
         Ok(serde_json::from_reader(&mut file)?)
     }
 
-    /// Writes the notification to the file with the given id.
+    /// Writes the notification to the file with the given ID.
     #[instrument(target = "exex::wal::storage", skip(self, notification))]
     pub(super) fn write_notification(
         &self,

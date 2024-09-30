@@ -179,7 +179,7 @@ where
     /// If the head block is not found in the database, it means we're not on the canonical chain
     /// and we need to revert the notification with the ExEx head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification>> {
-        if self.provider.header(&self.exex_head.block.hash)?.is_some() {
+        if self.provider.is_known(&self.exex_head.block.hash)? {
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
             return Ok(None)
         }
@@ -457,7 +457,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut wal = Wal::new(temp_dir.path()).unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;
@@ -557,7 +557,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut wal = Wal::new(temp_dir.path()).unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
         let genesis_hash = init_genesis(&provider_factory)?;

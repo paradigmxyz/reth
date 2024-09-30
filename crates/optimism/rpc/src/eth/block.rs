@@ -3,8 +3,9 @@
 use alloy_rpc_types::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::ChainSpecProvider;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -21,7 +22,7 @@ where
         Error = OpEthApiError,
         NetworkTypes: Network<ReceiptResponse = OpTransactionReceipt>,
     >,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl HeaderProvider {
@@ -58,9 +59,8 @@ where
                         index: idx as u64,
                         block_hash,
                         block_number,
-                        base_fee: base_fee.map(|base_fee| base_fee as u64),
-                        excess_blob_gas: excess_blob_gas
-                            .map(|excess_blob_gas| excess_blob_gas as u64),
+                        base_fee,
+                        excess_blob_gas,
                         timestamp,
                     };
 

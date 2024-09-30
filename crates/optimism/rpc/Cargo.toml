@@ -28,6 +28,7 @@ reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 
 # op-reth
+reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true

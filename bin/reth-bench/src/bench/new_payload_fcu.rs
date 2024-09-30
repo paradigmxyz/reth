@@ -11,13 +11,14 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
+use alloy_primitives::B256;
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::{Block, B256};
+use reth_primitives::Block;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -100,8 +101,7 @@ impl Command {
             )
             .await?;
 
-            let new_payload_result =
-                NewPayloadResult { gas_used: gas_used as u64, latency: start.elapsed() };
+            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
             call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
                 .await?;
@@ -119,8 +119,7 @@ impl Command {
             info!(%combined_result);
 
             // record the current result
-            let gas_row =
-                TotalGasRow { block_number, gas_used: gas_used as u64, time: current_duration };
+            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
         }
 

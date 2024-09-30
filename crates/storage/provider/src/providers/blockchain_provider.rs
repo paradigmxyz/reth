@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -20,8 +20,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -3766,10 +3766,7 @@ mod tests {
             index: 0,
             block_hash: in_memory_blocks[0].header.hash(),
             block_number: in_memory_blocks[0].header.number,
-            base_fee: in_memory_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: in_memory_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: in_memory_blocks[0].header.timestamp,
         };
@@ -3797,10 +3794,7 @@ mod tests {
             index: 0,
             block_hash: database_blocks[0].header.hash(),
             block_number: database_blocks[0].header.number,
-            base_fee: database_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: database_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: database_blocks[0].header.timestamp,
         };

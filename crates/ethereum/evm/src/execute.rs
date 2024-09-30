@@ -166,7 +166,7 @@ where
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = (block.header.gas_limit - cumulative_gas_used) as u64;
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
@@ -189,7 +189,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used() as u128;
+            cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(
@@ -199,7 +199,7 @@ where
                     // Success flag was added in `EIP-658: Embedding transaction status code in
                     // receipts`.
                     success: result.is_success(),
-                    cumulative_gas_used: cumulative_gas_used as u64,
+                    cumulative_gas_used,
                     // convert to reth log
                     logs: result.into_logs(),
                     ..Default::default()
@@ -225,7 +225,7 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used as u64 })
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
 }
 
@@ -808,7 +808,7 @@ mod tests {
             timestamp: 1,
             number: 1,
             parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
-            base_fee_per_gas: Some(u64::MAX.into()),
+            base_fee_per_gas: Some(u64::MAX),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -1250,7 +1250,7 @@ mod tests {
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
-                gas_price: header.base_fee_per_gas.unwrap(),
+                gas_price: header.base_fee_per_gas.unwrap().into(),
                 gas_limit: 134_807,
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 // `MIN_WITHDRAWAL_REQUEST_FEE`
@@ -1337,7 +1337,7 @@ mod tests {
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
-                gas_price: header.base_fee_per_gas.unwrap(),
+                gas_price: header.base_fee_per_gas.unwrap().into(),
                 gas_limit: 2_500_000, // higher than block gas limit
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 value: U256::from(1),

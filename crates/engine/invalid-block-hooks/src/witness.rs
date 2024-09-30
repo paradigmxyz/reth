@@ -4,7 +4,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
@@ -52,7 +52,11 @@ impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
 
 impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
 where
-    P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
+    P: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + Send
+        + Sync
+        + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(
@@ -171,7 +175,8 @@ where
 
         // Write the witness to the output directory.
         let response = ExecutionWitness {
-            state: std::collections::HashMap::from_iter(state),
+            state: HashMap::from_iter(state),
+            codes: Default::default(),
             keys: Some(state_preimages),
         };
         let re_executed_witness_path = self.save_file(
@@ -295,7 +300,11 @@ where
 
 impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
 where
-    P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
+    P: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + Send
+        + Sync
+        + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(

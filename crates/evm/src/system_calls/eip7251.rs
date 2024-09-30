@@ -4,9 +4,9 @@ use core::fmt::Display;
 
 use crate::ConfigureEvm;
 use alloy_eips::eip7251::{ConsolidationRequest, CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS};
-use alloy_primitives::{Address, Bytes, FixedBytes};
+use alloy_primitives::{bytes::Buf, Address, Bytes, FixedBytes};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Buf, Header, Request};
+use reth_primitives::{Header, Request};
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState,
@@ -56,7 +56,7 @@ pub fn transact_consolidation_requests_contract_call<EvmConfig, EXT, DB>(
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<ResultAndState, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -120,6 +120,12 @@ where
     // commit the state
     evm.context.evm.db.commit(state);
 
+    post_commit(result)
+}
+
+/// Parses the consolidation requests from the execution output.
+#[inline]
+pub(crate) fn post_commit(result: ExecutionResult) -> Result<Vec<Request>, BlockExecutionError> {
     let mut data = match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {

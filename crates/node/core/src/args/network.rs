@@ -4,11 +4,10 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
-    sync::Arc,
 };
 
 use clap::Args;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -186,8 +185,8 @@ impl NetworkArgs {
         })
     }
 
-    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
-    /// values in this option struct.
+    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
+    /// the values in this option struct.
     ///
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
@@ -200,7 +199,7 @@ impl NetworkArgs {
     pub fn network_config(
         &self,
         config: &Config,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {

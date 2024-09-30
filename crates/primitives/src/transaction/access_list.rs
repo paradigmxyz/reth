@@ -2,9 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::B256;
     use alloy_eips::eip2930::{AccessList, AccessListItem};
-    use alloy_primitives::Address;
+    use alloy_primitives::{Address, B256};
     use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;

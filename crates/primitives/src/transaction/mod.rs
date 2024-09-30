@@ -1,14 +1,15 @@
 //! Transaction types.
 
-use crate::{BlockHashOrNumber, Bytes, TxHash, B256, U256};
+use crate::BlockHashOrNumber;
 use alloy_eips::eip7702::SignedAuthorization;
-use alloy_primitives::{keccak256, Address, TxKind};
+use alloy_primitives::{keccak256, Address, TxKind, B256, U256};
 
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
 };
+use alloy_primitives::{Bytes, TxHash};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
@@ -139,35 +140,29 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut tx = match TxType::arbitrary(u)? {
             TxType::Legacy => {
-                let mut tx = TxLegacy::arbitrary(u)?;
-                tx.gas_limit = (tx.gas_limit as u64).into();
+                let tx = TxLegacy::arbitrary(u)?;
                 Self::Legacy(tx)
             }
             TxType::Eip2930 => {
-                let mut tx = TxEip2930::arbitrary(u)?;
-                tx.gas_limit = (tx.gas_limit as u64).into();
+                let tx = TxEip2930::arbitrary(u)?;
                 Self::Eip2930(tx)
             }
             TxType::Eip1559 => {
-                let mut tx = TxEip1559::arbitrary(u)?;
-                tx.gas_limit = (tx.gas_limit as u64).into();
+                let tx = TxEip1559::arbitrary(u)?;
                 Self::Eip1559(tx)
             }
             TxType::Eip4844 => {
-                let mut tx = TxEip4844::arbitrary(u)?;
-                tx.gas_limit = (tx.gas_limit as u64).into();
+                let tx = TxEip4844::arbitrary(u)?;
                 Self::Eip4844(tx)
             }
 
             TxType::Eip7702 => {
-                let mut tx = TxEip7702::arbitrary(u)?;
-                tx.gas_limit = (tx.gas_limit as u64).into();
+                let tx = TxEip7702::arbitrary(u)?;
                 Self::Eip7702(tx)
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                let mut tx = TxDeposit::arbitrary(u)?;
-                tx.gas_limit = (tx.gas_limit as u64).into();
+                let tx = TxDeposit::arbitrary(u)?;
                 Self::Deposit(tx)
             }
         };
@@ -319,9 +314,9 @@ impl Transaction {
             Self::Eip1559(TxEip1559 { gas_limit, .. }) |
             Self::Eip4844(TxEip4844 { gas_limit, .. }) |
             Self::Eip7702(TxEip7702 { gas_limit, .. }) |
-            Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
+            Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit,
             #[cfg(feature = "optimism")]
-            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit as u64,
+            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
         }
     }
 
@@ -559,13 +554,13 @@ impl Transaction {
     /// This sets the transaction's gas limit.
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
-            Self::Legacy(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip2930(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip1559(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip4844(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip7702(tx) => tx.gas_limit = gas_limit.into(),
+            Self::Legacy(tx) => tx.gas_limit = gas_limit,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            Self::Eip7702(tx) => tx.gas_limit = gas_limit,
             #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.gas_limit = gas_limit.into(),
+            Self::Deposit(tx) => tx.gas_limit = gas_limit,
         }
     }
 
@@ -1578,13 +1573,11 @@ impl<T> WithEncoded<Option<T>> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        hex,
         transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
-        Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        TransactionSignedNoHash, B256, U256,
+        Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     };
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-    use alloy_primitives::{address, b256, bytes, Address, Parity};
+    use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
@@ -1741,7 +1734,7 @@ mod tests {
             nonce: 26,
             max_priority_fee_per_gas: 1500000000,
             max_fee_per_gas: 1500000013,
-            gas_limit: MIN_TRANSACTION_GAS as u128,
+            gas_limit: MIN_TRANSACTION_GAS,
             to: Address::from_slice(&hex!("61815774383099e24810ab832a5b2a5425c154d5")[..]).into(),
             value: U256::from(3000000000000000000u64),
             input: Default::default(),

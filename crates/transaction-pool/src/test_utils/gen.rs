@@ -1,11 +1,11 @@
 use crate::EthPooledTransaction;
 use alloy_consensus::{TxEip1559, TxEip4844, TxLegacy};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
-use alloy_primitives::{Address, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, Bytes, Transaction, TransactionSigned,
+    constants::MIN_PROTOCOL_BASE_FEE, sign_message, Transaction, TransactionSigned,
 };
 
 /// A generator for transactions for testing purposes.
@@ -145,7 +145,7 @@ impl TransactionBuilder {
             TxLegacy {
                 chain_id: Some(self.chain_id),
                 nonce: self.nonce,
-                gas_limit: self.gas_limit.into(),
+                gas_limit: self.gas_limit,
                 gas_price: self.max_fee_per_gas,
                 to: self.to,
                 value: self.value,
@@ -162,7 +162,7 @@ impl TransactionBuilder {
             TxEip1559 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
-                gas_limit: self.gas_limit.into(),
+                gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
                 to: self.to,
@@ -180,7 +180,7 @@ impl TransactionBuilder {
             TxEip4844 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
-                gas_limit: self.gas_limit as u128,
+                gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
                 to: match self.to {

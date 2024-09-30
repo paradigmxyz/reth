@@ -1,8 +1,8 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
-use crate::{Signature, Transaction, TransactionSigned, TxHash, EIP4844_TX_TYPE_ID};
+use crate::{Signature, Transaction, TransactionSigned, EIP4844_TX_TYPE_ID};
 use alloy_consensus::{transaction::TxEip4844, TxEip4844WithSidecar};
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, TxHash};
 use alloy_rlp::{Decodable, Error as RlpError, Header};
 use serde::{Deserialize, Serialize};
 
@@ -282,8 +282,9 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
 #[cfg(all(test, feature = "c-kzg"))]
 mod tests {
     use super::*;
-    use crate::{hex, kzg::Blob, PooledTransactionsElement};
+    use crate::{kzg::Blob, PooledTransactionsElement};
     use alloy_eips::eip4844::Bytes48;
+    use alloy_primitives::hex;
     use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
 
