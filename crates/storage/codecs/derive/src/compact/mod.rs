@@ -217,18 +217,18 @@ mod tests {
     #[test]
     fn gen() {
         let f_struct = quote! {
-             #[derive(Debug, PartialEq, Clone)]
-             pub struct TestStruct {
-                 f_u64: u64,
-                 f_u256: U256,
-                 f_bool_t: bool,
-                 f_bool_f: bool,
-                 f_option_none: Option<U256>,
-                 f_option_some: Option<B256>,
-                 f_option_some_u64: Option<u64>,
-                 f_vec_empty: Vec<U256>,
-                 f_vec_some: Vec<Address>,
-             }
+            #[derive(Debug, PartialEq, Clone)]
+            pub struct TestStruct {
+                f_u64: u64,
+                f_u256: U256,
+                f_bool_t: bool,
+                f_bool_f: bool,
+                f_option_none: Option<U256>,
+                f_option_some: Option<B256>,
+                f_option_some_u64: Option<u64>,
+                f_vec_empty: Vec<U256>,
+                f_vec_some: Vec<Address>,
+            }
         };
 
         // Generate code that will impl the `Compact` trait.
@@ -242,13 +242,9 @@ mod tests {
         let should_output = quote! {
             impl TestStruct {
                 #[doc = "Used bytes by [`TestStructFlags`]"]
-                pub const fn bitflag_encoded_bytes() -> usize {
-                    2u8 as usize
-                }
+                pub const BITFLAG_ENCODED_BYTES: usize = 2u8 as usize;
                 #[doc = "Unused bits for new fields by [`TestStructFlags`]"]
-                pub const fn bitflag_unused_bits() -> usize {
-                    1u8 as usize
-                }
+                pub const BITFLAG_UNUSED_BITS: usize = 1u8 as usize;
             }
 
             pub use TestStruct_flags::TestStructFlags;
@@ -296,31 +292,21 @@ mod tests {
                 fuzz_test_test_struct(TestStruct::default())
             }
             impl Compact for TestStruct {
-                fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
-                    let mut flags = TestStructFlags::default();
-                    let mut total_length = 0;
-                    let mut buffer = bytes::BytesMut::new();
-                    let f_u64_len = self.f_u64.to_compact(&mut buffer);
-                    flags.set_f_u64_len(f_u64_len as u8);
-                    let f_u256_len = self.f_u256.to_compact(&mut buffer);
-                    flags.set_f_u256_len(f_u256_len as u8);
-                    let f_bool_t_len = self.f_bool_t.to_compact(&mut buffer);
-                    flags.set_f_bool_t_len(f_bool_t_len as u8);
-                    let f_bool_f_len = self.f_bool_f.to_compact(&mut buffer);
-                    flags.set_f_bool_f_len(f_bool_f_len as u8);
-                    let f_option_none_len = self.f_option_none.to_compact(&mut buffer);
-                    flags.set_f_option_none_len(f_option_none_len as u8);
-                    let f_option_some_len = self.f_option_some.specialized_to_compact(&mut buffer);
-                    flags.set_f_option_some_len(f_option_some_len as u8);
-                    let f_option_some_u64_len = self.f_option_some_u64.to_compact(&mut buffer);
-                    flags.set_f_option_some_u64_len(f_option_some_u64_len as u8);
-                    let f_vec_empty_len = self.f_vec_empty.to_compact(&mut buffer);
-                    let f_vec_some_len = self.f_vec_some.specialized_to_compact(&mut buffer);
-                    let flags = flags.into_bytes();
-                    total_length += flags.len() + buffer.len();
-                    buf.put_slice(&flags);
-                    buf.put(buffer);
-                    total_length
+                fn to_compact<B>(&self, buffer: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+                    let start_len = buffer.as_mut().len();
+
+                    if Self::BITFLAG_ENCODED_BYTES > 0 {
+                        buffer.put_slice(&[0; Self::BITFLAG_ENCODED_BYTES]);
+                    }
+
+                    let flags = self.to_compact_inner(buffer).into_bytes();
+                    debug_assert_eq!(Self::BITFLAG_ENCODED_BYTES, flags.len());
+
+                    if Self::BITFLAG_ENCODED_BYTES > 0 {
+                        buffer.as_mut()[start_len..start_len + flags.len()].copy_from_slice(&flags);
+                    }
+
+                    buffer.as_mut().len() - start_len
                 }
                 fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
                     let (flags, mut buf) = TestStructFlags::from(buf);
@@ -356,11 +342,46 @@ mod tests {
                     (obj, buf)
                 }
             }
+            impl TestStruct {
+                fn to_compact_inner<B>(&self, buffer: &mut B) -> TestStructFlags where B: bytes::BufMut + AsMut<[u8]> {
+                    let mut flags = TestStructFlags::default();
+                    let start_len = buffer.as_mut().len();
+                    let f_u64_len = self.f_u64.to_compact(buffer);
+                    flags.set_f_u64_len(f_u64_len as u8);
+                    let f_u256_len = self.f_u256.to_compact(buffer);
+                    flags.set_f_u256_len(f_u256_len as u8);
+                    let f_bool_t_len = self.f_bool_t.to_compact(buffer);
+                    flags.set_f_bool_t_len(f_bool_t_len as u8);
+                    let f_bool_f_len = self.f_bool_f.to_compact(buffer);
+                    flags.set_f_bool_f_len(f_bool_f_len as u8);
+                    let f_option_none_len = self.f_option_none.to_compact(buffer);
+                    flags.set_f_option_none_len(f_option_none_len as u8);
+                    let f_option_some_len = self.f_option_some.specialized_to_compact(buffer);
+                    flags.set_f_option_some_len(f_option_some_len as u8);
+                    let f_option_some_u64_len = self.f_option_some_u64.to_compact(buffer);
+                    flags.set_f_option_some_u64_len(f_option_some_u64_len as u8);
+                    let f_vec_empty_len = self.f_vec_empty.to_compact(buffer);
+                    let f_vec_some_len = self.f_vec_some.specialized_to_compact(buffer);
+                    flags
+                }
+            }
         };
 
-        assert_eq!(
-            syn::parse2::<syn::File>(output).unwrap(),
-            syn::parse2::<syn::File>(should_output).unwrap()
-        );
+        assert_eq!(format_tokenstream(output), format_tokenstream(should_output));
+    }
+
+    fn format_tokenstream(s: impl std::fmt::Display) -> String {
+        use std::io::Write;
+        let mut rustfmt = std::process::Command::new("rustfmt")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        rustfmt.stdin.as_mut().unwrap().write_all(s.to_string().as_bytes()).unwrap();
+        let output = rustfmt.wait_with_output().unwrap();
+        if !output.status.success() {
+            panic!("rustfmt failed: {}", output.status);
+        }
+        String::from_utf8(output.stdout).unwrap()
     }
 }

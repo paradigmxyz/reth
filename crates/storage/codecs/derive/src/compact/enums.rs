@@ -107,7 +107,7 @@ impl<'a> EnumHandler<'a> {
                     // Unnamed type
                     self.enum_lines.push(quote! {
                         #ident::#variant_name(field) => {
-                            field.#to_compact_ident(&mut buffer);
+                            field.#to_compact_ident(buffer);
                             #current_variant_index
                         },
                     });

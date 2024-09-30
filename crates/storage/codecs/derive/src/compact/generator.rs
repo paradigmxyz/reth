@@ -12,8 +12,39 @@ pub fn generate_from_to(
 ) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
-    let to_compact = generate_to_compact(fields, ident, is_zstd);
+    let to_compact_inner = generate_to_compact(fields, ident, is_zstd);
     let from_compact = generate_from_compact(fields, ident, is_zstd);
+
+    let to_compact = if is_zstd {
+        let compressor = format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase());
+        quote! {
+            // Encode to a local buffer first.
+            let mut tmp_buffer = Vec::with_capacity(64);
+            let flags = self.to_compact_inner(&mut tmp_buffer).into_bytes();
+
+            buffer.put_slice(&flags);
+            #compressor.with(|compressor| {
+                let mut compressor = compressor.borrow_mut();
+                // TODO: Write directly to `buffer` with `compress_to_buffer`.
+                let compressed = compressor.compress(&tmp_buffer).expect("Failed to compress.");
+                buffer.put_slice(compressed.as_slice());
+            });
+        }
+    } else {
+        quote! {
+            // Encode a placeholder for the flags which we fill later.
+            if Self::BITFLAG_ENCODED_BYTES > 0 {
+                buffer.put_slice(&[0; Self::BITFLAG_ENCODED_BYTES]);
+            }
+
+            let flags = self.to_compact_inner(buffer).into_bytes();
+            debug_assert_eq!(Self::BITFLAG_ENCODED_BYTES, flags.len());
+
+            if Self::BITFLAG_ENCODED_BYTES > 0 {
+                buffer.as_mut()[start_len..start_len + flags.len()].copy_from_slice(&flags);
+            }
+        }
+    };
 
     let snake_case_ident = ident.to_string().to_case(Case::Snake);
 
@@ -33,6 +64,15 @@ pub fn generate_from_to(
     } else {
         quote! {
            impl Compact for #ident
+        }
+    };
+    let normal_impl = if has_lifetime {
+        quote! {
+            impl<#lifetime> #ident<#lifetime>
+        }
+    } else {
+        quote! {
+            impl #ident
         }
     };
 
@@ -72,15 +112,23 @@ pub fn generate_from_to(
         #fuzz_tests
 
         #impl_compact {
-            fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
-                let mut flags = #flags::default();
-                let mut total_length = 0;
-                #(#to_compact)*
-                total_length
+            fn to_compact<B>(&self, buffer: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+                let start_len = buffer.as_mut().len();
+                #to_compact
+                buffer.as_mut().len() - start_len
             }
 
             fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
                 #fn_from_compact
+            }
+        }
+
+        #normal_impl {
+            fn to_compact_inner<B>(&self, buffer: &mut B) -> #flags where B: bytes::BufMut + AsMut<[u8]> {
+                let mut flags = #flags::default();
+                let start_len = buffer.as_mut().len();
+                #(#to_compact_inner)*
+                flags
             }
         }
     }
@@ -172,9 +220,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
 
 /// Generates code to implement the `Compact` trait method `from_compact`.
 fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<TokenStream2> {
-    let mut lines = vec![quote! {
-        let mut buffer = bytes::BytesMut::new();
-    }];
+    let mut lines = vec![];
 
     let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
@@ -195,39 +241,10 @@ fn generate_to_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> Vec<
     // compressed or not.
     if is_zstd {
         lines.push(quote! {
-            let mut zstd = buffer.len() > 7;
-            if zstd {
+            if (buffer.as_mut().len() - start_len) > 7 {
                 flags.set___zstd(1);
             }
         });
-    }
-
-    // Places the flag bits.
-    lines.push(quote! {
-        let flags = flags.into_bytes();
-        total_length += flags.len() + buffer.len();
-        buf.put_slice(&flags);
-    });
-
-    if is_zstd {
-        let compressor = format_ident!("{}_COMPRESSOR", ident.to_string().to_uppercase());
-
-        lines.push(quote! {
-            if zstd {
-                #compressor.with(|compressor| {
-                    let mut compressor = compressor.borrow_mut();
-
-                    let compressed = compressor.compress(&buffer).expect("Failed to compress.");
-                    buf.put(compressed.as_slice());
-                });
-            } else {
-                buf.put(buffer);
-            }
-        });
-    } else {
-        lines.push(quote! {
-            buf.put(buffer);
-        })
     }
 
     lines
