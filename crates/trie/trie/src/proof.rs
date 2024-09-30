@@ -192,7 +192,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok(StorageMultiProof::default())
+            return Ok(StorageMultiProof::empty())
         }
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
