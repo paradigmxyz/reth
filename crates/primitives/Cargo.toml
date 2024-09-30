@@ -51,9 +51,10 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 bytes.workspace = true
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
+once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
-once_cell.workspace = true
+serde_with = { workspace = true, optional = true }
 zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
@@ -62,22 +63,24 @@ proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
-reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
-revm-primitives = { workspace = true, features = ["arbitrary"] }
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-testing-utils.workspace = true
+revm-primitives = { workspace = true, features = ["arbitrary"] }
+
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
 
-assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
+assert_matches.workspace = true
+bincode.workspace = true
+modular-bitfield.workspace = true
 proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
-modular-bitfield.workspace = true
-
 
 criterion.workspace = true
 pprof = { workspace = true, features = [
@@ -119,6 +122,7 @@ alloy-compat = [
     "dep:op-alloy-rpc-types",
 ]
 test-utils = ["reth-primitives-traits/test-utils"]
+serde-bincode-compat = ["serde_with", "alloy-consensus/serde-bincode-compat"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

@@ -859,3 +859,110 @@ mod tests {
         );
     }
 }
+
+/// Bincode-compatible block type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_consensus::serde_bincode_compat::Header;
+    use reth_primitives_traits::{Requests, Withdrawals};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    use crate::transaction::serde_bincode_compat::TransactionSigned;
+
+    /// Bincode-compatible [`super::BlockBody`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use alloy_consensus::{serde_bincode_compat, TxEip1559};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::BlockBody")]
+    ///     body: BlockBody,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    struct BlockBody<'a> {
+        transactions: Vec<TransactionSigned<'a>>,
+        ommers: Vec<Header<'a>>,
+        withdrawals: Option<Cow<'a, Withdrawals>>,
+        requests: Option<Cow<'a, Requests>>,
+    }
+
+    impl<'a> From<&'a super::BlockBody> for BlockBody<'a> {
+        fn from(value: &'a super::BlockBody) -> Self {
+            Self {
+                transactions: value.transactions.iter().map(Into::into).collect(),
+                ommers: value.ommers.iter().map(Into::into).collect(),
+                withdrawals: value.withdrawals.as_ref().map(Cow::Borrowed),
+                requests: value.requests.as_ref().map(Cow::Borrowed),
+            }
+        }
+    }
+
+    impl<'a> From<BlockBody<'a>> for super::BlockBody {
+        fn from(value: BlockBody<'a>) -> Self {
+            Self {
+                transactions: value.transactions.into_iter().map(Into::into).collect(),
+                ommers: value.ommers.into_iter().map(Into::into).collect(),
+                withdrawals: value.withdrawals.map(Cow::into_owned),
+                requests: value.requests.map(Cow::into_owned),
+            }
+        }
+    }
+
+    impl<'a> SerializeAs<super::BlockBody> for BlockBody<'a> {
+        fn serialize_as<S>(source: &super::BlockBody, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            BlockBody::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::BlockBody> for BlockBody<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::BlockBody, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            BlockBody::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, BlockBody};
+
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_testing_utils::generators;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_block_body_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::BlockBody")]
+                block_body: BlockBody,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                block_body: BlockBody::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                    .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+    }
+}

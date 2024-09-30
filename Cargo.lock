@@ -124,6 +124,7 @@ dependencies = [
  "c-kzg",
  "derive_more",
  "serde",
+ "serde_with",
 ]
 
 [[package]]
@@ -8235,6 +8236,7 @@ dependencies = [
  "alloy-serde",
  "arbitrary",
  "assert_matches",
+ "bincode",
  "bytes",
  "c-kzg",
  "criterion",
@@ -8255,11 +8257,13 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-primitives-traits",
  "reth-static-file-types",
+ "reth-testing-utils",
  "reth-trie-common",
  "revm-primitives",
  "secp256k1",
  "serde",
  "serde_json",
+ "serde_with",
  "test-fuzz",
  "zstd",
 ]
@@ -8274,6 +8278,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "bincode",
  "byteorder",
  "bytes",
  "derive_more",
@@ -8282,10 +8287,12 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
+ "reth-testing-utils",
  "revm-primitives",
  "roaring",
  "serde",
  "serde_json",
+ "serde_with",
  "test-fuzz",
 ]
 
