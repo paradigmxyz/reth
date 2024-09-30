@@ -1066,21 +1066,6 @@ impl AsRef<Self> for TransactionSigned {
 // === impl TransactionSigned ===
 
 impl TransactionSigned {
-    /// Transaction signature.
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    /// Transaction hash. Used to identify transaction.
-    pub const fn hash(&self) -> TxHash {
-        self.hash
-    }
-
-    /// Reference to transaction hash. Used to identify transaction.
-    pub const fn hash_ref(&self) -> &TxHash {
-        &self.hash
-    }
-
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
@@ -1440,6 +1425,18 @@ impl Decodable2718 for TransactionSigned {
 }
 
 impl SignedTransaction for TransactionSigned {
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn hash(&self) -> TxHash {
+        self.hash
+    }
+
+    fn hash_ref(&self) -> &TxHash {
+        &self.hash
+    }
+
     fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.

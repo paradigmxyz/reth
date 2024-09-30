@@ -1,12 +1,10 @@
-use super::{
-    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
-    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+use std::{
+    collections::{hash_map::Entry, BTreeMap, HashMap},
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc},
 };
-use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
-};
+
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
@@ -31,20 +29,25 @@ use reth_primitives::{
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
     Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
-    Withdrawals,
+    SignedTransaction, StaticFileSegment, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_api::DBProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
-    ops::{Deref, Range, RangeBounds, RangeInclusive},
-    path::{Path, PathBuf},
-    sync::{mpsc, Arc},
-};
 use strum::IntoEnumIterator;
 use tracing::{info, trace, warn};
+
+use crate::{
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
+    ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+};
+
+use super::{
+    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
+    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file

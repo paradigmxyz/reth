@@ -1,9 +1,7 @@
 //! Types for tracking the canonical chain state in memory.
 
-use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, MemoryOverlayStateProvider,
-};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
+
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
@@ -11,13 +9,17 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned,
+    Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    SignedTransaction, TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
+
+use crate::{
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainInfoTracker, MemoryOverlayStateProvider,
+};
 
 /// Size of the broadcast channel used to notify canonical state events.
 const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;

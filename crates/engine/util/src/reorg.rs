@@ -1,5 +1,12 @@
 //! Stream wrapper that simulates reorgs.
 
+use std::{
+    collections::VecDeque,
+    future::Future,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
@@ -12,7 +19,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResu
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
+use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts, SignedTransaction};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -24,12 +31,6 @@ use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_trie::HashedPostState;
 use revm_primitives::{
     calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-};
-use std::{
-    collections::VecDeque,
-    future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
 use tracing::*;

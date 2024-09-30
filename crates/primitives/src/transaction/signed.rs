@@ -1,9 +1,18 @@
 //! API of a signed transaction, w.r.t. network stack.
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, Signature, TxHash};
 
 /// A signed transaction.
 pub trait SignedTransaction: Sized {
+    /// Transaction signature.
+    fn signature(&self) -> &Signature;
+
+    /// Transaction hash. Used to identify transaction.
+    fn hash(&self) -> TxHash;
+
+    /// Reference to transaction hash. Used to identify transaction.
+    fn hash_ref(&self) -> &TxHash;
+
     /// Recover signer from signature and hash.
     ///
     /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].

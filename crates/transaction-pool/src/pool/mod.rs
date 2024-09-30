@@ -65,46 +65,19 @@
 //!    transactions are _currently_ waiting for state changes that eventually move them into
 //!    category (2.) and become pending.
 
-use crate::{
-    error::{PoolError, PoolErrorKind, PoolResult},
-    identifier::{SenderId, SenderIdentifiers, TransactionId},
-    pool::{
-        listener::PoolEventBroadcast,
-        state::SubPool,
-        txpool::{SenderInfo, TxPool},
-    },
-    traits::{
-        AllPoolTransactions, BestTransactionsAttributes, BlockInfo, NewTransactionEvent, PoolSize,
-        PoolTransaction, PropagatedTransactions, TransactionOrigin,
-    },
-    validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
-};
-use alloy_primitives::{Address, TxHash, B256};
-use best::BestTransactions;
-use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use reth_eth_wire_types::HandleMempoolData;
-use reth_execution_types::ChangedAccount;
+pub mod txpool;
 
-use reth_primitives::{
-    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
-};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    sync::Arc,
-    time::Instant,
-};
-use tokio::sync::mpsc;
-use tracing::{debug, trace, warn};
+pub(crate) mod pending;
+pub(crate) mod size;
+pub(crate) mod state;
+
+mod best;
+mod blob;
 mod events;
-use crate::{
-    blobstore::BlobStore,
-    metrics::BlobStoreMetrics,
-    pool::txpool::UpdateOutcome,
-    traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
-    validate::ValidTransaction,
-};
+mod listener;
+mod parked;
+mod update;
+
 pub use best::BestTransactionFilter;
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
@@ -112,15 +85,43 @@ pub use listener::{AllTransactionsEvents, TransactionEvents};
 pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
 pub use pending::PendingPool;
 
-mod best;
-mod blob;
-mod listener;
-mod parked;
-pub(crate) mod pending;
-pub(crate) mod size;
-pub(crate) mod state;
-pub mod txpool;
-mod update;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+    time::Instant,
+};
+
+use alloy_primitives::{Address, TxHash, B256};
+use best::BestTransactions;
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
+use reth_primitives::{
+    BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, SignedTransaction,
+    TransactionSigned,
+};
+use tokio::sync::mpsc;
+use tracing::{debug, trace, warn};
+
+use crate::{
+    blobstore::BlobStore,
+    error::{PoolError, PoolErrorKind, PoolResult},
+    identifier::{SenderId, SenderIdentifiers, TransactionId},
+    metrics::BlobStoreMetrics,
+    pool::{
+        listener::PoolEventBroadcast,
+        state::SubPool,
+        txpool::{SenderInfo, TxPool, UpdateOutcome},
+    },
+    traits::{
+        AllPoolTransactions, BestTransactionsAttributes, BlockInfo, GetPooledTransactionLimit,
+        NewBlobSidecar, NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions,
+        TransactionListenerKind, TransactionOrigin,
+    },
+    validate::{TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction},
+    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
+};
 
 /// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
 pub const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;

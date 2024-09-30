@@ -9,7 +9,7 @@ use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement,
+    PooledTransactionsElement, SignedTransaction,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{FromEthApiError, FromEvmError};

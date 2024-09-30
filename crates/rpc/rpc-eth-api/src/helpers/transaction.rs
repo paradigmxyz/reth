@@ -9,7 +9,7 @@ use alloy_rpc_types::{BlockNumberOrTag, TransactionInfo};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use futures::Future;
 use reth_primitives::{
-    BlockId, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
+    BlockId, Receipt, SealedBlockWithSenders, SignedTransaction, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{

@@ -6,7 +6,7 @@ use alloy_primitives::TxHash;
 use alloy_rpc_types::{FilterId, FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_primitives::{BlockNumHash, Receipt};
+use reth_primitives::{BlockNumHash, Receipt, SignedTransaction};
 use reth_rpc_server_types::result::rpc_error_with_code;
 use reth_storage_api::BlockReader;
 

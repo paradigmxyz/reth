@@ -1,17 +1,19 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap};
+use core::{fmt, ops::RangeInclusive};
+
 use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
-use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SignedTransaction,
+    TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
+
+use crate::ExecutionOutcome;
 
 /// A chain of blocks and their final state.
 ///

@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::Header;
+use reth_primitives::{Header, SignedTransaction};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},

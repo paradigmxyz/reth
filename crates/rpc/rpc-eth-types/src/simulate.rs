@@ -11,8 +11,8 @@ use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     logs_bloom,
     proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockBody, BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned,
-    TransactionSignedNoHash,
+    BlockBody, BlockWithSenders, Receipt, Signature, SignedTransaction, Transaction,
+    TransactionSigned, TransactionSignedNoHash,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;

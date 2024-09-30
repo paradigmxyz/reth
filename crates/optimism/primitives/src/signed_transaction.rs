@@ -26,6 +26,18 @@ pub struct OpTransactionSigned {
 }
 
 impl SignedTransaction for OpTransactionSigned {
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn hash(&self) -> TxHash {
+        self.hash
+    }
+
+    fn hash_ref(&self) -> &TxHash {
+        &self.hash
+    }
+
     fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.

@@ -4,7 +4,7 @@
 
 use alloy_primitives::B256;
 use alloy_rpc_types::TransactionInfo;
-use reth_primitives::TransactionSignedEcRecovered;
+use reth_primitives::{SignedTransaction, TransactionSignedEcRecovered};
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
     TransactionCompat,
