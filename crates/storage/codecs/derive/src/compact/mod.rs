@@ -385,9 +385,7 @@ mod tests {
             .unwrap();
         rustfmt.stdin.as_mut().unwrap().write_all(s.to_string().as_bytes()).unwrap();
         let output = rustfmt.wait_with_output().unwrap();
-        if !output.status.success() {
-            panic!("rustfmt failed: {}", output.status);
-        }
+        assert!(output.status.success(), "rustfmt failed: {}", output.status);
         String::from_utf8(output.stdout).unwrap()
     }
 }

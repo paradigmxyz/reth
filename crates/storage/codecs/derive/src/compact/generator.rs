@@ -48,7 +48,7 @@ pub fn generate_from_to(
             if Self::BITFLAG_ENCODED_BYTES > 0 {
                 // SAFETY: We checked that the first chunk is at least `Self::BITFLAG_ENCODED_BYTES`
                 // long.
-                let flag_bytes = unsafe { std::slice::from_raw_parts_mut(start_ptr, flags.len()) };
+                let flag_bytes = unsafe { core::slice::from_raw_parts_mut(start_ptr, flags.len()) };
                 debug_assert_eq!(flag_bytes, &[0; Self::BITFLAG_ENCODED_BYTES][..]);
                 flag_bytes.copy_from_slice(&flags);
             }
