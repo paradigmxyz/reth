@@ -146,12 +146,12 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas as u64 &&
+            if transaction.gas_limit() > block_available_gas &&
                 (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas: block_available_gas as u64,
+                    block_available_gas,
                 }
                 .into())
             }
@@ -196,7 +196,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used() as u128;
+            cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -204,7 +204,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
-                cumulative_gas_used: cumulative_gas_used as u64,
+                cumulative_gas_used,
                 logs: result.into_logs(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -218,7 +218,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used as u64))
+        Ok((receipts, cumulative_gas_used))
     }
 }
 
@@ -538,7 +538,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -549,7 +549,7 @@ mod tests {
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
             Signature::test_signature(),
@@ -622,7 +622,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -633,7 +633,7 @@ mod tests {
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
             optimism_deposit_tx_signature(),

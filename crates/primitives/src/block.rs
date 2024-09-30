@@ -212,22 +212,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
             .collect::<arbitrary::Result<Vec<_>>>()?;
 
         // then generate up to 2 ommers
-        let ommers = (0..2)
-            .map(|_| {
-                let mut header = Header::arbitrary(u)?;
-                header.gas_limit = (header.gas_limit as u64).into();
-                header.gas_used = (header.gas_used as u64).into();
-                header.base_fee_per_gas = header
-                    .base_fee_per_gas
-                    .map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
-                header.blob_gas_used =
-                    header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
-                header.excess_blob_gas =
-                    header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
-
-                Ok(header)
-            })
-            .collect::<arbitrary::Result<Vec<_>>>()?;
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
 
         Ok(Self {
             header: u.arbitrary()?,
@@ -685,16 +670,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
         // then generate up to 2 ommers
         let ommers = (0..2)
             .map(|_| {
-                let mut header = Header::arbitrary(u)?;
-                header.gas_limit = (header.gas_limit as u64).into();
-                header.gas_used = (header.gas_used as u64).into();
-                header.base_fee_per_gas = header
-                    .base_fee_per_gas
-                    .map(|base_fee_per_gas| (base_fee_per_gas as u64).into());
-                header.blob_gas_used =
-                    header.blob_gas_used.map(|blob_gas_used| (blob_gas_used as u64).into());
-                header.excess_blob_gas =
-                    header.excess_blob_gas.map(|excess_blob_gas| (excess_blob_gas as u64).into());
+                let header = Header::arbitrary(u)?;
 
                 Ok(header)
             })
