@@ -2138,6 +2138,8 @@ pub mod serde_bincode_compat {
         TxEip4844, TxEip7702,
     };
     use alloy_primitives::{Signature, TxHash};
+    #[cfg(feature = "optimism")]
+    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -2171,7 +2173,7 @@ pub mod serde_bincode_compat {
         #[cfg(feature = "optimism")]
         /// See the documentation for [`super::Transaction::Deposit`]
         #[cfg(feature = "optimism")]
-        Deposit(Cow<'a, op_alloy_consensus::TxDeposit>),
+        Deposit(TxDeposit<'a>),
     }
 
     impl<'a> From<&'a super::Transaction> for Transaction<'a> {
@@ -2183,7 +2185,7 @@ pub mod serde_bincode_compat {
                 super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
                 super::Transaction::Eip7702(tx) => Self::Eip7702(Cow::Borrowed(tx)),
                 #[cfg(feature = "optimism")]
-                super::Transaction::Deposit(tx) => Self::Deposit(Cow::Borrowed(tx)),
+                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
             }
         }
     }
@@ -2197,7 +2199,7 @@ pub mod serde_bincode_compat {
                 Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
                 Transaction::Eip7702(tx) => Self::Eip7702(tx.into_owned()),
                 #[cfg(feature = "optimism")]
-                Transaction::Deposit(tx) => Self::Deposit(tx.into_owned()),
+                Transaction::Deposit(tx) => Self::Deposit(tx.into()),
             }
         }
     }
