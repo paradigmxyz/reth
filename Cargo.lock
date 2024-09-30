@@ -2765,6 +2765,7 @@ dependencies = [
 name = "example-custom-payload-builder"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "futures-util",
  "reth",

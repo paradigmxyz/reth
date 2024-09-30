@@ -1,9 +1,9 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_primitives::{alloy_primitives::Sealable, GotExpected, SealedHeader};
+use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
     StatsReader, TrieWriter,

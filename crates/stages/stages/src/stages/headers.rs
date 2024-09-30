@@ -378,12 +378,10 @@ mod tests {
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-    use alloy_primitives::B256;
+    use alloy_primitives::{Sealable, B256};
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{
-        alloy_primitives::Sealable, BlockBody, SealedBlock, SealedBlockWithSenders,
-    };
+    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};

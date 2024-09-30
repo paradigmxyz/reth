@@ -115,13 +115,12 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
 #[cfg(test)]
 mod tests {
     use crate::{
-        hex,
         transaction::signature::{
             legacy_parity, recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
         },
         Signature,
     };
-    use alloy_primitives::{Address, Parity, B256, U256};
+    use alloy_primitives::{hex, Address, Parity, B256, U256};
     use std::str::FromStr;
 
     #[test]
