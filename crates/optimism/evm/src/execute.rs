@@ -181,7 +181,7 @@ where
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+            let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
@@ -195,9 +195,9 @@ where
                 ?transaction,
                 "Executed transaction"
             );
-
-            evm.db_mut().commit(state.clone());
-            system_caller.on_state(&ResultAndState { result: result.clone(), state });
+            system_caller.on_state(&result_and_state);
+            let ResultAndState { result, state } = result_and_state;
+            evm.db_mut().commit(state);
 
             // append gas used
             cumulative_gas_used += result.gas_used();
