@@ -33,7 +33,7 @@ use reth_node_core::{
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskExecutor, TaskSpawner};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 use tracing::{info, trace, warn};
@@ -180,7 +180,10 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    pub const fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
+    pub const fn with_launch_context(
+        self,
+        task_executor: Box<dyn TaskSpawner>,
+    ) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor }
     }
 
@@ -188,7 +191,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     #[cfg(feature = "test-utils")]
     pub fn testing_node(
         mut self,
-        task_executor: TaskExecutor,
+        task_executor: Box<dyn TaskSpawner>,
     ) -> WithLaunchContext<
         NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
     > {
@@ -253,13 +256,13 @@ where
 /// See [`WithLaunchContext::launch`]
 pub struct WithLaunchContext<Builder> {
     builder: Builder,
-    task_executor: TaskExecutor,
+    task_executor: Box<dyn TaskSpawner>,
 }
 
 impl<Builder> WithLaunchContext<Builder> {
     /// Returns a reference to the task executor.
-    pub const fn task_executor(&self) -> &TaskExecutor {
-        &self.task_executor
+    pub const fn task_executor(&self) -> &dyn TaskSpawner {
+        &*self.task_executor
     }
 }
 
@@ -512,7 +515,7 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     /// The configured provider to interact with the blockchain.
     pub(crate) provider: Node::Provider,
     /// The executor of the node.
-    pub(crate) executor: TaskExecutor,
+    pub(crate) executor: Box<dyn TaskSpawner>,
     /// Config container
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
 }
@@ -551,8 +554,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
-    pub const fn task_executor(&self) -> &TaskExecutor {
-        &self.executor
+    pub const fn task_executor(&self) -> &dyn TaskSpawner {
+        &*self.executor
     }
 
     /// Returns the chain spec of the node.

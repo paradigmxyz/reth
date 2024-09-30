@@ -50,7 +50,7 @@ use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, MetricEvent, PipelineBuilder, PipelineTarget, StageId};
 use reth_static_file::StaticFileProducer;
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskExecutor, TaskSpawner};
 use reth_tracing::tracing::{debug, error, info, warn};
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
@@ -90,14 +90,17 @@ impl<N: NodeTypesWithDB> WithTree for BlockchainProvider2<N> {
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
     /// The task executor for the node.
-    pub task_executor: TaskExecutor,
+    pub task_executor: Box<dyn TaskSpawner>,
     /// The data directory for the node.
     pub data_dir: ChainPath<DataDirPath>,
 }
 
 impl LaunchContext {
     /// Create a new instance of the default node launcher.
-    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub const fn new(
+        task_executor: Box<dyn TaskSpawner>,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> Self {
         Self { task_executor, data_dir }
     }
 
@@ -222,8 +225,8 @@ impl<T> LaunchContextWith<T> {
     }
 
     /// Returns the task executor.
-    pub const fn task_executor(&self) -> &TaskExecutor {
-        &self.inner.task_executor
+    pub const fn task_executor(&self) -> &dyn TaskSpawner {
+        &*self.inner.task_executor
     }
 
     /// Attaches another value to the launch context.

@@ -36,7 +36,7 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskExecutor, TaskSpawner};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
@@ -99,7 +99,10 @@ pub struct DefaultNodeLauncher {
 
 impl DefaultNodeLauncher {
     /// Create a new instance of the default node launcher.
-    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub const fn new(
+        task_executor: Box<dyn TaskSpawner>,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
