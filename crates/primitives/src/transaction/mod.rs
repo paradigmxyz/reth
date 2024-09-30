@@ -1549,7 +1549,14 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         #[allow(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
-        let mut signature = Signature::arbitrary(u)?;
+
+        let secp = secp256k1::Secp256k1::new();
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let mut signature = crate::sign_message(
+            B256::from_slice(&key_pair.secret_bytes()[..]),
+            transaction.signature_hash(),
+        )
+        .unwrap();
 
         signature = if matches!(transaction, Transaction::Legacy(_)) {
             if let Some(chain_id) = transaction.chain_id() {

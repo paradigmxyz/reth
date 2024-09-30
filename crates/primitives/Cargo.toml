@@ -52,6 +52,7 @@ bytes.workspace = true
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 once_cell.workspace = true
+rand = { workspace = true, optional = true }
 rayon.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, optional = true }
@@ -95,13 +96,15 @@ std = ["reth-primitives-traits/std"]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
-    "reth-primitives-traits/arbitrary",
-    "revm-primitives/arbitrary",
-    "reth-ethereum-forks/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
+    "rand",
     "reth-codec",
+    "reth-ethereum-forks/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "revm-primitives/arbitrary",
+    "secp256k1",
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [

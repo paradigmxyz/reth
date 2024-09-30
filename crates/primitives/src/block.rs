@@ -539,6 +539,22 @@ impl SealedBlockWithSenders {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let block = SealedBlock::arbitrary(u)?;
+
+        let senders = block
+            .body
+            .transactions
+            .iter()
+            .map(|tx| tx.recover_signer().unwrap())
+            .collect::<Vec<_>>();
+
+        Ok(Self { block, senders })
+    }
+}
+
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
@@ -865,7 +881,8 @@ mod tests {
 pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::serde_bincode_compat::Header;
-    use reth_primitives_traits::{Requests, Withdrawals};
+    use alloy_primitives::Address;
+    use reth_primitives_traits::{serde_bincode_compat::SealedHeader, Requests, Withdrawals};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -875,7 +892,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use alloy_consensus::{serde_bincode_compat, TxEip1559};
+    /// use reth_primitives::{serde_bincode_compat, BlockBody};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
@@ -887,11 +904,11 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    struct BlockBody<'a> {
+    pub struct BlockBody<'a> {
         transactions: Vec<TransactionSigned<'a>>,
         ommers: Vec<Header<'a>>,
-        withdrawals: Option<Cow<'a, Withdrawals>>,
-        requests: Option<Cow<'a, Requests>>,
+        withdrawals: Cow<'a, Option<Withdrawals>>,
+        requests: Cow<'a, Option<Requests>>,
     }
 
     impl<'a> From<&'a super::BlockBody> for BlockBody<'a> {
@@ -899,8 +916,8 @@ pub(super) mod serde_bincode_compat {
             Self {
                 transactions: value.transactions.iter().map(Into::into).collect(),
                 ommers: value.ommers.iter().map(Into::into).collect(),
-                withdrawals: value.withdrawals.as_ref().map(Cow::Borrowed),
-                requests: value.requests.as_ref().map(Cow::Borrowed),
+                withdrawals: Cow::Borrowed(&value.withdrawals),
+                requests: Cow::Borrowed(&value.requests),
             }
         }
     }
@@ -910,8 +927,8 @@ pub(super) mod serde_bincode_compat {
             Self {
                 transactions: value.transactions.into_iter().map(Into::into).collect(),
                 ommers: value.ommers.into_iter().map(Into::into).collect(),
-                withdrawals: value.withdrawals.map(Cow::into_owned),
-                requests: value.requests.map(Cow::into_owned),
+                withdrawals: value.withdrawals.into_owned(),
+                requests: value.requests.into_owned(),
             }
         }
     }
@@ -934,9 +951,114 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
+    /// Bincode-compatible [`super::SealedBlock`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives::{serde_bincode_compat, SealedBlock};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::SealedBlock")]
+    ///     block: SealedBlock,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SealedBlock<'a> {
+        header: SealedHeader<'a>,
+        body: BlockBody<'a>,
+    }
+
+    impl<'a> From<&'a super::SealedBlock> for SealedBlock<'a> {
+        fn from(value: &'a super::SealedBlock) -> Self {
+            Self { header: SealedHeader::from(&value.header), body: BlockBody::from(&value.body) }
+        }
+    }
+
+    impl<'a> From<SealedBlock<'a>> for super::SealedBlock {
+        fn from(value: SealedBlock<'a>) -> Self {
+            Self { header: value.header.into(), body: value.body.into() }
+        }
+    }
+
+    impl<'a> SerializeAs<super::SealedBlock> for SealedBlock<'a> {
+        fn serialize_as<S>(source: &super::SealedBlock, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            SealedBlock::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::SealedBlock> for SealedBlock<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            SealedBlock::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::SealedBlockWithSenders`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives::{serde_bincode_compat, SealedBlockWithSenders};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::SealedBlockWithSenders")]
+    ///     block: SealedBlockWithSenders,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SealedBlockWithSenders<'a> {
+        block: SealedBlock<'a>,
+        senders: Cow<'a, Vec<Address>>,
+    }
+
+    impl<'a> From<&'a super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
+        fn from(value: &'a super::SealedBlockWithSenders) -> Self {
+            Self { block: SealedBlock::from(&value.block), senders: Cow::Borrowed(&value.senders) }
+        }
+    }
+
+    impl<'a> From<SealedBlockWithSenders<'a>> for super::SealedBlockWithSenders {
+        fn from(value: SealedBlockWithSenders<'a>) -> Self {
+            Self { block: value.block.into(), senders: value.senders.into_owned() }
+        }
+    }
+
+    impl<'a> SerializeAs<super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
+        fn serialize_as<S>(
+            source: &super::SealedBlockWithSenders,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            SealedBlockWithSenders::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::SealedBlockWithSenders> for SealedBlockWithSenders<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlockWithSenders, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            SealedBlockWithSenders::deserialize(deserializer).map(Into::into)
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, BlockBody};
+        use super::super::{serde_bincode_compat, BlockBody, SealedBlock, SealedBlockWithSenders};
 
         use arbitrary::Arbitrary;
         use rand::Rng;
@@ -957,6 +1079,47 @@ pub(super) mod serde_bincode_compat {
             generators::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 block_body: BlockBody::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                    .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_sealed_block_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::SealedBlock")]
+                block: SealedBlock,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                block: SealedBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_sealed_block_with_senders_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::SealedBlockWithSenders")]
+                block: SealedBlockWithSenders,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                block: SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                     .unwrap(),
             };
 
