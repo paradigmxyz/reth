@@ -732,9 +732,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.fetch_db_mem_by_tx_id(
             id,
             |provider| provider.transaction_block(id),
-            |_, block_state| {
-                Ok(Some(block_state.block().block().number))
-            },
+            |_, block_state| Ok(Some(block_state.block().block().number)),
         )
     }
 
