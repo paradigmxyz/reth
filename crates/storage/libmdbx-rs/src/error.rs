@@ -120,7 +120,7 @@ pub enum Error {
     #[error("read transaction has been timed out")]
     ReadTransactionTimeout,
     /// Unknown error code.
-    #[error("unknown error code")]
+    #[error("unknown error code: {0}")]
     Other(i32),
 }
 
