@@ -82,7 +82,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_execution_types::{serde_bincode_compat, ExExNotification};
+    /// use reth_exex_types::{serde_bincode_compat, ExExNotification};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
