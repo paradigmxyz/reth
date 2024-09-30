@@ -461,10 +461,10 @@ alloy-transport-ipc = { version = "0.4.0", default-features = false }
 alloy-transport-ws = { version = "0.4.0", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.3.1"
-op-alloy-rpc-types-engine = "0.3.1"
-op-alloy-network = "0.3.1"
-op-alloy-consensus = "0.3.1"
+op-alloy-rpc-types = "0.3.2"
+op-alloy-rpc-types-engine = "0.3.2"
+op-alloy-network = "0.3.2"
+op-alloy-consensus = "0.3.2"
 
 # misc
 aquamarine = "0.5"
@@ -617,5 +617,3 @@ tracy-client = "0.17.3"
 #alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
-
-op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", branch = "alexey/bincode-compat" }
