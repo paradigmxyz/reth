@@ -425,6 +425,7 @@ where
                     reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
                     "Received new notification"
                 );
+                this.wal.commit(&notification)?;
                 this.push_notification(notification);
                 continue
             }
