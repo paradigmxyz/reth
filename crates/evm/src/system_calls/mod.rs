@@ -1,7 +1,7 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
@@ -51,7 +51,7 @@ impl OnStateHook for NoopHook {
 #[allow(missing_debug_implementations)]
 pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
     evm_config: &'a EvmConfig,
-    chain_spec: Arc<Chainspec>,
+    chain_spec: Chainspec,
     /// Optional hook to be called after each state change.
     hook: Option<Hook>,
 }
@@ -59,7 +59,7 @@ pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
 impl<'a, EvmConfig, Chainspec> SystemCaller<'a, EvmConfig, Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub const fn new(evm_config: &'a EvmConfig, chain_spec: Arc<Chainspec>) -> Self {
+    pub const fn new(evm_config: &'a EvmConfig, chain_spec: Chainspec) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
 }
@@ -181,7 +181,7 @@ where
     {
         let result_and_state = eip2935::transact_blockhashes_contract_call(
             &self.evm_config.clone(),
-            self.chain_spec.as_ref(),
+            &self.chain_spec,
             timestamp,
             block_number,
             parent_block_hash,
@@ -236,7 +236,7 @@ where
     {
         let result_and_state = eip4788::transact_beacon_root_contract_call(
             &self.evm_config.clone(),
-            self.chain_spec.as_ref(),
+            &self.chain_spec,
             timestamp,
             block_number,
             parent_block_hash,
