@@ -191,7 +191,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         let (state, reverts) =
             self.populate_bundle_state(account_changeset, storage_changeset, end_block_number)?;
 
-        // iterate over block body and create ExecutionResult
         let mut receipt_iter =
             self.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?.into_iter();
 
