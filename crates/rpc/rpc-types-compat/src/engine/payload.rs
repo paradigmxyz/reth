@@ -1,7 +1,7 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -30,10 +30,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         .map(|tx| {
             let mut buf = tx.as_ref();
 
-            let tx = TransactionSigned::decode_2718(&mut buf).map_err(|err| match err {
-                Eip2718Error::RlpError(err) => err,
-                _ => alloy_rlp::Error::Custom("invalid transaction"),
-            })?;
+            let tx = TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
 
             if !buf.is_empty() {
                 return Err(alloy_rlp::Error::UnexpectedLength);

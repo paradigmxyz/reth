@@ -620,10 +620,7 @@ impl Decodable for PooledTransactionsElement {
                 Ok(Self::BlobTransaction(blob_tx))
             } else {
                 let typed_tx =
-                    TransactionSigned::typed_decode(tx_type, buf).map_err(|err| match err {
-                        Eip2718Error::RlpError(err) => err,
-                        _ => RlpError::Custom("failed to decode EIP-2718 transaction"),
-                    })?;
+                    TransactionSigned::typed_decode(tx_type, buf).map_err(RlpError::from)?;
 
                 // check that the bytes consumed match the payload length
                 let bytes_consumed = remaining_len - buf.len();

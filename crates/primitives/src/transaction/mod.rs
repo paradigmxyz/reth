@@ -1339,14 +1339,7 @@ impl Decodable for TransactionSigned {
     /// This is because [`Header::decode`] does not advance the buffer, and returns a length-1
     /// string header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        match Self::network_decode(buf) {
-            Ok(t) => Ok(t),
-            Err(Eip2718Error::RlpError(e)) => Err(e),
-            Err(Eip2718Error::UnexpectedType(_)) => {
-                Err(alloy_rlp::Error::Custom("unexpected tx type"))
-            }
-            _ => Err(alloy_rlp::Error::Custom("unknown error decoding tx envelope")),
-        }
+        Self::network_decode(buf).map_err(Into::into)
     }
 }
 
