@@ -448,10 +448,10 @@ mod tests {
 
         for i in (0..block_count).rev() {
             let hash = rng.gen();
-            let gas_limit: u64 = rng.gen();
-            let gas_used: u64 = rng.gen();
-            // Note: Generates a u32 to avoid overflows later
+            // Note: Generates saner values to avoid invalid overflows later
+            let gas_limit = rng.gen::<u32>() as u64;
             let base_fee_per_gas: Option<u64> = rng.gen::<bool>().then(|| rng.gen::<u32>() as u64);
+            let gas_used = rng.gen::<u32>() as u64;
 
             let header = Header {
                 number: newest_block - i,

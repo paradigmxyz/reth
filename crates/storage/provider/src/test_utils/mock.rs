@@ -6,6 +6,7 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256,
@@ -636,7 +637,7 @@ impl StorageRootProvider for MockEthProvider {
         _address: Address,
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        Ok(B256::default())
+        Ok(EMPTY_ROOT_HASH)
     }
 }
 
