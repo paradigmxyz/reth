@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives = { workspace = true, features = ["optimism"] }
+reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true }
 
@@ -52,3 +52,4 @@ arbitrary = [
     "dep:proptest",
     "reth-codec",
 ]
+optimism = ["reth-primitives/optimism"]
