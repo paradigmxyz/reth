@@ -10,7 +10,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::apply_beacon_root_contract_call,
+    system_calls::SystemCaller,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -119,10 +119,10 @@ where
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
+        let mut system_caller = SystemCaller::new(&self.evm_config, &self.chain_spec);
+
         // apply pre execution changes
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
+        system_caller.apply_beacon_root_contract_call(
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
