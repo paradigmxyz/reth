@@ -5,7 +5,8 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_chainspec::Chain;
-use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError};
+use reth_ethereum_forks::ValidationError;
+use reth_primitives::{GotExpected, GotExpectedBoxed};
 use std::io;
 
 /// Errors when sending/receiving messages

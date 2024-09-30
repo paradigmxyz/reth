@@ -15,9 +15,10 @@ use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_ethereum_forks::{EthereumHardfork, Head};
 use reth_network::config::rng_secret_key;
 use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
-use reth_primitives::{EthereumHardfork, Head, MAINNET_GENESIS_HASH};
+use reth_primitives::MAINNET_GENESIS_HASH;
 use secp256k1::{SecretKey, SECP256K1};
 use std::sync::LazyLock;
 use tokio::net::TcpStream;

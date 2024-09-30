@@ -20,6 +20,7 @@ reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 reth-eth-wire-types.workspace = true
 reth-network-peers.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true

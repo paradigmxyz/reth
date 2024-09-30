@@ -9,6 +9,7 @@ use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
+use reth_ethereum_forks::EthereumHardfork;
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -21,7 +22,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Request};
+use reth_primitives::{BlockWithSenders, Header, Receipt, Request};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,

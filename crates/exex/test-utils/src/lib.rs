@@ -18,6 +18,7 @@ use reth_db::{
 };
 use reth_db_common::init::init_genesis;
 use reth_ethereum_engine_primitives::EthereumEngineValidator;
+use reth_ethereum_forks::Head;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
@@ -41,7 +42,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockNumHash, Head, SealedBlockWithSenders};
+use reth_primitives::{BlockNumHash, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,

@@ -25,6 +25,7 @@ reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-transaction-pool.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

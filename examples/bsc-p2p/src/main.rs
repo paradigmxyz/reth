@@ -14,9 +14,9 @@
 
 use chainspec::{boot_nodes, bsc_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
+use reth_ethereum_forks::{ForkHash, ForkId};
 use reth_network::{NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager};
 use reth_network_api::PeersInfo;
-use reth_primitives::{ForkHash, ForkId};
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,

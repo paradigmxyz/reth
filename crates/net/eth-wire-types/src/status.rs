@@ -5,7 +5,7 @@ use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{EthereumHardfork, ForkId, Head};
+use reth_ethereum_forks::{EthereumHardfork, ForkId, Head};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
@@ -239,7 +239,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use reth_primitives::{EthereumHardfork, ForkHash, ForkId, Head};
+    use reth_ethereum_forks::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 
     #[test]

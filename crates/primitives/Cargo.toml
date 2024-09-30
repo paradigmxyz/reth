@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
@@ -94,7 +93,6 @@ asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
-    "reth-ethereum-forks/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",

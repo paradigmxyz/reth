@@ -32,6 +32,7 @@ reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -43,7 +44,13 @@ discv5.workspace = true
 # async/futures
 futures.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = [
+    "io-util",
+    "net",
+    "macros",
+    "rt-multi-thread",
+    "time",
+] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
@@ -62,7 +69,11 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 derive_more.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
@@ -86,7 +97,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-alloy-provider= { workspace = true, features = ["admin-api"] }
+alloy-provider = { workspace = true, features = ["admin-api"] }
 alloy-consensus.workspace = true
 
 # misc
@@ -101,8 +112,19 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 [features]
 default = ["serde"]
 geth-tests = []
-serde = ["dep:serde", "secp256k1/serde", "enr/serde", "reth-network-types/serde"]
-test-utils = ["dep:reth-provider", "reth-provider?/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
+serde = [
+    "dep:serde",
+    "secp256k1/serde",
+    "enr/serde",
+    "reth-network-types/serde",
+]
+test-utils = [
+    "dep:reth-provider",
+    "reth-provider?/test-utils",
+    "dep:tempfile",
+    "reth-transaction-pool/test-utils",
+    "reth-network-types/test-utils",
+]
 
 [[bench]]
 name = "bench"

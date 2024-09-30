@@ -3,7 +3,7 @@ use reth_chainspec::{
     once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
 };
 use reth_discv4::NodeRecord;
-use reth_primitives::Head;
+use reth_ethereum_forks::Head;
 
 use std::sync::Arc;
 

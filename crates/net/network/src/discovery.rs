@@ -15,10 +15,10 @@ use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerAddr;
-use reth_primitives::{EnrForkIdEntry, ForkId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};

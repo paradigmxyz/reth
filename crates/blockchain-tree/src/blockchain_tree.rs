@@ -12,13 +12,13 @@ use reth_blockchain_tree_api::{
     BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_consensus::{Consensus, ConsensusError};
+use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    EthereumHardfork, GotExpected, Hardforks, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StaticFileSegment,
+    GotExpected, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,

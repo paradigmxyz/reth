@@ -16,7 +16,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{fs, path::Path};
 
 use alloy_primitives::{BlockNumber, B256};
-use reth_primitives::{BlockHashOrNumber, Head, SealedHeader};
+use reth_ethereum_forks::Head;
+use reth_primitives::{BlockHashOrNumber, SealedHeader};
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,

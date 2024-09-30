@@ -2,12 +2,13 @@
 
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
+use reth_ethereum_forks::EthereumHardfork;
 use reth_primitives::{
     constants::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
+    GotExpected, Header, SealedBlock, SealedHeader,
 };
 use revm_primitives::calc_excess_blob_gas;
 

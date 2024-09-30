@@ -767,9 +767,9 @@ mod tests {
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
+    use reth_ethereum_forks::{EthereumHardfork, ForkFilter};
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use reth_primitives::{EthereumHardfork, ForkFilter};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},

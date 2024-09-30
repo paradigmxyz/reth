@@ -58,6 +58,7 @@ reth-tasks.workspace = true
 reth-tokio-util.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
+reth-ethereum-forks.workspace = true
 
 ## ethereum
 alloy-primitives.workspace = true

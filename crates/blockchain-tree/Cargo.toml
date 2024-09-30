@@ -29,6 +29,7 @@ reth-trie-parallel.workspace = true
 reth-network.workspace = true
 reth-consensus.workspace = true
 reth-node-types.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true

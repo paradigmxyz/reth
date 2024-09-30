@@ -17,6 +17,7 @@ use reth_db_api::database::Database;
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
+use reth_ethereum_forks::Head;
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
@@ -37,7 +38,6 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_primitives::Head;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
