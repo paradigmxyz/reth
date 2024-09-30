@@ -48,6 +48,7 @@ alloy-consensus.workspace = true
 arbitrary = [
     "reth-primitives/arbitrary",
     "alloy-chains/arbitrary",
+    "reth-ethereum-forks/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-arbitrary-interop",
