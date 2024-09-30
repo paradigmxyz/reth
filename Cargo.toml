@@ -48,7 +48,6 @@ members = [
     "crates/exex/test-utils/",
     "crates/exex/types/",
     "crates/metrics/",
-    "crates/metrics/metrics-derive/",
     "crates/net/banlist/",
     "crates/net/discv4/",
     "crates/net/discv5/",
@@ -345,7 +344,6 @@ reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
 reth-metrics = { path = "crates/metrics" }
-reth-metrics-derive = { path = "crates/metrics/metrics-derive" }
 reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
@@ -517,6 +515,7 @@ zstd = "0.13"
 
 # metrics
 metrics = "0.23.0"
+metrics-derive = "0.1"
 metrics-exporter-prometheus = { version = "0.15.0", default-features = false }
 metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.17.0" }

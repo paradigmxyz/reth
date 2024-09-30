@@ -12,11 +12,9 @@ description = "reth metrics utilities"
 workspace = true
 
 [dependencies]
-# reth
-reth-metrics-derive.workspace = true
-
 # metrics
 metrics.workspace = true
+metrics-derive.workspace = true
 
 # async
 tokio = { workspace = true, features = ["full"], optional = true }
