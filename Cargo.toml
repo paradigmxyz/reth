@@ -590,7 +590,7 @@ tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = "0.17.3"
 
-#[patch.crates-io]
+[patch.crates-io]
 #alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
@@ -617,3 +617,5 @@ tracy-client = "0.17.3"
 #alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
+
+op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", branch = "alexey/bincode-compat" }

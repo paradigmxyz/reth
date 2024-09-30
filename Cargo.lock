@@ -5102,8 +5102,7 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "274ce39752bdd16614292484839eb3e62139724c15087d9175a5838dab8d6317"
+source = "git+https://github.com/alloy-rs/op-alloy?branch=alexey/bincode-compat#1c7571dc8f0d6829958b36658dfc2363f7ed39e5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5113,6 +5112,7 @@ dependencies = [
  "arbitrary",
  "derive_more",
  "serde",
+ "serde_with",
  "spin",
 ]
 

@@ -127,6 +127,7 @@ alloy-compat = [
 test-utils = ["reth-primitives-traits/test-utils"]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
+    "op-alloy-consensus/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
     "serde_with",
 ]
