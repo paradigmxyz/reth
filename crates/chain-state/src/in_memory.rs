@@ -503,8 +503,7 @@ impl CanonicalInMemoryState {
         state: &BlockState,
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider {
-        let in_memory: Vec<_> =
-            state.chain().into_iter().map(|block_state| block_state.block()).collect();
+        let in_memory = state.chain().into_iter().map(|block_state| block_state.block()).collect();
 
         MemoryOverlayStateProvider::new(historical, in_memory)
     }
