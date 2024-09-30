@@ -1124,7 +1124,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut wal = Wal::new(temp_dir.path()).unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
 
         let provider_factory = create_test_provider_factory();
 
