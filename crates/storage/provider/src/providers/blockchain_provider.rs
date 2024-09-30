@@ -2247,19 +2247,22 @@ mod tests {
         // Check for partial in-memory ranges
         let blocks = provider.block_range(start_block_number + 1..=end_block_number)?;
         assert_eq!(blocks.len(), in_memory_blocks.len() - 1);
-        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1)) {
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1))
+        {
             assert_eq!(retrieved_block, &expected_block.clone().unseal());
         }
 
         let blocks = provider.block_range(start_block_number + 1..=end_block_number - 1)?;
         assert_eq!(blocks.len(), in_memory_blocks.len() - 2);
-        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1)) {
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1))
+        {
             assert_eq!(retrieved_block, &expected_block.clone().unseal());
         }
 
         let blocks = provider.block_range(start_block_number + 1..=end_block_number + 1)?;
         assert_eq!(blocks.len(), in_memory_blocks.len() - 1);
-        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1)) {
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1))
+        {
             assert_eq!(retrieved_block, &expected_block.clone().unseal());
         }
 
