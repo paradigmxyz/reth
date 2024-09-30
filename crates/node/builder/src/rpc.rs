@@ -22,7 +22,6 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
-use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
 use crate::{EthApiBuilderCtx, RpcAddOns};
@@ -187,7 +186,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Provider,
         Node::Pool,
         Node::Network,
-        TaskExecutor,
         Node::Provider,
         EthApi,
         Node::Executor,
@@ -203,7 +201,6 @@ where
         Node::Provider,
         Node::Pool,
         Node::Network,
-        TaskExecutor,
         Node::Provider,
         EthApi,
         Node::Executor,
@@ -314,7 +311,7 @@ where
         .with_pool(node.pool().clone())
         .with_network(node.network().clone())
         .with_events(node.provider().clone())
-        .with_executor(node.task_executor().clone())
+        .with_executor(Box::new(node.task_executor().clone()))
         .with_evm_config(node.evm_config().clone())
         .with_block_executor(node.block_executor().clone())
         .build_with_auth_server(module_config, engine_api, EthApi::eth_api_builder());

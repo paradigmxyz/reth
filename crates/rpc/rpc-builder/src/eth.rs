@@ -11,9 +11,8 @@ use reth_rpc_eth_types::{
 use reth_tasks::TaskSpawner;
 
 /// Alias for `eth` namespace API builder.
-pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> = Box<
-    dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>) -> EthApi,
->;
+pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Events, EthApi> =
+    Box<dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Events, EthApi>) -> EthApi>;
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
@@ -40,27 +39,18 @@ where
     ///
     /// This will spawn all necessary tasks for the handlers.
     #[allow(clippy::too_many_arguments)]
-    pub fn bootstrap<EvmConfig, Tasks>(
+    pub fn bootstrap<EvmConfig>(
         provider: Provider,
         pool: Pool,
         network: Network,
         evm_config: EvmConfig,
         config: EthConfig,
-        executor: Tasks,
+        executor: Box<dyn TaskSpawner>,
         events: Events,
-        eth_api_builder: DynEthApiBuilder<
-            Provider,
-            Pool,
-            EvmConfig,
-            Network,
-            Tasks,
-            Events,
-            EthApi,
-        >,
+        eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Events, EthApi>,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Header = Header>,
-        Tasks: TaskSpawner + Clone + 'static,
     {
         let cache = EthStateCache::spawn_with(
             provider.clone(),
@@ -97,7 +87,7 @@ where
             ctx.pool.clone(),
             ctx.cache.clone(),
             ctx.config.filter_config(),
-            Box::new(ctx.executor.clone()),
+            ctx.executor.clone(),
         );
 
         let pubsub = EthPubSub::with_spawner(
@@ -105,7 +95,7 @@ where
             ctx.pool.clone(),
             ctx.events.clone(),
             ctx.network.clone(),
-            Box::new(ctx.executor.clone()),
+            ctx.executor.clone(),
         );
 
         Self { api, cache: ctx.cache, filter, pubsub }

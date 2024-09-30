@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskExecutor, TaskSpawner, TokioTaskExecutor,
+    TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::Mutex;
 
@@ -78,7 +78,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            TokioTaskExecutor::default(),
+            Box::new(TokioTaskExecutor::default()),
             proof_permits,
         );
 
@@ -94,11 +94,10 @@ where
     Network: Clone,
 {
     /// Creates a new, shareable instance.
-    pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Self>,
+    pub fn with_spawner<Events>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Events, Self>,
     ) -> Self
     where
-        Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions,
     {
         let blocking_task_pool =
@@ -167,15 +166,8 @@ impl<N> BuilderProvider<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 where
     N: FullNodeComponents,
 {
-    type Ctx<'a> = &'a EthApiBuilderCtx<
-        N::Provider,
-        N::Pool,
-        N::Evm,
-        N::Network,
-        TaskExecutor,
-        N::Provider,
-        Self,
-    >;
+    type Ctx<'a> =
+        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, N::Network, N::Provider, Self>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
         Box::new(Self::with_spawner)
@@ -238,7 +230,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        task_spawner: impl TaskSpawner + 'static,
+        task_spawner: Box<dyn TaskSpawner>,
         proof_permits: usize,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -263,7 +255,7 @@ where
             max_simulate_blocks,
             eth_proof_window,
             starting_block,
-            task_spawner: Box::new(task_spawner),
+            task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,

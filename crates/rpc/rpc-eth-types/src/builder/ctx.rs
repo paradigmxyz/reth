@@ -14,7 +14,7 @@ use crate::{
 
 /// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]
-pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth> {
+pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Events, Eth> {
     /// Database handle.
     pub provider: Provider,
     /// Mempool handle.
@@ -26,7 +26,7 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, E
     /// RPC config for `eth` namespace.
     pub config: EthConfig,
     /// Runtime handle.
-    pub executor: Tasks,
+    pub executor: Box<dyn TaskSpawner>,
     /// Events handle.
     pub events: Events,
     /// RPC cache handle.
@@ -35,8 +35,8 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, E
     pub _rpc_ty_builders: PhantomData<Eth>,
 }
 
-impl<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>
-    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>
+impl<Provider, Pool, EvmConfig, Network, Events, Eth>
+    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Events, Eth>
 where
     Provider: BlockReaderIdExt + Clone,
 {
@@ -44,7 +44,6 @@ where
     pub fn new_fee_history_cache(&self) -> FeeHistoryCache
     where
         Provider: ChainSpecProvider + 'static,
-        Tasks: TaskSpawner,
         Events: CanonStateSubscriptions,
     {
         FeeHistoryCacheBuilder::build(self)
@@ -62,8 +61,8 @@ pub struct GasPriceOracleBuilder;
 
 impl GasPriceOracleBuilder {
     /// Builds a [`GasPriceOracle`], for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
+    pub fn build<Provider, Pool, EvmConfig, Network, Events, Eth>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Events, Eth>,
     ) -> GasPriceOracle<Provider>
     where
         Provider: BlockReaderIdExt + Clone,
@@ -78,12 +77,11 @@ pub struct FeeHistoryCacheBuilder;
 
 impl FeeHistoryCacheBuilder {
     /// Builds a [`FeeHistoryCache`], for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
+    pub fn build<Provider, Pool, EvmConfig, Network, Events, Eth>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Events, Eth>,
     ) -> FeeHistoryCache
     where
         Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
-        Tasks: TaskSpawner,
         Events: CanonStateSubscriptions,
     {
         let fee_history_cache =

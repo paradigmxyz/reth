@@ -70,15 +70,15 @@ pub struct EthStateCache {
 
 impl EthStateCache {
     /// Creates and returns both [`EthStateCache`] frontend and the memory bound service.
-    fn create<Provider, Tasks, EvmConfig>(
+    fn create<Provider, EvmConfig>(
         provider: Provider,
-        action_task_spawner: Tasks,
+        action_task_spawner: Box<dyn TaskSpawner>,
         evm_config: EvmConfig,
         max_blocks: u32,
         max_receipts: u32,
         max_envs: u32,
         max_concurrent_db_operations: usize,
-    ) -> (Self, EthStateCacheService<Provider, Tasks, EvmConfig>) {
+    ) -> (Self, EthStateCacheService<Provider, EvmConfig>) {
         let (to_service, rx) = unbounded_channel();
         let service = EthStateCacheService {
             provider,
@@ -108,22 +108,21 @@ impl EthStateCache {
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         EvmConfig: ConfigureEvm<Header = Header>,
     {
-        Self::spawn_with(provider, config, TokioTaskExecutor::default(), evm_config)
+        Self::spawn_with(provider, config, Box::new(TokioTaskExecutor::default()), evm_config)
     }
 
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
     /// The cache is memory limited by the given max bytes values.
-    pub fn spawn_with<Provider, Tasks, EvmConfig>(
+    pub fn spawn_with<Provider, EvmConfig>(
         provider: Provider,
         config: EthStateCacheConfig,
-        executor: Tasks,
+        executor: Box<dyn TaskSpawner>,
         evm_config: EvmConfig,
     ) -> Self
     where
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
         EvmConfig: ConfigureEvm<Header = Header>,
     {
         let EthStateCacheConfig { max_blocks, max_receipts, max_envs, max_concurrent_db_requests } =
@@ -137,7 +136,7 @@ impl EthStateCache {
             max_envs,
             max_concurrent_db_requests,
         );
-        executor.spawn_critical("eth state cache", Box::pin(service));
+        executor.as_ref().spawn_critical("eth state cache", Box::pin(service));
         this
     }
 
@@ -282,7 +281,6 @@ impl EthStateCache {
 #[must_use = "Type does nothing unless spawned"]
 pub(crate) struct EthStateCacheService<
     Provider,
-    Tasks,
     EvmConfig,
     LimitBlocks = ByLength,
     LimitReceipts = ByLength,
@@ -305,17 +303,16 @@ pub(crate) struct EthStateCacheService<
     /// Receiver half of the action channel.
     action_rx: UnboundedReceiverStream<CacheAction>,
     /// The type that's used to spawn tasks that do the actual work
-    action_task_spawner: Tasks,
+    action_task_spawner: Box<dyn TaskSpawner>,
     /// Rate limiter
     rate_limiter: Arc<Semaphore>,
     /// The type that determines how to configure the EVM.
     evm_config: EvmConfig,
 }
 
-impl<Provider, Tasks, EvmConfig> EthStateCacheService<Provider, Tasks, EvmConfig>
+impl<Provider, EvmConfig> EthStateCacheService<Provider, EvmConfig>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_new_block(&mut self, block_hash: B256, res: ProviderResult<Option<BlockWithSenders>>) {
@@ -397,10 +394,9 @@ where
     }
 }
 
-impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks, EvmConfig>
+impl<Provider, EvmConfig> Future for EthStateCacheService<Provider, EvmConfig>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Output = ();
