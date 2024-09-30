@@ -87,18 +87,7 @@ where
         let mut system_caller = SystemCaller::new(&self.evm_config, self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
-        system_caller.apply_beacon_root_contract_call(
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
-            &mut evm,
-        )?;
-        system_caller.apply_blockhashes_contract_call(
-            block.timestamp,
-            block.number,
-            block.parent_hash,
-            &mut evm,
-        )?;
+        system_caller.apply_pre_execution_changes(&block.clone().unseal(), &mut evm)?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
