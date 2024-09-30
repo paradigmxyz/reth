@@ -6,10 +6,7 @@ use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{
-    system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
-    ConfigureEvm,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -87,18 +84,16 @@ where
             EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default()),
         );
 
+        let mut system_caller = SystemCaller::new(&self.evm_config, self.provider.chain_spec());
+
         // Apply pre-block system contract calls.
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            self.provider.chain_spec().as_ref(),
+        system_caller.apply_beacon_root_contract_call(
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
             &mut evm,
         )?;
-        apply_blockhashes_contract_call(
-            &self.evm_config,
-            &self.provider.chain_spec(),
+        system_caller.apply_blockhashes_contract_call(
             block.timestamp,
             block.number,
             block.parent_hash,
