@@ -17,14 +17,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
-use reth_evm::{
-    system_calls::{
-        post_block_consolidation_requests_contract_call,
-        post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
-        pre_block_blockhashes_contract_call,
-    },
-    ConfigureEvm, NextBlockEnvAttributes,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -167,29 +160,28 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+
     // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &evm_config,
-        &chain_spec,
-        &initialized_cfg,
-        &initialized_block_env,
-        attributes.parent_beacon_block_root,
-    )
-    .map_err(|err| {
-        warn!(target: "payload_builder",
-            parent_hash=%parent_block.hash(),
-            %err,
-            "failed to apply beacon root contract call for payload"
-        );
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    system_caller
+        .pre_block_beacon_root_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+            attributes.parent_beacon_block_root,
+        )
+        .map_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to apply beacon root contract call for payload"
+            );
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
     // apply eip-2935 blockhashes update
-    pre_block_blockhashes_contract_call(
+    system_caller.pre_block_blockhashes_contract_call(
         &mut db,
-        &evm_config,
-        &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
         parent_block.hash(),
@@ -320,20 +312,20 @@ where
     {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-            &evm_config,
-            &mut db,
-            &initialized_cfg,
-            &initialized_block_env,
-        )
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-        let consolidation_requests = post_block_consolidation_requests_contract_call(
-            &evm_config,
-            &mut db,
-            &initialized_cfg,
-            &initialized_block_env,
-        )
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let withdrawal_requests = system_caller
+            .post_block_withdrawal_requests_contract_call(
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = system_caller
+            .post_block_consolidation_requests_contract_call(
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
         let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
         let requests_root = calculate_requests_root(&requests);
