@@ -167,11 +167,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         }
 
         // get transaction receipts
-        let Some(from_transaction_num) = block_bodies.first().map(|bodies| bodies.1.first_tx_num())
+        let Some(from_transaction_num) = block_bodies.first().map(|body| body.1.first_tx_num())
         else {
             return Ok(None)
         };
-        let Some(to_transaction_num) = block_bodies.last().map(|bodies| bodies.1.last_tx_num())
+        let Some(to_transaction_num) = block_bodies.last().map(|body| body.1.last_tx_num())
         else {
             return Ok(None)
         };
@@ -211,6 +211,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         Ok(Some(ExecutionOutcome::new_init(
             state,
             reverts,
+            // We skip new contracts since we never delete them from the database
             Vec::new(),
             receipts.into(),
             start_block_number,
