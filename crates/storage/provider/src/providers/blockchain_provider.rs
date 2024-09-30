@@ -162,7 +162,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // We are not removing block meta as it is used to get block changesets.
         let mut block_bodies = Vec::new();
         for block_num in range.clone() {
-            let Some(block_body) = self.block_body_indices(block_num)? else { break };
+            let block_body = self
+                .block_body_indices(block_num)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_num))?;
             block_bodies.push((block_num, block_body))
         }
 
