@@ -69,11 +69,6 @@ pub use transaction::{
 };
 
 // Re-exports
-pub use alloy_primitives::{
-    self, address, b256, bloom, bytes,
-    bytes::{Buf, BufMut, BytesMut},
-    hex, Bytes, TxHash, B256, U256, U64,
-};
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
 

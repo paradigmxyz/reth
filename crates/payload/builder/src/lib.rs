@@ -27,8 +27,9 @@
 //! use std::future::Future;
 //! use std::pin::Pin;
 //! use std::task::{Context, Poll};
+//! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
-//! use reth_primitives::{Block, Header, U256};
+//! use reth_primitives::{Block, Header};
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;

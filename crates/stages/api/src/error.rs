@@ -133,12 +133,12 @@ pub enum StageError {
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
     /// of the stage.
     #[error(transparent)]
-    Recoverable(Box<dyn std::error::Error + Send + Sync>),
+    Recoverable(Box<dyn core::error::Error + Send + Sync>),
     /// The stage encountered a fatal error.
     ///
     /// These types of errors stop the pipeline.
     #[error(transparent)]
-    Fatal(Box<dyn std::error::Error + Send + Sync>),
+    Fatal(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl StageError {

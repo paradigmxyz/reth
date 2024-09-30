@@ -3,14 +3,13 @@ use crate::{
     CanonStateSubscriptions,
 };
 use alloy_consensus::TxEip1559;
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{Address, BlockNumber, Sealable, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use rand::{thread_rng, Rng};
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    alloy_primitives::Sealable,
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     BlockBody, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,

@@ -2,9 +2,9 @@
 //! `TransactionSignedEcRecovered`
 
 use crate::{
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, B256,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
 };
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use core::ops::Deref;
 
 /// Represents various different transaction formats used in reth.

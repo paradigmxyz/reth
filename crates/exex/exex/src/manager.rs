@@ -333,35 +333,40 @@ where
         let exex_finished_heights = self
             .exex_handles
             .iter()
-            // Get ExEx ID and hash of the finished height for each ExEx
-            .map(|exex_handle| {
-                (&exex_handle.id, exex_handle.finished_height.map(|block| block.hash))
-            })
+            // Get ID and finished height for each ExEx
+            .map(|exex_handle| (&exex_handle.id, exex_handle.finished_height))
             // Deduplicate all hashes
-            .unique_by(|(_, hash)| *hash)
+            .unique_by(|(_, num_hash)| num_hash.map(|num_hash| num_hash.hash))
             // Check if hashes are canonical
-            .map(|(exex_id, hash)| {
-                hash.map_or(Ok((exex_id, hash, false)), |hash| {
+            .map(|(exex_id, num_hash)| {
+                num_hash.map_or(Ok((exex_id, num_hash, false)), |num_hash| {
                     self.provider
-                        .is_known(&hash)
-                        // Save the ExEx ID, hash of the finished height, and whether the hash
-                        // is canonical
-                        .map(|is_canonical| (exex_id, Some(hash), is_canonical))
+                        .is_known(&num_hash.hash)
+                        // Save the ExEx ID, finished height, and whether the hash is canonical
+                        .map(|is_canonical| (exex_id, Some(num_hash), is_canonical))
                 })
             })
             // We collect here to be able to log the unfinalized ExExes below
             .collect::<Result<Vec<_>, _>>()?;
         if exex_finished_heights.iter().all(|(_, _, is_canonical)| *is_canonical) {
             // If there is a finalized header and all ExExs are on the canonical chain, finalize
-            // the WAL with the new finalized header
-            self.wal.finalize(finalized_header.num_hash())?;
+            // the WAL with the lowest finished height among all ExExes
+            let lowest_finished_height = exex_finished_heights
+                .iter()
+                .copied()
+                .filter_map(|(_, num_hash, _)| num_hash)
+                .min_by_key(|num_hash| num_hash.number);
+            self.wal
+                .finalize(lowest_finished_height.expect("ExExManager has at least one ExEx"))?;
         } else {
             let unfinalized_exexes = exex_finished_heights
                 .into_iter()
-                .filter_map(|(exex_id, hash, is_canonical)| {
-                    is_canonical.not().then_some((exex_id, hash))
+                .filter_map(|(exex_id, num_hash, is_canonical)| {
+                    is_canonical.not().then_some((exex_id, num_hash))
                 })
-                .format_with(", ", |(exex_id, hash), f| f(&format_args!("{exex_id:?} = {hash:?}")));
+                .format_with(", ", |(exex_id, num_hash), f| {
+                    f(&format_args!("{exex_id:?} = {num_hash:?}"))
+                });
             debug!(
                 %unfinalized_exexes,
                 "Not all ExExes are on the canonical chain, can't finalize the WAL"

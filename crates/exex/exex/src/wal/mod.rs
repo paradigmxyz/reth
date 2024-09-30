@@ -15,8 +15,8 @@ use std::{
 };
 
 use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use reth_exex_types::ExExNotification;
-use reth_primitives::B256;
 use reth_tracing::tracing::{debug, instrument};
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
@@ -189,10 +189,10 @@ impl WalHandle {
 mod tests {
     use std::sync::Arc;
 
+    use alloy_primitives::B256;
     use eyre::OptionExt;
     use itertools::Itertools;
     use reth_exex_types::ExExNotification;
-    use reth_primitives::B256;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,

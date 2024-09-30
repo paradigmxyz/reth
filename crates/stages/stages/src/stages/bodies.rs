@@ -622,7 +622,7 @@ mod tests {
                 UnwindStageTestRunner,
             },
         };
-        use alloy_primitives::{BlockHash, BlockNumber, TxNumber};
+        use alloy_primitives::{BlockHash, BlockNumber, TxNumber, B256};
         use futures_util::Stream;
         use reth_db::{static_file::HeaderMask, tables};
         use reth_db_api::{
@@ -637,9 +637,7 @@ mod tests {
             },
             error::DownloadResult,
         };
-        use reth_primitives::{
-            BlockBody, Header, SealedBlock, SealedHeader, StaticFileSegment, B256,
-        };
+        use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader, StaticFileSegment};
         use reth_provider::{
             providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
             ProviderFactory, StaticFileProviderFactory, TransactionsProvider,

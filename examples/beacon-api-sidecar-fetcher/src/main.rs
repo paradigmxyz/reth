@@ -18,11 +18,12 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
+use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
 use reth::{
-    args::utils::DefaultChainSpecParser, builder::NodeHandle, cli::Cli, primitives::B256,
+    args::utils::DefaultChainSpecParser, builder::NodeHandle, cli::Cli,
     providers::CanonStateSubscriptions,
 };
 use reth_node_ethereum::EthereumNode;
