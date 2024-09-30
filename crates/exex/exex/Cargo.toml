@@ -42,7 +42,6 @@ tokio-util.workspace = true
 tokio.workspace = true
 
 ## misc
-dashmap.workspace = true
 eyre.workspace = true
 itertools.workspace = true
 metrics.workspace = true

@@ -10,7 +10,6 @@ license.workspace = true
 reth.workspace = true
 reth-chainspec.workspace = true
 reth-node-core.workspace = true
-reth-primitives.workspace = true
 reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 futures-util.workspace = true
 

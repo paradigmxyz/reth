@@ -2692,7 +2692,6 @@ dependencies = [
  "reth-chainspec",
  "reth-node-core",
  "reth-node-ethereum",
- "reth-primitives",
  "serde_json",
  "tokio",
 ]
@@ -7330,7 +7329,6 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
- "dashmap 6.1.0",
  "eyre",
  "futures",
  "itertools 0.13.0",
