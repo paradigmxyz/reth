@@ -217,7 +217,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             return fetch_from_db(provider)
         }
 
-        for block_state in in_mem_chain {
+        for block_state in in_mem_chain.into_iter().rev() {
             let executed_block = block_state.block();
             let block = executed_block.block();
 
