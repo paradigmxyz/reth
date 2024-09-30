@@ -14,7 +14,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::SystemCaller,
+    system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -130,16 +130,19 @@ where
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
     /// [`EthBlockExecutor::post_execution`].
-    fn execute_state_transitions<Ext, DB>(
+    fn execute_state_transitions<Ext, DB, F>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        state_hook: Option<F>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
+        F: OnStateHook,
     {
-        let mut system_caller = SystemCaller::new(&self.evm_config, &self.chain_spec);
+        let mut system_caller =
+            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
 
         system_caller.apply_pre_execution_changes(block, &mut evm)?;
 
@@ -169,7 +172,8 @@ where
                     error: Box::new(new_err),
                 }
             })?;
-            evm.db_mut().commit(state);
+            evm.db_mut().commit(state.clone());
+            system_caller.on_state(&ResultAndState { result: result.clone(), state });
 
             // append gas used
             cumulative_gas_used += result.gas_used();
@@ -260,17 +264,29 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
+    fn execute_without_verification(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+        self.execute_without_verification_with_state_hook(block, total_difficulty, None::<NoopHook>)
+    }
+
     /// Execute a single block and apply the state changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block, the total gas used and the list of
     /// EIP-7685 [requests](Request).
     ///
     /// Returns an error if execution fails.
-    fn execute_without_verification(
+    fn execute_without_verification_with_state_hook<F>(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+        state_hook: Option<F>,
+    ) -> Result<EthExecuteOutput, BlockExecutionError>
+    where
+        F: OnStateHook,
+    {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -278,7 +294,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, evm)
+            self.executor.execute_state_transitions(block, evm, state_hook)
         }?;
 
         // 3. apply post execution changes
@@ -366,6 +382,27 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+    }
+
+    fn execute_with_state_hook<F>(
+        mut self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+        let EthExecuteOutput { receipts, requests, gas_used } = self
+            .execute_without_verification_with_state_hook(
+                block,
+                total_difficulty,
+                Some(state_hook),
+            )?;
+
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
