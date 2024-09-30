@@ -1608,7 +1608,26 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider2<N> {
                 .collect();
             Ok(changesets)
         } else {
-            self.database.provider()?.storage_changeset(block_number)
+            // Perform checks on whether or not changesets exist for the block.
+            let provider = self.database.provider()?;
+
+            // No prune checkpoint means history should exist and we should `unwrap_or(true)`
+            let storage_history_exists = provider
+                .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                .and_then(|checkpoint| {
+                    // return true if the block number is ahead of the prune checkpoint.
+                    //
+                    // The checkpoint stores the highest pruned block number, so we should make
+                    // sure the block_number is strictly greater.
+                    checkpoint.block_number.map(|checkpoint| block_number > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !storage_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+
+            provider.storage_changeset(block_number)
         }
     }
 }
@@ -1633,7 +1652,25 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
                 .collect();
             Ok(changesets)
         } else {
-            self.database.provider()?.account_block_changeset(block_number)
+            // Perform checks on whether or not changesets exist for the block.
+            let provider = self.database.provider()?;
+            // No prune checkpoint means history should exist and we should `unwrap_or(true)`
+            let account_history_exists = provider
+                .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                .and_then(|checkpoint| {
+                    // return true if the block number is ahead of the prune checkpoint.
+                    //
+                    // The checkpoint stores the highest pruned block number, so we should make
+                    // sure the block_number is strictly greater.
+                    checkpoint.block_number.map(|checkpoint| block_number > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !account_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+
+            provider.account_block_changeset(block_number)
         }
     }
 }
