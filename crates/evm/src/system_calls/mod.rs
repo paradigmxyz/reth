@@ -22,7 +22,6 @@ mod eip7251;
 pub use eip7251::*;
 
 /// A hook that is called after each state change.
-// TODO impl for &mut
 pub trait OnStateHook {
     /// Invoked with the result and state after each system call.
     fn on_state(&mut self, state: &ResultAndState);
