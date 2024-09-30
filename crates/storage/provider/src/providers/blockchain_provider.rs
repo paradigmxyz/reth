@@ -177,7 +177,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         let state = state.as_ref();
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
+        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
     /// Returns:
