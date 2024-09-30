@@ -12,6 +12,29 @@ description = "OP primitive types"
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
+# reth
+reth-primitives = { workspace = true, features = ["optimism"] }
 reth-primitives-traits.workspace = true
+reth-codecs = { workspace = true, optional = true }
+
+# op-reth
+reth-optimism-consensus.workspace = true
+reth-optimism-chainspec.workspace = true
+
+# ethereum
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+
+# codecs
+modular-bitfield = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+serde.workspace = true
+
+# misc
+derive_more = { workspace = true, default-features = false, features = ["deref"] }
+
+[features]
+default = ["std", "reth-codec"]
+std = ["reth-primitives-traits/std"]
+reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
