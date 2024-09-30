@@ -217,6 +217,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             return fetch_from_db(provider)
         }
 
+        // Iterate from the lowest block to the highest
         for block_state in in_mem_chain.into_iter().rev() {
             let executed_block = block_state.block();
             let block = executed_block.block();
