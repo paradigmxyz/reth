@@ -97,5 +97,8 @@ pub use optimism::*;
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::block::serde_bincode_compat::*;
+    pub use super::{
+        block::serde_bincode_compat::*,
+        transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
+    };
 }

@@ -2131,7 +2131,7 @@ mod tests {
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
-pub(super) mod serde_bincode_compat {
+pub mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy},
@@ -2157,7 +2157,7 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    enum Transaction<'a> {
+    pub enum Transaction<'a> {
         Legacy(TxLegacy<'a>),
         Eip2930(TxEip2930<'a>),
         Eip1559(TxEip1559<'a>),
