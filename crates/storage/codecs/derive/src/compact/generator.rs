@@ -33,12 +33,7 @@ pub fn generate_from_to(
     } else {
         quote! {
             // Encode a placeholder for the flags which we fill later.
-            let start_ptr = buffer.chunk_mut().as_mut_ptr();
             if Self::BITFLAG_ENCODED_BYTES > 0 {
-                debug_assert!(
-                    buffer.chunk_mut().len() >= Self::BITFLAG_ENCODED_BYTES,
-                    "`BufMut` chunk is too small to encode flags; plz use contiguous buffers",
-                );
                 buffer.put_slice(&[0; Self::BITFLAG_ENCODED_BYTES]);
             }
 
@@ -46,10 +41,8 @@ pub fn generate_from_to(
             debug_assert_eq!(Self::BITFLAG_ENCODED_BYTES, flags.len());
 
             if Self::BITFLAG_ENCODED_BYTES > 0 {
-                // SAFETY: We checked that the first chunk is at least `Self::BITFLAG_ENCODED_BYTES`
-                // long.
-                let flag_bytes = unsafe { core::slice::from_raw_parts_mut(start_ptr, flags.len()) };
-                debug_assert_eq!(flag_bytes, &[0; Self::BITFLAG_ENCODED_BYTES][..]);
+                // TODO
+                // let flag_bytes = unsafe { core::slice::from_raw_parts_mut(start_ptr, flags.len()) };
                 flag_bytes.copy_from_slice(&flags);
             }
         }
