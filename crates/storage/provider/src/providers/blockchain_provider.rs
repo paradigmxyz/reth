@@ -224,7 +224,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             for tx_index in 0..block.body.transactions.len() {
                 if id == in_memory_tx_num {
                     return fetch_from_block_state(tx_index, block_state)
-                    // return Ok((provider, Some((Some(block_state), tx_index))))
                 }
 
                 in_memory_tx_num += 1;
