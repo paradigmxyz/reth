@@ -130,24 +130,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
     ///
-    /// 1. Iterate over the [`BlockBodyIndices`][reth_db::BlockBodyIndices] table to get all the
-    ///    transaction ids.
-    /// 2. Iterate over the [`StorageChangeSets`][reth_db::StorageChangeSets] table and the
-    ///    [`AccountChangeSets`][reth_db::AccountChangeSets] tables in reverse order to reconstruct
-    ///    the changesets.
-    ///    - In order to have both the old and new values in the changesets, we also access the
-    ///      plain state tables.
-    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
-    ///    we:
-    ///     1. Take the old value from the changeset
-    ///     2. Take the new value from the plain state
-    ///     3. Save the old value to the local state
-    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
-    ///    have seen before we:
-    ///     1. Take the old value from the changeset
-    ///     2. Take the new value from the local state
-    ///     3. Set the local state to the value in the changeset
-    ///
     /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
     pub fn get_state(
         &self,
@@ -1687,6 +1669,15 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
+    /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
+    ///
+    /// If data for the block does not exist, this will return [`None`].
+    ///
+    /// NOTE: This cannot be called safely in a loop outside of the blockchain tree thread. This is
+    /// because the [`CanonicalInMemoryState`] could change during a reorg, causing results to be
+    /// inconsistent. Currently this can safely be called within the blockchain tree thread,
+    /// because the tree thread is responsible for modifying the [`CanonicalInMemoryState`] in the
+    /// first place.
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
             let state = state.block_ref().execution_outcome().clone();
