@@ -129,9 +129,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// recent in-memory blocks in case of overlaps.
     ///
     /// * `fetch_db_range` function (`F`) provides access to the database provider, allowing the
-    /// user to retrieve the required range of items from the database.
-    /// * `map_block_state_item` function (`G`) provides each block of the range in the in-memory state,
-    /// allowing for selection or filtering for the desired data.
+    ///   user to retrieve the required range of items from the database.
+    /// * `map_block_state_item` function (`G`) provides each block of the range in the in-memory
+    ///   state, allowing for selection or filtering for the desired data.
     fn fetch_db_mem_range_while<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
