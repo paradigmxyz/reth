@@ -7329,11 +7329,15 @@ version = "1.0.7"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
+ "arbitrary",
+ "bincode",
+ "rand 0.8.5",
  "reth-execution-errors",
  "reth-primitives",
  "reth-trie",
  "revm",
  "serde",
+ "serde_with",
 ]
 
 [[package]]
@@ -7418,8 +7422,14 @@ version = "1.0.7"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
- "reth-provider",
+ "arbitrary",
+ "bincode",
+ "rand 0.8.5",
+ "reth-chain-state",
+ "reth-execution-types",
+ "reth-primitives",
  "serde",
+ "serde_with",
 ]
 
 [[package]]
