@@ -181,64 +181,65 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     }
 
     /// Returns:
-    /// 1. The block state as [`Some`] if the block is in memory, and [`None`] if the block is in
+    /// 1. The database provider. Instantiated **after** calling [`CanonicalInMemoryState::canonical_chain`].
+    /// 2. The block state as [`Some`] if the block is in memory, and [`None`] if the block is in
     ///    database.
-    /// 2. The in-block transaction index.
+    /// 3. The in-block transaction index.
     fn block_state_by_tx_id(
         &self,
-        provider: &DatabaseProviderRO<N::DB, N::ChainSpec>,
         id: TxNumber,
-    ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
-        // Get the last block number stored in the database
-        let last_database_block_number = provider.last_block_number()?;
+    ) -> ProviderResult<(
+        DatabaseProviderRO<N::DB, N::ChainSpec>,
+        Option<(Option<Arc<BlockState>>, usize)>,
+    )> {
+        let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let provider = self.database.provider()?;
+
+        // Get the last block number stored in the database which does NOT overlap with in-memory
+        // chain.
+        let mut last_database_block_number = provider.last_block_number()?;
+        if let Some(lowest_in_mem_block) = in_mem_chain.last() {
+            if lowest_in_mem_block.number() <= last_database_block_number {
+                last_database_block_number = lowest_in_mem_block.number().saturating_sub(1);
+            }
+        }
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
         let Some(last_block_body_index) =
             provider.block_body_indices(last_database_block_number)?
         else {
-            return Ok(None);
+            return Ok((provider, None));
         };
         let mut in_memory_tx_num = last_block_body_index.next_tx_num();
 
         if id < in_memory_tx_num {
             // If the transaction number is less than the first in-memory transaction number, make a
             // database lookup
-            let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
+            let Some(block_number) = provider.transaction_block(id)? else {
+                return Ok((provider, None))
+            };
             let Some(body_index) = provider.block_body_indices(block_number)? else {
-                return Ok(None)
+                return Ok((provider, None))
             };
             let tx_index = body_index.last_tx_num() - id;
-            Ok(Some((None, tx_index as usize)))
-        } else {
-            // Otherwise, iterate through in-memory blocks and find the transaction with the
-            // matching number
-
-            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
-            let last_in_memory_block_number =
-                self.canonical_in_memory_state.get_canonical_block_number();
-
-            for block_number in first_in_memory_block_number..=last_in_memory_block_number {
-                let Some(block_state) =
-                    self.canonical_in_memory_state.state_by_number(block_number)
-                else {
-                    return Ok(None);
-                };
-
-                let executed_block = block_state.block();
-                let block = executed_block.block();
-
-                for tx_index in 0..block.body.transactions.len() {
-                    if id == in_memory_tx_num {
-                        return Ok(Some((Some(block_state), tx_index)))
-                    }
-
-                    in_memory_tx_num += 1;
-                }
-            }
-
-            Ok(None)
+            return Ok((provider, Some((None, tx_index as usize))))
         }
+
+        for block_state in in_mem_chain {
+            let executed_block = block_state.block();
+            let block = executed_block.block();
+
+            for tx_index in 0..block.body.transactions.len() {
+                if id == in_memory_tx_num {
+                    return Ok((provider, Some((Some(block_state), tx_index))))
+                }
+
+                in_memory_tx_num += 1;
+            }
+        }
+
+        Ok((provider, None))
     }
 }
 
@@ -686,8 +687,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
+        let (provider, Some((block_state, tx_index))) = self.block_state_by_tx_id(id)? else {
             return Ok(None)
         };
 
@@ -703,8 +703,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
+        let (provider, Some((block_state, tx_index))) = self.block_state_by_tx_id(id)? else {
             return Ok(None)
         };
 
@@ -745,11 +744,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let provider = self.database.provider()?;
-        Ok(self
-            .block_state_by_tx_id(&provider, id)?
-            .and_then(|(block_state, _)| block_state)
-            .map(|block_state| block_state.block().block().number))
+        let (provider, Some((block_state, _))) = self.block_state_by_tx_id(id)? else { return Ok(None) };
+
+        if let Some(block_state) = block_state {
+            Ok(Some(block_state.block().block().number))
+        } else {
+            provider.transaction_block(id)
+        }
     }
 
     fn transactions_by_block(
@@ -821,8 +822,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
+        let (provider, Some((block_state, tx_index))) = self.block_state_by_tx_id(id)? else {
             return Ok(None)
         };
 
@@ -843,8 +843,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
+        let (provider, Some((block_state, tx_index))) = self.block_state_by_tx_id(id)? else {
             return Ok(None)
         };
 
