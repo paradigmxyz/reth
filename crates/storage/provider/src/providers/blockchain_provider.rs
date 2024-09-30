@@ -129,7 +129,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// recent in-memory blocks in case of overlaps.
     ///
     /// * `fetch_db_range` function (`F`) provides access to the database provider, allowing the
-    ///   user to retrieve the required range of items from the database.
+    ///   user to retrieve the required items from the database using [`RangeInclusive`].
     /// * `map_block_state_item` function (`G`) provides each block of the range in the in-memory
     ///   state, allowing for selection or filtering for the desired data.
     fn fetch_db_mem_range_while<T, F, G, P>(
@@ -204,7 +204,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         }
 
         if let Some((in_memory_chain, in_memory_range)) = in_memory {
-            for (num, block) in in_memory_range.zip(in_memory_chain) {
+            for (num, block) in in_memory_range.zip(in_memory_chain.into_iter().rev()) {
                 debug_assert!(num == block.number());
                 if let Some(item) = map_block_state_item(block, &mut predicate) {
                     items.push(item);
@@ -434,9 +434,9 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         self.fetch_db_mem_range_while(
-            start..=end,
-            |db_provider, range, _| {
-                db_provider.canonical_hashes_range(*range.start(), *range.end())
+            start..end,
+            |db_provider, inclusive_range, _| {
+                db_provider.canonical_hashes_range(*inclusive_range.start(), *inclusive_range.end() + 1)
             },
             |block_state, _| Some(block_state.hash()),
             |_| true,
