@@ -18,7 +18,7 @@ pub struct BlockCache {
     /// the cache with the same file ID. I.e. for each notification, there may be multiple blocks
     /// in the cache.
     files: RwLock<BTreeMap<u64, VecDeque<CachedBlock>>>,
-    /// A mapping of committed blocks `Block Hash -> Block`.
+    /// A mapping of committed blocks `Block Hash -> (File ID, Block)`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
     /// block.
