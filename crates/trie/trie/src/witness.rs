@@ -17,7 +17,7 @@ use itertools::{Either, Itertools};
 use reth_execution_errors::TrieWitnessError;
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
-    BranchNode, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
+    BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
 
 /// State transition witness for the trie.
@@ -110,8 +110,10 @@ where
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_trie_nodes = BTreeMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
-            let storage_multiproof =
-                account_multiproof.storages.remove(&hashed_address).unwrap_or_default();
+            let storage_multiproof = account_multiproof
+                .storages
+                .remove(&hashed_address)
+                .unwrap_or_else(StorageMultiProof::empty);
 
             // Gather and record account trie nodes.
             let account = state
@@ -215,7 +217,8 @@ where
         proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
     ) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, TrieWitnessError> {
         let mut trie_nodes = BTreeMap::default();
-        for (path, encoded) in proof {
+        let mut proof_iter = proof.into_iter().enumerate().peekable();
+        while let Some((idx, (path, encoded))) = proof_iter.next() {
             // Record the node in witness.
             self.witness.insert(keccak256(encoded.as_ref()), encoded.clone());
 
@@ -239,7 +242,11 @@ where
                         trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
                     }
                 }
-                TrieNode::EmptyRoot => return Err(TrieWitnessError::UnexpectedEmptyRoot(next_path)),
+                TrieNode::EmptyRoot => {
+                    if idx != 0 || proof_iter.peek().is_some() {
+                        return Err(TrieWitnessError::UnexpectedEmptyRoot(next_path))
+                    }
+                }
             };
         }
 
