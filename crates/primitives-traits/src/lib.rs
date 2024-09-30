@@ -1,4 +1,4 @@
-//! Common abstracted types in reth.
+//! Common abstracted types in Reth.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -43,3 +43,15 @@ pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
 pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
+
+/// Bincode-compatible serde implementations for common abstracted types in Reth.
+///
+/// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
+/// Reth types require optional serialization for RPC compatibility. This module makes so that
+/// all fields are serialized.
+///
+/// Read more: <https://github.com/bincode-org/bincode/issues/326>
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::header::serde_bincode_compat::*;
+}

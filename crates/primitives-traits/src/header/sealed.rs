@@ -140,3 +140,95 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
         Ok(Self::new(header, seal))
     }
 }
+
+/// Bincode-compatible [`SealedHeader`] serde implementation.
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    use alloy_consensus::serde_bincode_compat::Header;
+    use alloy_primitives::BlockHash;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::SealedHeader`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives_traits::{header::SealedHeader, serde_bincode_compat};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::header::SealedHeader")]
+    ///     header: SealedHeader,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SealedHeader<'a> {
+        hash: BlockHash,
+        header: Header<'a>,
+    }
+
+    impl<'a> From<&'a super::SealedHeader> for SealedHeader<'a> {
+        fn from(value: &'a super::SealedHeader) -> Self {
+            Self { hash: value.hash, header: Header::from(&value.header) }
+        }
+    }
+
+    impl<'a> From<SealedHeader<'a>> for super::SealedHeader {
+        fn from(value: SealedHeader<'a>) -> Self {
+            Self { hash: value.hash, header: value.header.into() }
+        }
+    }
+
+    impl<'a> SerializeAs<super::SealedHeader> for SealedHeader<'a> {
+        fn serialize_as<S>(source: &super::SealedHeader, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            SealedHeader::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::SealedHeader> for SealedHeader<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedHeader, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            SealedHeader::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, SealedHeader};
+
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_testing_utils::generators;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_sealed_header_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::SealedHeader")]
+                transaction: SealedHeader,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: SealedHeader::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                    .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+    }
+}

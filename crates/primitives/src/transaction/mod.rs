@@ -1416,7 +1416,14 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         #[allow(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
-        let mut signature = Signature::arbitrary(u)?;
+
+        let secp = secp256k1::Secp256k1::new();
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let mut signature = crate::sign_message(
+            B256::from_slice(&key_pair.secret_bytes()[..]),
+            transaction.signature_hash(),
+        )
+        .unwrap();
 
         signature = if matches!(transaction, Transaction::Legacy(_)) {
             if let Some(chain_id) = transaction.chain_id() {
@@ -1967,5 +1974,212 @@ mod tests {
         let res = TransactionSigned::decode_2718(&mut &data[..]);
 
         assert!(res.is_err());
+    }
+}
+
+/// Bincode-compatible transaction type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_consensus::{
+        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy},
+        TxEip4844, TxEip7702,
+    };
+    use alloy_primitives::{Signature, TxHash};
+    #[cfg(feature = "optimism")]
+    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::Transaction`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives_traits::{serde_bincode_compat, Transaction};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::transaction::Transaction")]
+    ///     transaction: Transaction,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
+    pub enum Transaction<'a> {
+        Legacy(TxLegacy<'a>),
+        Eip2930(TxEip2930<'a>),
+        Eip1559(TxEip1559<'a>),
+        Eip4844(Cow<'a, TxEip4844>),
+        Eip7702(Cow<'a, TxEip7702>),
+        #[cfg(feature = "optimism")]
+        #[cfg(feature = "optimism")]
+        Deposit(TxDeposit<'a>),
+    }
+
+    impl<'a> From<&'a super::Transaction> for Transaction<'a> {
+        fn from(value: &'a super::Transaction) -> Self {
+            match value {
+                super::Transaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
+                super::Transaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
+                super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
+                super::Transaction::Eip7702(tx) => Self::Eip7702(Cow::Borrowed(tx)),
+                #[cfg(feature = "optimism")]
+                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
+            }
+        }
+    }
+
+    impl<'a> From<Transaction<'a>> for super::Transaction {
+        fn from(value: Transaction<'a>) -> Self {
+            match value {
+                Transaction::Legacy(tx) => Self::Legacy(tx.into()),
+                Transaction::Eip2930(tx) => Self::Eip2930(tx.into()),
+                Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
+                Transaction::Eip7702(tx) => Self::Eip7702(tx.into_owned()),
+                #[cfg(feature = "optimism")]
+                Transaction::Deposit(tx) => Self::Deposit(tx.into()),
+            }
+        }
+    }
+
+    impl<'a> SerializeAs<super::Transaction> for Transaction<'a> {
+        fn serialize_as<S>(source: &super::Transaction, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Transaction::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::Transaction> for Transaction<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Transaction, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Transaction::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives_traits::{serde_bincode_compat, TransactionSigned};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::transaction::TransactionSigned")]
+    ///     transaction: TransactionSigned,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TransactionSigned<'a> {
+        hash: TxHash,
+        signature: Signature,
+        transaction: Transaction<'a>,
+    }
+
+    impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
+        fn from(value: &'a super::TransactionSigned) -> Self {
+            Self {
+                hash: value.hash,
+                signature: value.signature,
+                transaction: Transaction::from(&value.transaction),
+            }
+        }
+    }
+
+    impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
+        fn from(value: TransactionSigned<'a>) -> Self {
+            Self {
+                hash: value.hash,
+                signature: value.signature,
+                transaction: value.transaction.into(),
+            }
+        }
+    }
+
+    impl<'a> SerializeAs<super::TransactionSigned> for TransactionSigned<'a> {
+        fn serialize_as<S>(
+            source: &super::TransactionSigned,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TransactionSigned::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TransactionSigned> for TransactionSigned<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TransactionSigned, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TransactionSigned::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
+
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_testing_utils::generators;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_transaction_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::Transaction")]
+                transaction: Transaction,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: Transaction::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                    .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_transaction_signed_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::TransactionSigned")]
+                transaction: TransactionSigned,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: TransactionSigned::arbitrary(&mut arbitrary::Unstructured::new(
+                    &bytes,
+                ))
+                .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
     }
 }
