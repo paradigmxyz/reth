@@ -181,7 +181,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     }
 
     /// Fetches data from either in-memory state or storage by [`TxNumber`].
-    fn fetch_db_mem_by_tx_id<S, M, R>(
+    fn get_in_memory_or_database_by_tx_id<S, M, R>(
         &self,
         id: TxNumber,
         fetch_from_db: S,
@@ -678,7 +678,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.fetch_db_mem_by_tx_id(
+        self.get_in_memory_or_database_by_tx_id(
             id,
             |provider| provider.transaction_by_id(id),
             |tx_index, block_state| {
@@ -691,7 +691,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.fetch_db_mem_by_tx_id(
+        self.get_in_memory_or_database_by_tx_id(
             id,
             |provider| provider.transaction_by_id_no_hash(id),
             |tx_index, block_state| {
@@ -729,7 +729,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.fetch_db_mem_by_tx_id(
+        self.get_in_memory_or_database_by_tx_id(
             id,
             |provider| provider.transaction_block(id),
             |_, block_state| Ok(Some(block_state.block().block().number)),
@@ -805,7 +805,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.fetch_db_mem_by_tx_id(
+        self.get_in_memory_or_database_by_tx_id(
             id,
             |provider| provider.transaction_sender(id),
             |tx_index, block_state| {
@@ -823,7 +823,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.fetch_db_mem_by_tx_id(
+        self.get_in_memory_or_database_by_tx_id(
             id,
             |provider| provider.receipt(id),
             |tx_index, block_state| {
@@ -3840,7 +3840,7 @@ mod tests {
         let result = provider.transaction_block(tx_id)?;
         assert!(
             result.is_none(),
-            "`fetch_db_mem_by_tx_id` should be None if the block is in database"
+            "`get_in_memory_or_database_by_tx_id` should be None if the block is in database"
         );
 
         // Ensure that invalid transaction ID returns None
