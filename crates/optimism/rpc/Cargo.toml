@@ -14,9 +14,9 @@ workspace = true
 [dependencies]
 # reth
 reth-evm.workspace = true
-reth-primitives.workspace = true
-reth-provider.workspace = true
-reth-rpc-eth-api.workspace = true
+reth-primitives = { workspace = true, features = ["optimism"] }
+reth-provider = { workspace = true, features = ["optimism"] }
+reth-rpc-eth-api = { workspace = true, features = ["optimism"] }
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
@@ -40,7 +40,7 @@ alloy-rpc-types.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
 op-alloy-consensus.workspace = true
-revm.workspace = true
+revm = { workspace = true, features = ["optimism"] }
 
 # async
 parking_lot.workspace = true
@@ -58,12 +58,3 @@ derive_more.workspace = true
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
-
-[features]
-optimism = [
-    "reth-optimism-evm/optimism",
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-rpc-eth-api/optimism",
-    "revm/optimism",
-]

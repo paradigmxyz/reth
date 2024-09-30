@@ -11,13 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["optimism"] }
 
 [dev-dependencies]
 reth-codecs.workspace = true
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
-
-[features]
-optimism = ["reth-primitives/optimism"]

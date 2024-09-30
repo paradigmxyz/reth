@@ -16,9 +16,9 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
-reth-revm.workspace = true
+reth-revm = { workspace = true, features = ["optimism"] }
 reth-execution-errors.workspace = true
-reth-execution-types.workspace = true
+reth-execution-types = { workspace = true, features = ["optimism"] }
 reth-prune-types.workspace = true
 
 # ethereum
@@ -31,7 +31,7 @@ reth-optimism-forks.workspace = true
 
 # revm
 revm.workspace = true
-revm-primitives.workspace = true
+revm-primitives = { workspace = true, features = ["optimism"] }
 
 # misc
 thiserror.workspace = true
@@ -42,11 +42,3 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
-
-[features]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-revm/optimism",
-]

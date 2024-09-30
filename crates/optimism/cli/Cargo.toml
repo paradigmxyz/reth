@@ -18,14 +18,14 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["optimism"] }
 reth-prune.workspace = true
 reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-execution-types.workspace = true
-reth-node-core.workspace = true
+reth-node-core = { workspace = true, features = ["optimism"] }
 reth-optimism-node.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["optimism"] }
 
 ## optimism
 reth-optimism-primitives.workspace = true
@@ -69,13 +69,6 @@ reth-db-common.workspace = true
 reth-cli-commands.workspace = true
 
 [features]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-optimism-evm/optimism",
-    "reth-provider/optimism",
-    "reth-node-core/optimism",
-    "reth-optimism-node/optimism",
-]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
