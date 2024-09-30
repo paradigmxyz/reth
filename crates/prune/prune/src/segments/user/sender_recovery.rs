@@ -1,14 +1,15 @@
-use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment},
-    PrunerError,
-};
 use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use tracing::{instrument, trace};
+
+use crate::{
+    db_ext::DbTxPruneExt,
+    segments::{PruneInput, Segment},
+    PrunerError,
+};
 
 #[derive(Debug)]
 pub struct SenderRecovery {
@@ -82,7 +83,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, Segment, SegmentOutput, SenderRecovery};
+    use std::ops::Sub;
+
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -90,11 +92,13 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
+    use reth_primitives::SignedTransaction;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::ops::Sub;
+
+    use crate::segments::{PruneInput, Segment, SegmentOutput, SenderRecovery};
 
     #[test]
     fn prune() {

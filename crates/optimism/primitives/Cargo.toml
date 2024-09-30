@@ -25,6 +25,7 @@ reth-optimism-chainspec.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
+alloy-eips.workspace = true
 
 # codecs
 modular-bitfield = { workspace = true, optional = true }
@@ -33,8 +34,21 @@ serde.workspace = true
 
 # misc
 derive_more = { workspace = true, default-features = false, features = ["deref"] }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest-arbitrary-interop.workspace = true
+rand.workspace = true
 
 [features]
 default = ["std", "reth-codec"]
 std = ["reth-primitives-traits/std"]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
+arbitrary = [
+    "reth-primitives-traits/arbitrary",
+    "alloy-eips/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "reth-codec",
+]

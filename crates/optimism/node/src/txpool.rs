@@ -229,19 +229,20 @@ pub struct OpL1BlockInfo {
 
 #[cfg(test)]
 mod tests {
-    use crate::txpool::OpTransactionValidator;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{TxKind, U256};
     use reth::primitives::Signature;
     use reth_chainspec::MAINNET;
     use reth_primitives::{
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
+        SignedTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
     };
+
+    use crate::txpool::OpTransactionValidator;
 
     #[test]
     fn validate_optimism_transaction() {

@@ -299,7 +299,8 @@ pub fn validate_against_parent_4844(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::ops::RangeBounds;
+
     use alloy_consensus::TxEip4844;
     use alloy_primitives::{
         hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Parity, Sealable, U256,
@@ -308,13 +309,14 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        proofs, Account, BlockBody, BlockHashOrNumber, Signature, Transaction, TransactionSigned,
-        Withdrawal, Withdrawals,
+        proofs, Account, BlockBody, BlockHashOrNumber, Signature, SignedTransaction, Transaction,
+        TransactionSigned, Withdrawal, Withdrawals,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
     };
-    use std::ops::RangeBounds;
+
+    use super::*;
 
     mock! {
         WithdrawalsProvider {}

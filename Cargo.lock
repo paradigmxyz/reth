@@ -8123,10 +8123,15 @@ name = "reth-optimism-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "derive_more",
  "modular-bitfield",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "reth-codecs",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
@@ -8371,6 +8376,7 @@ dependencies = [
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
+ "reth-primitives",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",

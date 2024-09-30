@@ -6,14 +6,14 @@ use reth_network::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
-use reth_primitives::{Signature, TransactionSigned};
+use reth_primitives::{Signature, SignedTransaction, TransactionSigned};
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
     TransactionPool,
 };
-
 use tokio::sync::oneshot;
+
 // peer0: `GetPooledTransactions` requester
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]

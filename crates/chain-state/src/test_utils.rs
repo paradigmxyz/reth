@@ -1,7 +1,9 @@
-use crate::{
-    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions,
+use std::{
+    collections::HashMap,
+    ops::Range,
+    sync::{Arc, Mutex},
 };
+
 use alloy_consensus::TxEip1559;
 use alloy_primitives::{Address, BlockNumber, Sealable, B256, U256};
 use alloy_signer::SignerSync;
@@ -13,16 +15,16 @@ use reth_primitives::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     BlockBody, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+    SealedHeader, SignedTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
-use std::{
-    collections::HashMap,
-    ops::Range,
-    sync::{Arc, Mutex},
-};
 use tokio::sync::broadcast::{self, Sender};
+
+use crate::{
+    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
+    CanonStateSubscriptions,
+};
 
 /// Functionality to build blocks for tests and help with assertions about
 /// their execution.

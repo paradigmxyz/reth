@@ -1,3 +1,5 @@
+use std::{fmt::Debug, ops::Range, sync::mpsc};
+
 use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
@@ -17,7 +19,6 @@ use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
     StageId, UnwindInput, UnwindOutput,
 };
-use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 
@@ -337,7 +338,7 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{SealedBlock, TransactionSigned};
+    use reth_primitives::{SealedBlock, SignedTransaction, TransactionSigned};
     use reth_provider::{
         providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
         StaticFileProviderFactory, TransactionsProvider,
@@ -348,11 +349,12 @@ mod tests {
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
 
-    use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
+
+    use super::*;
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
 

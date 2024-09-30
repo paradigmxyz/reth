@@ -15,8 +15,8 @@ use derive_more::{AsRef, Deref};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BlobTransaction, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, EIP4844_TX_TYPE_ID,
+    BlobTransaction, BlobTransactionSidecar, Signature, SignedTransaction, Transaction,
+    TransactionSigned, TransactionSignedEcRecovered, EIP4844_TX_TYPE_ID,
 };
 
 use super::{
@@ -773,9 +773,12 @@ impl TryFrom<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecove
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy_primitives::{address, hex};
     use assert_matches::assert_matches;
+
+    use crate::SignedTransaction;
+
+    use super::*;
 
     #[test]
     fn invalid_legacy_pooled_decoding_input_too_short() {
