@@ -364,19 +364,19 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> 
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(*block_hash) {
-            return Ok(Some(block_state.block().block().header.header().clone()));
-        }
-
-        self.database.header(block_hash)
+        self.get_in_memory_or_storage_by_block(
+            block_hash.into(),
+            |db_provider| db_provider.header(block_hash),
+            |block_state| Ok(Some(block_state.block().block().header.header().clone())),
+        )
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-            return Ok(Some(block_state.block().block().header.header().clone()));
-        }
-
-        self.database.header_by_number(num)
+        self.get_in_memory_or_storage_by_block(
+            num.into(),
+            |db_provider| db_provider.header_by_number(num),
+            |block_state| Ok(Some(block_state.block().block().header.header().clone())),
+        )
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
