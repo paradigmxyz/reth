@@ -8146,7 +8146,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-optimism-chainspec",
- "reth-optimism-consensus",
  "reth-primitives",
  "reth-primitives-traits",
  "serde",
