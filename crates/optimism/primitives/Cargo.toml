@@ -50,13 +50,13 @@ reth-codec = [
     "std",
     "rand",
     "dep:proptest",
+    "dep:arbitrary",
 ]
 arbitrary = [
-    "dep:arbitrary",
+    "reth-codec",
     "dep:proptest",
     "alloy-eips/arbitrary",
     "rand",
-    "reth-codec",
     "reth-primitives-traits/arbitrary",
     "reth-primitives/arbitrary",
 ]
