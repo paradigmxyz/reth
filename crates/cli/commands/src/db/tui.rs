@@ -347,7 +347,7 @@ where
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(95), Constraint::Percentage(5)].as_ref())
-        .split(f.size());
+        .split(f.area());
 
     // Columns
     {

@@ -113,7 +113,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let to_header = (move || {
             get_single_header(client.clone(), BlockHashOrNumber::Number(self.to))
         })
-        .retry(&backoff)
+        .retry(backoff)
         .notify(|err, _| warn!(target: "reth::cli", "Error requesting header: {err}. Retrying..."))
         .await?;
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
