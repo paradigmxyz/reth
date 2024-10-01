@@ -58,6 +58,7 @@ arbitrary = [
     "rand",
     "reth-codec",
     "reth-primitives-traits/arbitrary",
+    "reth-primitives/arbitrary",
 ]
 optimism = [
     "reth-primitives/optimism",
