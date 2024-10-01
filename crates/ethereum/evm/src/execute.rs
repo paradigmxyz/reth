@@ -77,7 +77,7 @@ impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>, O> =
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBlockExecutor<EvmConfig, DB>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =

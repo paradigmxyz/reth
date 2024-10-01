@@ -1,18 +1,18 @@
 //! Helpers for testing.
 
-use crate::execute::{
-    BatchExecutor, BlockExecOutput, BlockExecutionInput, BlockExecutorProvider, Executor,
-};
+use std::{fmt::Display, sync::Arc};
+
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{EthBlockExecOutput, ExecutionOutcome};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
-use std::{fmt::Display, sync::Arc};
+
+use crate::execute::{BatchExecutor, BlockExecutionInput, BlockExecutorProvider, Executor};
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -47,7 +47,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
     }
 }
 
-impl<DB, O> Executor<DB, O> for MockExecutorProvider {
+impl<DB> Executor<DB> for MockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = EthBlockExecOutput;
     type Error = BlockExecutionError;

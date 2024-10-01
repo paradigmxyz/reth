@@ -72,18 +72,16 @@ impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    type Executor<DB, O>
+    type Executor<DB>
         = OpBlockExecutor<EvmConfig, DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
-        O: BlockExecOutput;
+        DB: Database<Error: Into<ProviderError> + Display>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         OpBatchExecutor<EvmConfig, DB>;
-    fn executor<DB, O>(&self, db: DB) -> Self::Executor<DB, O>
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        O: BlockExecOutput,
     {
         self.op_executor(db)
     }
@@ -359,7 +357,7 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecOutput {
+        Ok(OpBlockExecOutput {
             state: self.state.take_bundle(),
             receipts,
             requests: vec![],
@@ -382,7 +380,7 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
 
-        Ok(BlockExecOutput {
+        Ok(OpBlockExecOutput {
             state: self.state.take_bundle(),
             receipts,
             requests: vec![],
