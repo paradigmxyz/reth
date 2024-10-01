@@ -11,8 +11,8 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned,
+    BlockWithSenders, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -616,6 +616,20 @@ impl BlockState {
     /// Returns the executed block that determines the state.
     pub fn block(&self) -> ExecutedBlock {
         self.block.clone()
+    }
+
+    /// Returns the block with senders for the state.
+    pub fn block_with_senders(&self) -> BlockWithSenders {
+        let block = self.block.block().clone();
+        let senders = self.block.senders().clone();
+        BlockWithSenders { block: block.unseal(), senders }
+    }
+
+    /// Returns the sealed block with senders for the state.
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+        let block = self.block.block().clone();
+        let senders = self.block.senders().clone();
+        SealedBlockWithSenders { block, senders }
     }
 
     /// Returns the hash of executed block that determines the state.
