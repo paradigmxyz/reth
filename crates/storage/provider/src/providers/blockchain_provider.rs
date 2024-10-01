@@ -554,16 +554,12 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         match id {
             BlockHashOrNumber::Hash(hash) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(BlockWithSenders { block: block.unseal(), senders }));
+                    return Ok(Some(block_state.block_with_senders()));
                 }
             }
             BlockHashOrNumber::Number(num) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(BlockWithSenders { block: block.unseal(), senders }));
+                    return Ok(Some(block_state.block_with_senders()));
                 }
             }
         }
@@ -578,16 +574,12 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         match id {
             BlockHashOrNumber::Hash(hash) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(SealedBlockWithSenders { block, senders }));
+                    return Ok(Some(block_state.sealed_block_with_senders()));
                 }
             }
             BlockHashOrNumber::Number(num) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(SealedBlockWithSenders { block, senders }));
+                    return Ok(Some(block_state.sealed_block_with_senders()));
                 }
             }
         }
@@ -615,11 +607,9 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             range,
             |range, _| self.database.block_with_senders_range(range),
             |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    BlockWithSenders { block: block.unseal(), senders }
-                })
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block_with_senders())
             },
             |_| true,
         )
@@ -633,11 +623,9 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             range,
             |range, _| self.database.sealed_block_with_senders_range(range),
             |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    SealedBlockWithSenders { block, senders }
-                })
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.sealed_block_with_senders())
             },
             |_| true,
         )
