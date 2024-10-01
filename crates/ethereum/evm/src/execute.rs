@@ -14,10 +14,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::{
-        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
-        apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
-    },
+    system_calls::SystemCaller,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -142,23 +139,9 @@ where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
     {
-        // apply pre execution changes
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
-            &mut evm,
-        )?;
-        apply_blockhashes_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_hash,
-            &mut evm,
-        )?;
+        let mut system_caller = SystemCaller::new(&self.evm_config, &self.chain_spec);
+
+        system_caller.apply_pre_execution_changes(block, &mut evm)?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;
@@ -212,15 +195,9 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-            // Collect all EIP-7685 requests
-            let withdrawal_requests =
-                apply_withdrawal_requests_contract_call(&self.evm_config, &mut evm)?;
+            let post_execution_requests = system_caller.apply_post_execution_changes(&mut evm)?;
 
-            // Collect all EIP-7251 requests
-            let consolidation_requests =
-                apply_consolidation_requests_contract_call(&self.evm_config, &mut evm)?;
-
-            [deposit_requests, withdrawal_requests, consolidation_requests].concat()
+            [deposit_requests, post_execution_requests].concat()
         } else {
             vec![]
         };

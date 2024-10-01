@@ -1,6 +1,7 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -26,7 +27,17 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     let transactions = payload
         .transactions
         .iter()
-        .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
+        .map(|tx| {
+            let mut buf = tx.as_ref();
+
+            let tx = TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+
+            if !buf.is_empty() {
+                return Err(alloy_rlp::Error::UnexpectedLength);
+            }
+
+            Ok(tx)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
 
@@ -360,7 +371,7 @@ pub fn validate_block_hash(
 pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     let transactions = value.body.transactions.into_iter().map(|tx| {
         let mut out = Vec::new();
-        tx.encode_enveloped(&mut out);
+        tx.encode_2718(&mut out);
         out.into()
     });
     ExecutionPayloadBodyV1 {
@@ -373,7 +384,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
 pub fn convert_to_payload_body_v2(value: Block) -> ExecutionPayloadBodyV2 {
     let transactions = value.body.transactions.into_iter().map(|tx| {
         let mut out = Vec::new();
-        tx.encode_enveloped(&mut out);
+        tx.encode_2718(&mut out);
         out.into()
     });
 
