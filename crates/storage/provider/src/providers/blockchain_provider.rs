@@ -2689,6 +2689,10 @@ mod tests {
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
+        // make sure that the finalized block is on db
+        let finalized_block = database_blocks.get(database_blocks.len() - 3).unwrap();
+        provider.set_finalized(finalized_block.header.clone());
+
         let blocks = [database_blocks, in_memory_blocks].concat();
 
         assert_eq!(provider.header(&database_block.hash())?, Some(database_block.header().clone()));
