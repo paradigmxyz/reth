@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-codecs = { workspace = true, optional = true }
+reth-codecs = { workspace = true, optional = true, features = ["optimism"] }
 
 # op-reth
 reth-optimism-consensus.workspace = true
@@ -31,10 +31,10 @@ alloy-eips.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 zstd = { workspace = true, optional = true }
 serde.workspace = true
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 # misc
-derive_more = { workspace = true, default-features = false, features = ["deref"] }
-arbitrary = { workspace = true, features = ["derive"], optional = true }
+derive_more = { workspace = true, features = ["deref"] }
 proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -52,4 +52,6 @@ arbitrary = [
     "dep:proptest",
     "reth-codec",
 ]
-optimism = ["reth-primitives/optimism"]
+optimism = [
+    "reth-primitives/optimism",
+]
