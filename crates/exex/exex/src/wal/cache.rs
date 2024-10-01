@@ -14,12 +14,12 @@ use reth_exex_types::ExExNotification;
 #[derive(Debug, Default)]
 pub struct BlockCache {
     /// A min heap of `(Block Number, File ID)` tuples.
-    pub(super) blocks: BinaryHeap<Reverse<(BlockNumber, u64)>>,
+    pub(super) blocks: BinaryHeap<Reverse<(BlockNumber, u32)>>,
     /// A mapping of committed blocks `Block Hash -> Block`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
     /// block.
-    pub(super) committed_blocks: FbHashMap<32, (u64, CachedBlock)>,
+    pub(super) committed_blocks: FbHashMap<32, (u32, CachedBlock)>,
 }
 
 impl BlockCache {
@@ -34,7 +34,7 @@ impl BlockCache {
     /// # Returns
     ///
     /// A set of file IDs that were removed.
-    pub(super) fn remove_before(&mut self, block_number: BlockNumber) -> HashSet<u64> {
+    pub(super) fn remove_before(&mut self, block_number: BlockNumber) -> HashSet<u32> {
         let mut file_ids = HashSet::default();
 
         while let Some(block @ Reverse((max_block, file_id))) = self.blocks.peek().copied() {
@@ -54,14 +54,14 @@ impl BlockCache {
 
     /// Returns the file ID for the notification containing the given committed block hash, if it
     /// exists.
-    pub(super) fn get_file_id_by_committed_block_hash(&self, block_hash: &B256) -> Option<u64> {
+    pub(super) fn get_file_id_by_committed_block_hash(&self, block_hash: &B256) -> Option<u32> {
         self.committed_blocks.get(block_hash).map(|entry| entry.0)
     }
 
     /// Inserts the blocks from the notification into the cache with the given file ID.
     pub(super) fn insert_notification_blocks_with_file_id(
         &mut self,
-        file_id: u64,
+        file_id: u32,
         notification: &ExExNotification,
     ) {
         let reverted_chain = notification.reverted_chain();
@@ -85,12 +85,12 @@ impl BlockCache {
     }
 
     #[cfg(test)]
-    pub(super) fn blocks_sorted(&self) -> Vec<(BlockNumber, u64)> {
+    pub(super) fn blocks_sorted(&self) -> Vec<(BlockNumber, u32)> {
         self.blocks.clone().into_sorted_vec().into_iter().map(|entry| entry.0).collect()
     }
 
     #[cfg(test)]
-    pub(super) fn committed_blocks_sorted(&self) -> Vec<(B256, u64, CachedBlock)> {
+    pub(super) fn committed_blocks_sorted(&self) -> Vec<(B256, u32, CachedBlock)> {
         use itertools::Itertools;
 
         self.committed_blocks
