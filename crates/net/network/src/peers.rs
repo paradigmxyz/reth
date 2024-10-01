@@ -1937,7 +1937,7 @@ mod tests {
         peers.on_outgoing_pending_session_dropped(&socket_addr, &peer, &err);
         assert_eq!(peers.num_outbound_connections(), 0);
 
-        // tmp ban peer
+        // try tmp ban peer
         match event!(peers) {
             PeerAction::BanPeer { peer_id } => {
                 assert_eq!(peer_id, peer);
