@@ -114,7 +114,7 @@ impl WalInner {
 
             block_cache.insert_notification_blocks_with_file_id(file_id, &notification);
 
-            self.next_file_id.fetch_max(1, Ordering::Relaxed);
+            self.next_file_id.fetch_add(1, Ordering::Relaxed);
         }
 
         Ok(())
