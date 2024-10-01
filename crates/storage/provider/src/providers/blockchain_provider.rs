@@ -1158,7 +1158,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            if pending.anchor().hash == block_hash {
+            if pending.hash() == block_hash {
                 return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
             }
         }
