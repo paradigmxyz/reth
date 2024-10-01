@@ -1,10 +1,10 @@
 //! Engine node related functionality.
 
-use alloy_rpc_types::engine::ClientVersionV1;
+use alloy_rpc_types::engine::{CancunPayloadFields, ClientVersionV1};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
-    BeaconConsensusEngineHandle,
+    BeaconConsensusEngineHandle, BeaconEngineMessage,
 };
 use reth_blockchain_tree::BlockchainTreeConfig;
 use reth_chainspec::EthChainSpec;
@@ -23,9 +23,13 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        compat::engine::payload::block_to_payload,
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+    },
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
+use alloy_rpc_types::engine::PayloadStatus;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::EthereumHardforks;
@@ -322,6 +326,8 @@ where
         }
 
         // Run consensus engine to completion
+        let payload_building_validation_enabled =
+            ctx.node_config().debug.payload_building_validation;
         let initial_target = ctx.initial_backfill_target()?;
         let network_handle = ctx.components().network().clone();
         let mut built_payloads = ctx
@@ -344,15 +350,52 @@ where
             let mut res = Ok(());
 
             // advance the chain and await payloads built locally to add into the engine api tree handler to prevent re-execution if that block is received as payload from the CL
+            let mut new_payload_responses = futures::stream::FuturesUnordered::default();
             loop {
                 tokio::select! {
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", block=?executed_block.block().num_hash(),  "inserting built payload");
-                            eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
+                            let request = if payload_building_validation_enabled {
+                                debug!(target: "reth::cli", block=?executed_block.block().num_hash(), "inserting built payload with validation");
+                                let (tx, rx) = oneshot::channel();
+                                new_payload_responses.push(rx);
+
+                                let message = BeaconEngineMessage::NewPayload {
+                                    payload: block_to_payload(executed_block.block.as_ref().clone()),
+                                    cancun_fields: executed_block.block.parent_beacon_block_root.map(|parent_beacon_block_root| {
+                                        CancunPayloadFields {
+                                            parent_beacon_block_root,
+                                            versioned_hashes: executed_block.block.blob_versioned_hashes_iter().copied().collect(),
+                                        }
+                                    }),
+                                    tx,
+                                };
+                                EngineApiRequest::Beacon(message)
+                            } else {
+                                debug!(target: "reth::cli", block=?executed_block.block().num_hash(), "inserting built payload without validation");
+                                EngineApiRequest::InsertExecutedBlock(executed_block)
+                            };
+                            eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(request.into());
                         }
                     }
-                    event =  eth_service.next() => {
+                    Some(response) = new_payload_responses.next() => {
+                        match response {
+                            Ok(Ok(PayloadStatus { status, latest_valid_hash })) => {
+                                if status.is_invalid() {
+                                    error!(target: "reth::cli", ?status, ?latest_valid_hash, "Invalid built payload");
+                                } else {
+                                    info!(target: "reth::cli", ?status, ?latest_valid_hash, "Received response for built payload");
+                                }
+                            }
+                            Ok(Err(error)) => {
+                                error!(target: "reth::cli", %error, "Error validating newly built payload");
+                            }
+                            Err(_error) => {
+                                error!(target: "reth::cli", "Channel for built payload result closed");
+                            }
+                        };
+                    }
+                    event = eth_service.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");
                         match event {
