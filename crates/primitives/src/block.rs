@@ -1,6 +1,7 @@
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+#[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 
 use alloc::vec::Vec;
@@ -11,10 +12,11 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
-#[cfg(any(test, feature = "arbitrary"))]
 use reth_primitives_traits::Requests;
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::SignedTransaction;
 use crate::{
     GotExpected, Header, SealedHeader, SignedTransaction, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals,
