@@ -2560,6 +2560,7 @@ mod tests {
     use crate::persistence::PersistenceAction;
     use alloy_primitives::{Bytes, Sealable};
     use alloy_rlp::Decodable;
+    use assert_matches::assert_matches;
     use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -3465,18 +3466,28 @@ mod tests {
             });
         }
 
-        // reorg case
-        let result =
-            test_harness.tree.on_new_head(chain_b.first().unwrap().block.hash(), None).unwrap();
-        assert!(matches!(result, Some(NewCanonicalChain::Reorg { .. })));
-        if let Some(NewCanonicalChain::Reorg { new, old }) = result {
-            assert_eq!(new.len(), 1);
-            assert_eq!(new[0].block.hash(), chain_b[0].block.hash());
+        // for each block in chain_b, reorg to it and then back to canonical
+        let mut expected_new = Vec::new();
+        for block in &chain_b {
+            // reorg to chain from block b
+            let result = test_harness.tree.on_new_head(block.block.hash(), None).unwrap();
+            assert_matches!(result, Some(NewCanonicalChain::Reorg { .. }));
 
-            assert_eq!(old.len(), chain_a.len());
-            for (index, block) in chain_a.iter().enumerate() {
-                assert_eq!(old[index].block.hash(), block.block.hash());
+            expected_new.push(block);
+            if let Some(NewCanonicalChain::Reorg { new, old }) = result {
+                assert_eq!(new.len(), expected_new.len());
+                for (index, block) in expected_new.iter().enumerate() {
+                    assert_eq!(new[index].block.hash(), block.block.hash());
+                }
+
+                assert_eq!(old.len(), chain_a.len());
+                for (index, block) in chain_a.iter().enumerate() {
+                    assert_eq!(old[index].block.hash(), block.block.hash());
+                }
             }
+
+            // set last block of chain a as canonical head
+            test_harness.tree.on_new_head(chain_a.last().unwrap().hash(), None).unwrap();
         }
     }
 
