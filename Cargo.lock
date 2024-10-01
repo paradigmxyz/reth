@@ -7984,6 +7984,7 @@ dependencies = [
 name = "reth-node-types"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
