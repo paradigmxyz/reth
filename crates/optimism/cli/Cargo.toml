@@ -24,7 +24,7 @@ reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-execution-types.workspace = true
 reth-node-core = { workspace = true, features = ["optimism"] }
-reth-node-optimism.workspace = true
+reth-optimism-node.workspace = true
 reth-primitives = { workspace = true, features = ["optimism"] }
 
 ## optimism
