@@ -241,7 +241,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
-    /// Fetches data from either in-memory state or persistent storage by transaction [`HashOrNumber`].
+    /// Fetches data from either in-memory state or persistent storage by transaction
+    /// [`HashOrNumber`].
     fn get_in_memory_or_storage_by_tx<S, M, R>(
         &self,
         id: HashOrNumber,
@@ -759,19 +760,11 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.block().block().body.transactions.clone()));
-                }
-            }
-            BlockHashOrNumber::Number(number) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                    return Ok(Some(block_state.block().block().body.transactions.clone()));
-                }
-            }
-        }
-        self.database.transactions_by_block(id)
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |provider| provider.transactions_by_block(id),
+            |block_state| Ok(Some(block_state.block().block().body.transactions.clone())),
+        )
     }
 
     fn transactions_by_block_range(
