@@ -358,9 +358,11 @@ where
                 .iter()
                 .copied()
                 .filter_map(|(_, num_hash, _)| num_hash)
-                .min_by_key(|num_hash| num_hash.number);
-            self.wal
-                .finalize(lowest_finished_height.expect("ExExManager has at least one ExEx"))?;
+                .chain([(finalized_header.num_hash())])
+                .min_by_key(|num_hash| num_hash.number)
+                .unwrap();
+
+            self.wal.finalize(lowest_finished_height)?;
         } else {
             let unfinalized_exexes = exex_finished_heights
                 .into_iter()
