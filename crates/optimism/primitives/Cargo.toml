@@ -48,6 +48,7 @@ reth-codec = [
     "dep:zstd",
     "dep:modular-bitfield",
     "std",
+    "rand",
 ]
 arbitrary = [
     "dep:arbitrary",
