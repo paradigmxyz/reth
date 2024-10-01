@@ -295,7 +295,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         Ok(None)
     }
 
-    /// Fetches data from either in-memory state or storage by [`BlockHashOrNumber`].
+    /// Fetches data from either in-memory state or persistent storage by [`BlockHashOrNumber`].
     fn get_in_memory_or_storage_by_block<S, M, R>(
         &self,
         id: BlockHashOrNumber,
@@ -365,7 +365,7 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.get_in_memory_or_storage_by_block(
-            block_hash.into(),
+            (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
             |block_state| Ok(Some(block_state.block().block().header.header().clone())),
         )
