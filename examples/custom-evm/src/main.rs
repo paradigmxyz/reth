@@ -34,12 +34,13 @@ use reth_node_ethereum::{
     EthExecutorProvider, EthereumNode,
 };
 use reth_primitives::{
-    revm_primitives::{CfgEnvWithHandlerCfg, PrecompileErrors, PrecompileError, TxEnv},
+    revm_primitives::{CfgEnvWithHandlerCfg, PrecompileError, PrecompileErrors, TxEnv},
     Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
 
 /// Custom EVM configuration
 #[derive(Debug, Clone)]
@@ -48,6 +49,12 @@ pub struct MyEvmConfig {
     /// Wrapper around mainnet configuration
     inner: EthEvmConfig,
 }
+
+// Maximum number of retries
+const MAX_RETRIES: usize = 3;
+
+// Fixed delay between retries (in seconds)
+const RETRY_DELAY: u64 = 1;
 
 impl MyEvmConfig {
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
@@ -75,9 +82,8 @@ impl MyEvmConfig {
                 address!("0000000000000000000000000000000000000111"),
                 Precompile::Env(move |_input: &Bytes, _gas_limit: u64, _context: &Env| {
                     let handle = tokio::runtime::Handle::current();
-                    let result = handle.block_on(async {
-                        MyEvmConfig::state_root_precompile().await
-                    });
+                    let result =
+                        handle.block_on(async { MyEvmConfig::state_root_precompile().await });
 
                     result
                 })
@@ -98,9 +104,10 @@ impl MyEvmConfig {
                 // Return the state root as bytes to the EVM
                 Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::from(state_root.to_vec()) })
             }
-            Err(e) => Err(PrecompileErrors::Error(
-                PrecompileError::Other(format!("Failed to fetch Arbitrum state root: {}", e))
-            ))
+            Err(e) => Err(PrecompileErrors::Error(PrecompileError::Other(format!(
+                "Failed to fetch Arbitrum state root: {}",
+                e
+            )))),
         }
     }
 
@@ -115,40 +122,68 @@ impl MyEvmConfig {
             "id": 1
         }"#;
 
-        // Send HTTP request
         let client = reqwest::Client::new();
-        let response = client
-            .post(url)
-            .header("Content-Type", "application/json")
-            .body(request_body)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response body: {}", e))?;
+        // Retry loop with fixed delay
+        for attempt in 0..=MAX_RETRIES {
+            // Send the HTTP request
+            match client
+                .post(url)
+                .header("Content-Type", "application/json")
+                .body(request_body)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let text = response
+                        .text()
+                        .await
+                        .map_err(|e| format!("Failed to read response body: {}", e))?;
 
-        // Parse the JSON response
-        let json: Value = serde_json::from_str(&response)
-            .map_err(|e| format!("Failed to parse JSON response: {}", e))?;
+                    // Parse the JSON response
+                    let json: Value = serde_json::from_str(&text)
+                        .map_err(|e| format!("Failed to parse JSON response: {}", e))?;
 
-        // Extract the state root from the block data
-        match json["result"]["stateRoot"].as_str() {
-            Some(state_root_hex) => {
-                let state_root_bytes =
-                    hex::decode(state_root_hex.strip_prefix("0x").unwrap_or(state_root_hex))
+                    // Extract the state root from the block data
+                    if let Some(state_root_hex) = json["result"]["stateRoot"].as_str() {
+                        let state_root_bytes = hex::decode(
+                            state_root_hex.strip_prefix("0x").unwrap_or(state_root_hex),
+                        )
                         .map_err(|e| format!("Failed to decode state root hex: {}", e))?;
 
-                if state_root_bytes.len() == 32 {
-                    let mut state_root = [0u8; 32];
-                    state_root.copy_from_slice(&state_root_bytes);
-                    Ok(state_root)
-                } else {
-                    Err("State root has incorrect length".into())
+                        if state_root_bytes.len() == 32 {
+                            let mut state_root = [0u8; 32];
+                            state_root.copy_from_slice(&state_root_bytes);
+                            return Ok(state_root);
+                        } else {
+                            return Err("State root has incorrect length".into());
+                        }
+                    }
+
+                    return Err("State root not found in the JSON response".into());
+                }
+
+                Err(e) => {
+                    // Log the error for debugging
+                    eprintln!("Attempt {} failed: {}", attempt + 1, e);
+
+                    // If we've reached the last attempt, return the error
+                    if attempt == MAX_RETRIES {
+                        return Err(format!(
+                            "Failed to fetch Arbitrum state root after {} attempts: {}",
+                            MAX_RETRIES + 1,
+                            e
+                        )
+                        .into());
+                    }
+
+                    // Wait for a fixed delay before retrying
+                    sleep(Duration::from_secs(RETRY_DELAY)).await;
                 }
             }
-            None => Err("State root not found in the JSON response".into()),
         }
+
+        // This point should not be reached due to the retry mechanism.
+        Err("Unexpected error in fetch_state_root".into())
     }
 }
 
