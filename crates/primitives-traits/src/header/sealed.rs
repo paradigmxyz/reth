@@ -153,14 +153,14 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{header::SealedHeader, serde_bincode_compat};
+    /// use reth_primitives_traits::{serde_bincode_compat, SealedHeader};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
     /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::header::SealedHeader")]
+    ///     #[serde_as(as = "serde_bincode_compat::SealedHeader")]
     ///     header: SealedHeader,
     /// }
     /// ```

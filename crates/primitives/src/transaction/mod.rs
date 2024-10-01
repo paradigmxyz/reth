@@ -1995,7 +1995,7 @@ pub mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{serde_bincode_compat, Transaction};
+    /// use reth_primitives::{serde_bincode_compat, Transaction};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
@@ -2069,7 +2069,7 @@ pub mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{serde_bincode_compat, TransactionSigned};
+    /// use reth_primitives::{serde_bincode_compat, TransactionSigned};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
