@@ -368,8 +368,9 @@ where
                     is_canonical.not().then_some((exex_id, num_hash))
                 })
                 .format_with(", ", |(exex_id, num_hash), f| {
-                    f(&format_args!("{exex_id:?} = {num_hash:?}"))
-                });
+                    f(&format_args!("{exex_id} = {num_hash:?}"))
+                })
+                .to_string();
             debug!(
                 target: "exex::manager",
                 %unfinalized_exexes,
