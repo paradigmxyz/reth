@@ -9,7 +9,7 @@ pub use storage::Storage;
 use std::{
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
 };
@@ -69,7 +69,7 @@ impl Wal {
 /// Inner type for the WAL.
 #[derive(Debug)]
 struct WalInner {
-    next_file_id: AtomicUsize,
+    next_file_id: AtomicU32,
     /// The underlying WAL storage backed by a file.
     storage: Storage,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
@@ -79,7 +79,7 @@ struct WalInner {
 impl WalInner {
     fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
         let mut wal = Self {
-            next_file_id: AtomicUsize::new(0),
+            next_file_id: AtomicU32::new(0),
             storage: Storage::new(directory)?,
             block_cache: RwLock::new(BlockCache::default()),
         };
@@ -95,6 +95,7 @@ impl WalInner {
     #[instrument(target = "exex::wal", skip(self))]
     fn fill_block_cache(&mut self) -> eyre::Result<()> {
         let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
+        self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
 
         let mut block_cache = self.block_cache.write();
 
@@ -113,8 +114,6 @@ impl WalInner {
             );
 
             block_cache.insert_notification_blocks_with_file_id(file_id, &notification);
-
-            self.next_file_id.fetch_add(1, Ordering::Relaxed);
         }
 
         Ok(())
@@ -127,7 +126,7 @@ impl WalInner {
     fn commit(&self, notification: &ExExNotification) -> eyre::Result<()> {
         let mut block_cache = self.block_cache.write();
 
-        let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed) as u64;
+        let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
         self.storage.write_notification(file_id, notification)?;
 
         debug!(?file_id, "Inserting notification blocks into the block cache");
@@ -211,8 +210,8 @@ mod tests {
     }
 
     fn sort_committed_blocks(
-        committed_blocks: Vec<(B256, u64, CachedBlock)>,
-    ) -> Vec<(B256, u64, CachedBlock)> {
+        committed_blocks: Vec<(B256, u32, CachedBlock)>,
+    ) -> Vec<(B256, u32, CachedBlock)> {
         committed_blocks
             .into_iter()
             .sorted_by_key(|(_, _, block)| (block.block.number, block.block.hash))
