@@ -1,50 +1,53 @@
-//! Native Compact codec impl for EIP-7685 requests.
+//! Native Compact codec impl for alloy-trie types.
 
 use crate::Compact;
 use alloc::vec::Vec;
 use alloy_primitives::B256;
-use alloy_trie::{hash_builder::HashBuilderValue, BranchNodeCompact, TrieMask};
+use alloy_trie::{
+    hash_builder::{HashBuilderInput, HashBuilderInputRef},
+    BranchNodeCompact, TrieMask,
+};
 use bytes::{Buf, BufMut};
 
-/// Identifier for [`HashBuilderValue::Hash`]
+/// Identifier for [`HashBuilderInputRef::Hash`]
 const HASH_BUILDER_TYPE_HASH: u8 = 0;
 
-/// Identifier for [`HashBuilderValue::Bytes`]
+/// Identifier for [`HashBuilderInputRef::Bytes`]
 const HASH_BUILDER_TYPE_BYTES: u8 = 1;
 
-impl Compact for HashBuilderValue {
+impl Compact for HashBuilderInput {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {
-        match self {
-            Self::Hash(hash) => {
+        match self.as_ref() {
+            HashBuilderInputRef::Hash(hash) => {
                 buf.put_u8(HASH_BUILDER_TYPE_HASH);
                 1 + hash.to_compact(buf)
             }
-            Self::Bytes(bytes) => {
+            HashBuilderInputRef::Bytes(bytes) => {
                 buf.put_u8(HASH_BUILDER_TYPE_BYTES);
                 1 + bytes.to_compact(buf)
             }
         }
     }
 
-    // # Panics
-    //
-    // A panic will be triggered if a HashBuilderValue variant greater than 1 is passed from the
-    // database.
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        match buf.get_u8() {
+        let mut this = Self::default();
+        let buf = match buf.get_u8() {
             HASH_BUILDER_TYPE_HASH => {
                 let (hash, buf) = B256::from_compact(buf, 32);
-                (Self::Hash(hash), buf)
+                this.set_from_ref(HashBuilderInputRef::Hash(&hash));
+                buf
             }
             HASH_BUILDER_TYPE_BYTES => {
                 let (bytes, buf) = Vec::from_compact(buf, 0);
-                (Self::Bytes(bytes), buf)
+                this.set_from_ref(HashBuilderInputRef::Bytes(&bytes));
+                buf
             }
-            _ => unreachable!("Junk data in database: unknown HashBuilderValue variant"),
-        }
+            _ => unreachable!("Junk data in database: unknown HashBuilderInput variant"),
+        };
+        (this, buf)
     }
 }
 

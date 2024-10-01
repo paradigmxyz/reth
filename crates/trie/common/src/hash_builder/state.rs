@@ -1,5 +1,5 @@
 use crate::TrieMask;
-use alloy_trie::{hash_builder::HashBuilderValue, HashBuilder};
+use alloy_trie::{hash_builder::HashBuilderInput, nodes::RlpNode, HashBuilder};
 use bytes::Buf;
 use nybbles::Nibbles;
 use reth_codecs::Compact;
@@ -16,10 +16,10 @@ use serde::{Deserialize, Serialize};
 pub struct HashBuilderState {
     /// The current key.
     pub key: Vec<u8>,
+    /// The current node input.
+    pub input: HashBuilderInput,
     /// The builder stack.
-    pub stack: Vec<Vec<u8>>,
-    /// The current node value.
-    pub value: HashBuilderValue,
+    pub stack: Vec<RlpNode>,
 
     /// Group masks.
     pub groups: Vec<TrieMask>,
@@ -37,7 +37,7 @@ impl From<HashBuilderState> for HashBuilder {
         Self {
             key: Nibbles::from_nibbles_unchecked(state.key),
             stack: state.stack,
-            value: state.value,
+            input: state.input,
             groups: state.groups,
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
@@ -54,7 +54,7 @@ impl From<HashBuilder> for HashBuilderState {
         Self {
             key: state.key.into(),
             stack: state.stack,
-            value: state.value,
+            input: state.input,
             groups: state.groups,
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
@@ -80,7 +80,7 @@ impl Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += self.value.to_compact(buf);
+        len += self.input.to_compact(buf);
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;
@@ -112,11 +112,11 @@ impl Compact for HashBuilderState {
         let mut stack = Vec::with_capacity(stack_len);
         for _ in 0..stack_len {
             let item_len = buf.get_u16() as usize;
-            stack.push(Vec::from(&buf[..item_len]));
+            stack.push(RlpNode::from_raw(&buf[..item_len]).unwrap());
             buf.advance(item_len);
         }
 
-        let (value, mut buf) = HashBuilderValue::from_compact(buf, 0);
+        let (input, mut buf) = HashBuilderInput::from_compact(buf, 0);
 
         let groups_len = buf.get_u16() as usize;
         let mut groups = Vec::with_capacity(groups_len);
@@ -143,7 +143,7 @@ impl Compact for HashBuilderState {
         }
 
         let stored_in_database = buf.get_u8() != 0;
-        (Self { key, stack, value, groups, tree_masks, hash_masks, stored_in_database }, buf)
+        (Self { key, stack, input, groups, tree_masks, hash_masks, stored_in_database }, buf)
     }
 }
 
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn hash_builder_state_regression() {
         let mut state = HashBuilderState::default();
-        state.stack.push(vec![]);
+        state.stack.push(Default::default());
         let mut buf = vec![];
         let len = state.clone().to_compact(&mut buf);
         let (decoded, _) = HashBuilderState::from_compact(&buf, len);
