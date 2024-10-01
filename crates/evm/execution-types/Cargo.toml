@@ -29,11 +29,11 @@ alloy-eips.workspace = true
 arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
-reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 
 [features]
 default = ["std"]
-optimism = []
+optimism = ["reth-primitives/optimism", "revm/optimism"]
 serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
 serde-bincode-compat = ["reth-primitives/serde-bincode-compat", "serde_with"]
 std = []
