@@ -49,6 +49,7 @@ reth-codec = [
     "dep:modular-bitfield",
     "std",
     "rand",
+    "dep:proptest",
 ]
 arbitrary = [
     "dep:arbitrary",
