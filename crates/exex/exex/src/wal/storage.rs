@@ -116,8 +116,11 @@ impl Storage {
             Err(err) => return Err(err.into()),
         };
 
-        // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-        Ok(serde_json::from_reader(&mut file)?)
+        // Deserialize using the bincode- and msgpack-compatible serde wrapper
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
+            rmp_serde::decode::from_read(&mut file)?;
+
+        Ok(Some(notification.into()))
     }
 
     /// Writes the notification to the file with the given ID.
@@ -130,9 +133,12 @@ impl Storage {
         let file_path = self.file_path(file_id);
         debug!(?file_path, "Writing notification to WAL");
 
+        // Serialize using the bincode- and msgpack-compatible serde wrapper
+        let notification =
+            reth_exex_types::serde_bincode_compat::ExExNotification::from(notification);
+
         Ok(reth_fs_util::atomic_write_file(&file_path, |file| {
-            // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-            serde_json::to_writer(file, notification)
+            rmp_serde::encode::write(file, &notification)
         })?)
     }
 }
