@@ -19,3 +19,6 @@ alloy-primitives.workspace = true
 
 eyre.workspace = true
 tokio.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+

@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_primitives::{address, hex, Address, Bytes, U256};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
@@ -34,10 +34,11 @@ use reth_node_ethereum::{
     EthExecutorProvider, EthereumNode,
 };
 use reth_primitives::{
-    revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
+    revm_primitives::{CfgEnvWithHandlerCfg, PrecompileErrors, PrecompileError, TxEnv},
     Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
+use serde_json::Value;
 use std::sync::Arc;
 
 /// Custom EVM configuration
@@ -65,23 +66,89 @@ impl MyEvmConfig {
     where
         DB: Database,
     {
-        // first we need the evm spec id, which determines the precompiles
         let spec_id = handler.cfg.spec_id;
 
-        // install the precompiles
         handler.pre_execution.load_precompiles = Arc::new(move || {
             let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+
             precompiles.extend([(
-                address!("0000000000000000000000000000000000000999"),
-                Precompile::Env(Self::my_precompile).into(),
+                address!("0000000000000000000000000000000000000111"),
+                Precompile::Env(move |_input: &Bytes, _gas_limit: u64, _context: &Env| {
+                    let handle = tokio::runtime::Handle::current();
+                    let result = handle.block_on(async {
+                        MyEvmConfig::state_root_precompile().await
+                    });
+
+                    result
+                })
+                .into(),
             )]);
+
             precompiles
         });
     }
 
-    /// A custom precompile that does nothing
-    fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok(PrecompileOutput::new(0, Bytes::new()))
+    /// Precompile execution logic for fetching the Arbitrum state root.
+    /// This function is invoked by the EVM when a precompile contract at a specific address is called.
+    /// It fetches the latest state root from an external service and returns it to the EVM.
+    pub async fn state_root_precompile() -> PrecompileResult {
+        // Call async function to fetch the state root
+        match Self::fetch_state_root().await {
+            Ok(state_root) => {
+                // Return the state root as bytes to the EVM
+                Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::from(state_root.to_vec()) })
+            }
+            Err(e) => Err(PrecompileErrors::Error(
+                PrecompileError::Other(format!("Failed to fetch Arbitrum state root: {}", e))
+            ))
+        }
+    }
+
+    // Async function to make an HTTP request to fetch the Arbitrum state root
+    async fn fetch_state_root() -> Result<[u8; 32], Box<dyn std::error::Error>> {
+        let url = "http://localhost:8547";
+
+        let request_body = r#"{
+            "jsonrpc": "2.0",
+            "method": "eth_getBlockByNumber",
+            "params": ["latest", false],
+            "id": 1
+        }"#;
+
+        // Send HTTP request
+        let client = reqwest::Client::new();
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(request_body)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        // Parse the JSON response
+        let json: Value = serde_json::from_str(&response)
+            .map_err(|e| format!("Failed to parse JSON response: {}", e))?;
+
+        // Extract the state root from the block data
+        match json["result"]["stateRoot"].as_str() {
+            Some(state_root_hex) => {
+                let state_root_bytes =
+                    hex::decode(state_root_hex.strip_prefix("0x").unwrap_or(state_root_hex))
+                        .map_err(|e| format!("Failed to decode state root hex: {}", e))?;
+
+                if state_root_bytes.len() == 32 {
+                    let mut state_root = [0u8; 32];
+                    state_root.copy_from_slice(&state_root_bytes);
+                    Ok(state_root)
+                } else {
+                    Err("State root has incorrect length".into())
+                }
+            }
+            None => Err("State root not found in the JSON response".into()),
+        }
     }
 }
 

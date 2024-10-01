@@ -2730,6 +2730,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
+ "reqwest",
  "reth",
  "reth-chainspec",
  "reth-evm-ethereum",
@@ -2738,6 +2739,7 @@ dependencies = [
  "reth-node-ethereum",
  "reth-primitives",
  "reth-tracing",
+ "serde_json",
  "tokio",
 ]
 
