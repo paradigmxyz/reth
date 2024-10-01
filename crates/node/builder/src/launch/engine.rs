@@ -1,6 +1,6 @@
 //! Engine node related functionality.
 
-use alloy_rpc_types::engine::{CancunPayloadFields, ClientVersionV1};
+use alloy_rpc_types::engine::{CancunPayloadFields, ClientVersionV1, PayloadStatus};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -29,7 +29,6 @@ use reth_node_core::{
     },
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
-use alloy_rpc_types::engine::PayloadStatus;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::EthereumHardforks;
