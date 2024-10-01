@@ -1,5 +1,5 @@
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
-use reth_primitives::BlockHashOrNumber;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Client trait for fetching block hashes by number.

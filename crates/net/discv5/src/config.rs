@@ -30,8 +30,14 @@ pub const DEFAULT_DISCOVERY_V5_ADDR_IPV6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
 
 /// The default port for discv5 via UDP.
 ///
-/// Default is port 9000. See [`discv5::ListenConfig`] default.
-pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9000;
+/// Default is port 9200.
+pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9200;
+
+/// The default [`discv5::ListenConfig`].
+///
+/// This is different from the upstream default.
+pub const DEFAULT_DISCOVERY_V5_LISTEN_CONFIG: ListenConfig =
+    ListenConfig::Ipv4 { ip: DEFAULT_DISCOVERY_V5_ADDR, port: DEFAULT_DISCOVERY_V5_PORT };
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
@@ -222,8 +228,9 @@ impl ConfigBuilder {
             discovered_peer_filter,
         } = self;
 
-        let mut discv5_config = discv5_config
-            .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
+        let mut discv5_config = discv5_config.unwrap_or_else(|| {
+            discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build()
+        });
 
         discv5_config.listen_config =
             amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
@@ -290,7 +297,7 @@ impl Config {
     pub fn builder(rlpx_tcp_socket: SocketAddr) -> ConfigBuilder {
         ConfigBuilder {
             discv5_config: None,
-            bootstrap_nodes: HashSet::new(),
+            bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
             other_enr_kv_pairs: Vec::new(),
@@ -528,7 +535,7 @@ mod test {
     fn overwrite_ipv4_addr() {
         let rlpx_addr: Ipv4Addr = "192.168.0.1".parse().unwrap();
 
-        let listen_config = ListenConfig::default();
+        let listen_config = DEFAULT_DISCOVERY_V5_LISTEN_CONFIG;
 
         let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
 
@@ -543,7 +550,7 @@ mod test {
     fn overwrite_ipv6_addr() {
         let rlpx_addr: Ipv6Addr = "fe80::1".parse().unwrap();
 
-        let listen_config = ListenConfig::default();
+        let listen_config = DEFAULT_DISCOVERY_V5_LISTEN_CONFIG;
 
         let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
 

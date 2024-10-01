@@ -1,4 +1,7 @@
+#![allow(missing_docs)]
+
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, Account};
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
@@ -109,7 +112,10 @@ fn testspec_empty_storage_proof() {
     assert_eq!(slots.len(), account_proof.storage_proofs.len());
     for (idx, slot) in slots.into_iter().enumerate() {
         let proof = account_proof.storage_proofs.get(idx).unwrap();
-        assert_eq!(proof, &StorageProof::new(slot));
+        assert_eq!(
+            proof,
+            &StorageProof::new(slot).with_proof(vec![Bytes::from([EMPTY_STRING_CODE])])
+        );
         assert_eq!(proof.verify(account_proof.storage_root), Ok(()));
     }
     assert_eq!(account_proof.verify(root), Ok(()));

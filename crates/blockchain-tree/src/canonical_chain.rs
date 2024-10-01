@@ -1,5 +1,5 @@
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_primitives::BlockNumHash;
 use std::collections::BTreeMap;
 
 /// This keeps track of (non-finalized) blocks of the canonical chain.

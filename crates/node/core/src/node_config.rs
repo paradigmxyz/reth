@@ -9,7 +9,7 @@ use crate::{
     utils::get_single_header,
 };
 use eyre::eyre;
-use reth_chainspec::{ChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_network_p2p::headers::client::HeadersClient;
 use serde::{de::DeserializeOwned, Serialize};
@@ -70,8 +70,8 @@ use tracing::*;
 ///     let builder = builder.with_rpc(rpc);
 /// }
 /// ```
-#[derive(Debug, Clone)]
-pub struct NodeConfig {
+#[derive(Debug)]
+pub struct NodeConfig<ChainSpec> {
     /// All data directory related arguments
     pub datadir: DatadirArgs,
 
@@ -129,12 +129,33 @@ pub struct NodeConfig {
     pub pruning: PruningArgs,
 }
 
-impl NodeConfig {
+impl NodeConfig<ChainSpec> {
     /// Creates a testing [`NodeConfig`], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self::default()
             // set all ports to zero by default for test instances
             .with_unused_ports()
+    }
+}
+
+impl<ChainSpec> NodeConfig<ChainSpec> {
+    /// Creates a new config with given chain spec, setting all fields to default values.
+    pub fn new(chain: Arc<ChainSpec>) -> Self {
+        Self {
+            config: None,
+            chain,
+            metrics: None,
+            instance: 1,
+            network: NetworkArgs::default(),
+            rpc: RpcServerArgs::default(),
+            txpool: TxPoolArgs::default(),
+            builder: PayloadBuilderArgs::default(),
+            debug: DebugArgs::default(),
+            db: DatabaseArgs::default(),
+            dev: DevArgs::default(),
+            pruning: PruningArgs::default(),
+            datadir: DatadirArgs::default(),
+        }
     }
 
     /// Sets --dev mode for the node.
@@ -235,7 +256,10 @@ impl NodeConfig {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> Option<PruneConfig> {
+    pub fn prune_config(&self) -> Option<PruneConfig>
+    where
+        ChainSpec: EthChainSpec,
+    {
         self.pruning.prune_config(&self.chain)
     }
 
@@ -365,8 +389,11 @@ impl NodeConfig {
     }
 
     /// Resolve the final datadir path.
-    pub fn datadir(&self) -> ChainPath<DataDirPath> {
-        self.datadir.clone().resolve_datadir(self.chain.chain)
+    pub fn datadir(&self) -> ChainPath<DataDirPath>
+    where
+        ChainSpec: EthChainSpec,
+    {
+        self.datadir.clone().resolve_datadir(self.chain.chain())
     }
 
     /// Load an application configuration from a specified path.
@@ -397,22 +424,28 @@ impl NodeConfig {
     }
 }
 
-impl Default for NodeConfig {
+impl Default for NodeConfig<ChainSpec> {
     fn default() -> Self {
+        Self::new(MAINNET.clone())
+    }
+}
+
+impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
+    fn clone(&self) -> Self {
         Self {
-            config: None,
-            chain: MAINNET.clone(),
-            metrics: None,
-            instance: 1,
-            network: NetworkArgs::default(),
-            rpc: RpcServerArgs::default(),
-            txpool: TxPoolArgs::default(),
-            builder: PayloadBuilderArgs::default(),
-            debug: DebugArgs::default(),
-            db: DatabaseArgs::default(),
-            dev: DevArgs::default(),
-            pruning: PruningArgs::default(),
-            datadir: DatadirArgs::default(),
+            chain: self.chain.clone(),
+            config: self.config.clone(),
+            metrics: self.metrics,
+            instance: self.instance,
+            network: self.network.clone(),
+            rpc: self.rpc.clone(),
+            txpool: self.txpool.clone(),
+            builder: self.builder.clone(),
+            debug: self.debug.clone(),
+            db: self.db,
+            dev: self.dev,
+            pruning: self.pruning.clone(),
+            datadir: self.datadir.clone(),
         }
     }
 }

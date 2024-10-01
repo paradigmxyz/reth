@@ -10,13 +10,15 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_primitives::Address;
+use alloy_rpc_types::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
     args::utils::DefaultChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
-    primitives::{Address, BlockNumberOrTag, IntoRecoveredTransaction},
+    primitives::BlockNumberOrTag,
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},
@@ -26,7 +28,6 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
-use reth_rpc_types::state::EvmOverrides;
 
 fn main() {
     Cli::<DefaultChainSpecParser, RethCliTxpoolExt>::parse()

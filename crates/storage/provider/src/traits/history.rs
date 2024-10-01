@@ -1,6 +1,6 @@
+use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use reth_db_api::models::BlockNumberAddress;
-use reth_primitives::{Address, BlockNumber, B256};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::{Range, RangeInclusive};
 

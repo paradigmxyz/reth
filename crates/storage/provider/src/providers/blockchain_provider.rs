@@ -7,22 +7,22 @@ use crate::{
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::ChainInfo;
-use reth_db::Database;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -35,7 +35,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::{DatabaseProvider, ProviderNodeTypes};
+use super::ProviderNodeTypes;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -69,7 +69,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
-                Ok(Self::with_latest(database, header.seal(best.best_hash))?)
+                Ok(Self::with_latest(database, SealedHeader::new(header, best.best_hash))?)
             }
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
@@ -177,68 +177,61 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         let state = state.as_ref();
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
+        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
-    /// Returns:
-    /// 1. The block state as [`Some`] if the block is in memory, and [`None`] if the block is in
-    ///    database.
-    /// 2. The in-block transaction index.
-    fn block_state_by_tx_id(
+    /// Fetches data from either in-memory state or storage by [`TxNumber`].
+    fn get_in_memory_or_storage_by_tx_id<S, M, R>(
         &self,
-        provider: &DatabaseProviderRO<N::DB>,
         id: TxNumber,
-    ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
-        // Get the last block number stored in the database
-        let last_database_block_number = provider.last_block_number()?;
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<Option<R>>
+    where
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        M: Fn(usize, Arc<BlockState>) -> ProviderResult<Option<R>>,
+    {
+        // Order of instantiation matters. More information on: `fetch_db_mem_range_while`.
+        let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let provider = self.database.provider()?;
+
+        // Get the last block number stored in the database which does NOT overlap with in-memory
+        // chain.
+        let mut last_database_block_number = provider.last_block_number()?;
+        if let Some(lowest_in_mem_block) = in_mem_chain.last() {
+            if lowest_in_mem_block.number() <= last_database_block_number {
+                last_database_block_number = lowest_in_mem_block.number().saturating_sub(1);
+            }
+        }
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
-        let Some(last_block_body_index) =
-            provider.block_body_indices(last_database_block_number)?
-        else {
-            return Ok(None);
-        };
+        let last_block_body_index = provider
+            .block_body_indices(last_database_block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
         let mut in_memory_tx_num = last_block_body_index.next_tx_num();
 
+        // If the transaction number is less than the first in-memory transaction number, make a
+        // database lookup
         if id < in_memory_tx_num {
-            // If the transaction number is less than the first in-memory transaction number, make a
-            // database lookup
-            let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
-            let Some(body_index) = provider.block_body_indices(block_number)? else {
-                return Ok(None)
-            };
-            let tx_index = body_index.last_tx_num() - id;
-            Ok(Some((None, tx_index as usize)))
-        } else {
-            // Otherwise, iterate through in-memory blocks and find the transaction with the
-            // matching number
-
-            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
-            let last_in_memory_block_number =
-                self.canonical_in_memory_state.get_canonical_block_number();
-
-            for block_number in first_in_memory_block_number..=last_in_memory_block_number {
-                let Some(block_state) =
-                    self.canonical_in_memory_state.state_by_number(block_number)
-                else {
-                    return Ok(None);
-                };
-
-                let executed_block = block_state.block();
-                let block = executed_block.block();
-
-                for tx_index in 0..block.body.len() {
-                    if id == in_memory_tx_num {
-                        return Ok(Some((Some(block_state), tx_index)))
-                    }
-
-                    in_memory_tx_num += 1;
-                }
-            }
-
-            Ok(None)
+            return fetch_from_db(provider)
         }
+
+        // Iterate from the lowest block to the highest
+        for block_state in in_mem_chain.into_iter().rev() {
+            let executed_block = block_state.block();
+            let block = executed_block.block();
+
+            for tx_index in 0..block.body.transactions.len() {
+                if id == in_memory_tx_num {
+                    return fetch_from_block_state(tx_index, block_state)
+                }
+
+                in_memory_tx_num += 1;
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -264,8 +257,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
+    type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
+    type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.database.database_provider_ro()
@@ -499,7 +492,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                 // Check in-memory state first
                 self.canonical_in_memory_state
                     .state_by_number(number)
-                    .map(|o| o.block().block().ommers.clone())
+                    .map(|o| o.block().block().body.ommers.clone())
                     .map_or_else(|| self.database.ommers(id), |ommers| Ok(Some(ommers)))
             }
             None => self.database.ommers(id),
@@ -526,7 +519,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             stored_indices.first_tx_num = stored_indices.next_tx_num();
 
             for state in parent_chain {
-                let txs = state.block().block.body.len() as u64;
+                let txs = state.block().block.body.transactions.len() as u64;
                 if state.block().block().number == number {
                     stored_indices.tx_count = txs;
                 } else {
@@ -673,7 +666,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
                 .canonical_in_memory_state
                 .state_by_number(block_number)
                 .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
-            for tx in &block_state.block().block().body {
+            for tx in block_state.block().block().body.transactions() {
                 if tx.hash() == tx_hash {
                     return Ok(Some(in_memory_tx_id))
                 }
@@ -686,35 +679,33 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let transaction = block_state.block().block().body.get(tx_index).cloned();
-            Ok(transaction)
-        } else {
-            provider.transaction_by_id(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_by_id(id),
+            |tx_index, block_state| {
+                Ok(block_state.block().block().body.transactions.get(tx_index).cloned())
+            },
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let transaction =
-                block_state.block().block().body.get(tx_index).cloned().map(Into::into);
-            Ok(transaction)
-        } else {
-            provider.transaction_by_id_no_hash(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_by_id_no_hash(id),
+            |tx_index, block_state| {
+                Ok(block_state
+                    .block()
+                    .block()
+                    .body
+                    .transactions
+                    .get(tx_index)
+                    .cloned()
+                    .map(Into::into))
+            },
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -739,11 +730,11 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let provider = self.database.provider()?;
-        Ok(self
-            .block_state_by_tx_id(&provider, id)?
-            .and_then(|(block_state, _)| block_state)
-            .map(|block_state| block_state.block().block().number))
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_block(id),
+            |_, block_state| Ok(Some(block_state.block().block().number)),
+        )
     }
 
     fn transactions_by_block(
@@ -753,12 +744,12 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         match id {
             BlockHashOrNumber::Hash(hash) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.block().block().body.clone()));
+                    return Ok(Some(block_state.block().block().body.transactions.clone()));
                 }
             }
             BlockHashOrNumber::Number(number) => {
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                    return Ok(Some(block_state.block().block().body.clone()));
+                    return Ok(Some(block_state.block().block().body.transactions.clone()));
                 }
             }
         }
@@ -780,7 +771,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
-                transactions.push(block_state.block().block().body.clone());
+                transactions.push(block_state.block().block().body.transactions.clone());
                 last_in_memory_block = Some(number);
             } else {
                 break
@@ -815,38 +806,31 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let sender = block_state
-                .block()
-                .block()
-                .body
-                .get(tx_index)
-                .and_then(|transaction| transaction.recover_signer());
-            Ok(sender)
-        } else {
-            provider.transaction_sender(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_sender(id),
+            |tx_index, block_state| {
+                Ok(block_state
+                    .block()
+                    .block()
+                    .body
+                    .transactions
+                    .get(tx_index)
+                    .and_then(|transaction| transaction.recover_signer()))
+            },
+        )
     }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let receipt = block_state.executed_block_receipts().get(tx_index).cloned();
-            Ok(receipt)
-        } else {
-            provider.receipt(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.receipt(id),
+            |tx_index, block_state| {
+                Ok(block_state.executed_block_receipts().get(tx_index).cloned())
+            },
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -857,12 +841,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
 
             // assuming 1:1 correspondence between transactions and receipts
             debug_assert_eq!(
-                block.body.len(),
+                block.body.transactions.len(),
                 receipts.len(),
                 "Mismatch between transaction and receipt count"
             );
 
-            if let Some(tx_index) = block.body.iter().position(|tx| tx.hash() == hash) {
+            if let Some(tx_index) = block.body.transactions.iter().position(|tx| tx.hash() == hash)
+            {
                 // safe to use tx_index for receipts due to 1:1 correspondence
                 return Ok(receipts.get(tx_index).cloned());
             }
@@ -940,7 +925,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
 
         if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().withdrawals.clone())
+            Ok(block.block().block().body.withdrawals.clone())
         } else {
             self.database.withdrawals_by_block(id, timestamp)
         }
@@ -952,7 +937,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         // If the best block is in memory, use that. Otherwise, use the latest withdrawal in the
         // database.
         if let Some(block) = self.canonical_in_memory_state.state_by_number(best_block_num) {
-            Ok(block.block().block().withdrawals.clone().and_then(|mut w| w.pop()))
+            Ok(block.block().block().body.withdrawals.clone().and_then(|mut w| w.pop()))
         } else {
             self.database.latest_withdrawal()
         }
@@ -970,7 +955,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         }
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().requests.clone())
+            Ok(block.block().block().body.requests.clone())
         } else {
             self.database.requests_by_block(id, timestamp)
         }
@@ -1229,7 +1214,7 @@ where
 
 impl<N: NodeTypesWithDB> BlockReaderIdExt for BlockchainProvider2<N>
 where
-    Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
+    Self: BlockReader + ReceiptProviderIdExt,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
         match id {
@@ -1279,20 +1264,34 @@ where
                 Ok(self.canonical_in_memory_state.get_finalized_header())
             }
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
-            BlockNumberOrTag::Earliest => {
-                self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
-            }
+            BlockNumberOrTag::Earliest => self.header_by_number(0)?.map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            ),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
-            BlockNumberOrTag::Number(num) => {
-                self.header_by_number(num)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
-            }
+            BlockNumberOrTag::Number(num) => self.header_by_number(num)?.map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            ),
         }
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| h.seal_slow()),
+            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| {
+                let sealed = h.seal_slow();
+                let (header, seal) = sealed.into_parts();
+                SealedHeader::new(header, seal)
+            }),
         })
     }
 
@@ -1395,6 +1394,8 @@ mod tests {
         writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
     };
+    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1407,14 +1408,14 @@ mod tests {
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Receipt, SealedBlock,
-        SealedBlockWithSenders, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
-        Withdrawals, B256,
+        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
+        TransactionMeta, TransactionSignedNoHash, Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-        StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
+        ReceiptProviderIdExt, RequestsProvider, StateProviderFactory, TransactionVariant,
+        TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1485,12 +1486,12 @@ mod tests {
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
-            .map(|block| block.body.iter())
+            .map(|block| block.body.transactions.iter())
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let provider_rw = factory.provider_rw()?;
+        let provider_rw = factory.database_provider_rw()?;
 
         // Insert blocks into the database
         for block in &database_blocks {
@@ -1810,11 +1811,11 @@ mod tests {
         // First in memory block ommers should be found
         assert_eq!(
             provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
         assert_eq!(
             provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
 
         // A random hash should return None as the block number is not found
@@ -2763,7 +2764,7 @@ mod tests {
                         shainghai_timestamp
                     )?
                     .unwrap(),
-                block.withdrawals.unwrap(),
+                block.body.withdrawals.unwrap(),
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
@@ -2773,7 +2774,7 @@ mod tests {
 
         assert_eq!(
             Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.withdrawals.clone().unwrap().pop(),
+            canonical_block.body.withdrawals.clone().unwrap().pop(),
             "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
         );
 
@@ -2970,11 +2971,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
 
         let block_number = in_memory_block.number;
@@ -2982,11 +2983,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
 
         Ok(())
@@ -3006,8 +3007,8 @@ mod tests {
 
         for block in blocks {
             let block_number = block.number as usize;
-            for (txn_number, _) in block.body.iter().enumerate() {
-                let txn_hash = block.body.get(txn_number).unwrap().hash();
+            for (txn_number, _) in block.body.transactions.iter().enumerate() {
+                let txn_hash = block.body.transactions.get(txn_number).unwrap().hash();
                 let txn_id = provider.transaction_id(txn_hash)?.unwrap();
                 assert_eq!(
                     provider.receipt(txn_id)?.unwrap(),
@@ -3249,11 +3250,11 @@ mod tests {
 
         assert_eq!(
             provider.requests_by_block(database_block.number.into(), prague_timestamp,)?,
-            database_block.requests.clone()
+            database_block.body.requests.clone()
         );
         assert_eq!(
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
-            in_memory_block.requests.clone()
+            in_memory_block.body.requests.clone()
         );
 
         Ok(())
@@ -3519,7 +3520,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction ID can be found in the database
@@ -3528,7 +3529,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction ID can be found in the in-memory state
@@ -3571,7 +3572,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3587,7 +3588,7 @@ mod tests {
 
         // Database
         // Choose a random transaction ID from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3627,7 +3628,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3644,7 +3645,7 @@ mod tests {
 
         // Database
         // Choose a random transaction ID from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3684,7 +3685,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction hash from the in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction can be retrieved by its hash from the in-memory state
@@ -3697,7 +3698,7 @@ mod tests {
 
         // Database
         // Choose a random transaction hash from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction can be retrieved by its hash from the database
@@ -3733,7 +3734,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory block
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Create the expected metadata for this transaction
@@ -3761,7 +3762,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Create the expected metadata for this transaction
@@ -3812,7 +3813,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3830,7 +3831,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database block
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3838,10 +3839,7 @@ mod tests {
 
         // Retrieve the block number for this transaction
         let result = provider.transaction_block(tx_id)?;
-        assert!(
-            result.is_none(),
-            "`block_state_by_tx_id` should be None if the block is in database"
-        );
+        assert_eq!(Some(0), result, "The block number should match the database block number");
 
         // Ensure that invalid transaction ID returns None
         let result = provider.transaction_block(67675657)?;
@@ -3874,7 +3872,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3888,7 +3886,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -3927,7 +3925,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3941,7 +3939,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -3984,8 +3982,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the in-memory blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], in_memory_blocks[0].body);
-        assert_eq!(result[1], in_memory_blocks[1].body);
+        assert_eq!(result[0], in_memory_blocks[0].body.transactions);
+        assert_eq!(result[1], in_memory_blocks[1].body.transactions);
 
         // Database
         // Define a block range entirely within database blocks
@@ -3997,8 +3995,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the database blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body);
-        assert_eq!(result[1], database_blocks[1].body);
+        assert_eq!(result[0], database_blocks[0].body.transactions);
+        assert_eq!(result[1], database_blocks[1].body.transactions);
 
         Ok(())
     }
@@ -4025,8 +4023,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the database
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body[0].clone().into());
-        assert_eq!(result[1], database_blocks[0].body[1].clone().into());
+        assert_eq!(result[0], database_blocks[0].body.transactions[0].clone().into());
+        assert_eq!(result[1], database_blocks[0].body.transactions[1].clone().into());
 
         // Define an empty range that should return no transactions
         let start_tx_num = u64::MAX;
@@ -4108,7 +4106,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory block
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
 
         // Retrieve the transaction ID
         let tx_id = provider.transaction_id(tx.hash())?.unwrap();
@@ -4126,7 +4124,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database block
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
 
         // Retrieve the transaction ID
         let tx_id = provider.transaction_id(tx.hash())?.unwrap();

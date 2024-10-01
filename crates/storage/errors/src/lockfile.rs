@@ -12,8 +12,7 @@ pub enum StorageLockError {
     Other(String),
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StorageLockError {}
+impl core::error::Error for StorageLockError {}
 
 /// TODO: turn into variant once `ProviderError`
 impl From<FsPathError> for StorageLockError {

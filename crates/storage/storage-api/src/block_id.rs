@@ -1,7 +1,7 @@
 use crate::BlockHashReader;
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting

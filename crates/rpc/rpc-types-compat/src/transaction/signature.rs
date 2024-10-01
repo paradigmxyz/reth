@@ -1,20 +1,20 @@
 use alloy_primitives::U256;
-use reth_primitives::{Signature as PrimitiveSignature, TxType};
-use reth_rpc_types::{Parity, Signature};
+use alloy_rpc_types::{Parity, Signature};
+use reth_primitives::{transaction::legacy_parity, Signature as PrimitiveSignature, TxType};
 
 /// Creates a new rpc signature from a legacy [primitive
 /// signature](reth_primitives::Signature), using the give chain id to compute the signature's
 /// recovery id.
 ///
 /// If the chain id is `Some`, the recovery id is computed according to [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
-pub(crate) fn from_legacy_primitive_signature(
+pub fn from_legacy_primitive_signature(
     signature: PrimitiveSignature,
     chain_id: Option<u64>,
 ) -> Signature {
     Signature {
-        r: signature.r,
-        s: signature.s,
-        v: U256::from(signature.legacy_parity(chain_id).to_u64()),
+        r: signature.r(),
+        s: signature.s(),
+        v: U256::from(legacy_parity(&signature, chain_id).to_u64()),
         y_parity: None,
     }
 }
@@ -22,12 +22,12 @@ pub(crate) fn from_legacy_primitive_signature(
 /// Creates a new rpc signature from a non-legacy [primitive
 /// signature](reth_primitives::Signature). This sets the `v` value to `0` or `1` depending on
 /// the signature's `odd_y_parity`.
-pub(crate) fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signature {
+pub fn from_typed_primitive_signature(signature: PrimitiveSignature) -> Signature {
     Signature {
-        r: signature.r,
-        s: signature.s,
-        v: U256::from(signature.odd_y_parity as u8),
-        y_parity: Some(Parity(signature.odd_y_parity)),
+        r: signature.r(),
+        s: signature.s(),
+        v: U256::from(signature.v().y_parity_byte()),
+        y_parity: Some(Parity(signature.v().y_parity())),
     }
 }
 
@@ -40,7 +40,7 @@ pub(crate) fn from_typed_primitive_signature(signature: PrimitiveSignature) -> S
 /// If the transaction is a legacy transaction, it will use the `chain_id` to compute the
 /// signature's recovery id. If the transaction is a typed transaction, it will set the `v`
 /// value to `0` or `1` depending on the signature's `odd_y_parity`.
-pub(crate) fn from_primitive_signature(
+pub fn from_primitive_signature(
     signature: PrimitiveSignature,
     tx_type: TxType,
     chain_id: Option<u64>,

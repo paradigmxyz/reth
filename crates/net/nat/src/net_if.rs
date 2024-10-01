@@ -1,7 +1,5 @@
 //! IP resolution on non-host Docker network.
 
-#![cfg(not(target_os = "windows"))]
-
 use std::{io, net::IpAddr};
 
 /// The 'eth0' interface tends to be the default interface that docker containers use to
@@ -20,7 +18,6 @@ pub enum NetInterfaceError {
 }
 
 /// Reads IP of OS interface with given name, if exists.
-#[cfg(not(target_os = "windows"))]
 pub fn resolve_net_if_ip(if_name: &str) -> Result<IpAddr, NetInterfaceError> {
     match if_addrs::get_if_addrs() {
         Ok(ifs) => {
@@ -39,9 +36,8 @@ pub fn resolve_net_if_ip(if_name: &str) -> Result<IpAddr, NetInterfaceError> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
-
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn read_docker_if_addr() {

@@ -34,8 +34,10 @@ reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
 
 # ethereum
-enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 discv5.workspace = true
 
 # async/futures
@@ -85,6 +87,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
 alloy-provider= { workspace = true, features = ["admin-api"] }
+alloy-consensus.workspace = true
 
 # misc
 serial_test.workspace = true

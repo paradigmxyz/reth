@@ -1,11 +1,8 @@
 //! Database adapters for payload building.
-
-use reth_primitives::{
-    revm_primitives::{
-        db::{Database, DatabaseRef},
-        AccountInfo, Address, Bytecode, B256,
-    },
-    U256,
+use alloy_primitives::{Address, B256, U256};
+use reth_primitives::revm_primitives::{
+    db::{Database, DatabaseRef},
+    AccountInfo, Bytecode,
 };
 use std::{
     cell::RefCell,
@@ -161,6 +158,6 @@ struct CachedAccount {
 
 impl CachedAccount {
     fn new(info: Option<AccountInfo>) -> Self {
-        Self { info, storage: HashMap::new() }
+        Self { info, storage: HashMap::default() }
     }
 }

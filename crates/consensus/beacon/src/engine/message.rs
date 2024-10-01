@@ -1,13 +1,14 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
-use futures::{future::Either, FutureExt};
-use reth_engine_primitives::EngineTypes;
-use reth_errors::RethResult;
-use reth_payload_builder::error::PayloadBuilderError;
-use reth_rpc_types::engine::{
+use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
+use futures::{future::Either, FutureExt};
+use reth_engine_primitives::EngineTypes;
+use reth_errors::RethResult;
+use reth_payload_primitives::PayloadBuilderError;
 use std::{
+    fmt::Display,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -159,4 +160,32 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     },
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,
+}
+
+impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NewPayload { payload, .. } => {
+                write!(
+                    f,
+                    "NewPayload(parent: {}, number: {}, hash: {})",
+                    payload.parent_hash(),
+                    payload.block_number(),
+                    payload.block_hash()
+                )
+            }
+            Self::ForkchoiceUpdated { state, payload_attrs, .. } => {
+                // we don't want to print the entire payload attributes, because for OP this
+                // includes all txs
+                write!(
+                    f,
+                    "ForkchoiceUpdated {{ state: {state:?}, has_payload_attributes: {} }}",
+                    payload_attrs.is_some()
+                )
+            }
+            Self::TransitionConfigurationExchanged => {
+                write!(f, "TransitionConfigurationExchanged")
+            }
+        }
+    }
 }

@@ -3,17 +3,19 @@ use std::sync::Arc;
 use super::setup;
 use alloy_primitives::BlockNumber;
 use eyre::Result;
-use reth_chainspec::ChainSpec;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_provider::{
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    DatabaseProviderFactory, ProviderFactory,
+};
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
-pub(crate) async fn dump_hashing_account_stage<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
     to: BlockNumber,
@@ -49,13 +51,13 @@ pub(crate) async fn dump_hashing_account_stage<N: NodeTypesWithDB<ChainSpec = Ch
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+fn unwind_and_copy<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let provider = db_tool.provider_factory.provider_rw()?;
+    let provider = db_tool.provider_factory.database_provider_rw()?;
     let mut exec_stage = AccountHashingStage::default();
 
     exec_stage.unwind(
@@ -74,14 +76,14 @@ fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 }
 
 /// Try to re-execute the stage straight away
-fn dry_run<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+fn dry_run<N: ProviderNodeTypes>(
     output_provider_factory: ProviderFactory<N>,
     to: u64,
     from: u64,
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
 
-    let provider = output_provider_factory.provider_rw()?;
+    let provider = output_provider_factory.database_provider_rw()?;
     let mut stage = AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()

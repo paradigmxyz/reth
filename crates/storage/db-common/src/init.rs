@@ -2,7 +2,7 @@
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, B256, U256};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::tables;
@@ -71,10 +71,7 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
-    PF: DatabaseProviderFactory
-        + StaticFileProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + BlockHashReader,
+    PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
     PF::ProviderRW: StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
@@ -294,13 +291,14 @@ where
 }
 
 /// Inserts header for the genesis state.
-pub fn insert_genesis_header<Provider>(
+pub fn insert_genesis_header<Provider, Spec>(
     provider: &Provider,
     static_file_provider: &StaticFileProvider,
-    chain: &ChainSpec,
+    chain: &Spec,
 ) -> ProviderResult<()>
 where
     Provider: DBProvider<Tx: DbTxMut>,
+    Spec: EthChainSpec,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
 
@@ -326,29 +324,27 @@ where
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<PF>(
+pub fn init_from_state_dump<Provider>(
     mut reader: impl BufRead,
-    factory: PF,
+    provider_rw: &Provider,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256>
 where
-    PF: DatabaseProviderFactory
-        + StaticFileProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + BlockHashReader
+    Provider: DBProvider<Tx: DbTxMut>
         + BlockNumReader
-        + HeaderProvider,
-    PF::ProviderRW: StageCheckpointWriter
+        + BlockHashReader
+        + ChainSpecProvider
+        + StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
         + StateChangeWriter
         + TrieWriter
-        + AsRef<PF::ProviderRW>,
+        + AsRef<Provider>,
 {
-    let block = factory.last_block_number()?;
-    let hash = factory.block_hash(block)?.unwrap();
-    let expected_state_root = factory
+    let block = provider_rw.last_block_number()?;
+    let hash = provider_rw.block_hash(block)?.unwrap();
+    let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or(ProviderError::HeaderNotFound(block.into()))?
         .state_root;
@@ -370,7 +366,7 @@ where
 
     debug!(target: "reth::cli",
         block,
-        chain=%factory.chain_spec().chain,
+        chain=%provider_rw.chain_spec().chain(),
         "Initializing state at block"
     );
 
@@ -378,11 +374,10 @@ where
     let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
-    let provider_rw = factory.database_provider_rw()?;
-    dump_state(collector, &provider_rw, block)?;
+    dump_state(collector, provider_rw, block)?;
 
     // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(&provider_rw)?;
+    let computed_state_root = compute_state_root(provider_rw)?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -406,8 +401,6 @@ where
     for stage in StageId::STATE_REQUIRED {
         provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
     }
-
-    provider_rw.commit()?;
 
     Ok(hash)
 }
@@ -589,7 +582,7 @@ struct GenesisAccountWithAddress {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, HOLESKY, MAINNET, SEPOLIA};
+    use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,

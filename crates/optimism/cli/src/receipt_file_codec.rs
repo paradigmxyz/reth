@@ -1,11 +1,11 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_primitives::B256;
-use alloy_rlp::{Decodable, RlpDecodable};
-use reth_primitives::{
+use alloy_primitives::{
     bytes::{Buf, BytesMut},
-    Address, Bloom, Bytes, Log, Receipt, TxType,
+    Address, Bloom, Bytes, B256,
 };
+use alloy_rlp::{Decodable, RlpDecodable};
+use reth_primitives::{Log, Receipt, TxType};
 use tokio_util::codec::Decoder;
 
 use reth_downloaders::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
@@ -95,8 +95,7 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use alloy_primitives::hex;
-    use reth_primitives::alloy_primitives::LogData;
+    use alloy_primitives::{hex, LogData};
 
     use super::*;
 

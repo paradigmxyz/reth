@@ -125,12 +125,11 @@ impl From<StateRootError> for BlockValidationError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for BlockValidationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for BlockValidationError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::EVM { error, .. } => std::error::Error::source(error),
-            Self::StateRoot(source) => std::error::Error::source(source),
+            Self::EVM { error, .. } => core::error::Error::source(error),
+            Self::StateRoot(source) => core::error::Error::source(source),
             _ => Option::None,
         }
     }
@@ -153,7 +152,7 @@ impl BlockExecutionError {
     #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: core::error::Error + Send + Sync + 'static,
     {
         Self::Internal(InternalBlockExecutionError::other(error))
     }
@@ -185,13 +184,12 @@ impl From<ProviderError> for BlockExecutionError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for BlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for BlockExecutionError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Validation(source) => std::error::Error::source(source),
-            Self::Consensus(source) => std::error::Error::source(source),
-            Self::Internal(source) => std::error::Error::source(source),
+            Self::Validation(source) => core::error::Error::source(source),
+            Self::Consensus(source) => core::error::Error::source(source),
+            Self::Internal(source) => core::error::Error::source(source),
         }
     }
 }
@@ -216,8 +214,7 @@ pub enum InternalBlockExecutionError {
     #[from]
     LatestBlock(ProviderError),
     /// Arbitrary Block Executor Errors
-    #[cfg(feature = "std")]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl InternalBlockExecutionError {
@@ -225,7 +222,7 @@ impl InternalBlockExecutionError {
     #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: core::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
     }
@@ -237,12 +234,11 @@ impl InternalBlockExecutionError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for InternalBlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for InternalBlockExecutionError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Pruning(source) => std::error::Error::source(source),
-            Self::LatestBlock(source) => std::error::Error::source(source),
+            Self::Pruning(source) => core::error::Error::source(source),
+            Self::LatestBlock(source) => core::error::Error::source(source),
             _ => Option::None,
         }
     }

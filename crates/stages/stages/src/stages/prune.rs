@@ -1,5 +1,8 @@
-use reth_db_api::database::Database;
-use reth_provider::{DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter};
+use reth_db::transaction::DbTxMut;
+use reth_provider::{
+    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    StaticFileProviderFactory,
+};
 use reth_prune::{
     PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -32,22 +35,25 @@ impl PruneStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for PruneStage {
+impl<Provider> Stage<Provider> for PruneStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointReader
+        + PruneCheckpointWriter
+        + BlockReader
+        + StaticFileProviderFactory,
+{
     fn id(&self) -> StageId {
         StageId::Prune
     }
 
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let mut pruner = PrunerBuilder::default()
             .segments(self.prune_modes.clone())
             .delete_limit(self.commit_threshold)
-            .build(provider.static_file_provider().clone());
+            .build::<Provider>(provider.static_file_provider());
 
-        let result = pruner.run_with_provider(&provider.0, input.target())?;
+        let result = pruner.run_with_provider(provider, input.target())?;
         if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
@@ -87,7 +93,7 @@ impl<DB: Database> Stage<DB> for PruneStage {
 
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // We cannot recover the data that was pruned in `execute`, so we just update the
@@ -118,16 +124,19 @@ impl PruneSenderRecoveryStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for PruneSenderRecoveryStage {
+impl<Provider> Stage<Provider> for PruneSenderRecoveryStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointReader
+        + PruneCheckpointWriter
+        + BlockReader
+        + StaticFileProviderFactory,
+{
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
     }
 
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let mut result = self.0.execute(provider, input)?;
 
         // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
@@ -146,7 +155,7 @@ impl<DB: Database> Stage<DB> for PruneSenderRecoveryStage {
 
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.0.unwind(provider, input)
@@ -160,7 +169,8 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use reth_primitives::{SealedBlock, B256};
+    use alloy_primitives::B256;
+    use reth_primitives::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };
@@ -204,9 +214,9 @@ mod tests {
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             self.db.insert_transaction_senders(
-                blocks.iter().flat_map(|block| block.body.iter()).enumerate().map(|(i, tx)| {
-                    (i as u64, tx.recover_signer().expect("failed to recover signer"))
-                }),
+                blocks.iter().flat_map(|block| block.body.transactions.iter()).enumerate().map(
+                    |(i, tx)| (i as u64, tx.recover_signer().expect("failed to recover signer")),
+                ),
             )?;
             Ok(blocks)
         }

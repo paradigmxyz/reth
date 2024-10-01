@@ -42,6 +42,7 @@ use utils::*;
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
@@ -55,10 +56,7 @@ mod tests {
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
-    use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, BlockNumber, Bytecode, SealedBlock,
-        StaticFileSegment, B256, U256,
-    };
+    use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
@@ -144,7 +142,7 @@ mod tests {
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
-            let provider = factory.provider_rw().unwrap();
+            let provider = factory.database_provider_rw().unwrap();
 
             // Check execution and create receipts and changesets according to the pruning
             // configuration
@@ -268,8 +266,8 @@ mod tests {
         let mut receipts = Vec::new();
         let mut tx_num = 0u64;
         for block in &blocks {
-            let mut block_receipts = Vec::with_capacity(block.body.len());
-            for transaction in &block.body {
+            let mut block_receipts = Vec::with_capacity(block.body.transactions.len());
+            for transaction in &block.body.transactions {
                 block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
                 tx_num += 1;
             }

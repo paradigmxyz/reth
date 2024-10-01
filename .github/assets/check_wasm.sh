@@ -35,7 +35,6 @@ exclude_crates=(
   reth-ethereum-payload-builder
   reth-etl
   reth-evm-ethereum
-  reth-evm-optimism
   reth-execution-errors
   reth-exex
   reth-exex-test-utils
@@ -49,8 +48,9 @@ exclude_crates=(
   reth-node-ethereum
   reth-node-events
   reth-node-metrics
-  reth-node-optimism
   reth-optimism-cli
+  reth-optimism-evm
+  reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-payload-builder
@@ -66,6 +66,7 @@ exclude_crates=(
   reth-rpc-types
   reth-stages
   reth-storage-errors
+  reth-engine-local
   # The following are not supposed to be working
   reth # all of the crates below
   reth-invalid-block-hooks # reth-provider

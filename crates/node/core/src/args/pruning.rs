@@ -3,7 +3,7 @@
 use crate::args::error::ReceiptsLogError;
 use alloy_primitives::{Address, BlockNumber};
 use clap::Args;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::collections::BTreeMap;
@@ -92,7 +92,7 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, chain_spec: &ChainSpec) -> Option<PruneConfig> {
+    pub fn prune_config(&self, chain_spec: &impl EthChainSpec) -> Option<PruneConfig> {
         // Initialise with a default prune configuration.
         let mut config = PruneConfig::default();
 
@@ -106,16 +106,14 @@ impl PruningArgs {
                     // prune all receipts if chain doesn't have deposit contract specified in chain
                     // spec
                     receipts: chain_spec
-                        .deposit_contract
-                        .as_ref()
+                        .deposit_contract()
                         .map(|contract| PruneMode::Before(contract.block))
                         .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     receipts_log_filter: ReceiptsLogPruneConfig(
                         chain_spec
-                            .deposit_contract
-                            .as_ref()
+                            .deposit_contract()
                             .map(|contract| (contract.address, PruneMode::Before(contract.block)))
                             .into_iter()
                             .collect(),

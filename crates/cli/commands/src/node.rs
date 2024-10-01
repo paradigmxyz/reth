@@ -1,7 +1,7 @@
 //! Main node command for launching a node
 
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -112,7 +112,7 @@ pub struct NodeCommand<
     pub ext: Ext,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<C> {
+impl<C: ChainSpecParser> NodeCommand<C> {
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
@@ -128,14 +128,18 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<C> {
     }
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
+impl<
+        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
+        Ext: clap::Args + fmt::Debug,
+    > NodeCommand<C, Ext>
+{
     /// Launches the node
     ///
     /// This transforms the node command into a node config and launches the node using the given
     /// closure.
     pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
@@ -312,24 +316,6 @@ mod tests {
 
         let db_path = data_dir.db();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
-    }
-
-    #[test]
-    fn parse_dev() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["reth", "--dev"]);
-        let chain = reth_chainspec::DEV.clone();
-        assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-        assert_eq!(
-            cmd.chain.paris_block_and_final_difficulty,
-            chain.paris_block_and_final_difficulty
-        );
-        assert_eq!(cmd.chain.hardforks, chain.hardforks);
-
-        assert!(cmd.rpc.http);
-        assert!(cmd.network.discovery.disable_discovery);
-
-        assert!(cmd.dev.dev);
     }
 
     #[test]

@@ -12,12 +12,12 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
+use reth_primitives::{transaction::FillTxEnv, Header, TransactionSigned};
 use revm_primitives::{
-    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, Env,
-    SpecId, TxEnv, TxKind,
+    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
 use std::sync::Arc;
 
@@ -122,26 +122,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.handler_cfg.spec_id = spec_id;
     }
 
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
-        block_env.number = U256::from(header.number);
-        block_env.coinbase = header.beneficiary;
-        block_env.timestamp = U256::from(header.timestamp);
-        if after_merge {
-            block_env.prevrandao = Some(header.mix_hash);
-            block_env.difficulty = U256::ZERO;
-        } else {
-            block_env.difficulty = header.difficulty;
-            block_env.prevrandao = None;
-        }
-        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
-        block_env.gas_limit = U256::from(header.gas_limit);
-
-        // EIP-4844 excess blob gas of this block, introduced in Cancun
-        if let Some(excess_blob_gas) = header.excess_blob_gas {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-        }
-    }
-
     fn next_cfg_and_block_env(
         &self,
         parent: &Self::Header,
@@ -214,11 +194,13 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::Genesis;
+    use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Genesis, Header, B256, KECCAK_EMPTY, U256,
+        Header, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

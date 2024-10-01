@@ -1,6 +1,7 @@
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
+pub use alloy_eips::eip1559::BaseFeeParams;
+
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_chains::{Chain, ChainKind, NamedChain};
+use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
@@ -8,7 +9,7 @@ use derive_more::From;
 use once_cell::sync::{Lazy, OnceCell};
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
+    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
@@ -23,7 +24,7 @@ use reth_primitives_traits::{
 };
 use reth_trie_common::root::state_root_ref_unhashed;
 
-pub use alloy_eips::eip1559::BaseFeeParams;
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -234,20 +235,8 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
-    pub const fn is_eth(&self) -> bool {
-        matches!(
-            self.chain.kind(),
-            ChainKind::Named(
-                NamedChain::Mainnet |
-                    NamedChain::Morden |
-                    NamedChain::Ropsten |
-                    NamedChain::Rinkeby |
-                    NamedChain::Goerli |
-                    NamedChain::Kovan |
-                    NamedChain::Holesky |
-                    NamedChain::Sepolia
-            )
-        )
+    pub const fn is_ethereum(&self) -> bool {
+        self.chain.is_ethereum()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -255,7 +244,7 @@ impl ChainSpec {
     #[cfg(feature = "optimism")]
     pub fn is_optimism(&self) -> bool {
         self.chain.is_optimism() ||
-            self.hardforks.get(reth_ethereum_forks::OptimismHardfork::Bedrock).is_some()
+            self.hardforks.get(reth_optimism_forks::OptimismHardfork::Bedrock).is_some()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -315,19 +304,19 @@ impl ChainSpec {
         };
 
         Header {
-            gas_limit: self.genesis.gas_limit as u64,
+            gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce,
+            nonce: self.genesis.nonce.into(),
             extra_data: self.genesis.extra_data.clone(),
             state_root: state_root_ref_unhashed(&self.genesis.alloc),
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            base_fee_per_gas,
+            base_fee_per_gas: base_fee_per_gas.map(Into::into),
             withdrawals_root,
             parent_beacon_block_root,
-            blob_gas_used,
-            excess_blob_gas,
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: excess_blob_gas.map(Into::into),
             requests_root,
             ..Default::default()
         }
@@ -422,10 +411,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(
-            &self.hardforks,
-            self.paris_block_and_final_difficulty.map(|(block, _)| block),
-        )
+        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
     }
 
     /// Get the fork id for the given hardfork.
@@ -616,6 +602,41 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
+impl Hardforks for ChainSpec {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
+        self.hardforks.fork(fork)
+    }
+
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
+        self.hardforks.forks_iter()
+    }
+
+    fn fork_id(&self, head: &Head) -> ForkId {
+        self.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> ForkId {
+        self.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: Head) -> ForkFilter {
+        self.fork_filter(head)
+    }
+}
+
+impl EthereumHardforks for ChainSpec {
+    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.get_final_paris_total_difficulty()
+    }
+
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.final_paris_total_difficulty(block_number)
+    }
+}
+
+#[cfg(feature = "optimism")]
+impl reth_optimism_forks::OptimismHardforks for ChainSpec {}
+
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]
 fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
@@ -708,7 +729,7 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
 #[cfg(feature = "optimism")]
 /// Convert the given [`Genesis`] into an Optimism [`ChainSpec`].
 fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
-    use reth_ethereum_forks::OptimismHardfork;
+    use reth_optimism_forks::OptimismHardfork;
     let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
     let genesis_info = optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
 
@@ -804,13 +825,13 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
     }
 }
 
-/// A trait for reading the current [`ChainSpec`].
+/// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
     /// The chain spec type.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec + 'static;
 
-    /// Get an [`Arc`] to the [`ChainSpec`].
+    /// Get an [`Arc`] to the chainspec.
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 }
 
@@ -972,7 +993,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
         self = self.paris_activated();
-        self.hardforks.insert(crate::OptimismHardfork::Bedrock, ForkCondition::Block(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
@@ -980,7 +1002,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.hardforks.insert(crate::OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -990,7 +1013,8 @@ impl ChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.hardforks.insert(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.hardforks.insert(crate::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -999,7 +1023,8 @@ impl ChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.hardforks.insert(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.hardforks.insert(crate::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1007,7 +1032,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.hardforks.insert(crate::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1015,7 +1041,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.hardforks.insert(crate::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1110,7 +1137,7 @@ impl OptimismGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                reth_ethereum_forks::OptimismHardfork::Canyon.boxed(),
+                                reth_optimism_forks::OptimismHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]
@@ -2309,7 +2336,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_paris_block_and_total_difficulty() {
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let paris_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
@@ -2321,7 +2348,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
@@ -2511,7 +2538,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     #[cfg(feature = "optimism")]
     fn test_fork_order_optimism_mainnet() {
-        use crate::OptimismHardfork;
+        use reth_optimism_forks::OptimismHardfork;
 
         let genesis = Genesis {
             config: ChainConfig {

@@ -16,7 +16,7 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
-//! use reth_evm::ConfigureEvm;
+//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::Header;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -27,18 +27,20 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //!
-//! pub async fn launch<Provider, Pool, Network, Events, EvmConfig>(
+//! pub async fn launch<Provider, Pool, Network, Events, EvmConfig, BlockExecutor>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     events: Events,
 //!     evm_config: EvmConfig,
+//!     block_executor: BlockExecutor,
 //! ) where
 //!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
+//!     BlockExecutor: BlockExecutorProvider,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -54,6 +56,7 @@
 //!         TokioTaskExecutor::default(),
 //!         events,
 //!         evm_config,
+//!         block_executor,
 //!     )
 //!     .build(transports, Box::new(EthApi::with_spawner));
 //!     let handle = RpcServerConfig::default()
@@ -68,7 +71,7 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
-//! use reth_evm::ConfigureEvm;
+//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::Header;
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -82,13 +85,23 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT, EvmConfig>(
+//! pub async fn launch<
+//!     Provider,
+//!     Pool,
+//!     Network,
+//!     Events,
+//!     EngineApi,
+//!     EngineT,
+//!     EvmConfig,
+//!     BlockExecutor,
+//! >(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     events: Events,
 //!     engine_api: EngineApi,
 //!     evm_config: EvmConfig,
+//!     block_executor: BlockExecutor,
 //! ) where
 //!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + 'static,
@@ -97,6 +110,7 @@
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
+//!     BlockExecutor: BlockExecutorProvider,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -112,6 +126,7 @@
 //!         TokioTaskExecutor::default(),
 //!         events,
 //!         evm_config,
+//!         block_executor,
 //!     );
 //!
 //!     // configure the server modules
@@ -152,9 +167,9 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::Header;
 use reth_provider::{
@@ -168,11 +183,10 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcReceipt,
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
-use reth_rpc_types::WithOtherFields;
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -210,11 +224,10 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
-use reth_node_core::rpc::types::AnyTransactionReceipt;
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
+pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, BlockExecutor>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -224,6 +237,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     events: Events,
     evm_config: EvmConfig,
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+    block_executor: BlockExecutor,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
@@ -231,17 +245,24 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
-    EthApi: FullEthApiServer<
-        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-    >,
+    EvmConfig: ConfigureEvm<Header = reth_primitives::Header>,
+    EthApi: FullEthApiServer,
+    BlockExecutor: BlockExecutorProvider,
 {
     let module_config = module_config.into();
     server_config
         .into()
         .start(
-            &RpcModuleBuilder::new(provider, pool, network, executor, events, evm_config)
-                .build(module_config, eth),
+            &RpcModuleBuilder::new(
+                provider,
+                pool,
+                network,
+                executor,
+                events,
+                evm_config,
+                block_executor,
+            )
+            .build(module_config, eth),
         )
         .await
 }
@@ -250,7 +271,7 @@ where
 ///
 /// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
-pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig> {
+pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor> {
     /// The Provider type to when creating all rpc handlers
     provider: Provider,
     /// The Pool type to when creating all rpc handlers
@@ -263,12 +284,14 @@ pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig> {
     events: Events,
     /// Defines how the EVM should be configured before execution.
     evm_config: EvmConfig,
+    /// The provider for getting a block executor that executes blocks
+    block_executor: BlockExecutor,
 }
 
 // === impl RpcBuilder ===
 
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
-    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor>
+    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor>
 {
     /// Create a new instance of the builder
     pub const fn new(
@@ -278,32 +301,33 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         executor: Tasks,
         events: Events,
         evm_config: EvmConfig,
+        block_executor: BlockExecutor,
     ) -> Self {
-        Self { provider, pool, network, executor, events, evm_config }
+        Self { provider, pool, network, executor, events, evm_config, block_executor }
     }
 
     /// Configure the provider instance.
     pub fn with_provider<P>(
         self,
         provider: P,
-    ) -> RpcModuleBuilder<P, Pool, Network, Tasks, Events, EvmConfig>
+    ) -> RpcModuleBuilder<P, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor>
     where
         P: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     {
-        let Self { pool, network, executor, events, evm_config, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+        let Self { pool, network, executor, events, evm_config, block_executor, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
     }
 
     /// Configure the transaction pool instance.
     pub fn with_pool<P>(
         self,
         pool: P,
-    ) -> RpcModuleBuilder<Provider, P, Network, Tasks, Events, EvmConfig>
+    ) -> RpcModuleBuilder<Provider, P, Network, Tasks, Events, EvmConfig, BlockExecutor>
     where
         P: TransactionPool + 'static,
     {
-        let Self { provider, network, executor, events, evm_config, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+        let Self { provider, network, executor, events, evm_config, block_executor, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
     }
 
     /// Configure a [`NoopTransactionPool`] instance.
@@ -313,14 +337,23 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     /// [`EthApi`](reth_rpc::eth::EthApi) which requires a [`TransactionPool`] implementation.
     pub fn with_noop_pool(
         self,
-    ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events, EvmConfig> {
-        let Self { provider, executor, events, network, evm_config, .. } = self;
+    ) -> RpcModuleBuilder<
+        Provider,
+        NoopTransactionPool,
+        Network,
+        Tasks,
+        Events,
+        EvmConfig,
+        BlockExecutor,
+    > {
+        let Self { provider, executor, events, network, evm_config, block_executor, .. } = self;
         RpcModuleBuilder {
             provider,
             executor,
             events,
             network,
             evm_config,
+            block_executor,
             pool: NoopTransactionPool::default(),
         }
     }
@@ -329,12 +362,12 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     pub fn with_network<N>(
         self,
         network: N,
-    ) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events, EvmConfig>
+    ) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events, EvmConfig, BlockExecutor>
     where
         N: NetworkInfo + Peers + 'static,
     {
-        let Self { provider, pool, executor, events, evm_config, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+        let Self { provider, pool, executor, events, evm_config, block_executor, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
     }
 
     /// Configure a [`NoopNetwork`] instance.
@@ -344,8 +377,9 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     /// [`EthApi`](reth_rpc::eth::EthApi) which requires a [`NetworkInfo`] implementation.
     pub fn with_noop_network(
         self,
-    ) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events, EvmConfig> {
-        let Self { provider, pool, executor, events, evm_config, .. } = self;
+    ) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events, EvmConfig, BlockExecutor>
+    {
+        let Self { provider, pool, executor, events, evm_config, block_executor, .. } = self;
         RpcModuleBuilder {
             provider,
             pool,
@@ -353,6 +387,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
             events,
             network: NoopNetwork::default(),
             evm_config,
+            block_executor,
         }
     }
 
@@ -360,12 +395,12 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     pub fn with_executor<T>(
         self,
         executor: T,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, T, Events, EvmConfig>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, T, Events, EvmConfig, BlockExecutor>
     where
         T: TaskSpawner + 'static,
     {
-        let Self { pool, network, provider, events, evm_config, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+        let Self { pool, network, provider, events, evm_config, block_executor, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
     }
 
     /// Configure [`TokioTaskExecutor`] as the task executor to use for additional tasks.
@@ -374,8 +409,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     /// [`TokioTaskExecutor`].
     pub fn with_tokio_executor(
         self,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, TokioTaskExecutor, Events, EvmConfig> {
-        let Self { pool, network, provider, events, evm_config, .. } = self;
+    ) -> RpcModuleBuilder<
+        Provider,
+        Pool,
+        Network,
+        TokioTaskExecutor,
+        Events,
+        EvmConfig,
+        BlockExecutor,
+    > {
+        let Self { pool, network, provider, events, evm_config, block_executor, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
@@ -383,6 +426,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
             events,
             executor: TokioTaskExecutor::default(),
             evm_config,
+            block_executor,
         }
     }
 
@@ -390,29 +434,41 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     pub fn with_events<E>(
         self,
         events: E,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, E, EvmConfig>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, E, EvmConfig, BlockExecutor>
     where
         E: CanonStateSubscriptions + 'static,
     {
-        let Self { provider, pool, executor, network, evm_config, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+        let Self { provider, pool, executor, network, evm_config, block_executor, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
     }
 
     /// Configure the evm configuration type
     pub fn with_evm_config<E>(
         self,
         evm_config: E,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E, BlockExecutor>
     where
         E: ConfigureEvm + 'static,
     {
-        let Self { provider, pool, executor, network, events, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+        let Self { provider, pool, executor, network, events, block_executor, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
+    }
+
+    /// Configure the block executor provider
+    pub fn with_block_executor<BE>(
+        self,
+        block_executor: BE,
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BE>
+    where
+        BE: BlockExecutorProvider,
+    {
+        let Self { provider, network, pool, executor, events, evm_config, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config, block_executor }
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
-    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor>
+    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + 'static,
@@ -420,6 +476,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm<Header = Header>,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -436,21 +493,27 @@ where
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
-        RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>,
+        RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>,
     )
     where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
-        EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-        >,
+        EthApi: FullEthApiServer,
     {
-        let Self { provider, pool, network, executor, events, evm_config } = self;
+        let Self { provider, pool, network, executor, events, evm_config, block_executor } = self;
 
         let config = module_config.config.clone().unwrap_or_default();
 
         let mut registry = RpcRegistryInner::new(
-            provider, pool, network, executor, events, config, evm_config, eth,
+            provider,
+            pool,
+            network,
+            executor,
+            events,
+            config,
+            evm_config,
+            eth,
+            block_executor,
         );
 
         let modules = registry.create_transport_rpc_modules(module_config);
@@ -469,6 +532,7 @@ where
     ///
     /// ```no_run
     /// use reth_evm::ConfigureEvm;
+    /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_primitives::Header;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -485,6 +549,7 @@ where
     ///         .with_executor(TokioTaskExecutor::default())
     ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
+    ///         .with_block_executor(EthExecutorProvider::mainnet())
     ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner));
     ///
     ///     let eth_api = registry.eth_api();
@@ -494,12 +559,22 @@ where
         self,
         config: RpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
-    ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+    ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
     where
-        EthApi: 'static,
+        EthApi: EthApiTypes + 'static,
     {
-        let Self { provider, pool, network, executor, events, evm_config } = self;
-        RpcRegistryInner::new(provider, pool, network, executor, events, config, evm_config, eth)
+        let Self { provider, pool, network, executor, events, evm_config, block_executor } = self;
+        RpcRegistryInner::new(
+            provider,
+            pool,
+            network,
+            executor,
+            events,
+            config,
+            evm_config,
+            eth,
+            block_executor,
+        )
     }
 
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -510,13 +585,11 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-        >,
+        EthApi: FullEthApiServer,
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self { provider, pool, network, executor, events, evm_config } = self;
+        let Self { provider, pool, network, executor, events, evm_config, block_executor } = self;
 
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
@@ -530,6 +603,7 @@ where
                 config.unwrap_or_default(),
                 evm_config,
                 eth,
+                block_executor,
             );
 
             modules.config = module_config;
@@ -542,9 +616,9 @@ where
     }
 }
 
-impl Default for RpcModuleBuilder<(), (), (), (), (), ()> {
+impl Default for RpcModuleBuilder<(), (), (), (), (), (), ()> {
     fn default() -> Self {
-        Self::new((), (), (), (), (), ())
+        Self::new((), (), (), (), (), (), ())
     }
 }
 
@@ -618,12 +692,21 @@ impl RpcModuleConfigBuilder {
 
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
-pub struct RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi> {
+pub struct RpcRegistryInner<
+    Provider,
+    Pool,
+    Network,
+    Tasks,
+    Events,
+    EthApi: EthApiTypes,
+    BlockExecutor,
+> {
     provider: Provider,
     pool: Pool,
     network: Network,
     executor: Tasks,
     events: Events,
+    block_executor: BlockExecutor,
     /// Holds a all `eth_` namespace handlers
     eth: EthHandlers<Provider, Pool, Network, Events, EthApi>,
     /// to put trace calls behind semaphore
@@ -634,15 +717,16 @@ pub struct RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi> {
 
 // === impl RpcRegistryInner ===
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: 'static,
+    EthApi: EthApiTypes + 'static,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Creates a new, empty instance.
     #[allow(clippy::too_many_arguments)]
@@ -663,13 +747,14 @@ where
             Events,
             EthApi,
         >,
+        block_executor: BlockExecutor,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Header = Header>,
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let eth = EthHandlers::builder(
+        let eth = EthHandlers::bootstrap(
             provider.clone(),
             pool.clone(),
             network.clone(),
@@ -678,8 +763,7 @@ where
             executor.clone(),
             events.clone(),
             eth_api_builder,
-        )
-        .build();
+        );
 
         Self {
             provider,
@@ -690,12 +774,15 @@ where
             modules: Default::default(),
             blocking_pool_guard,
             events,
+            block_executor,
         }
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+where
+    EthApi: EthApiTypes,
 {
     /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
     pub const fn eth_api(&self) -> &EthApi {
@@ -750,14 +837,16 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi>
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
 where
     Network: NetworkInfo + Clone + 'static,
-    Provider: ChainSpecProvider<ChainSpec = ChainSpec>,
+    EthApi: EthApiTypes,
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Instantiates `AdminApi`
-    pub fn admin_api(&self) -> AdminApi<Network>
+    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
     where
         Network: Peers,
     {
@@ -787,29 +876,25 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: Clone,
+    EthApi: EthApiServer<
+            RpcTransaction<EthApi::NetworkTypes>,
+            RpcBlock<EthApi::NetworkTypes>,
+            RpcReceipt<EthApi::NetworkTypes>,
+        > + EthApiTypes,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Register Eth Namespace
     ///
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn register_eth(&mut self) -> &mut Self
-    where
-        EthApi: EthApiServer<
-                reth_rpc_types::Transaction,
-                reth_rpc_types::Block,
-                RpcReceipt<EthApi::NetworkTypes>,
-            > + EthApiTypes<
-                NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-            >,
-    {
+    pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
         self
@@ -822,14 +907,14 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer<
-                WithOtherFields<reth_rpc_types::Transaction>,
-                reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
-                RpcReceipt<EthApi::NetworkTypes>,
-            > + EthApiTypes<
-                NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-            > + TraceExt
-            + EthTransactions,
+        EthApi: TraceExt
+            + EthTransactions<
+                NetworkTypes: alloy_network::Network<
+                    TransactionResponse = alloy_serde::WithOtherFields<
+                        alloy_rpc_types::Transaction,
+                    >,
+                >,
+            >,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -893,6 +978,26 @@ where
         self
     }
 
+    /// Instantiates `OtterscanApi`
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
+    pub fn otterscan_api(&self) -> OtterscanApi<EthApi> {
+        let eth_api = self.eth_api().clone();
+        OtterscanApi::new(eth_api)
+    }
+}
+
+impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+where
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Network: NetworkInfo + Peers + Clone + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
+    EthApi: EthApiTypes,
+    BlockExecutor: BlockExecutorProvider,
+{
     /// Instantiates `TraceApi`
     ///
     /// # Panics
@@ -922,37 +1027,22 @@ where
         EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
 
-    /// Instantiates `OtterscanApi`
-    ///
-    /// # Panics
-    ///
-    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn otterscan_api(&self) -> OtterscanApi<EthApi>
-    where
-        EthApi: EthApiServer<
-                WithOtherFields<reth_rpc_types::Transaction>,
-                reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
-                RpcReceipt<EthApi::NetworkTypes>,
-            > + EthApiTypes<
-                NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-            > + TraceExt
-            + EthTransactions,
-    {
-        let eth_api = self.eth_api().clone();
-        OtterscanApi::new(eth_api)
-    }
-
     /// Instantiates `DebugApi`
     ///
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<Provider, EthApi>
+    pub fn debug_api(&self) -> DebugApi<Provider, EthApi, BlockExecutor>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
+        BlockExecutor: BlockExecutorProvider,
     {
-        let eth_api = self.eth_api().clone();
-        DebugApi::new(self.provider.clone(), eth_api, self.blocking_pool_guard.clone())
+        DebugApi::new(
+            self.provider.clone(),
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.block_executor.clone(),
+        )
     }
 
     /// Instantiates `NetApi`
@@ -974,17 +1064,16 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: FullEthApiServer<
-        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
-    >,
+    EthApi: FullEthApiServer,
+    BlockExecutor: BlockExecutorProvider,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
@@ -1077,6 +1166,7 @@ where
                             self.provider.clone(),
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
+                            self.block_executor.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1109,7 +1199,7 @@ where
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => {
-                            TxPoolApi::new(self.pool.clone()).into_rpc().into()
+                            TxPoolApi::<_, EthApi>::new(self.pool.clone()).into_rpc().into()
                         }
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces

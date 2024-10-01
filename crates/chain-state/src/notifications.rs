@@ -153,14 +153,12 @@ pub trait ForkChoiceSubscriptions: Send + Sync {
 
     /// Convenience method to get a stream of the new safe blocks of the chain.
     fn safe_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
-        ForkChoiceStream::<SealedHeader> { st: WatchStream::new(self.subscribe_safe_block().0) }
+        ForkChoiceStream::new(self.subscribe_safe_block().0)
     }
 
     /// Convenience method to get a stream of the new finalized blocks of the chain.
     fn finalized_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
-        ForkChoiceStream::<SealedHeader> {
-            st: WatchStream::new(self.subscribe_finalized_block().0),
-        }
+        ForkChoiceStream::new(self.subscribe_finalized_block().0)
     }
 }
 
@@ -175,7 +173,7 @@ pub struct ForkChoiceStream<T> {
 impl<T: Clone + Sync + Send + 'static> ForkChoiceStream<T> {
     /// Creates a new `ForkChoiceStream`
     pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
-        Self { st: WatchStream::new(rx) }
+        Self { st: WatchStream::from_changes(rx) }
     }
 }
 

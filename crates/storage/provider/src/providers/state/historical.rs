@@ -2,6 +2,10 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -9,10 +13,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_primitives::{
-    constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment,
-    StorageKey, StorageValue, B256,
-};
+use reth_primitives::{constants::EPOCH_SLOTS, Account, Bytecode, StaticFileSegment};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -23,10 +24,7 @@ use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageRoot, DatabaseTrieWitness,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-};
+use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -496,12 +494,13 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
         StaticFileProviderFactory,
     };
+    use alloy_primitives::{address, b256, Address, B256, U256};
     use reth_db::{tables, BlockNumberList};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
+    use reth_primitives::{Account, StorageEntry};
     use reth_storage_errors::provider::ProviderError;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");

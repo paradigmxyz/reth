@@ -3,6 +3,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
 };
 
+use reth_chainspec::MAINNET;
 use reth_discv4::Discv4Config;
 use reth_network::{
     error::{NetworkError, ServiceKind},
@@ -74,7 +75,7 @@ async fn test_tcp_port_node_record_no_discovery() {
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
         .disable_discovery()
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
     let network = NetworkManager::new(config).await.unwrap();
 
     let local_addr = network.local_addr();
@@ -93,7 +94,7 @@ async fn test_tcp_port_node_record_discovery() {
         .listener_port(0)
         .discovery_port(0)
         .disable_dns_discovery()
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
     let network = NetworkManager::new(config).await.unwrap();
 
     let local_addr = network.local_addr();

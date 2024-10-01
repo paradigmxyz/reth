@@ -56,7 +56,11 @@ async fn test_eth_launcher() {
             .with_components(EthereumNode::components())
             .with_add_ons::<EthereumAddOns>()
             .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(tasks.executor(), builder.config.datadir());
+                let launcher = EngineNodeLauncher::new(
+                    tasks.executor(),
+                    builder.config.datadir(),
+                    Default::default(),
+                );
                 builder.launch_with(launcher)
             });
 }

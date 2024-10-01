@@ -3,12 +3,12 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use alloy_primitives::B256;
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
 use reth_db_common::init::init_from_state_dump;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
-use reth_provider::ProviderFactory;
+use reth_node_builder::NodeTypesWithEngine;
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 use tracing::info;
@@ -17,7 +17,7 @@ use tracing::info;
 #[derive(Debug, Parser)]
 pub struct InitStateCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    pub env: EnvironmentArgs<C>,
 
     /// JSONL file with state dump.
     ///
@@ -37,10 +37,10 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
     /// and including the non-genesis block to init chain at. See 'import' command.
     #[arg(value_name = "STATE_DUMP_FILE", verbatim_doc_comment)]
-    state: PathBuf,
+    pub state: PathBuf,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateCommand<C> {
     /// Execute the `init` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
@@ -59,7 +59,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
 }
 
 /// Initialize chain with state at specific block, from a file with state dump.
-pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn init_at_state<N: ProviderNodeTypes>(
     state_dump_path: PathBuf,
     factory: ProviderFactory<N>,
     etl_config: EtlConfig,
@@ -71,5 +71,9 @@ pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let file = File::open(state_dump_path)?;
     let reader = BufReader::new(file);
 
-    init_from_state_dump(reader, factory, etl_config)
+    let provider_rw = factory.provider_rw()?;
+    let hash = init_from_state_dump(reader, &provider_rw.0, etl_config)?;
+    provider_rw.commit()?;
+
+    Ok(hash)
 }

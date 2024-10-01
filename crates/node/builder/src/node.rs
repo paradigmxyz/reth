@@ -110,7 +110,7 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The configured rpc namespaces
     pub rpc_registry: RpcRegistry<Node, AddOns::EthApi>,
     /// The initial node config.
-    pub config: NodeConfig,
+    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
 }

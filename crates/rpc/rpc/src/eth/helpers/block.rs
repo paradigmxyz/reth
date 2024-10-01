@@ -1,19 +1,22 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use reth_primitives::{BlockId, TransactionMeta};
+use alloy_rpc_types::{AnyTransactionReceipt, BlockId};
+use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
-    FromEthApiError,
+    RpcReceipt,
 };
-use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
-use reth_rpc_types::AnyTransactionReceipt;
+use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadBlock,
+    Self: LoadBlock<
+        Error = EthApiError,
+        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+    >,
     Provider: HeaderProvider,
 {
     #[inline]
@@ -24,7 +27,7 @@ where
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>
+    ) -> Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>
     where
         Self: LoadReceipt,
     {
@@ -36,8 +39,9 @@ where
             let timestamp = block.timestamp;
             let block = block.unseal();
 
-            let receipts = block
+            return block
                 .body
+                .transactions
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()
@@ -54,10 +58,9 @@ where
 
                     ReceiptBuilder::new(&tx, meta, receipt, &receipts)
                         .map(|builder| builder.build())
-                        .map_err(Self::Error::from_eth_err)
                 })
-                .collect::<Result<Vec<_>, Self::Error>>();
-            return receipts.map(Some)
+                .collect::<Result<Vec<_>, Self::Error>>()
+                .map(Some)
         }
 
         Ok(None)

@@ -1,12 +1,12 @@
 //! RPC errors specific to OP.
 
+use alloy_rpc_types::error::EthRpcErrorCode;
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
-use reth_evm_optimism::OptimismBlockExecutionError;
+use reth_optimism_evm::OptimismBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use reth_rpc_types::error::EthRpcErrorCode;
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]

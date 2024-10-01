@@ -3,14 +3,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
+use alloy_primitives::{Address, Bytes, U256};
 use parking_lot::RwLock;
 use reth::{
     api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    primitives::{
-        revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        Address, Bytes, U256,
-    },
+    primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
@@ -168,26 +166,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
         total_difficulty: U256,
     ) {
         self.inner.fill_cfg_env(cfg_env, header, total_difficulty)
-    }
-
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
-        block_env.number = U256::from(header.number);
-        block_env.coinbase = header.beneficiary;
-        block_env.timestamp = U256::from(header.timestamp);
-        if after_merge {
-            block_env.prevrandao = Some(header.mix_hash);
-            block_env.difficulty = U256::ZERO;
-        } else {
-            block_env.difficulty = header.difficulty;
-            block_env.prevrandao = None;
-        }
-        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
-        block_env.gas_limit = U256::from(header.gas_limit);
-
-        // EIP-4844 excess blob gas of this block, introduced in Cancun
-        if let Some(excess_blob_gas) = header.excess_blob_gas {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-        }
     }
 
     fn next_cfg_and_block_env(

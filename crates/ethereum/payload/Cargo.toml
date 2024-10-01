@@ -26,9 +26,14 @@ reth-evm-ethereum.workspace = true
 reth-errors.workspace = true
 reth-trie.workspace = true
 reth-chain-state.workspace = true
+reth-chainspec.workspace = true
 
 # ethereum
 revm.workspace = true
+revm-primitives.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true

@@ -17,6 +17,7 @@ reth-blockchain-tree.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-chain-state.workspace = true
 reth-consensus.workspace = true
+reth-chainspec.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
@@ -28,12 +29,15 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
-reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
-reth-node-types.workspace = true
 reth-trie.workspace = true
 reth-trie-parallel.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # common
 futures.workspace = true
@@ -52,7 +56,6 @@ reth-prune-types = { workspace = true, optional = true }
 reth-stages = { workspace = true, optional = true }
 reth-static-file = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
-reth-chainspec = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -83,6 +86,5 @@ test-utils = [
   "reth-prune-types",
   "reth-stages/test-utils",
   "reth-static-file",
-  "reth-tracing",
-  "reth-chainspec"
+  "reth-tracing"
 ]

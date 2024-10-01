@@ -259,7 +259,7 @@ impl NodeState {
                     number=block.number,
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
-                    txs=block.body.len(),
+                    txs=block.body.transactions.len(),
                     gas=%format_gas(block.header.gas_used),
                     gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),

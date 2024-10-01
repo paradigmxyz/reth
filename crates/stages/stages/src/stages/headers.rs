@@ -1,3 +1,4 @@
+use alloy_primitives::{BlockHash, BlockNumber, B256};
 use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -5,15 +6,16 @@ use reth_consensus::Consensus;
 use reth_db::{tables, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     transaction::DbTxMut,
+    DbTxUnwindExt,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{BlockHash, BlockNumber, SealedHeader, StaticFileSegment, B256};
+use reth_primitives::{SealedHeader, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    StaticFileProviderFactory,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -88,9 +90,9 @@ where
     ///
     /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
     /// database table.
-    fn write_headers<DB: Database>(
+    fn write_headers(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &impl DBProvider<Tx: DbTxMut>,
         static_file_provider: StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
@@ -132,7 +134,7 @@ where
             // Header validation
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
-                    block: Box::new(header.clone().seal(header_hash)),
+                    block: Box::new(SealedHeader::new(header.clone(), header_hash)),
                     error: BlockErrorKind::Validation(error),
                 }
             })?;
@@ -183,11 +185,11 @@ where
     }
 }
 
-impl<DB, Provider, D> Stage<DB> for HeaderStage<Provider, D>
+impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
-    DB: Database,
-    Provider: HeaderSyncGapProvider,
+    P: HeaderSyncGapProvider,
     D: HeaderDownloader,
+    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -259,11 +261,7 @@ where
 
     /// Download the headers in reverse order (falling block numbers)
     /// starting from the tip of the chain
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
 
         if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
@@ -281,8 +279,7 @@ where
 
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
-        let last_header_number =
-            self.write_headers(provider, provider.static_file_provider().clone())?;
+        let last_header_number = self.write_headers(provider, provider.static_file_provider())?;
 
         // Clear ETL collectors
         self.hash_collector.clear();
@@ -310,7 +307,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
@@ -318,13 +315,17 @@ where
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
         // unwind from the next block number since the unwind_to block is exclusive
-        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            (input.unwind_to + 1)..,
-        )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
+        provider
+            .tx_ref()
+            .unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+                (input.unwind_to + 1)..,
+            )?;
+        provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        provider
+            .tx_ref()
+            .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
         let unfinalized_headers_unwound =
-            provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+            provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block
@@ -377,9 +378,10 @@ mod tests {
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
+    use alloy_primitives::{Sealable, B256};
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
+    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
@@ -489,7 +491,9 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let header = header.unwrap().seal_slow();
+                            let sealed = header.unwrap().seal_slow();
+                            let (header, seal) = sealed.into_parts();
+                            let header = SealedHeader::new(header, seal);
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty

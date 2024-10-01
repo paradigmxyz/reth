@@ -1,4 +1,8 @@
 use alloy_primitives::{BlockNumber, B256};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
+};
 use futures::{stream::BoxStream, Future, StreamExt};
 use itertools::Either;
 use reth_blockchain_tree_api::{
@@ -13,7 +17,7 @@ use reth_network_p2p::{
 };
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,
@@ -21,10 +25,6 @@ use reth_primitives::{
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
-};
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
@@ -197,7 +197,7 @@ where
     /// The payload store.
     payload_builder: PayloadBuilderHandle<N::Engine>,
     /// Validator for execution payloads
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<N::ChainSpec>,
     /// Current blockchain tree action.
     blockchain_tree_action: Option<BlockchainTreeAction<N::Engine>>,
     /// Pending forkchoice update.
@@ -462,7 +462,8 @@ where
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if self.blockchain.chain_spec().is_optimism() {
+        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
+        {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
@@ -945,7 +946,7 @@ where
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(safe.header.seal(safe_block_hash));
+            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
         }
         Ok(())
     }
@@ -966,7 +967,8 @@ where
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
             self.blockchain.finalize_block(finalized.number)?;
-            self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
+            self.blockchain
+                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
         }
         Ok(())
     }
@@ -1982,10 +1984,10 @@ mod tests {
         test_utils::{spawn_consensus_engine, TestConsensusEngineBuilder},
         BeaconForkChoiceUpdateError,
     };
+    use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
-    use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2178,11 +2180,11 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use alloy_primitives::U256;
+        use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use generators::BlockParams;
         use reth_db::{tables, test_utils::create_test_static_files_dir, Database};
         use reth_db_api::transaction::DbTxMut;
         use reth_provider::{providers::StaticFileProvider, test_utils::MockNodeTypesWithDB};
-        use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
         #[tokio::test]
@@ -2860,7 +2862,7 @@ mod tests {
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
-            block2.withdrawals = None;
+            block2.body.withdrawals = None;
             block2.header.parent_hash = block1.hash();
             block2.header.base_fee_per_gas = Some(100);
             block2.header.difficulty = U256::ZERO;

@@ -5,12 +5,11 @@ use crate::{PipelineTarget, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, FinalizedBlockReader,
-    FinalizedBlockWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
+    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -64,11 +63,11 @@ pub type PipelineWithResult<N> = (Pipeline<N>, Result<ControlFlow, PipelineError
 /// # Defaults
 ///
 /// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
-pub struct Pipeline<N: NodeTypesWithDB> {
+pub struct Pipeline<N: ProviderNodeTypes> {
     /// Provider factory.
     provider_factory: ProviderFactory<N>,
     /// All configured stages in the order they will be executed.
-    stages: Vec<BoxedStage<N::DB>>,
+    stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
@@ -83,7 +82,8 @@ pub struct Pipeline<N: NodeTypesWithDB> {
 
 impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Construct a pipeline using a [`PipelineBuilder`].
-    pub fn builder() -> PipelineBuilder<N::DB> {
+    pub fn builder() -> PipelineBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>
+    {
         PipelineBuilder::default()
     }
 
@@ -276,7 +276,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut provider_rw = self.provider_factory.provider_rw()?;
+        let mut provider_rw = self.provider_factory.database_provider_rw()?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -354,7 +354,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                         stage.post_unwind_commit()?;
 
-                        provider_rw = self.provider_factory.provider_rw()?;
+                        provider_rw = self.provider_factory.database_provider_rw()?;
                     }
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });
@@ -423,7 +423,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 };
             }
 
-            let provider_rw = self.provider_factory.provider_rw()?;
+            let provider_rw = self.provider_factory.database_provider_rw()?;
 
             self.event_sender.notify(PipelineEvent::Run {
                 pipeline_stages_progress: PipelineStagesProgress {
@@ -513,7 +513,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                 // FIXME: When handling errors, we do not commit the database transaction. This
                 // leads to the Merkle stage not clearing its checkpoint, and restarting from an
                 // invalid place.
-                let provider_rw = factory.provider_rw()?;
+                let provider_rw = factory.database_provider_rw()?;
                 provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
                 provider_rw.save_stage_checkpoint(
                     StageId::MerkleExecute,
@@ -574,7 +574,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
     }
 }
 
-impl<N: NodeTypesWithDB> std::fmt::Debug for Pipeline<N> {
+impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())

@@ -19,6 +19,7 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 #[cfg(feature = "mdbx")]
 pub(crate) mod utils;
 
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_db_api::{
     models::{
         accounts::BlockNumberAddress,
@@ -30,8 +31,7 @@ use reth_db_api::{
     table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, Receipt, Requests, StorageEntry,
-    TransactionSignedNoHash, TxHash, TxNumber, B256,
+    Account, Bytecode, Header, Receipt, Requests, StorageEntry, TransactionSignedNoHash,
 };
 use reth_primitives_traits::IntegerList;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -429,8 +429,8 @@ impl Encode for ChainStateKey {
 }
 
 impl Decode for ChainStateKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
-        if value.as_ref() == [0] {
+    fn decode(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
+        if value == [0] {
             Ok(Self::LastFinalizedBlock)
         } else {
             Err(reth_db_api::DatabaseError::Decode)

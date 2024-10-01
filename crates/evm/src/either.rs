@@ -3,15 +3,17 @@
 use core::fmt::Display;
 
 use crate::execute::{BatchExecutor, BlockExecutorProvider, Executor};
+use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
+use revm::State;
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
@@ -69,6 +71,20 @@ where
         match self {
             Self::Left(a) => a.execute(input),
             Self::Right(b) => b.execute(input),
+        }
+    }
+
+    fn execute_with_state_witness<F>(
+        self,
+        input: Self::Input<'_>,
+        witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
+        match self {
+            Self::Left(a) => a.execute_with_state_witness(input, witness),
+            Self::Right(b) => b.execute_with_state_witness(input, witness),
         }
     }
 }

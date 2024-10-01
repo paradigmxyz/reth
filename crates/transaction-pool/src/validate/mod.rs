@@ -8,8 +8,8 @@ use crate::{
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives::{
-    BlobTransactionSidecar, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    SealedBlock, TransactionSignedEcRecovered,
+    BlobTransactionSidecar, PooledTransactionsElementEcRecovered, SealedBlock,
+    TransactionSignedEcRecovered,
 };
 use std::{fmt, future::Future, time::Instant};
 
@@ -51,7 +51,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// this transaction from ever becoming valid.
     Invalid(T, InvalidPoolTransactionError),
     /// An error occurred while trying to validate the transaction
-    Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
+    Error(TxHash, Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl<T: PoolTransaction> TransactionValidationOutcome<T> {
@@ -380,10 +380,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> IntoRecoveredTransaction
-    for ValidPoolTransaction<T>
-{
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidPoolTransaction<T> {
+    /// Converts to this type into a [`TransactionSignedEcRecovered`].
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.transaction.clone().into_consensus()
     }
 }

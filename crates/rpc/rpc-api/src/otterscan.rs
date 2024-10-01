@@ -1,18 +1,17 @@
+use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_rpc_types::Header;
+use alloy_rpc_types_trace::otterscan::{
+    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
+    TransactionsWithReceipts,
+};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::BlockId;
-use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
-        TransactionsWithReceipts,
-    },
-    Header, Transaction, WithOtherFields,
-};
 
 /// Otterscan rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "ots"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "ots"))]
-pub trait Otterscan {
+pub trait Otterscan<T: RpcObject> {
     /// Get the block header by block number, required by otterscan.
     /// Otterscan currently requires this endpoint, used as:
     ///
@@ -62,7 +61,7 @@ pub trait Otterscan {
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>>;
+    ) -> RpcResult<OtsBlockTransactions<T>>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsBefore")]

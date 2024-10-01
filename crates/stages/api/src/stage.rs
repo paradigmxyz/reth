@@ -1,7 +1,6 @@
 use crate::{error::StageError, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_db_api::database::Database;
-use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError, TransactionsProvider};
+use reth_provider::{BlockReader, ProviderError};
 use std::{
     cmp::{max, min},
     future::{poll_fn, Future},
@@ -71,11 +70,14 @@ impl ExecInput {
     /// Return the next block range determined the number of transactions within it.
     /// This function walks the block indices until either the end of the range is reached or
     /// the number of transactions exceeds the threshold.
-    pub fn next_block_range_with_transaction_threshold<DB: Database>(
+    pub fn next_block_range_with_transaction_threshold<Provider>(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         tx_threshold: u64,
-    ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
+    ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError>
+    where
+        Provider: BlockReader,
+    {
         let start_block = self.next_block();
         let target_block = self.target();
 
@@ -186,9 +188,9 @@ pub struct UnwindOutput {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
-/// Stages receive [`DatabaseProviderRW`].
+/// Stages receive [`DBProvider`](reth_provider::DBProvider).
 #[auto_impl::auto_impl(Box)]
-pub trait Stage<DB: Database>: Send + Sync {
+pub trait Stage<Provider>: Send + Sync {
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.
@@ -229,11 +231,7 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Execute the stage.
     /// It is expected that the stage will write all necessary data to the database
     /// upon invoking this method.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError>;
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError>;
 
     /// Post execution commit hook.
     ///
@@ -247,7 +245,7 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 
@@ -262,7 +260,7 @@ pub trait Stage<DB: Database>: Send + Sync {
 }
 
 /// [Stage] trait extension.
-pub trait StageExt<DB: Database>: Stage<DB> {
+pub trait StageExt<Provider>: Stage<Provider> {
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
     /// with [`poll_fn`] context. For more information see [`Stage::poll_execute_ready`].
     fn execute_ready(
@@ -273,4 +271,4 @@ pub trait StageExt<DB: Database>: Stage<DB> {
     }
 }
 
-impl<DB: Database, S: Stage<DB>> StageExt<DB> for S {}
+impl<Provider, S: Stage<Provider>> StageExt<Provider> for S {}

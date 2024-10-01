@@ -279,7 +279,7 @@ async fn remote_exex<Node: FullNodeComponents>(
     while let Some(notification) = ctx.notifications.next().await {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
-                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
         }
 
         info!("Notification sent to the gRPC server");
@@ -388,7 +388,7 @@ async fn remote_exex<Node: FullNodeComponents>(
     while let Some(notification) = ctx.notifications.next().await {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
-                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
         }
 
         info!(?notification, "Notification sent to the gRPC server");

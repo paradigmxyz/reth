@@ -2,7 +2,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;
@@ -14,7 +14,7 @@ use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
 use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
 use reth_stages::StageId;
-use reth_static_file_types::{find_fixed_range, StaticFileSegment};
+use reth_static_file_types::StaticFileSegment;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
@@ -25,7 +25,7 @@ pub struct Command<C: ChainSpecParser> {
     stage: StageEnum,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
@@ -54,8 +54,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     .sorted_by_key(|(block_range, _)| block_range.start())
                     .rev()
                 {
-                    static_file_provider
-                        .delete_jar(static_file_segment, find_fixed_range(block_range.start()))?;
+                    static_file_provider.delete_jar(static_file_segment, block_range.start())?;
                 }
             }
         }
@@ -165,7 +164,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::IndexStorageHistory.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_history(&provider_rw.0, self.env.chain.genesis.alloc.iter())?;
+                insert_genesis_history(&provider_rw.0, self.env.chain.genesis().alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;

@@ -1,12 +1,13 @@
+use alloy_primitives::{Address, Sealable, B256};
+use alloy_rpc_types::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::{Address, B256};
+use reth_primitives::SealedHeader;
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
 };
-use reth_rpc_types::{Filter, FilteredParams};
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -62,7 +63,9 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
-    let sealed_header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    let sealed_header = SealedHeader::new(header, seal);
 
     // Can also query the header by hash!
     let header_by_hash =

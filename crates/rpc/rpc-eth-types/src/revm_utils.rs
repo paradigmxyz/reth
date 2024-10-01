@@ -1,7 +1,7 @@
 //! utilities for working with revm
 
 use alloy_primitives::{Address, B256, U256};
-use reth_rpc_types::{
+use alloy_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
 };
@@ -66,7 +66,7 @@ where
         .unwrap_or_default())
 }
 
-/// Helper type for representing the fees of a [`reth_rpc_types::TransactionRequest`]
+/// Helper type for representing the fees of a `TransactionRequest`
 #[derive(Debug)]
 pub struct CallFees {
     /// EIP-1559 priority fee
@@ -85,7 +85,7 @@ pub struct CallFees {
 // === impl CallFees ===
 
 impl CallFees {
-    /// Ensures the fields of a [`reth_rpc_types::TransactionRequest`] are not conflicting.
+    /// Ensures the fields of a `TransactionRequest` are not conflicting.
     ///
     /// # EIP-4844 transactions
     ///
@@ -206,8 +206,12 @@ impl CallFees {
     }
 }
 
-/// Applies the given block overrides to the env
-pub fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+/// Applies the given block overrides to the env and updates overridden block hashes in the db.
+pub fn apply_block_overrides<DB>(
+    overrides: BlockOverrides,
+    db: &mut CacheDB<DB>,
+    env: &mut BlockEnv,
+) {
     let BlockOverrides {
         number,
         difficulty,
@@ -216,8 +220,13 @@ pub fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
         coinbase,
         random,
         base_fee,
-        block_hash: _,
+        block_hash,
     } = overrides;
+
+    if let Some(block_hashes) = block_hash {
+        // override block hashes
+        db.block_hashes.extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+    }
 
     if let Some(number) = number {
         env.number = number;

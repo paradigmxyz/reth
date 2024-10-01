@@ -3,15 +3,14 @@
 use std::time::Duration;
 
 use alloy_primitives::{Address, Bytes, U256};
+use alloy_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
-use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
-};
+use reth_rpc_types::ToRpcError;
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
@@ -422,7 +421,7 @@ impl RpcInvalidTransactionError {
 
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
-    const fn error_code(&self) -> i32 {
+    pub const fn error_code(&self) -> i32 {
         match self {
             Self::InvalidChainId | Self::GasTooLow | Self::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
@@ -576,7 +575,8 @@ impl RevertError {
         }
     }
 
-    const fn error_code(&self) -> i32 {
+    /// Returns error code to return for this error.
+    pub const fn error_code(&self) -> i32 {
         EthRpcErrorCode::ExecutionError.code()
     }
 }
@@ -591,7 +591,7 @@ impl std::fmt::Display for RevertError {
     }
 }
 
-impl std::error::Error for RevertError {}
+impl core::error::Error for RevertError {}
 
 /// A helper error type that's mainly used to mirror `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
@@ -643,7 +643,7 @@ pub enum RpcPoolError {
     AddressAlreadyReserved,
     /// Other unspecified error
     #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {

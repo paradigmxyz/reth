@@ -183,8 +183,9 @@ impl BlockBuffer {
 #[cfg(test)]
 mod tests {
     use crate::BlockBuffer;
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::BlockHash;
-    use reth_primitives::{BlockNumHash, SealedBlockWithSenders};
+    use reth_primitives::SealedBlockWithSenders;
     use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 

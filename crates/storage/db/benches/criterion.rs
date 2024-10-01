@@ -1,14 +1,22 @@
 #![allow(missing_docs)]
+
+use std::{path::Path, sync::Arc};
+
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::tables::*;
+use reth_db::{tables::*, test_utils::create_test_rw_db_with_path};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    table::{Decode, Decompress, DupSort},
-    transaction::DbTx,
+    database::Database,
+    table::{Compress, Decode, Decompress, DupSort, Encode, Table},
+    transaction::{DbTx, DbTxMut},
 };
+use reth_fs_util as fs;
+
+mod utils;
+use utils::*;
 
 criterion_group! {
     name = benches;
@@ -79,7 +87,7 @@ where
             |input| {
                 {
                     for (_, k, _, _) in input {
-                        let _ = <T as Table>::Key::decode(k);
+                        let _ = <T as Table>::Key::decode(&k);
                     }
                 };
                 black_box(());
@@ -107,7 +115,7 @@ where
             |input| {
                 {
                     for (_, _, _, v) in input {
-                        let _ = <T as Table>::Value::decompress(v);
+                        let _ = <T as Table>::Value::decompress(&v);
                     }
                 };
                 black_box(());
@@ -291,5 +299,3 @@ where
 
     // group.bench_function(format!("{}.RandomRead", T::NAME), |b| {});
 }
-
-include!("./utils.rs");
