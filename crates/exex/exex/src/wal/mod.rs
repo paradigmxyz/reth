@@ -448,6 +448,27 @@ mod tests {
             wal.inner.block_cache().committed_blocks_sorted(),
             sort_committed_blocks(
                 [
+                    committed_notification_2_cache_committed_blocks.clone(),
+                    reorged_notification_cache_committed_blocks.clone()
+                ]
+                .concat()
+            )
+        );
+        assert_eq!(
+            read_notifications(&wal)?,
+            vec![committed_notification_2.clone(), reorged_notification.clone()]
+        );
+
+        // Re-open the WAL and verify that the cache population works correctly
+        let wal = Wal::new(&temp_dir)?;
+        assert_eq!(
+            wal.inner.block_cache().blocks_sorted(),
+            [reorged_notification_cache_blocks, committed_notification_2_cache_blocks]
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            sort_committed_blocks(
+                [
                     committed_notification_2_cache_committed_blocks,
                     reorged_notification_cache_committed_blocks
                 ]
