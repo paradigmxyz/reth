@@ -549,14 +549,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
-            BlockHashOrNumber::Number(num) => self.get_in_memory_or_storage_by_block(
-                num.into(),
-                |db_provider| db_provider.block_by_number(num),
-                |block_state| Ok(Some(block_state.block().block().clone().unseal())),
-            ),
-        }
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.block(id),
+            |block_state| Ok(Some(block_state.block().block().clone().unseal())),
+        )
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
@@ -572,22 +569,22 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        match self.convert_hash_or_number(id)? {
-            Some(number) => {
-                // If the Paris (Merge) hardfork block is known and block is after it, return empty
-                // ommers.
-                if self.database.chain_spec().final_paris_total_difficulty(number).is_some() {
-                    return Ok(Some(Vec::new()));
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.ommers(id),
+            |block_state| {
+                if self
+                    .database
+                    .chain_spec()
+                    .final_paris_total_difficulty(block_state.number())
+                    .is_some()
+                {
+                    return Ok(Some(Vec::new()))
                 }
 
-                self.get_in_memory_or_storage_by_block(
-                    id,
-                    |db_provider| db_provider.ommers(id),
-                    |block_state| Ok(Some(block_state.block().block().body.ommers.clone())),
-                )
-            }
-            None => self.database.ommers(id),
-        }
+                Ok(Some(block_state.block().block().body.ommers.clone()))
+            },
+        )
     }
 
     fn block_body_indices(
