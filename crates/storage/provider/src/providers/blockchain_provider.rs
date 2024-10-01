@@ -7,7 +7,7 @@ use crate::{
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
@@ -294,6 +294,32 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
         Ok(None)
     }
+
+    /// Fetches data from either in-memory state or storage by [`BlockHashOrNumber`].
+    fn get_in_memory_or_storage_by_block<S, M, R>(
+        &self,
+        id: BlockHashOrNumber,
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<Option<R>>
+    where
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        M: Fn(Arc<BlockState>) -> ProviderResult<Option<R>>,
+    {
+        let block_state = match id {
+            BlockHashOrNumber::Hash(block_hash) => {
+                self.canonical_in_memory_state.state_by_hash(block_hash)
+            }
+            BlockHashOrNumber::Number(block_number) => {
+                self.canonical_in_memory_state.state_by_number(block_number)
+            }
+        };
+
+        if let Some(block_state) = block_state {
+            return fetch_from_block_state(block_state)
+        }
+        fetch_from_db(self.database_provider_ro()?)
+    }
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
@@ -390,11 +416,11 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-            return Ok(Some(block_state.block().block().header.clone()));
-        }
-
-        self.database.sealed_header(number)
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.sealed_header(number),
+            |block_state| Ok(Some(block_state.block().block().header.clone())),
+        )
     }
 
     fn sealed_headers_range(
@@ -427,11 +453,11 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-            return Ok(Some(block_state.hash()));
-        }
-
-        self.database.block_hash(number)
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.block_hash(number),
+            |block_state| Ok(Some(block_state.hash())),
+        )
     }
 
     fn canonical_hashes_range(
@@ -465,11 +491,11 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider2<N> {
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            return Ok(Some(block_state.number()));
-        }
-
-        self.database.block_number(hash)
+        self.get_in_memory_or_storage_by_block(
+            hash.into(),
+            |db_provider| db_provider.block_number(hash),
+            |block_state| Ok(Some(block_state.number())),
+        )
     }
 }
 
@@ -491,13 +517,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
-                // check in memory first
                 // Note: it's fine to return the unsealed block because the caller already has
                 // the hash
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.block().block().clone().unseal()));
-                }
-                self.database.find_block_by_hash(hash, source)
+                self.get_in_memory_or_storage_by_block(
+                    hash.into(),
+                    |db_provider| db_provider.find_block_by_hash(hash, source),
+                    |block_state| Ok(Some(block_state.block().block().clone().unseal())),
+                )
             }
             BlockSource::Pending => {
                 Ok(self.canonical_in_memory_state.pending_block().map(|block| block.unseal()))
@@ -508,12 +534,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
-            BlockHashOrNumber::Number(num) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    return Ok(Some(block_state.block().block().clone().unseal()));
-                }
-                self.database.block_by_number(num)
-            }
+            BlockHashOrNumber::Number(num) => self.get_in_memory_or_storage_by_block(
+                num.into(),
+                |db_provider| db_provider.block_by_number(num),
+                |block_state| Ok(Some(block_state.block().block().clone().unseal())),
+            ),
         }
     }
 
@@ -538,11 +563,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                     return Ok(Some(Vec::new()));
                 }
 
-                // Check in-memory state first
-                self.canonical_in_memory_state
-                    .state_by_number(number)
-                    .map(|o| o.block().block().body.ommers.clone())
-                    .map_or_else(|| self.database.ommers(id), |ommers| Ok(Some(ommers)))
+                self.get_in_memory_or_storage_by_block(
+                    id,
+                    |db_provider| db_provider.ommers(id),
+                    |block_state| Ok(Some(block_state.block().block().body.ommers.clone())),
+                )
             }
             None => self.database.ommers(id),
         }
@@ -593,23 +618,15 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(BlockWithSenders { block: block.unseal(), senders }));
-                }
-            }
-            BlockHashOrNumber::Number(num) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(BlockWithSenders { block: block.unseal(), senders }));
-                }
-            }
-        }
-        self.database.block_with_senders(id, transaction_kind)
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.block_with_senders(id, transaction_kind),
+            |block_state| {
+                let block = block_state.block().block().clone();
+                let senders = block_state.block().senders().clone();
+                Ok(Some(BlockWithSenders { block: block.unseal(), senders }))
+            },
+        )
     }
 
     fn sealed_block_with_senders(
@@ -617,23 +634,15 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(SealedBlockWithSenders { block, senders }));
-                }
-            }
-            BlockHashOrNumber::Number(num) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(SealedBlockWithSenders { block, senders }));
-                }
-            }
-        }
-        self.database.sealed_block_with_senders(id, transaction_kind)
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
+            |block_state| {
+                let block = block_state.block().block().clone();
+                let senders = block_state.block().senders().clone();
+                Ok(Some(SealedBlockWithSenders { block, senders }))
+            },
+        )
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
@@ -898,20 +907,11 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        match block {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.executed_block_receipts()));
-                }
-            }
-            BlockHashOrNumber::Number(number) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                    return Ok(Some(block_state.executed_block_receipts()));
-                }
-            }
-        }
-
-        self.database.receipts_by_block(block)
+        self.get_in_memory_or_storage_by_block(
+            block,
+            |db_provider| db_provider.receipts_by_block(block),
+            |block_state| Ok(Some(block_state.executed_block_receipts())),
+        )
     }
 
     fn receipts_by_tx_range(
@@ -963,25 +963,23 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
             return Ok(None)
         }
 
-        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-
-        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().body.withdrawals.clone())
-        } else {
-            self.database.withdrawals_by_block(id, timestamp)
-        }
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.withdrawals_by_block(id, timestamp),
+            |block_state| Ok(block_state.block().block().body.withdrawals.clone()),
+        )
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         let best_block_num = self.best_block_number()?;
 
-        // If the best block is in memory, use that. Otherwise, use the latest withdrawal in the
-        // database.
-        if let Some(block) = self.canonical_in_memory_state.state_by_number(best_block_num) {
-            Ok(block.block().block().body.withdrawals.clone().and_then(|mut w| w.pop()))
-        } else {
-            self.database.latest_withdrawal()
-        }
+        self.get_in_memory_or_storage_by_block(
+            best_block_num.into(),
+            |db_provider| db_provider.latest_withdrawal(),
+            |block_state| {
+                Ok(block_state.block().block().body.withdrawals.clone().and_then(|mut w| w.pop()))
+            },
+        )
     }
 }
 
@@ -994,12 +992,12 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
             return Ok(None)
         }
-        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().body.requests.clone())
-        } else {
-            self.database.requests_by_block(id, timestamp)
-        }
+
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.requests_by_block(id, timestamp),
+            |block_state| Ok(block_state.block().block().body.requests.clone()),
+        )
     }
 }
 
