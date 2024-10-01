@@ -113,7 +113,7 @@ impl Storage {
         let mut file = match File::open(&file_path) {
             Ok(file) => file,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(reth_fs_util::FsPathError::open(err, &file_path).into()),
         };
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
