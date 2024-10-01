@@ -54,31 +54,21 @@ pub(crate) fn generate_flag_struct(
         format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
-    let impl_bitflag_encoded_bytes = if has_lifetime {
+    let impl_header = if has_lifetime {
         quote! {
-            impl<'a> #ident<'a> {
-                #[doc = #bitflag_encoded_bytes]
-                pub const fn bitflag_encoded_bytes() -> usize {
-                    #total_bytes as usize
-                }
-                #[doc = #bitflag_unused_bits]
-                pub const fn bitflag_unused_bits() -> usize {
-                    #unused_bits as usize
-                }
-           }
+            impl<'a> #ident<'a>
         }
     } else {
         quote! {
-            impl #ident {
-                #[doc = #bitflag_encoded_bytes]
-                pub const fn bitflag_encoded_bytes() -> usize {
-                    #total_bytes as usize
-                }
-                #[doc = #bitflag_unused_bits]
-                pub const fn bitflag_unused_bits() -> usize {
-                    #unused_bits as usize
-                }
-           }
+            impl #ident
+        }
+    };
+    let impl_bitflag_encoded_bytes = quote! {
+        #impl_header {
+            #[doc = #bitflag_encoded_bytes]
+            pub const BITFLAG_ENCODED_BYTES: usize = #total_bytes as usize;
+            #[doc = #bitflag_unused_bits]
+            pub const BITFLAG_UNUSED_BITS: usize = #unused_bits as usize;
         }
     };
 
@@ -183,14 +173,10 @@ fn placeholder_flag_struct(ident: &Ident, flags: &Ident) -> TokenStream2 {
     quote! {
         impl #ident {
             #[doc = #bitflag_encoded_bytes]
-            pub const fn bitflag_encoded_bytes() -> usize {
-                0
-            }
+            pub const BITFLAG_ENCODED_BYTES: usize = 0;
 
             #[doc = #bitflag_unused_bits]
-            pub const fn bitflag_unused_bits() -> usize {
-                0
-            }
+            pub const BITFLAG_UNUSED_BITS: usize = 0;
         }
 
         /// Placeholder struct for when there is no need for a fieldset. Doesn't actually write or read any data.

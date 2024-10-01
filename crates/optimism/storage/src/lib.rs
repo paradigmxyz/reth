@@ -28,29 +28,29 @@ mod tests {
 
     #[test]
     fn test_ensure_backwards_compatibility() {
-        assert_eq!(Account::bitflag_encoded_bytes(), 2);
-        assert_eq!(AccountHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(CheckpointBlockRange::bitflag_encoded_bytes(), 1);
-        assert_eq!(CompactClientVersion::bitflag_encoded_bytes(), 0);
-        assert_eq!(CompactU256::bitflag_encoded_bytes(), 1);
-        assert_eq!(CompactU64::bitflag_encoded_bytes(), 1);
-        assert_eq!(EntitiesCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(ExecutionCheckpoint::bitflag_encoded_bytes(), 0);
-        assert_eq!(HeadersCheckpoint::bitflag_encoded_bytes(), 0);
-        assert_eq!(IndexHistoryCheckpoint::bitflag_encoded_bytes(), 0);
-        assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(PruneMode::bitflag_encoded_bytes(), 1);
-        assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
-        assert_eq!(Receipt::bitflag_encoded_bytes(), 2);
-        assert_eq!(ReceiptWithBloom::bitflag_encoded_bytes(), 0);
-        assert_eq!(SealedHeader::bitflag_encoded_bytes(), 0);
-        assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
-        assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
-        assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
-        assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
+        assert_eq!(Account::BITFLAG_ENCODED_BYTES, 2);
+        assert_eq!(AccountHashingCheckpoint::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(CheckpointBlockRange::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(CompactClientVersion::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(CompactU256::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(CompactU64::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(EntitiesCheckpoint::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(ExecutionCheckpoint::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(HeadersCheckpoint::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(IndexHistoryCheckpoint::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(PruneCheckpoint::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(PruneMode::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(PruneSegment::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(Receipt::BITFLAG_ENCODED_BYTES, 2);
+        assert_eq!(ReceiptWithBloom::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(SealedHeader::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(StageCheckpoint::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(StageUnitCheckpoint::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(StoredBlockBodyIndices::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(StoredBlockOmmers::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(StoredBlockWithdrawals::BITFLAG_ENCODED_BYTES, 0);
+        assert_eq!(StorageHashingCheckpoint::BITFLAG_ENCODED_BYTES, 1);
+        assert_eq!(Withdrawals::BITFLAG_ENCODED_BYTES, 0);
 
         // In case of failure, refer to the documentation of the
         // [`validate_bitflag_backwards_compat`] macro for detailed instructions on handling

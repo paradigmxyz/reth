@@ -69,6 +69,6 @@ mod tests {
     // expand the flags field and break backwards compatibility
     #[test]
     fn test_ensure_backwards_compatibility() {
-        assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
+        assert_eq!(Withdrawal::BITFLAG_ENCODED_BYTES, 2);
     }
 }

@@ -57,7 +57,7 @@ impl<'a> StructHandler<'a> {
             self.is_wrapper = true;
 
             self.lines.push(quote! {
-                let _len = self.0.#to_compact_ident(&mut buffer);
+                let _len = self.0.#to_compact_ident(buffer);
             });
 
             if is_flag_type(ftype) {
@@ -80,12 +80,12 @@ impl<'a> StructHandler<'a> {
             self.lines.push(quote! {
                 if self.#name != #itype::zero() {
                     flags.#set_bool_method(true);
-                    self.#name.#to_compact_ident(&mut buffer);
+                    self.#name.#to_compact_ident(buffer);
                 };
             });
         } else {
             self.lines.push(quote! {
-                let #len = self.#name.#to_compact_ident(&mut buffer);
+                let #len = self.#name.#to_compact_ident(buffer);
             });
         }
         if is_flag_type(ftype) {

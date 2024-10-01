@@ -155,8 +155,8 @@ mod tests {
 
     #[test]
     fn test_ensure_backwards_compatibility() {
-        assert_eq!(Header::bitflag_encoded_bytes(), 4);
-        assert_eq!(HeaderExt::bitflag_encoded_bytes(), 1);
+        assert_eq!(Header::BITFLAG_ENCODED_BYTES, 4);
+        assert_eq!(HeaderExt::BITFLAG_ENCODED_BYTES, 1);
     }
 
     #[test]
