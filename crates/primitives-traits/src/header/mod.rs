@@ -11,8 +11,9 @@ pub use alloy_consensus::Header;
 
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 
+/// Bincode-compatible header type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
-pub(super) mod serde_bincode_compat {
+pub mod serde_bincode_compat {
     pub use super::sealed::serde_bincode_compat::SealedHeader;
 }
 
