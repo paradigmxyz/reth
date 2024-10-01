@@ -15,10 +15,9 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-codecs = { workspace = true, optional = true, features = ["optimism"] }
+reth-codecs = { workspace = true, optional = true }
 
 # op-reth
-reth-optimism-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 
 # ethereum
@@ -36,22 +35,31 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 # misc
 derive_more = { workspace = true, features = ["deref"] }
 proptest = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest-arbitrary-interop.workspace = true
-rand.workspace = true
 
 [features]
 default = ["std", "reth-codec"]
 std = ["reth-primitives-traits/std"]
-reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:zstd",
+    "dep:modular-bitfield",
+    "std",
+    "rand",
+    "dep:proptest",
+]
 arbitrary = [
-    "reth-primitives-traits/arbitrary",
-    "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
+    "alloy-eips/arbitrary",
+    "rand",
     "reth-codec",
+    "reth-primitives-traits/arbitrary",
 ]
 optimism = [
     "reth-primitives/optimism",
+    "reth-codecs/optimism",
 ]

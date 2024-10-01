@@ -43,13 +43,13 @@ metrics = { workspace = true, optional = true }
 
 # misc
 bytes.workspace = true
-page_size = {  version = "0.6.0", optional = true }
+page_size = { version = "0.6.0", optional = true }
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 paste.workspace = true
 rustc-hash = { workspace = true, optional = true }
-sysinfo = { version = "0.30", default-features = false }
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }

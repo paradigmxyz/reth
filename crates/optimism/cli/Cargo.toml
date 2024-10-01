@@ -75,6 +75,7 @@ optimism = [
     "reth-provider/optimism",
     "reth-node-core/optimism",
     "reth-optimism-node/optimism",
+    "reth-optimism-primitives/optimism",
 ]
 asm-keccak = [
     "alloy-primitives/asm-keccak",

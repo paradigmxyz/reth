@@ -159,9 +159,7 @@ impl NetworkManager {
         metrics.acc_duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
         metrics.acc_duration_poll_swarm.set(acc_swarm.as_secs_f64());
     }
-}
 
-impl NetworkManager {
     /// Creates the manager of a new network.
     ///
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
@@ -948,9 +946,7 @@ impl NetworkManager {
             .total_pending_connections
             .set(self.swarm.sessions().num_pending_connections() as f64);
     }
-}
 
-impl NetworkManager {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
     /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
