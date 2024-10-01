@@ -115,6 +115,7 @@ impl ExExHandle {
                     // I.e., the ExEx has already processed the notification.
                     if finished_height.number >= new.tip().number {
                         debug!(
+                            target: "exex::manager",
                             exex_id = %self.id,
                             %notification_id,
                             ?finished_height,
@@ -135,6 +136,7 @@ impl ExExHandle {
         }
 
         debug!(
+            target: "exex::manager",
             exex_id = %self.id,
             %notification_id,
             "Reserving slot for notification"
@@ -145,6 +147,7 @@ impl ExExHandle {
         }
 
         debug!(
+            target: "exex::manager",
             exex_id = %self.id,
             %notification_id,
             "Sending notification"
@@ -327,7 +330,7 @@ where
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
     fn finalize_wal(&self, finalized_header: SealedHeader) -> eyre::Result<()> {
-        debug!(header = ?finalized_header.num_hash(), "Received finalized header");
+        debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
 
         // Check if all ExExes are on the canonical chain
         let exex_finished_heights = self
@@ -368,6 +371,7 @@ where
                     f(&format_args!("{exex_id:?} = {num_hash:?}"))
                 });
             debug!(
+                target: "exex::manager",
                 %unfinalized_exexes,
                 "Not all ExExes are on the canonical chain, can't finalize the WAL"
             );
@@ -400,7 +404,7 @@ where
         // Handle incoming ExEx events
         for exex in &mut this.exex_handles {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(exex_id = %exex.id, ?event, "Received event from ExEx");
+                debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
@@ -421,6 +425,7 @@ where
         while this.buffer.len() < this.max_capacity {
             if let Poll::Ready(Some(notification)) = this.handle_rx.poll_recv(cx) {
                 debug!(
+                    target: "exex::manager",
                     committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
                     reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
                     "Received new notification"
@@ -457,7 +462,7 @@ where
         }
 
         // Remove processed buffered notifications
-        debug!(%min_id, "Updating lowest notification id in buffer");
+        debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
         this.buffer.retain(|&(id, _)| id >= min_id);
         this.min_id = min_id;
 

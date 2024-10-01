@@ -40,15 +40,15 @@ impl Storage {
     }
 
     /// Removes notification for the given file ID from the storage.
-    #[instrument(target = "exex::wal::storage", skip(self))]
+    #[instrument(skip(self))]
     fn remove_notification(&self, file_id: u32) -> bool {
         match reth_fs_util::remove_file(self.file_path(file_id)) {
             Ok(()) => {
-                debug!("Notification was removed from the storage");
+                debug!(target: "exex::wal::storage", "Notification was removed from the storage");
                 true
             }
             Err(err) => {
-                debug!(?err, "Failed to remove notification from the storage");
+                debug!(target: "exex::wal::storage", ?err, "Failed to remove notification from the storage");
                 false
             }
         }
@@ -105,10 +105,10 @@ impl Storage {
     }
 
     /// Reads the notification from the file with the given ID.
-    #[instrument(target = "exex::wal::storage", skip(self))]
+    #[instrument(skip(self))]
     pub(super) fn read_notification(&self, file_id: u32) -> eyre::Result<Option<ExExNotification>> {
         let file_path = self.file_path(file_id);
-        debug!(?file_path, "Reading notification from WAL");
+        debug!(target: "exex::wal::storage", ?file_path, "Reading notification from WAL");
 
         let mut file = match File::open(&file_path) {
             Ok(file) => file,
@@ -127,14 +127,14 @@ impl Storage {
     }
 
     /// Writes the notification to the file with the given ID.
-    #[instrument(target = "exex::wal::storage", skip(self, notification))]
+    #[instrument(skip(self, notification))]
     pub(super) fn write_notification(
         &self,
         file_id: u32,
         notification: &ExExNotification,
     ) -> eyre::Result<()> {
         let file_path = self.file_path(file_id);
-        debug!(?file_path, "Writing notification to WAL");
+        debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
         // Serialize using the bincode- and msgpack-compatible serde wrapper
         let notification =
