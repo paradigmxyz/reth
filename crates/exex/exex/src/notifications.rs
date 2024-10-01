@@ -191,8 +191,10 @@ where
         let Some(notification) =
             self.wal_handle.get_committed_notification_by_block_hash(&self.exex_head.block.hash)?
         else {
-            debug!(target: "exex::notifications", exex_head = ?self.exex_head, "Could not find notification for ExEx head in the WAL");
-            return Ok(None)
+            return Err(eyre::eyre!(
+                "Could not find notification for block hash {:?} in the WAL",
+                self.exex_head.block.hash
+            ))
         };
 
         // Update the head block hash to the parent hash of the first committed block.
