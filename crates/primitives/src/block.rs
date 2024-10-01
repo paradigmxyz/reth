@@ -12,7 +12,6 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
-#[cfg(any(test, feature = "arbitrary"))]
 use reth_primitives_traits::Requests;
 use serde::{Deserialize, Serialize};
 
