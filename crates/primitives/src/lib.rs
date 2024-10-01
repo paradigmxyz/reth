@@ -1,4 +1,4 @@
-//! Commonly used types in reth.
+//! Commonly used types in Reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.
 //!
@@ -87,3 +87,18 @@ mod optimism {
 
 #[cfg(feature = "optimism")]
 pub use optimism::*;
+
+/// Bincode-compatible serde implementations for commonly used types in Reth.
+///
+/// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
+/// Reth types require optional serialization for RPC compatibility. This module makes so that
+/// all fields are serialized.
+///
+/// Read more: <https://github.com/bincode-org/bincode/issues/326>
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::{
+        block::serde_bincode_compat::*,
+        transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
+    };
+}
