@@ -371,7 +371,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
             let last_finalized_num_hash = self
                 .canonical_in_memory_state
                 .get_finalized_num_hash()
-                .unwrap_or(BlockNumHash::new(0, B256::default()));
+                .unwrap_or_else(|| BlockNumHash::new(0, B256::default()));
             self.database.header_td_by_number(last_finalized_num_hash.number)
         } else if let Some(td) = self.database.header_td_by_number(number)? {
             // Otherwise, if the TD is recorded on disk, we can just return that
