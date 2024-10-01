@@ -53,5 +53,5 @@ pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::header::serde_bincode_compat::*;
+    pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
