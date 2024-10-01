@@ -241,7 +241,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
-    /// Fetches data from either in-memory state or storage by [`TxNumber`].
+    /// Fetches data from either in-memory state or persistent storage by [`TxNumber`].
     fn get_in_memory_or_storage_by_tx_id<S, M, R>(
         &self,
         id: TxNumber,
