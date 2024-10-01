@@ -241,6 +241,9 @@ impl CanonicalInMemoryState {
     }
 
     /// Append new blocks to the in memory state.
+    ///
+    /// This removes all reorged blocks and appends the new blocks to the tracked chain and connects
+    /// them to their parent blocks.
     fn update_blocks<I>(&self, new_blocks: I, reorged: I)
     where
         I: IntoIterator<Item = ExecutedBlock>,
@@ -316,16 +319,18 @@ impl CanonicalInMemoryState {
             // clear all numbers
             numbers.clear();
 
-            // drain all blocks and only keep the ones that are not persisted
+            // drain all blocks and only keep the ones that are not persisted (below the persisted
+            // height)
             let mut old_blocks = blocks
                 .drain()
+                .filter(|(_, b)| b.block().block().number > persisted_height)
                 .map(|(_, b)| b.block.clone())
-                .filter(|b| b.block().number > persisted_height)
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
             old_blocks.sort_unstable_by_key(|block| block.block().number);
 
+            // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
                 let block_state = BlockState::with_parent(block.clone(), parent);
@@ -410,7 +415,7 @@ impl CanonicalInMemoryState {
         self.inner.chain_info_tracker.on_transition_configuration_exchanged();
     }
 
-    /// Returns the timepstamp of the last transition configuration exchanged,
+    /// Returns the timestamp of the last transition configuration exchanged,
     pub fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
         self.inner.chain_info_tracker.last_transition_configuration_exchanged_at()
     }
