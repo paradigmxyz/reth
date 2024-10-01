@@ -2,6 +2,7 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
+use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, Network};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
@@ -9,7 +10,6 @@ use alloy_rpc_types_engine::{
 };
 use alloy_transport::{Transport, TransportResult};
 use reth_node_api::EngineApiMessageVersion;
-use reth_primitives::B256;
 use tracing::error;
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.

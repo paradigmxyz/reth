@@ -305,7 +305,7 @@ pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
 pub fn atomic_write_file<F, E>(file_path: &Path, write_fn: F) -> Result<()>
 where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
     let mut tmp_path = file_path.to_path_buf();
     tmp_path.set_extension("tmp");

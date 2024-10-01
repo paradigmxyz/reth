@@ -22,13 +22,18 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["test-utils"] }
 alloy-eips.workspace = true
+arbitrary.workspace = true
+bincode.workspace = true
+rand.workspace = true
+reth-primitives = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = ["std"]
 optimism = []
 serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
+serde-bincode-compat = ["reth-primitives/serde-bincode-compat", "serde_with"]
 std = []

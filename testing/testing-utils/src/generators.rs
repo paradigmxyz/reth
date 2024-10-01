@@ -221,11 +221,11 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let sealed = Header {
         parent_hash: block_params.parent.unwrap_or_default(),
         number,
-        gas_used: total_gas.into(),
-        gas_limit: total_gas.into(),
+        gas_used: total_gas,
+        gas_limit: total_gas,
         transactions_root,
         ommers_hash,
-        base_fee_per_gas: Some(rng.gen::<u64>().into()),
+        base_fee_per_gas: Some(rng.gen()),
         requests_root,
         withdrawals_root,
         ..Default::default()
@@ -500,8 +500,8 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::Parity;
-    use reth_primitives::{hex, public_key_to_address, Signature};
+    use alloy_primitives::{hex, Parity};
+    use reth_primitives::{public_key_to_address, Signature};
     use std::str::FromStr;
 
     #[test]

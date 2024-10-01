@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -20,8 +20,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -122,12 +122,17 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         (start, end)
     }
 
-    /// Fetches a range of data from both in-memory state and storage.
+    /// Fetches a range of data from both in-memory state and storage while a predicate is met.
     ///
-    /// - `fetch_db_range`: Retrieves a range of items from the database.
-    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
-    ///   is returned.
-    fn fetch_db_mem_range<T, F, G, P>(
+    /// Creates a snapshot of the in-memory chain state and database provider to prevent
+    /// inconsistencies. Splits the range into in-memory and storage sections, prioritizing
+    /// recent in-memory blocks in case of overlaps.
+    ///
+    /// * `fetch_db_range` function (`F`) provides access to the database provider, allowing the
+    ///   user to retrieve the required items from the database using [`RangeInclusive`].
+    /// * `map_block_state_item` function (`G`) provides each block of the range in the in-memory
+    ///   state, allowing for selection or filtering for the desired data.
+    fn fetch_db_mem_range_while<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
         fetch_db_range: F,
@@ -135,34 +140,90 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        F: FnOnce(RangeInclusive<BlockNumber>, &mut P) -> ProviderResult<Vec<T>>,
-        G: Fn(BlockNumber, &mut P) -> Option<T>,
+        F: FnOnce(
+            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            RangeInclusive<BlockNumber>,
+            &mut P,
+        ) -> ProviderResult<Vec<T>>,
+        G: Fn(Arc<BlockState>, &mut P) -> Option<T>,
         P: FnMut(&T) -> bool,
     {
+        // Each one provides a snapshot at the time of instantiation, but its order matters.
+        //
+        // If we acquire first the database provider, it's possible that before the in-memory chain
+        // snapshot is instantiated, it will flush blocks to disk. This would
+        // mean that our database provider would not have access to the flushed blocks (since it's
+        // working under an older view), while the in-memory state may have deleted them
+        // entirely. Resulting in gaps on the range.
+        let mut in_memory_chain =
+            self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let db_provider = self.database_provider_ro()?;
+
         let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
+            // the first block is the highest one.
+            in_memory_chain
+                .first()
+                .map(|b| b.number())
+                .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
         });
-        let mut range = start..=end;
+
+        // Split range into storage_range and in-memory range. If the in-memory range is not
+        // necessary drop it early.
+        //
+        // The last block of `in_memory_chain` is the lowest block number.
+        let (in_memory, storage_range) = match in_memory_chain.last().as_ref().map(|b| b.number()) {
+            Some(lowest_memory_block) if lowest_memory_block <= end => {
+                let highest_memory_block =
+                    in_memory_chain.first().as_ref().map(|b| b.number()).expect("qed");
+
+                // Database will for a time overlap with in-memory-chain blocks. In
+                // case of a re-org, it can mean that the database blocks are of a forked chain, and
+                // so, we should prioritize the in-memory overlapped blocks.
+                let in_memory_range =
+                    lowest_memory_block.max(start)..=end.min(highest_memory_block);
+
+                // If requested range is in the middle of the in-memory range, remove the necessary
+                // lowest blocks
+                in_memory_chain.truncate(
+                    in_memory_chain
+                        .len()
+                        .saturating_sub(start.saturating_sub(lowest_memory_block) as usize),
+                );
+
+                let storage_range =
+                    (lowest_memory_block > start).then(|| start..=lowest_memory_block - 1);
+
+                (Some((in_memory_chain, in_memory_range)), storage_range)
+            }
+            _ => {
+                // Drop the in-memory chain so we don't hold blocks in memory.
+                drop(in_memory_chain);
+
+                (None, Some(start..=end))
+            }
+        };
+
         let mut items = Vec::with_capacity((end - start + 1) as usize);
 
-        // First, fetch the items from the database
-        let mut db_items = fetch_db_range(range.clone(), &mut predicate)?;
-
-        if !db_items.is_empty() {
+        if let Some(storage_range) = storage_range {
+            let mut db_items = fetch_db_range(&db_provider, storage_range.clone(), &mut predicate)?;
             items.append(&mut db_items);
 
-            // Advance the range iterator by the number of items fetched from the database
-            range.nth(items.len() - 1);
+            // The predicate was not met, if the number of items differs from the expected. So, we
+            // return what we have.
+            if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
+                return Ok(items)
+            }
         }
 
-        // Fetch the remaining items from the in-memory state
-        for num in range {
-            // TODO: there might be an update between loop iterations, we
-            // need to handle that situation.
-            if let Some(item) = map_block_state_item(num, &mut predicate) {
-                items.push(item);
-            } else {
-                break;
+        if let Some((in_memory_chain, in_memory_range)) = in_memory {
+            for (num, block) in in_memory_range.zip(in_memory_chain.into_iter().rev()) {
+                debug_assert!(num == block.number());
+                if let Some(item) = map_block_state_item(block, &mut predicate) {
+                    items.push(item);
+                } else {
+                    break
+                }
             }
         }
 
@@ -177,68 +238,61 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         let state = state.as_ref();
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
+        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
-    /// Returns:
-    /// 1. The block state as [`Some`] if the block is in memory, and [`None`] if the block is in
-    ///    database.
-    /// 2. The in-block transaction index.
-    fn block_state_by_tx_id(
+    /// Fetches data from either in-memory state or storage by [`TxNumber`].
+    fn get_in_memory_or_storage_by_tx_id<S, M, R>(
         &self,
-        provider: &DatabaseProviderRO<N::DB, N::ChainSpec>,
         id: TxNumber,
-    ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
-        // Get the last block number stored in the database
-        let last_database_block_number = provider.last_block_number()?;
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<Option<R>>
+    where
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        M: Fn(usize, Arc<BlockState>) -> ProviderResult<Option<R>>,
+    {
+        // Order of instantiation matters. More information on: `fetch_db_mem_range_while`.
+        let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let provider = self.database.provider()?;
+
+        // Get the last block number stored in the database which does NOT overlap with in-memory
+        // chain.
+        let mut last_database_block_number = provider.last_block_number()?;
+        if let Some(lowest_in_mem_block) = in_mem_chain.last() {
+            if lowest_in_mem_block.number() <= last_database_block_number {
+                last_database_block_number = lowest_in_mem_block.number().saturating_sub(1);
+            }
+        }
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
-        let Some(last_block_body_index) =
-            provider.block_body_indices(last_database_block_number)?
-        else {
-            return Ok(None);
-        };
+        let last_block_body_index = provider
+            .block_body_indices(last_database_block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
         let mut in_memory_tx_num = last_block_body_index.next_tx_num();
 
+        // If the transaction number is less than the first in-memory transaction number, make a
+        // database lookup
         if id < in_memory_tx_num {
-            // If the transaction number is less than the first in-memory transaction number, make a
-            // database lookup
-            let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
-            let Some(body_index) = provider.block_body_indices(block_number)? else {
-                return Ok(None)
-            };
-            let tx_index = body_index.last_tx_num() - id;
-            Ok(Some((None, tx_index as usize)))
-        } else {
-            // Otherwise, iterate through in-memory blocks and find the transaction with the
-            // matching number
-
-            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
-            let last_in_memory_block_number =
-                self.canonical_in_memory_state.get_canonical_block_number();
-
-            for block_number in first_in_memory_block_number..=last_in_memory_block_number {
-                let Some(block_state) =
-                    self.canonical_in_memory_state.state_by_number(block_number)
-                else {
-                    return Ok(None);
-                };
-
-                let executed_block = block_state.block();
-                let block = executed_block.block();
-
-                for tx_index in 0..block.body.transactions.len() {
-                    if id == in_memory_tx_num {
-                        return Ok(Some((Some(block_state), tx_index)))
-                    }
-
-                    in_memory_tx_num += 1;
-                }
-            }
-
-            Ok(None)
+            return fetch_from_db(provider)
         }
+
+        // Iterate from the lowest block to the highest
+        for block_state in in_mem_chain.into_iter().rev() {
+            let executed_block = block_state.block();
+            let block = executed_block.block();
+
+            for tx_index in 0..block.body.transactions.len() {
+                if id == in_memory_tx_num {
+                    return fetch_from_block_state(tx_index, block_state)
+                }
+
+                in_memory_tx_num += 1;
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -327,14 +381,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.headers_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.header().clone())
-            },
+            |db_provider, range, _| db_provider.headers_range(range),
+            |block_state, _| Some(block_state.block().block().header.header().clone()),
             |_| true,
         )
     }
@@ -351,14 +401,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.sealed_headers_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.clone())
-            },
+            |db_provider, range, _| db_provider.sealed_headers_range(range),
+            |block_state, _| Some(block_state.block().block().header.clone()),
             |_| true,
         )
     }
@@ -368,14 +414,11 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, predicate| self.database.sealed_headers_while(range, predicate),
-            |num, predicate| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.clone())
-                    .filter(|header| predicate(header))
+            |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
+            |block_state, predicate| {
+                Some(block_state.block().block().header.clone()).filter(|header| predicate(header))
             },
             predicate,
         )
@@ -396,14 +439,13 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.fetch_db_mem_range(
-            start..=end,
-            |range, _| self.database.canonical_hashes_range(*range.start(), *range.end()),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.hash())
+        self.fetch_db_mem_range_while(
+            start..end,
+            |db_provider, inclusive_range, _| {
+                db_provider
+                    .canonical_hashes_range(*inclusive_range.start(), *inclusive_range.end() + 1)
             },
+            |block_state, _| Some(block_state.hash()),
             |_| true,
         )
     }
@@ -595,14 +637,10 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.block_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().clone().unseal())
-            },
+            |db_provider, range, _| db_provider.block_range(range),
+            |block_state, _| Some(block_state.block().block().clone().unseal()),
             |_| true,
         )
     }
@@ -611,15 +649,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.block_with_senders_range(range),
-            |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    BlockWithSenders { block: block.unseal(), senders }
-                })
+            |db_provider, range, _| db_provider.block_with_senders_range(range),
+            |block_state, _| {
+                let block = block_state.block().block().clone();
+                let senders = block_state.block().senders().clone();
+                Some(BlockWithSenders { block: block.unseal(), senders })
             },
             |_| true,
         )
@@ -629,15 +665,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        self.fetch_db_mem_range(
+        self.fetch_db_mem_range_while(
             range,
-            |range, _| self.database.sealed_block_with_senders_range(range),
-            |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    SealedBlockWithSenders { block, senders }
-                })
+            |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
+            |block_state, _| {
+                let block = block_state.block().block().clone();
+                let senders = block_state.block().senders().clone();
+                Some(SealedBlockWithSenders { block, senders })
             },
             |_| true,
         )
@@ -686,41 +720,33 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let transaction = block_state.block().block().body.transactions.get(tx_index).cloned();
-            Ok(transaction)
-        } else {
-            provider.transaction_by_id(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_by_id(id),
+            |tx_index, block_state| {
+                Ok(block_state.block().block().body.transactions.get(tx_index).cloned())
+            },
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let transaction = block_state
-                .block()
-                .block()
-                .body
-                .transactions
-                .get(tx_index)
-                .cloned()
-                .map(Into::into);
-            Ok(transaction)
-        } else {
-            provider.transaction_by_id_no_hash(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_by_id_no_hash(id),
+            |tx_index, block_state| {
+                Ok(block_state
+                    .block()
+                    .block()
+                    .body
+                    .transactions
+                    .get(tx_index)
+                    .cloned()
+                    .map(Into::into))
+            },
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -745,11 +771,11 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let provider = self.database.provider()?;
-        Ok(self
-            .block_state_by_tx_id(&provider, id)?
-            .and_then(|(block_state, _)| block_state)
-            .map(|block_state| block_state.block().block().number))
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_block(id),
+            |_, block_state| Ok(Some(block_state.block().block().number)),
+        )
     }
 
     fn transactions_by_block(
@@ -821,39 +847,31 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let sender = block_state
-                .block()
-                .block()
-                .body
-                .transactions
-                .get(tx_index)
-                .and_then(|transaction| transaction.recover_signer());
-            Ok(sender)
-        } else {
-            provider.transaction_sender(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.transaction_sender(id),
+            |tx_index, block_state| {
+                Ok(block_state
+                    .block()
+                    .block()
+                    .body
+                    .transactions
+                    .get(tx_index)
+                    .and_then(|transaction| transaction.recover_signer()))
+            },
+        )
     }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let receipt = block_state.executed_block_receipts().get(tx_index).cloned();
-            Ok(receipt)
-        } else {
-            provider.receipt(id)
-        }
+        self.get_in_memory_or_storage_by_tx_id(
+            id,
+            |provider| provider.receipt(id),
+            |tx_index, block_state| {
+                Ok(block_state.executed_block_receipts().get(tx_index).cloned())
+            },
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -2200,6 +2218,28 @@ mod tests {
         assert_eq!(blocks.len(), in_memory_blocks.len());
         // Check if the blocks are equal
         for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter()) {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        // Check for partial in-memory ranges
+        let blocks = provider.block_range(start_block_number + 1..=end_block_number)?;
+        assert_eq!(blocks.len(), in_memory_blocks.len() - 1);
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1))
+        {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        let blocks = provider.block_range(start_block_number + 1..=end_block_number - 1)?;
+        assert_eq!(blocks.len(), in_memory_blocks.len() - 2);
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1))
+        {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        let blocks = provider.block_range(start_block_number + 1..=end_block_number + 1)?;
+        assert_eq!(blocks.len(), in_memory_blocks.len() - 1);
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter().skip(1))
+        {
             assert_eq!(retrieved_block, &expected_block.clone().unseal());
         }
 
@@ -3766,10 +3806,7 @@ mod tests {
             index: 0,
             block_hash: in_memory_blocks[0].header.hash(),
             block_number: in_memory_blocks[0].header.number,
-            base_fee: in_memory_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: in_memory_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: in_memory_blocks[0].header.timestamp,
         };
@@ -3797,10 +3834,7 @@ mod tests {
             index: 0,
             block_hash: database_blocks[0].header.hash(),
             block_number: database_blocks[0].header.number,
-            base_fee: database_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: database_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: database_blocks[0].header.timestamp,
         };
@@ -3868,10 +3902,7 @@ mod tests {
 
         // Retrieve the block number for this transaction
         let result = provider.transaction_block(tx_id)?;
-        assert!(
-            result.is_none(),
-            "`block_state_by_tx_id` should be None if the block is in database"
-        );
+        assert_eq!(Some(0), result, "The block number should match the database block number");
 
         // Ensure that invalid transaction ID returns None
         let result = provider.transaction_block(67675657)?;

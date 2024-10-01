@@ -1,6 +1,7 @@
 //! Command for debugging block building.
 use alloy_consensus::TxEip4844;
-use alloy_primitives::Address;
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
@@ -25,9 +26,8 @@ use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttribut
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar, Bytes,
+    revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar,
     PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
-    B256, U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
@@ -201,7 +201,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                     encoded_length
                 }
-                _ => transaction.length_without_header(),
+                _ => transaction.encode_2718_len(),
             };
 
             debug!(target: "reth::cli", ?transaction, "Adding transaction to the pool");

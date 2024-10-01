@@ -1,7 +1,7 @@
-use alloy_primitives::{map::HashMap, Address};
+use alloy_primitives::{map::HashMap, Address, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
-use reth_primitives::{Block, Withdrawal, Withdrawals, U256};
+use reth_primitives::{Block, Withdrawal, Withdrawals};
 
 /// Collect all balance changes at the end of the block.
 ///

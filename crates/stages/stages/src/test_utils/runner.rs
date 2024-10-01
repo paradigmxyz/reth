@@ -13,7 +13,7 @@ pub(crate) enum TestRunnerError {
     #[error(transparent)]
     Database(#[from] DatabaseError),
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error>),
+    Internal(#[from] Box<dyn core::error::Error>),
     #[error(transparent)]
     Provider(#[from] ProviderError),
 }
