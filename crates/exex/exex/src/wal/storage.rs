@@ -28,11 +28,11 @@ impl Storage {
         Ok(Self { path: path.as_ref().to_path_buf() })
     }
 
-    fn file_path(&self, id: u64) -> PathBuf {
+    fn file_path(&self, id: u32) -> PathBuf {
         self.path.join(format!("{id}.wal"))
     }
 
-    fn parse_filename(filename: &str) -> eyre::Result<u64> {
+    fn parse_filename(filename: &str) -> eyre::Result<u32> {
         filename
             .strip_suffix(".wal")
             .and_then(|s| s.parse().ok())
@@ -41,7 +41,7 @@ impl Storage {
 
     /// Removes notification for the given file ID from the storage.
     #[instrument(target = "exex::wal::storage", skip(self))]
-    fn remove_notification(&self, file_id: u64) -> bool {
+    fn remove_notification(&self, file_id: u32) -> bool {
         match reth_fs_util::remove_file(self.file_path(file_id)) {
             Ok(()) => {
                 debug!("Notification was removed from the storage");
@@ -57,7 +57,7 @@ impl Storage {
     /// Returns the range of file IDs in the storage.
     ///
     /// If there are no files in the storage, returns `None`.
-    pub(super) fn files_range(&self) -> eyre::Result<Option<RangeInclusive<u64>>> {
+    pub(super) fn files_range(&self) -> eyre::Result<Option<RangeInclusive<u32>>> {
         let mut min_id = None;
         let mut max_id = None;
 
@@ -66,8 +66,8 @@ impl Storage {
             let file_name = entry.file_name();
             let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
 
-            min_id = min_id.map_or(Some(file_id), |min_id: u64| Some(min_id.min(file_id)));
-            max_id = max_id.map_or(Some(file_id), |max_id: u64| Some(max_id.max(file_id)));
+            min_id = min_id.map_or(Some(file_id), |min_id: u32| Some(min_id.min(file_id)));
+            max_id = max_id.map_or(Some(file_id), |max_id: u32| Some(max_id.max(file_id)));
         }
 
         Ok(min_id.zip(max_id).map(|(min_id, max_id)| min_id..=max_id))
@@ -80,7 +80,7 @@ impl Storage {
     /// Number of removed notifications.
     pub(super) fn remove_notifications(
         &self,
-        file_ids: impl IntoIterator<Item = u64>,
+        file_ids: impl IntoIterator<Item = u32>,
     ) -> eyre::Result<usize> {
         let mut deleted = 0;
 
@@ -95,8 +95,8 @@ impl Storage {
 
     pub(super) fn iter_notifications(
         &self,
-        range: RangeInclusive<u64>,
-    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
+        range: RangeInclusive<u32>,
+    ) -> impl Iterator<Item = eyre::Result<(u32, ExExNotification)>> + '_ {
         range.map(move |id| {
             let notification = self.read_notification(id)?.ok_or_eyre("notification not found")?;
 
@@ -106,7 +106,7 @@ impl Storage {
 
     /// Reads the notification from the file with the given ID.
     #[instrument(target = "exex::wal::storage", skip(self))]
-    pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<Option<ExExNotification>> {
+    pub(super) fn read_notification(&self, file_id: u32) -> eyre::Result<Option<ExExNotification>> {
         let file_path = self.file_path(file_id);
         debug!(?file_path, "Reading notification from WAL");
 
@@ -127,7 +127,7 @@ impl Storage {
     #[instrument(target = "exex::wal::storage", skip(self, notification))]
     pub(super) fn write_notification(
         &self,
-        file_id: u64,
+        file_id: u32,
         notification: &ExExNotification,
     ) -> eyre::Result<()> {
         let file_path = self.file_path(file_id);
