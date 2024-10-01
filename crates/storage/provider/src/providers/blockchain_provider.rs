@@ -621,11 +621,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block_with_senders(id, transaction_kind),
-            |block_state| {
-                let block = block_state.block().block().clone();
-                let senders = block_state.block().senders().clone();
-                Ok(Some(BlockWithSenders { block: block.unseal(), senders }))
-            },
+            |block_state| Ok(Some(block_state.block_with_senders())),
         )
     }
 
@@ -637,11 +633,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
-            |block_state| {
-                let block = block_state.block().block().clone();
-                let senders = block_state.block().senders().clone();
-                Ok(Some(SealedBlockWithSenders { block, senders }))
-            },
+            |block_state| Ok(Some(block_state.sealed_block_with_senders())),
         )
     }
 
@@ -661,11 +653,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         self.fetch_db_mem_range_while(
             range,
             |db_provider, range, _| db_provider.block_with_senders_range(range),
-            |block_state, _| {
-                let block = block_state.block().block().clone();
-                let senders = block_state.block().senders().clone();
-                Some(BlockWithSenders { block: block.unseal(), senders })
-            },
+            |block_state, _| Some(block_state.block_with_senders()),
             |_| true,
         )
     }
@@ -677,11 +665,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         self.fetch_db_mem_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
-            |block_state, _| {
-                let block = block_state.block().block().clone();
-                let senders = block_state.block().senders().clone();
-                Some(SealedBlockWithSenders { block, senders })
-            },
+            |block_state, _| Some(block_state.sealed_block_with_senders()),
             |_| true,
         )
     }
