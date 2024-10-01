@@ -301,10 +301,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         fetch_from_db: S,
         fetch_from_block_state: M,
-    ) -> ProviderResult<Option<R>>
+    ) -> ProviderResult<R>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
-        M: Fn(Arc<BlockState>) -> ProviderResult<Option<R>>,
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        M: Fn(Arc<BlockState>) -> ProviderResult<R>,
     {
         let block_state = match id {
             BlockHashOrNumber::Hash(block_hash) => {
@@ -1112,17 +1112,18 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        if let Ok(state) = self.database.history_by_block_hash(block_hash) {
-            // This could be tracked by a block in the database block
-            Ok(state)
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
-            // ... or this could be tracked by the in memory state
-            let state_provider = self.block_state_provider(state)?;
-            Ok(Box::new(state_provider))
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(block_hash))
-        }
+
+        Ok(self.get_in_memory_or_storage_by_block(
+            block_hash.into(),
+            |_| {
+                // TODO(joshie): port history_by_block_hash to DatabaseProvider and use db_provider
+                self.database.history_by_block_hash(block_hash)
+            },
+            |block_state| {
+                let state_provider = self.block_state_provider(block_state)?;
+                Ok(Box::new(state_provider))
+            },
+        )?)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
