@@ -15,6 +15,8 @@ use proptest::prelude::prop_compose;
 use reth_primitives_traits::Requests;
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::SignedTransaction;
 use crate::{
     GotExpected, Header, SealedHeader, SignedTransaction, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals,
