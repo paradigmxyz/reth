@@ -4,28 +4,28 @@ use crate::Compact;
 use alloc::vec::Vec;
 use alloy_primitives::B256;
 use alloy_trie::{
-    hash_builder::{HashBuilderInput, HashBuilderInputRef},
+    hash_builder::{HashBuilderValue, HashBuilderValueRef},
     BranchNodeCompact, TrieMask,
 };
 use bytes::{Buf, BufMut};
 
-/// Identifier for [`HashBuilderInputRef::Hash`]
+/// Identifier for [`HashBuilderValueRef::Hash`]
 const HASH_BUILDER_TYPE_HASH: u8 = 0;
 
-/// Identifier for [`HashBuilderInputRef::Bytes`]
+/// Identifier for [`HashBuilderValueRef::Bytes`]
 const HASH_BUILDER_TYPE_BYTES: u8 = 1;
 
-impl Compact for HashBuilderInput {
+impl Compact for HashBuilderValue {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {
         match self.as_ref() {
-            HashBuilderInputRef::Hash(hash) => {
+            HashBuilderValueRef::Hash(hash) => {
                 buf.put_u8(HASH_BUILDER_TYPE_HASH);
                 1 + hash.to_compact(buf)
             }
-            HashBuilderInputRef::Bytes(bytes) => {
+            HashBuilderValueRef::Bytes(bytes) => {
                 buf.put_u8(HASH_BUILDER_TYPE_BYTES);
                 1 + bytes.to_compact(buf)
             }
@@ -37,15 +37,15 @@ impl Compact for HashBuilderInput {
         let buf = match buf.get_u8() {
             HASH_BUILDER_TYPE_HASH => {
                 let (hash, buf) = B256::from_compact(buf, 32);
-                this.set_from_ref(HashBuilderInputRef::Hash(&hash));
+                this.set_from_ref(HashBuilderValueRef::Hash(&hash));
                 buf
             }
             HASH_BUILDER_TYPE_BYTES => {
                 let (bytes, buf) = Vec::from_compact(buf, 0);
-                this.set_from_ref(HashBuilderInputRef::Bytes(&bytes));
+                this.set_bytes_owned(bytes);
                 buf
             }
-            _ => unreachable!("Junk data in database: unknown HashBuilderInput variant"),
+            _ => unreachable!("Junk data in database: unknown HashBuilderValue variant"),
         };
         (this, buf)
     }

@@ -739,6 +739,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.6.0"
+source = "git+https://github.com/alloy-rs/trie?branch=dani/fix-arbitrary-hashbuilder#5308e54ce41b635da9ed071fbfcf2b25662db273"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
