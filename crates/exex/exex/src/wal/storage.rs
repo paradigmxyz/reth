@@ -118,7 +118,9 @@ impl Storage {
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
-            rmp_serde::decode::from_read(&mut file)?;
+            rmp_serde::decode::from_read(&mut file).map_err(|err| {
+                eyre::eyre!("failed to decode notification from {file_path:?}: {err:?}")
+            })?;
 
         Ok(Some(notification.into()))
     }
