@@ -251,7 +251,7 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 
     /// Returns the chain spec.
     #[inline]
-    pub fn chain_spec(&self) -> &ChainSpec {
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.executor.chain_spec
     }
 
@@ -362,6 +362,8 @@ where
             receipts,
             requests: vec![],
             gas_used,
+            chain_spec: self.chain_spec().clone(),
+            timestamp: block.timestamp,
         })
     }
 
@@ -385,6 +387,8 @@ where
             receipts,
             requests: vec![],
             gas_used,
+            chain_sepc: self.chain_spec().clone(),
+            timestamp: block.timestamp,
         })
     }
 }
