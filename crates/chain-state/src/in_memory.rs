@@ -9,7 +9,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    BlockWithSenders, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
     SignedTransaction, TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
