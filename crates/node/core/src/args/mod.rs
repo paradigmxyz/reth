@@ -56,7 +56,7 @@ pub use datadir_args::DatadirArgs;
 mod benchmark_args;
 pub use benchmark_args::BenchmarkArgs;
 
-/// EngineArgs struct for configuring the engine
+/// Struct for configuring the engine
 mod engine;
 pub use engine::EngineArgs;
 
