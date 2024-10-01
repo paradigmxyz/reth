@@ -5265,6 +5265,7 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-rpc",
  "reth-provider",
+ "tracing",
 ]
 
 [[package]]
