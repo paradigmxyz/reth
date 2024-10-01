@@ -291,7 +291,7 @@ pub trait Trace: LoadState {
 
             let Some(block) = block else { return Ok(None) };
 
-            if block.body.is_empty() {
+            if block.body.transactions.is_empty() {
                 // nothing to trace
                 return Ok(Some(Vec::new()))
             }
@@ -308,10 +308,11 @@ pub trait Trace: LoadState {
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
-                let max_transactions = highest_index.map_or(block.body.len(), |highest| {
-                    // we need + 1 because the index is 0-based
-                    highest as usize + 1
-                });
+                let max_transactions =
+                    highest_index.map_or(block.body.transactions.len(), |highest| {
+                        // we need + 1 because the index is 0-based
+                        highest as usize + 1
+                    });
                 let mut results = Vec::with_capacity(max_transactions);
 
                 let mut transactions = block

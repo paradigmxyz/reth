@@ -1,7 +1,7 @@
 //! OP mainnet bedrock related data.
 
-use alloy_primitives::{b256, bloom, bytes, B256, B64, U256};
-use reth_primitives::{address, Header};
+use alloy_primitives::{address, b256, bloom, bytes, B256, B64, U256};
+use reth_primitives::Header;
 use reth_primitives_traits::constants::EMPTY_OMMER_ROOT_HASH;
 
 /// Transaction 0x9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9 in block 985,
@@ -54,6 +54,10 @@ pub fn is_dup_tx(block_number: u64) -> bool {
 
     false
 }
+
+/// OVM Header #1 hash.
+pub const OVM_HEADER_1_HASH: B256 =
+    b256!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
 
 /// Bedrock hash on Optimism Mainnet.
 pub const BEDROCK_HEADER_HASH: B256 =

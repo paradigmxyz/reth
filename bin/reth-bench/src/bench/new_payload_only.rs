@@ -10,12 +10,13 @@ use crate::{
     },
     valid_payload::call_new_payload,
 };
+use alloy_primitives::B256;
 use alloy_provider::Provider;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::{Block, B256};
+use reth_primitives::Block;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -77,16 +78,14 @@ impl Command {
             call_new_payload(&auth_provider, payload, parent_beacon_block_root, versioned_hashes)
                 .await?;
 
-            let new_payload_result =
-                NewPayloadResult { gas_used: gas_used as u64, latency: start.elapsed() };
+            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);
 
             // current duration since the start of the benchmark
             let current_duration = total_benchmark_duration.elapsed();
 
             // record the current result
-            let row =
-                TotalGasRow { block_number, gas_used: gas_used as u64, time: current_duration };
+            let row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((row, new_payload_result));
         }
 

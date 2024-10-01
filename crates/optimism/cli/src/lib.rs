@@ -25,6 +25,7 @@ pub mod commands;
 pub mod receipt_file_codec;
 
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
+use reth_optimism_chainspec::OpChainSpec;
 
 use std::{ffi::OsString, fmt, sync::Arc};
 
@@ -32,18 +33,18 @@ use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
 use futures_util::Future;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_evm_optimism::OpExecutorProvider;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use reth_node_optimism::OptimismNode;
+use reth_optimism_evm::OpExecutorProvider;
+use reth_optimism_node::OptimismNode;
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
@@ -52,10 +53,7 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<
-    Spec: ChainSpecParser<ChainSpec = ChainSpec> = OpChainSpecParser,
-    Ext: clap::Args + fmt::Debug = NoArgs,
-> {
+pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<Spec, Ext>,
@@ -109,9 +107,9 @@ impl Cli {
     }
 }
 
-impl<Spec, Ext> Cli<Spec, Ext>
+impl<C, Ext> Cli<C, Ext>
 where
-    Spec: ChainSpecParser<ChainSpec = ChainSpec>,
+    C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
 {
     /// Execute the configured cli command.
@@ -120,12 +118,12 @@ where
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
         self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain.to_string());
+            self.logs.log_file_directory.join(self.chain.chain().to_string());
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);

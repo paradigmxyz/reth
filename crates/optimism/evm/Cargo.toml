@@ -1,5 +1,5 @@
 [package]
-name = "reth-evm-optimism"
+name = "reth-optimism-evm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -38,5 +38,10 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+alloy-eips.workspace = true
+
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
+
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true

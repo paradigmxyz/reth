@@ -16,7 +16,10 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use alloy_primitives::{Parity, Signature, U256};
+use std::fmt::Display;
+
+use alloy_genesis::Genesis;
+use alloy_primitives::{Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use dev::OP_DEV;
@@ -24,10 +27,15 @@ pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
 use derive_more::{Constructor, Deref, Into};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{
+    BaseFeeParams, ChainSpec, DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId,
+    Hardforks, Head,
+};
+use reth_network_peers::NodeRecord;
+use reth_primitives_traits::Header;
 
 /// OP stack chain spec type.
-#[derive(Debug, Clone, Deref, Into, Constructor)]
+#[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,
@@ -37,6 +45,86 @@ pub struct OpChainSpec {
 /// signature.
 pub fn optimism_deposit_tx_signature() -> Signature {
     Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
+}
+
+impl EthChainSpec for OpChainSpec {
+    fn chain(&self) -> alloy_chains::Chain {
+        self.inner.chain()
+    }
+
+    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
+        self.inner.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
+        self.inner.base_fee_params_at_block(block_number)
+    }
+
+    fn deposit_contract(&self) -> Option<&DepositContract> {
+        self.inner.deposit_contract()
+    }
+
+    fn genesis_hash(&self) -> B256 {
+        self.inner.genesis_hash()
+    }
+
+    fn prune_delete_limit(&self) -> usize {
+        self.inner.prune_delete_limit()
+    }
+
+    fn display_hardforks(&self) -> impl Display {
+        self.inner.display_hardforks()
+    }
+
+    fn genesis_header(&self) -> &Header {
+        self.inner.genesis_header()
+    }
+
+    fn genesis(&self) -> &Genesis {
+        self.inner.genesis()
+    }
+
+    fn max_gas_limit(&self) -> u64 {
+        self.inner.max_gas_limit()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.inner.bootnodes()
+    }
+}
+
+impl Hardforks for OpChainSpec {
+    fn fork<H: reth_chainspec::Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+        self.inner.fork(fork)
+    }
+
+    fn forks_iter(
+        &self,
+    ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
+        self.inner.forks_iter()
+    }
+
+    fn fork_id(&self, head: &Head) -> ForkId {
+        self.inner.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> ForkId {
+        self.inner.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: Head) -> ForkFilter {
+        self.inner.fork_filter(head)
+    }
+}
+
+impl EthereumHardforks for OpChainSpec {
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.inner.final_paris_total_difficulty(block_number)
+    }
+
+    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.inner.get_final_paris_total_difficulty()
+    }
 }
 
 #[cfg(test)]

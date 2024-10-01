@@ -7,14 +7,14 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList,
-    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
+    BlobTransactionValidationError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
     EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
@@ -666,7 +666,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: self.new_tip.gas_limit as u64,
+            block_gas_limit: self.new_tip.gas_limit,
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
@@ -1251,7 +1251,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
         };
 
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let transaction = Self::new(tx, encoded_length);
         Ok(transaction)
     }
@@ -1392,10 +1392,8 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned, TxEip1559, TxEip2930,
-        TxEip4844, TxEip7702, TxLegacy,
-    };
+    use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+    use reth_primitives::{constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned};
 
     #[test]
     fn test_pool_size_invariants() {

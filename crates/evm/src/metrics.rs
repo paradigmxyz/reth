@@ -30,7 +30,7 @@ impl ExecutorMetrics {
     where
         F: FnOnce(BlockExecutionInput<'_, BlockWithSenders>) -> R,
     {
-        let gas_used = input.block.gas_used as u64;
+        let gas_used = input.block.gas_used;
 
         // Execute the block and record the elapsed time.
         let execute_start = Instant::now();

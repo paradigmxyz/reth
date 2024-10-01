@@ -37,7 +37,7 @@ reth-node-events.workspace = true
 reth-network-p2p.workspace = true
 reth-errors.workspace = true
 reth-config.workspace = true
-reth-evm-optimism.workspace = true
+reth-optimism-evm.workspace = true
 reth-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-node-builder.workspace = true
@@ -72,6 +72,6 @@ reth-cli-commands.workspace = true
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
-    "reth-node-optimism/asm-keccak",
+    "reth-optimism-node/asm-keccak",
     "reth-primitives/asm-keccak",
 ]

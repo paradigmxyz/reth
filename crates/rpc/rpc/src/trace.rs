@@ -1,6 +1,6 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types::{
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Index,
@@ -14,7 +14,7 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
@@ -80,7 +80,7 @@ where
     Provider: BlockReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + 'static,
     Eth: TraceExt + 'static,
 {
@@ -311,8 +311,11 @@ where
         // add reward traces for all blocks
         for block in &blocks {
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
-                let mut traces =
-                    self.extract_reward_traces(&block.header, &block.ommers, base_block_reward);
+                let mut traces = self.extract_reward_traces(
+                    &block.header,
+                    &block.body.ommers,
+                    base_block_reward,
+                );
                 traces.retain(|trace| matcher.matches(&trace.trace));
                 all_traces.extend(traces);
             } else {
@@ -383,7 +386,7 @@ where
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
                 traces.extend(self.extract_reward_traces(
                     &block.header,
-                    &block.ommers,
+                    &block.body.ommers,
                     base_block_reward,
                 ));
             }
@@ -556,7 +559,7 @@ where
     Provider: BlockReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + 'static,
     Eth: TraceExt + 'static,
 {

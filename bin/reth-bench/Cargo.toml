@@ -36,6 +36,7 @@ alloy-pubsub.workspace = true
 alloy-json-rpc.workspace = true
 alloy-rpc-client.workspace = true
 alloy-eips.workspace = true
+alloy-primitives.workspace = true
 
 # reqwest
 reqwest = { workspace = true, default-features = false, features = [

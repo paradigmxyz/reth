@@ -114,7 +114,8 @@ mod tests {
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        let transactions = blocks.iter().flat_map(|block| &block.body).collect::<Vec<_>>();
+        let transactions =
+            blocks.iter().flat_map(|block| &block.body.transactions).collect::<Vec<_>>();
 
         assert_eq!(db.table::<tables::Transactions>().unwrap().len(), transactions.len());
 
@@ -164,7 +165,7 @@ mod tests {
             let last_pruned_tx_number = blocks
                 .iter()
                 .take(to_block as usize)
-                .map(|block| block.body.len())
+                .map(|block| block.body.transactions.len())
                 .sum::<usize>()
                 .min(
                     next_tx_number_to_prune as usize +
@@ -175,7 +176,7 @@ mod tests {
             let last_pruned_block_number = blocks
                 .iter()
                 .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.len();
+                    tx_count += block.body.transactions.len();
 
                     if tx_count > last_pruned_tx_number {
                         Done((block.number, tx_count))

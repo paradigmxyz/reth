@@ -1,5 +1,5 @@
 [package]
-name = "reth-node-optimism"
+name = "reth-optimism-node"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -36,15 +36,17 @@ reth-rpc.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
-reth-evm-optimism.workspace = true
+reth-optimism-evm.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # async
 async-trait.workspace = true

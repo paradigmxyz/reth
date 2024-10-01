@@ -3,77 +3,39 @@ use alloc::{boxed::Box, string::ToString};
 
 use crate::ConfigureEvm;
 use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use alloy_primitives::B256;
+use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
-use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, B256};
-
-/// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
-///
-/// This constructs a new [`Evm`] with the given DB, and environment
-/// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the pre block contract call.
-///
-/// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
-/// change.
-pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
-    db: &mut DB,
-    evm_config: &EvmConfig,
-    chain_spec: &ChainSpec,
-    initialized_cfg: &CfgEnvWithHandlerCfg,
-    initialized_block_env: &BlockEnv,
-    parent_beacon_block_root: Option<B256>,
-) -> Result<(), BlockExecutionError>
-where
-    DB: Database + DatabaseCommit,
-    DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
-{
-    // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            Default::default(),
-        ))
-        .build();
-
-    // initialize a block from the env, because the pre block call needs the block itself
-    apply_beacon_root_contract_call(
-        evm_config,
-        chain_spec,
-        initialized_block_env.timestamp.to(),
-        initialized_block_env.number.to(),
-        parent_beacon_block_root,
-        &mut evm_pre_block,
-    )
-}
+use revm::{interpreter::Host, Database, Evm};
+use revm_primitives::ResultAndState;
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
+/// chain spec, EVM.
 ///
-/// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
-/// state changes are made.
+/// Note: this does not commit the state changes to the database, it only transact the call.
+///
+/// Returns `None` if Cancun is not active or the block is the genesis block, otherwise returns the
+/// result of the call.
 ///
 /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
-pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
+pub(crate) fn transact_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
     evm_config: &EvmConfig,
     chain_spec: &Spec,
     block_timestamp: u64,
     block_number: u64,
     parent_beacon_block_root: Option<B256>,
     evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
+) -> Result<Option<ResultAndState>, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(())
+        return Ok(None)
     }
 
     let parent_beacon_block_root =
@@ -88,7 +50,7 @@ where
             }
             .into())
         }
-        return Ok(())
+        return Ok(None)
     }
 
     // get previous env
@@ -102,8 +64,8 @@ where
         parent_beacon_block_root.0.into(),
     );
 
-    let mut state = match evm.transact() {
-        Ok(res) => res.state,
+    let mut res = match evm.transact() {
+        Ok(res) => res,
         Err(e) => {
             evm.context.evm.env = previous_env;
             return Err(BlockValidationError::BeaconRootContractCall {
@@ -114,13 +76,11 @@ where
         }
     };
 
-    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-
-    evm.context.evm.db.commit(state);
+    res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
+    res.state.remove(&evm.block().coinbase);
 
     // re-set the previous env
     evm.context.evm.env = previous_env;
 
-    Ok(())
+    Ok(Some(res))
 }

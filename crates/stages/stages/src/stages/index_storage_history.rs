@@ -124,7 +124,7 @@ where
             |AddressStorageKey((address, storage_key)), highest_block_number| {
                 StorageShardedKey::new(address, storage_key, highest_block_number)
             },
-            StorageShardedKey::decode,
+            StorageShardedKey::decode_owned,
             |key| AddressStorageKey((key.address, key.sharded_key.key)),
         )?;
 
@@ -153,6 +153,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
+    use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
     use itertools::Itertools;
     use reth_db::BlockNumberList;
     use reth_db_api::{
@@ -163,7 +164,7 @@ mod tests {
         },
         transaction::DbTx,
     };
-    use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
+    use reth_primitives::StorageEntry;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,
@@ -196,7 +197,7 @@ mod tests {
     }
 
     fn list(list: &[u64]) -> BlockNumberList {
-        BlockNumberList::new(list).unwrap()
+        BlockNumberList::new(list.iter().copied()).unwrap()
     }
 
     fn cast(

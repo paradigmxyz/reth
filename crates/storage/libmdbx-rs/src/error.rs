@@ -119,8 +119,11 @@ pub enum Error {
     /// Read transaction has been timed out.
     #[error("read transaction has been timed out")]
     ReadTransactionTimeout,
+    /// Permission defined
+    #[error("permission denied to setup database")]
+    Permission,
     /// Unknown error code.
-    #[error("unknown error code")]
+    #[error("unknown error code: {0}")]
     Other(i32),
 }
 
@@ -157,6 +160,7 @@ impl Error {
             ffi::MDBX_EACCESS => Self::Access,
             ffi::MDBX_TOO_LARGE => Self::TooLarge,
             ffi::MDBX_EBADSIGN => Self::BadSignature,
+            ffi::MDBX_EPERM => Self::Permission,
             other => Self::Other(other),
         }
     }
@@ -196,6 +200,7 @@ impl Error {
             Self::WriteTransactionUnsupportedInReadOnlyMode |
             Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
+            Self::Permission => ffi::MDBX_EPERM,
             Self::Other(err_code) => *err_code,
         }
     }

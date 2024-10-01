@@ -1,3 +1,4 @@
+use alloy_consensus::Transaction;
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
@@ -66,7 +67,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthTransactions<TransactionCompat: TransactionCompat>
+        > + EthTransactions
         + TraceExt
         + 'static,
 {

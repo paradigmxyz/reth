@@ -41,6 +41,7 @@ where
 
             return block
                 .body
+                .transactions
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()
@@ -50,9 +51,8 @@ where
                         index: idx as u64,
                         block_hash,
                         block_number,
-                        base_fee: base_fee.map(|base_fee| base_fee as u64),
-                        excess_blob_gas: excess_blob_gas
-                            .map(|excess_blob_gas| excess_blob_gas as u64),
+                        base_fee,
+                        excess_blob_gas,
                         timestamp,
                     };
 

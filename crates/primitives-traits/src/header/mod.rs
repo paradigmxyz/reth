@@ -11,6 +11,11 @@ pub use alloy_consensus::Header;
 
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    pub use super::sealed::serde_bincode_compat::SealedHeader;
+}
+
 /// Trait for extracting specific Ethereum block data from a header
 pub trait BlockHeader {
     /// Retrieves the beneficiary (miner) of the block
@@ -52,7 +57,7 @@ impl BlockHeader for Header {
     }
 
     fn gas_limit(&self) -> u64 {
-        self.gas_limit as u64
+        self.gas_limit
     }
 
     fn timestamp(&self) -> u64 {
@@ -64,10 +69,10 @@ impl BlockHeader for Header {
     }
 
     fn base_fee_per_gas(&self) -> Option<u64> {
-        self.base_fee_per_gas.map(|base_fee| base_fee as u64)
+        self.base_fee_per_gas
     }
 
     fn excess_blob_gas(&self) -> Option<u64> {
-        self.excess_blob_gas.map(|excess_blob_gas| excess_blob_gas as u64)
+        self.excess_blob_gas
     }
 }

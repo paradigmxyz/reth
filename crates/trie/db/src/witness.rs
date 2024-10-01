@@ -1,12 +1,11 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{map::HashMap, Bytes, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::TrieWitnessError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     witness::TrieWitness, HashedPostState, TrieInput,
 };
-use std::collections::HashMap;
 
 /// Extends [`TrieWitness`] with operations specific for working with a database transaction.
 pub trait DatabaseTrieWitness<'a, TX> {

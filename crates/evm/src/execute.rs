@@ -5,8 +5,9 @@ pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
+use alloy_primitives::BlockNumber;
 use core::fmt::Display;
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm::State;
 use revm_primitives::db::Database;
@@ -151,9 +152,8 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::Block;
+    use alloy_primitives::U256;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::U256;
     use std::marker::PhantomData;
 
     #[derive(Clone, Default)]
@@ -232,14 +232,6 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let block = Block {
-            header: Default::default(),
-            body: vec![],
-            ommers: vec![],
-            withdrawals: None,
-            requests: None,
-        };
-        let block = BlockWithSenders::new(block, Default::default()).unwrap();
-        let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
+        let _ = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
     }
 }

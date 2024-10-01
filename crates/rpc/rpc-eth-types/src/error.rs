@@ -591,7 +591,7 @@ impl std::fmt::Display for RevertError {
     }
 }
 
-impl std::error::Error for RevertError {}
+impl core::error::Error for RevertError {}
 
 /// A helper error type that's mainly used to mirror `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
@@ -643,7 +643,7 @@ pub enum RpcPoolError {
     AddressAlreadyReserved,
     /// Other unspecified error
     #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {

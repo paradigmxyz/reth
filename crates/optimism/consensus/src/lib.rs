@@ -8,7 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_primitives::{B64, U256};
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
@@ -16,6 +16,7 @@ use reth_consensus_common::validation::{
     validate_header_base_fee, validate_header_extradata, validate_header_gas,
     validate_shanghai_withdrawals,
 };
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{
     BlockWithSenders, GotExpected, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH,
@@ -23,6 +24,8 @@ use reth_primitives::{
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;
+pub use proof::calculate_receipt_root_no_memo_optimism;
+
 mod validation;
 pub use validation::validate_block_post_execution;
 
@@ -32,17 +35,12 @@ pub use validation::validate_block_post_execution;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismBeaconConsensus {
     /// Configuration
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
 }
 
 impl OptimismBeaconConsensus {
     /// Create a new instance of [`OptimismBeaconConsensus`]
-    ///
-    /// # Panics
-    ///
-    /// If given chain spec is not optimism [`ChainSpec::is_optimism`]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        assert!(chain_spec.is_optimism(), "optimism consensus only valid for optimism chains");
+    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
@@ -122,7 +120,7 @@ impl Consensus for OptimismBeaconConsensus {
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         // Check ommers hash
-        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
+        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
         if block.header.ommers_hash != ommers_hash {
             return Err(ConsensusError::BodyOmmersHashDiff(
                 GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),

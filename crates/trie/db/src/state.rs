@@ -77,9 +77,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// # Example
     ///
     /// ```
+    /// use alloy_primitives::U256;
     /// use reth_db::test_utils::create_test_rw_db;
     /// use reth_db_api::database::Database;
-    /// use reth_primitives::{Account, U256};
+    /// use reth_primitives::Account;
     /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
     /// use reth_trie_db::DatabaseStateRoot;
     ///
@@ -267,11 +268,11 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{hex, map::HashMap, Address, U256};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
-    use reth_primitives::{hex, revm_primitives::AccountInfo, Address, U256};
+    use reth_primitives::revm_primitives::AccountInfo;
     use revm::db::BundleState;
-    use std::collections::HashMap;
 
     #[test]
     fn from_bundle_state_with_rayon() {
@@ -286,8 +287,8 @@ mod tests {
         let bundle_state = BundleState::builder(2..=2)
             .state_present_account_info(address1, account1)
             .state_present_account_info(address2, account2)
-            .state_storage(address1, HashMap::from([(slot1, (U256::ZERO, U256::from(10)))]))
-            .state_storage(address2, HashMap::from([(slot2, (U256::ZERO, U256::from(20)))]))
+            .state_storage(address1, HashMap::from_iter([(slot1, (U256::ZERO, U256::from(10)))]))
+            .state_storage(address2, HashMap::from_iter([(slot2, (U256::ZERO, U256::from(20)))]))
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 

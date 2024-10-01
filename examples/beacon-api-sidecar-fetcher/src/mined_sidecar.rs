@@ -1,10 +1,11 @@
 use crate::BeaconSidecarConfig;
+use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{BlobTransaction, SealedBlockWithSenders, B256},
+    primitives::{BlobTransaction, SealedBlockWithSenders},
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -115,7 +116,7 @@ where
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),
                         block_number: block.number,
-                        gas_used: block.gas_used as u64,
+                        gas_used: block.gas_used,
                     };
                     actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
                         transaction,
@@ -194,7 +195,7 @@ where
                                         let block_metadata = BlockMetadata {
                                             block_hash: new.tip().block.hash(),
                                             block_number: new.tip().block.number,
-                                            gas_used: new.tip().block.gas_used as u64,
+                                            gas_used: new.tip().block.gas_used,
                                         };
                                         BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,
@@ -267,7 +268,7 @@ async fn fetch_blobs_for_block(
                 let block_metadata = BlockMetadata {
                     block_hash: block.hash(),
                     block_number: block.number,
-                    gas_used: block.gas_used as u64,
+                    gas_used: block.gas_used,
                 };
                 BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata })
             })

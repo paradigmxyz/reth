@@ -1,11 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
-
 mod signature;
-mod typed;
 
 pub use signature::*;
-pub use typed::*;
-
 use std::fmt;
 
 use alloy_rpc_types::{
@@ -133,7 +129,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,
-        gas: Some(gas as u128),
+        gas: Some(gas),
         value: Some(value),
         input: TransactionInput::new(input),
         nonce: Some(nonce),

@@ -1,4 +1,5 @@
 use alloy_consensus::{EnvKzgSettings, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope};
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_network::{
     eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844,
 };
@@ -7,7 +8,6 @@ use alloy_rpc_types::{Authorization, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::Ok;
-use reth_primitives::eip7702::SignedAuthorization;
 
 /// Helper for transaction operations
 #[derive(Debug)]
@@ -29,7 +29,7 @@ impl TransactionTestContext {
     /// Creates a deployment transaction and signs it, returning an envelope.
     pub async fn deploy_tx(
         chain_id: u64,
-        gas: u128,
+        gas: u64,
         init_code: Bytes,
         wallet: PrivateKeySigner,
     ) -> TxEnvelope {
@@ -40,7 +40,7 @@ impl TransactionTestContext {
     /// Creates a deployment transaction and signs it, returning bytes.
     pub async fn deploy_tx_bytes(
         chain_id: u64,
-        gas: u128,
+        gas: u64,
         init_code: Bytes,
         wallet: PrivateKeySigner,
     ) -> Bytes {
@@ -145,7 +145,7 @@ impl TransactionTestContext {
 /// Creates a type 2 transaction
 fn tx(
     chain_id: u64,
-    gas: u128,
+    gas: u64,
     data: Option<Bytes>,
     delegate_to: Option<SignedAuthorization>,
     nonce: u64,
