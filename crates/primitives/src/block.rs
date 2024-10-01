@@ -18,8 +18,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "arbitrary"))]
 use crate::SignedTransaction;
 use crate::{
-    GotExpected, Header, SealedHeader, SignedTransaction, TransactionSigned,
-    TransactionSignedEcRecovered, Withdrawals,
+    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
 };
 
 // HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
