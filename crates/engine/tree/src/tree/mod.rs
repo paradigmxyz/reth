@@ -853,7 +853,7 @@ where
         };
 
         let new_head_number = new_head_block.block.number;
-        let current_canonical_number = self.state.tree_state.current_canonical_head.number;
+        let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
         let mut new_chain = vec![new_head_block.clone()];
         let mut current_hash = new_head_block.block.parent_hash;
@@ -888,6 +888,18 @@ where
         // We have a reorg. Walk back both chains to find the fork point.
         let mut old_chain = Vec::new();
         let mut old_hash = self.state.tree_state.current_canonical_head.hash;
+
+        while current_canonical_number > current_number {
+            if let Some(block) = self.executed_block_by_hash(old_hash)? {
+                old_chain.push(block.clone());
+                old_hash = block.block.header.parent_hash;
+                current_canonical_number -= 1;
+            } else {
+                // This shouldn't happen as we're walking back the canonical chain
+                warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
+                return Ok(None);
+            }
+        }
 
         while old_hash != current_hash {
             if let Some(block) = self.executed_block_by_hash(old_hash)? {
@@ -927,28 +939,31 @@ where
     ///   extension of the canonical chain.
     /// * walking back from the current head to verify that the target hash is not already part of
     ///   the canonical chain.
-    fn is_fork(&self, target_hash: B256, finalized_hash: Option<B256>) -> ProviderResult<bool> {
+    fn is_fork(&self, target_hash: B256, _finalized_hash: Option<B256>) -> ProviderResult<bool> {
         // verify that the given hash is not part of an extension of the canon chain.
+        let canonical_head = self.state.tree_state.canonical_head();
         let mut current_hash = target_hash;
         while let Some(current_block) = self.sealed_header_by_hash(current_hash)? {
-            if current_block.hash() == self.state.tree_state.canonical_block_hash() {
+            if current_block.hash() == canonical_head.hash {
                 return Ok(false)
+            }
+            // We already passed the canonical head
+            if current_block.number <= canonical_head.number {
+                break
             }
             current_hash = current_block.parent_hash;
         }
 
-        // verify that the given hash is not already part of the canon chain
-        current_hash = self.state.tree_state.canonical_block_hash();
-        while let Some(current_block) = self.sealed_header_by_hash(current_hash)? {
-            if Some(current_hash) == finalized_hash {
-                return Ok(true)
-            }
-
-            if current_block.hash() == target_hash {
-                return Ok(false)
-            }
-            current_hash = current_block.parent_hash;
+        // verify that the given hash is not already part of canonical chain stored in memory
+        if self.canonical_in_memory_state.header_by_hash(target_hash).is_some() {
+            return Ok(false)
         }
+
+        // verify that the given hash is not already part of persisted canonical chain
+        if self.provider.block_number(target_hash)?.is_some() {
+            return Ok(false)
+        }
+
         Ok(true)
     }
 
