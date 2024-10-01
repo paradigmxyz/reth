@@ -54,7 +54,7 @@ test-fuzz.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = ["alloy-consensus/std"]
 test-utils = ["arbitrary"]
 arbitrary = [
     "std",
