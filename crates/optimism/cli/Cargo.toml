@@ -24,7 +24,6 @@ reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-execution-types.workspace = true
 reth-node-core = { workspace = true, features = ["optimism"] }
-reth-optimism-node.workspace = true
 reth-primitives = { workspace = true, features = ["optimism"] }
 
 ## optimism
@@ -38,6 +37,7 @@ reth-network-p2p.workspace = true
 reth-errors.workspace = true
 reth-config.workspace = true
 reth-optimism-evm.workspace = true
+reth-optimism-node.workspace = true
 reth-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-node-builder.workspace = true
