@@ -140,7 +140,7 @@ where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
-    // 1. Spawn a single thread using std::thread (think of it as the boss-worker thread)
+    // 1. Spawn two thread using std::thread (one as a producer and the other as a consumer)
     // 2. Preallocate channels for the chunk in the range of each batch
     // 3. Spin up raynon thread on each chunk 
     // 4. Start listening to response on receiver for each chunk till completion / failure case.
