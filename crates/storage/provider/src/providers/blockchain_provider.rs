@@ -1097,7 +1097,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
 
-        Ok(self.get_in_memory_or_storage_by_block(
+        self.get_in_memory_or_storage_by_block(
             block_hash.into(),
             |_| {
                 // TODO(joshie): port history_by_block_hash to DatabaseProvider and use db_provider
@@ -1107,7 +1107,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
                 let state_provider = self.block_state_provider(block_state)?;
                 Ok(Box::new(state_provider))
             },
-        )?)
+        )
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
