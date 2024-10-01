@@ -11,6 +11,9 @@
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
+mod tree;
+pub use tree::{DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD};
+
 pub use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
     PayloadTypes,
