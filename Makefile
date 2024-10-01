@@ -325,7 +325,7 @@ fmt:
 	cargo +nightly fmt
 
 lint-reth:
-	cargo clippy \
+	cargo +nightly clippy \
 	--workspace \
 	--bin "reth" \
 	--lib \
@@ -336,7 +336,7 @@ lint-reth:
 	-- -D warnings
 
 lint-op-reth:
-	cargo clippy \
+	cargo +nightly clippy \
 	--workspace \
 	--bin "op-reth" \
 	--lib \
@@ -347,7 +347,7 @@ lint-op-reth:
 	-- -D warnings
 
 lint-other-targets:
-	cargo clippy \
+	cargo +nightly clippy \
 	--workspace \
 	--lib \
 	--examples \
@@ -373,7 +373,7 @@ lint:
 	make lint-codespell
 
 fix-lint-reth:
-	cargo clippy \
+	cargo +nightly clippy \
 	--workspace \
 	--bin "reth" \
 	--lib \
@@ -387,7 +387,7 @@ fix-lint-reth:
 	-- -D warnings
 
 fix-lint-op-reth:
-	cargo clippy \
+	cargo +nightly clippy \
 	--workspace \
 	--bin "op-reth" \
 	--lib \
@@ -401,7 +401,7 @@ fix-lint-op-reth:
 	-- -D warnings
 
 fix-lint-other-targets:
-	cargo clippy \
+	cargo +nightly clippy \
 	--workspace \
 	--lib \
 	--examples \
