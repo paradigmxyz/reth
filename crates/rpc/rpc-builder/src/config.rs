@@ -171,7 +171,7 @@ impl RethRpcServerConfig for RpcServerArgs {
         if self.http_api.is_some() && !self.http {
             warn!(
                 target: "reth::cli",
-                "--http.api is set but --http is not enabled. HTTP RPC API will not be exposed."
+                "The --http.api flag is set but --http is not enabled. HTTP RPC API will not be exposed."
             );
         }
 
