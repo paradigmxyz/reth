@@ -373,13 +373,9 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
                 .get_finalized_num_hash()
                 .unwrap_or_else(|| BlockNumHash::new(0, B256::default()));
             self.database.header_td_by_number(last_finalized_num_hash.number)
-        } else if let Some(td) = self.database.header_td_by_number(number)? {
-            // Otherwise, if the TD is recorded on disk, we can just return that
-            Ok(Some(td))
         } else {
-            // If the block does not exist in memory, and does not exist on-disk, we should not
-            // return a TD for it.
-            Ok(None)
+            // Otherwise, return what we have on disk
+            self.database.header_td_by_number(number)
         }
     }
 
