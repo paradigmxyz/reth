@@ -44,9 +44,6 @@ futures-util.workspace = true
 # observability
 tracing.workspace = true
 
-# common
-parking_lot.workspace = true
-
 # misc
 thiserror.workspace = true
 itertools.workspace = true

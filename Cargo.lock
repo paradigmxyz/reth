@@ -8727,7 +8727,6 @@ dependencies = [
  "futures-util",
  "itertools 0.13.0",
  "num-traits",
- "parking_lot 0.12.3",
  "paste",
  "pprof",
  "rand 0.8.5",

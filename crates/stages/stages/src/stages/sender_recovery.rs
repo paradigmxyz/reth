@@ -6,7 +6,6 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use parking_lot::RwLock;
 use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
@@ -100,8 +99,7 @@ where
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
-
-        recover_batch(batch, provider, &mut senders_cursor)?;
+        recover_batch_range(batch, provider, &mut senders_cursor)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
@@ -133,7 +131,7 @@ where
 }
 
 
-fn recover_batch<Provider, CURSOR>(
+fn recover_batch_range<Provider, CURSOR>(
     tx_batch_range: Vec<Range<u64>>,
     provider: &Provider,
     senders_cursor: &mut CURSOR,
@@ -149,14 +147,12 @@ where
 
     let (tx_batch_sender, tx_batch_receiver) = mpsc::channel();
     let (receiver_sender, receiver_receiver) = mpsc::channel();
-    
-    let static_file_provider = provider.static_file_provider().clone();
+    let total_expected = tx_batch_range[0].start - tx_batch_range[tx_batch_range.len() - 1].end;
 
-    let mut total_expected_chunks = 0;
+    let static_file_provider = provider.static_file_provider().clone();
     std::thread::spawn(move || {
         // Send all batches to the processing thread
         for tx_range in tx_batch_range {
-            total_expected_chunks += 1;
             debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
 
             // Preallocate channels
@@ -237,7 +233,6 @@ where
                 Ok((tx_id, sender_address)) => {
                     senders_cursor.append(tx_id, sender_address)?;
                     processed_transactions += 1;
-                    // total_expected += 1;
                 }
                 Err(error) => {
                     return match *error {
@@ -270,13 +265,12 @@ where
         }
     }
 
-    // let mut total_expected = tx_batch_range.start - tx_batch_range[].end;
     // Fail safe check
-    if processed_transactions != total_expected_chunks {
+    if processed_transactions != total_expected {
         return Err(StageError::Fatal(
             SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected {
                 got: processed_transactions,
-                expected: total_expected_chunks,
+                expected: total_expected,
             })
             .into(),
         ));
