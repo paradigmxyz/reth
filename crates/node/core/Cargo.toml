@@ -33,6 +33,7 @@ reth-tracing.workspace = true
 reth-config.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
+reth-engine-primitives.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers.workspace = true
 reth-consensus-common.workspace = true
