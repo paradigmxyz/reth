@@ -126,6 +126,8 @@ where
     /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
     /// executes the transactions.
     ///
+    /// The optional `state_hook` will be executed with the state changes if present.
+    ///
     /// # Note
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
@@ -265,6 +267,8 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
+    /// Convenience method to invoke `execute_without_verification_with_state_hook` setting the
+    /// state hook as `None`.
     fn execute_without_verification(
         &mut self,
         block: &BlockWithSenders,

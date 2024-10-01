@@ -108,6 +108,8 @@ where
     ///
     /// This applies the pre-execution changes, and executes the transactions.
     ///
+    /// The optional `state_hook` will be executed with the state changes if present.
+    ///
     /// # Note
     ///
     /// It does __not__ apply post-execution changes.
@@ -282,6 +284,8 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
+    /// Convenience method to invoke `execute_without_verification_with_state_hook` setting the
+    /// state hook as `None`.
     fn execute_without_verification(
         &mut self,
         block: &BlockWithSenders,
