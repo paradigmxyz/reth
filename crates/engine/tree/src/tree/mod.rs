@@ -865,9 +865,9 @@ where
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
             if let Some(block) = self.executed_block_by_hash(current_hash)? {
-                new_chain.push(block.clone());
                 current_hash = block.block.parent_hash;
                 current_number -= 1;
+                new_chain.push(block);
             } else {
                 warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
                 // This should never happen as we're walking back a chain that should connect to
@@ -891,8 +891,8 @@ where
 
         while old_hash != current_hash {
             if let Some(block) = self.executed_block_by_hash(old_hash)? {
-                old_chain.push(block.clone());
                 old_hash = block.block.header.parent_hash;
+                old_chain.push(block);
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
                 warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
@@ -906,8 +906,8 @@ where
 
             if let Some(block) = self.executed_block_by_hash(current_hash)? {
                 if self.is_fork(block.block.hash(), finalized_block)? {
-                    new_chain.push(block.clone());
                     current_hash = block.block.parent_hash;
+                    new_chain.push(block);
                 }
             } else {
                 // This shouldn't happen as we've already walked this path
