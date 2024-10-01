@@ -71,11 +71,12 @@ pub fn parse_custom_chain_spec(s: &str) -> eyre::Result<ChainSpec, eyre::Error> 
     Ok(genesis.into())
 }
 
-/// Default chain specification parser.
-#[derive(Debug, Clone, Default)]
-pub struct DefaultChainSpecParser;
+/// A chain specification parser for ethereum chains.
+#[derive(Debug, Copy, Clone, Default)]
+#[non_exhaustive]
+pub struct EthereumChainSpecParser;
 
-impl ChainSpecParser for DefaultChainSpecParser {
+impl ChainSpecParser for EthereumChainSpecParser {
     type ChainSpec = ChainSpec;
 
     const SUPPORTED_CHAINS: &'static [&'static str] = SUPPORTED_CHAINS;
