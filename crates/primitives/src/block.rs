@@ -300,13 +300,13 @@ impl BlockWithSenders {
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
     pub header: SealedHeader,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
 }
 
 impl SealedBlock {

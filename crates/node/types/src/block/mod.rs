@@ -6,6 +6,7 @@ use core::ops;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
+use reth_primitives::{SealedBlock, SealedHeader};
 
 use crate::BlockBody;
 
@@ -23,7 +24,7 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
     fn body(&self) -> &Self::Body;
 
     /// Calculate the header hash and seal the block so that it can't be changed.
-    fn seal_slow(self) -> SealedBlock {
+    fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.into();
         let sealed = header.seal_slow();
         let (header, seal) = sealed.into_parts();
@@ -33,7 +34,7 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock {
+    fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.into();
         SealedBlock { header: SealedHeader::new(header, hash), body }
     }

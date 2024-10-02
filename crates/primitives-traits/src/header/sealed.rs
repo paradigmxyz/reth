@@ -14,13 +14,13 @@ use serde::{Deserialize, Serialize};
 /// to modify header.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Compact)]
 #[add_arbitrary_tests(rlp, compact)]
-pub struct SealedHeader {
+pub struct SealedHeader<H = Header> {
     /// Locked Header hash.
     hash: BlockHash,
     /// Locked Header fields.
     #[as_ref]
     #[deref]
-    header: Header,
+    header: H,
 }
 
 impl SealedHeader {
