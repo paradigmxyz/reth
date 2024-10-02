@@ -11,7 +11,18 @@ use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
 use crate::BlockBody;
 
 /// Abstraction of block data type.
-pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Body)> {
+pub trait Block:
+    Debug
+    + Clone
+    + PartialEq
+    + Eq
+    + Default
+    + Serialize
+    + Deserialize
+    + Deref
+    + From<(Self::Header, Self::Body)>
+    + Into<(Self::Header, Self::Body)>
+{
     /// Header part of the block.
     type Header: BlockHeader + Sealable;
     /// The block's body contains the transactions in the block.
