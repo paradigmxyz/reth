@@ -130,7 +130,6 @@ where
     }
 }
 
-
 fn recover_batch_range<Provider, CURSOR>(
     tx_batch_range: Vec<Range<u64>>,
     provider: &Provider,
@@ -142,7 +141,7 @@ where
 {
     // 1. Spawn two thread using std::thread (one as a producer and the other as a consumer)
     // 2. Preallocate channels for the chunk in the range of each batch
-    // 3. Spin up raynon thread on each chunk 
+    // 3. Spin up raynon thread on each chunk
     // 4. Start listening to response on receiver for each chunk till completion / failure case.
 
     let (tx_batch_sender, tx_batch_receiver) = mpsc::channel();
@@ -160,7 +159,8 @@ where
                 .clone()
                 .step_by(WORKER_CHUNK_SIZE)
                 .map(|start| {
-                    let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
+                    let range =
+                        start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
                     let (tx, rx) = mpsc::channel();
                     // Range and channel sender will be sent to rayon worker
                     ((range, tx), rx)
@@ -179,7 +179,7 @@ where
     std::thread::spawn(move || {
         while let Ok(chunks) = tx_batch_receiver.recv() {
             for (chunk_range, recovered_senders_tx) in chunks {
-               // Read the raw value, and let the rayon worker to decompress & decode.
+                // Read the raw value, and let the rayon worker to decompress & decode.
                 let chunk = match static_file_provider.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
                     chunk_range.clone(),
@@ -208,7 +208,9 @@ where
 
                         let res = tx
                             .value()
-                            .map_err(|err| Box::new(SenderRecoveryStageError::StageError(err.into())))
+                            .map_err(|err| {
+                                Box::new(SenderRecoveryStageError::StageError(err.into()))
+                            })
                             .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
 
                         let is_err = res.is_err();
