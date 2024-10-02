@@ -6,7 +6,7 @@ use core::ops;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
 
 use crate::BlockBody;
 
@@ -39,7 +39,8 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
         SealedBlock { header: SealedHeader::new(header, hash), body }
     }
 
-    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
+    /// Expensive operation that recovers transaction signer. See
+    /// [`SealedBlockWithSenders`](reth_primitives::SealedBlockWithSenders).
     fn senders(&self) -> Option<Vec<Address>> {
         self.body().recover_signers()
     }
@@ -53,7 +54,7 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
     ///
     /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders<Self> {
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
@@ -65,7 +66,10 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
-    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<BlockWithSenders, Self> {
+    fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<BlockWithSenders<Self>, Self> {
         let senders = if self.body().transactions().len() == senders.len() {
             senders
         } else {
@@ -80,7 +84,7 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<BlockWithSenders> {
+    fn with_recovered_senders(self) -> Option<BlockWithSenders<Self>> {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
     }
