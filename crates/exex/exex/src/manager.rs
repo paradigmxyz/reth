@@ -162,7 +162,7 @@ impl ExExHandle {
 
 /// Metrics for the `ExEx` manager.
 #[derive(Metrics)]
-#[metrics(scope = "exex_manager")]
+#[metrics(scope = "exex.manager")]
 pub struct ExExManagerMetrics {
     /// Max size of the internal state notifications buffer.
     max_capacity: Gauge,
