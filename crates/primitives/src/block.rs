@@ -10,6 +10,7 @@ pub use alloy_eips::eip1898::{
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use core::mem;
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
@@ -582,6 +583,15 @@ impl traits::BlockBody for BlockBody {
         self.blob_transactions_iter()
             .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
             .flatten()
+    }
+
+    fn size(&self) -> usize {
+        self.transactions().iter().map(Self::SignedTransaction::size).sum::<usize>() +
+            self.transactions().capacity() * mem::size_of::<Self::SignedTransaction>() +
+            self.ommers().iter().map(Self::Header::size).sum::<usize>() +
+            self.ommers().capacity() * core::mem::size_of::<Self::Header>() +
+            self.withdrawals()
+                .map_or(mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 

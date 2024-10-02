@@ -1,7 +1,7 @@
 //! Block body abstraction.
 
 use alloc::fmt;
-use core::{mem, ops};
+use core::ops;
 
 use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_primitives::{Address, B256};
@@ -94,14 +94,10 @@ pub trait BlockBody:
     }
 
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    fn size(&self) -> usize {
-        self.transactions().iter().map(Self::SignedTransaction::size).sum::<usize>() +
-            self.transactions().capacity() * mem::size_of::<Self::SignedTransaction>() +
-            self.ommers().iter().map(Self::Header::size).sum::<usize>() +
-            self.ommers().capacity() * core::mem::size_of::<Self::Header>() +
-            self.withdrawals()
-                .map_or(mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
-    }
+    // todo: default impl when alloy prs merged
+    // <https://github.com/alloy-rs/alloy/pull/1414>
+    // <https://github.com/alloy-rs/alloy/pull/1415>
+    fn size(&self) -> usize;
 }
 
 impl<T> BlockBody for T
@@ -150,5 +146,9 @@ where
 
     fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
         self.deref().blob_versioned_hashes_iter()
+    }
+
+    fn size(&self) -> usize {
+        self.deref().size()
     }
 }
