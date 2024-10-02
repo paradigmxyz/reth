@@ -28,12 +28,8 @@ const BATCH_SIZE: usize = 100_000;
 /// Maximum number of senders to recover per rayon worker job.
 const WORKER_CHUNK_SIZE: usize = 100;
 
-/// Type alias for a sender that transmits a batch of transaction chunks.
-/// Each chunk is a pair of a range of transaction IDs and a sender that
-/// communicates the result of sender recovery for that range.
-type TxBatchSender = mpsc::Sender<
-    Vec<(Range<u64>, mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>)>,
->;
+/// Type alias for a sender that transmits the result of sender recovery.
+type RecoveryResultSender = mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
@@ -144,7 +140,7 @@ where
 fn recover_range<Provider, CURSOR>(
     tx_range: Range<u64>,
     provider: &Provider,
-    tx_batch_sender: TxBatchSender,
+    tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
@@ -227,13 +223,13 @@ where
     Ok(())
 }
 
-fn setup_range_recovery<Provider>(provider: &Provider) -> TxBatchSender
+fn setup_range_recovery<Provider>(
+    provider: &Provider,
+) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
 where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
 {
-    let (tx_sender, tx_receiver) = mpsc::channel::<
-        Vec<(Range<u64>, mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>)>,
-    >();
+    let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
     let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
