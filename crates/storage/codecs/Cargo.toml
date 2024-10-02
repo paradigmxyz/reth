@@ -14,19 +14,26 @@ workspace = true
 # reth
 reth-codecs-derive = { path = "./derive", default-features = false }
 
+
 # eth
-alloy-consensus = { workspace = true, optional = true }
+alloy-consensus = { workspace = true, optional = true,features = ["serde"] }
 alloy-eips = { workspace = true, optional = true, features = ["serde"] }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
+alloy-rlp.workspace = true
 
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
 
+revm-primitives = { workspace = true}
+
 # misc
 bytes.workspace = true
 modular-bitfield = { workspace = true, optional = true }
+derive_more.workspace = true
+serde.workspace = true
+
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = [
