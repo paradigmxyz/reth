@@ -821,15 +821,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_sender(id),
-            |tx_index, _, block_state| {
-                Ok(block_state
-                    .block()
-                    .block()
-                    .body
-                    .transactions
-                    .get(tx_index)
-                    .and_then(|transaction| transaction.recover_signer()))
-            },
+            |tx_index, _, block_state| Ok(block_state.block().senders.get(tx_index).copied()),
         )
     }
 }
