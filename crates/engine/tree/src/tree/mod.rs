@@ -1524,19 +1524,13 @@ where
     /// Return sealed block from database or in-memory state by hash.
     fn sealed_header_by_hash(&self, hash: B256) -> ProviderResult<Option<SealedHeader>> {
         // check memory first
-        let block = self
-            .state
-            .tree_state
-            .block_by_hash(hash)
-            // TODO: clone for compatibility. should we return an Arc here?
-            .map(|block| block.as_ref().clone().header);
+        let block =
+            self.state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone().header);
 
         if block.is_some() {
             Ok(block)
-        } else if let Some(block_num) = self.provider.block_number(hash)? {
-            Ok(self.provider.sealed_header(block_num)?)
         } else {
-            Ok(None)
+            self.provider.sealed_header_by_hash(hash)
         }
     }
 
