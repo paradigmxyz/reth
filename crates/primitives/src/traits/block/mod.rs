@@ -24,7 +24,7 @@ pub trait Block:
 {
     /// Header part of the block.
     type Header: BlockHeader + Sealable;
-    
+
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;
 
@@ -101,8 +101,6 @@ pub trait Block:
     }
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
-    // todo: default impl when alloy prs merged
-    // <https://github.com/alloy-rs/alloy/pull/1414>
     fn size(&self) -> usize;
 }
 

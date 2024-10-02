@@ -31,6 +31,7 @@ pub trait BlockBody:
     fn transactions(&self) -> &[Self::SignedTransaction];
 
     /// Returns [`Withdrawals`] in the block, if any.
+    // todo: branch out into extension trait
     fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns reference to uncle block headers.
@@ -94,9 +95,6 @@ pub trait BlockBody:
     }
 
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    // todo: default impl when alloy prs merged
-    // <https://github.com/alloy-rs/alloy/pull/1414>
-    // <https://github.com/alloy-rs/alloy/pull/1415>
     fn size(&self) -> usize;
 }
 
