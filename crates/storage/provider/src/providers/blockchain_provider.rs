@@ -247,8 +247,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
     ///
     /// * `fetch_from_db`: has a [`DatabaseProviderRO`] and the storage specific range.
-    /// * `fetch_from_block_state`: has the number of elements that should be fetched from
-    ///   [`BlockState`].
+    /// * `fetch_from_block_state`: has a [`RangeInclusive`] of elements that should be fetched from
+    ///   [`BlockState`]. [`RangeInclusive`] is necessary to handle partial look-ups of a block.
     fn get_in_memory_or_storage_by_tx_range<S, M, R>(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -260,7 +260,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             DatabaseProviderRO<N::DB, N::ChainSpec>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
-        M: Fn(usize, Arc<BlockState>) -> ProviderResult<Vec<R>>,
+        M: Fn(RangeInclusive<usize>, Arc<BlockState>) -> ProviderResult<Vec<R>>,
     {
         let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
         let provider = self.database.provider()?;
@@ -319,7 +319,13 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             let block_tx_count = block_state.block_ref().block().body.transactions.len();
             let remaining = (tx_range.end() - tx_range.start() + 1) as usize;
 
-            items.extend(fetch_from_block_state(remaining.min(block_tx_count), block_state)?);
+            // This should only be more than 0 in the first iteration, in case of a partial range
+            let skip = (tx_range.start() - in_memory_tx_num) as usize;
+
+            items.extend(fetch_from_block_state(
+                skip..=(remaining.min(block_tx_count) - 1),
+                block_state,
+            )?);
 
             in_memory_tx_num += block_tx_count as u64;
 
@@ -329,7 +335,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             }
 
             // Set updated range
-            tx_range = (tx_range.start() + block_tx_count as u64)..=*tx_range.end();
+            tx_range = in_memory_tx_num..=*tx_range.end();
         }
 
         Ok(items)
@@ -903,14 +909,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.transactions_by_tx_range(db_range),
-            |num_items, block_state| {
-                Ok(block_state
-                    .block_ref()
-                    .block()
-                    .body
-                    .transactions
+            |index_range, block_state| {
+                Ok(block_state.block_ref().block().body.transactions[index_range]
                     .iter()
-                    .take(num_items)
                     .cloned()
                     .map(Into::into)
                     .collect())
@@ -925,8 +926,8 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.senders_by_tx_range(db_range),
-            |num_items, block_state| {
-                Ok(block_state.block_ref().senders.iter().take(num_items).copied().collect())
+            |index_range, block_state| {
+                Ok(block_state.block_ref().senders[index_range].iter().copied().collect())
             },
         )
     }
@@ -997,10 +998,8 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
-            |num_items, block_state| {
-                let mut receipts = block_state.executed_block_receipts();
-                receipts.truncate(num_items);
-                Ok(receipts)
+            |index_range, block_state| {
+                Ok(block_state.executed_block_receipts().drain(index_range).collect())
             },
         )
     }
@@ -4188,34 +4187,48 @@ mod tests {
     #[test]
     fn test_senders_by_tx_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
-            0,
+            TEST_BLOCKS_COUNT,
             BlockRangeParams {
                 tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                 ..Default::default()
             },
         )?;
 
-        // Define a valid transaction range within the database
-        let start_tx_num = 0;
-        let end_tx_num = 1;
+        let db_tx_count =
+            database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+        let in_mem_tx_count =
+            in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
 
-        // Retrieve the senders for this transaction number range
-        let result = provider.senders_by_tx_range(start_tx_num..=end_tx_num)?;
+        let db_range = 0..=(db_tx_count - 1);
+        let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
 
-        // Ensure the sender addresses match the expected addresses in the database
-        assert_eq!(result.len(), 2);
+        // Retrieve the senders for the whole database range
+        let database_senders =
+            database_blocks.iter().flat_map(|b| b.senders().unwrap()).collect::<Vec<_>>();
+        assert_eq!(provider.senders_by_tx_range(db_range)?, database_senders);
+
+        // Retrieve the senders for the whole in-memory range
+        let in_memory_senders =
+            in_memory_blocks.iter().flat_map(|b| b.senders().unwrap()).collect::<Vec<_>>();
+        assert_eq!(provider.senders_by_tx_range(in_mem_range.clone())?, in_memory_senders);
+
+        // Retrieve the senders for a partial in-memory range
         assert_eq!(
-            result[0],
-            database_blocks[0].senders().unwrap()[0],
-            "The sender address should match the expected sender address"
+            &provider.senders_by_tx_range(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+            &in_memory_senders[1..in_memory_senders.len() - 1]
         );
+
+        // Retrieve the senders for a range that spans database and in-memory
         assert_eq!(
-            result[1],
-            database_blocks[0].senders().unwrap()[1],
-            "The sender address should match the expected sender address"
+            provider.senders_by_tx_range(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+            database_senders[database_senders.len() - 2..]
+                .iter()
+                .chain(&in_memory_senders[..in_memory_senders.len() - 1])
+                .copied()
+                .collect::<Vec<_>>()
         );
 
         // Define an empty range that should return no sender addresses
