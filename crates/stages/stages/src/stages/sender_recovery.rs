@@ -151,7 +151,7 @@ where
     let static_file_provider = provider.static_file_provider();
 
     // Spawn a producer thread for all the batches using tokio.
-    std::thread::spawn(async move {
+    std::thread::spawn(move || {
         for tx_range in tx_batch_range {
             debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
 
