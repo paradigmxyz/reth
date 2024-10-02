@@ -3,14 +3,22 @@
 mod cache;
 pub use cache::BlockCache;
 mod storage;
-use eyre::OptionExt;
 pub use storage::Storage;
+mod metrics;
+use metrics::Metrics;
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+};
 
 use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
+use parking_lot::{RwLock, RwLockReadGuard};
 use reth_exex_types::ExExNotification;
-use reth_primitives::B256;
 use reth_tracing::tracing::{debug, instrument};
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
@@ -40,16 +48,14 @@ impl Wal {
     }
 
     /// Commits the notification to WAL.
-    pub fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
+    pub fn commit(&self, notification: &ExExNotification) -> eyre::Result<()> {
         self.inner.commit(notification)
     }
 
-    /// Finalizes the WAL to the given block, inclusive.
+    /// Finalizes the WAL up to the given canonical block, inclusive.
     ///
-    /// 1. Finds a notification with first unfinalized block (first notification containing a
-    ///    committed block higher than `to_block`).
-    /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
-    ///    notification includes both finalized and non-finalized blocks, it will not be removed.
+    /// The caller should check that all ExExes are on the canonical chain and will not need any
+    /// blocks from the WAL below the provided block, inclusive.
     pub fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
         self.inner.finalize(to_block)
     }
@@ -65,26 +71,43 @@ impl Wal {
 /// Inner type for the WAL.
 #[derive(Debug)]
 struct WalInner {
+    next_file_id: AtomicU32,
     /// The underlying WAL storage backed by a file.
     storage: Storage,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
-    block_cache: BlockCache,
+    block_cache: RwLock<BlockCache>,
+    metrics: Metrics,
 }
 
 impl WalInner {
     fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
-        let mut wal = Self { storage: Storage::new(directory)?, block_cache: BlockCache::new() };
+        let mut wal = Self {
+            next_file_id: AtomicU32::new(0),
+            storage: Storage::new(directory)?,
+            block_cache: RwLock::new(BlockCache::default()),
+            metrics: Metrics::default(),
+        };
         wal.fill_block_cache()?;
         Ok(wal)
     }
 
+    fn block_cache(&self) -> RwLockReadGuard<'_, BlockCache> {
+        self.block_cache.read()
+    }
+
     /// Fills the block cache with the notifications from the storage.
-    #[instrument(target = "exex::wal", skip(self))]
+    #[instrument(skip(self))]
     fn fill_block_cache(&mut self) -> eyre::Result<()> {
         let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
+        self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
+
+        let mut block_cache = self.block_cache.write();
+        let mut notifications_size = 0;
 
         for entry in self.storage.iter_notifications(files_range) {
-            let (file_id, notification) = entry?;
+            let (file_id, size, notification) = entry?;
+
+            notifications_size += size;
 
             let committed_chain = notification.committed_chain();
             let reverted_chain = notification.reverted_chain();
@@ -97,101 +120,69 @@ impl WalInner {
                 "Inserting block cache entries"
             );
 
-            self.block_cache.insert_notification_blocks_with_file_id(file_id, &notification);
+            block_cache.insert_notification_blocks_with_file_id(file_id, &notification);
         }
+
+        self.update_metrics(&block_cache, notifications_size as i64);
 
         Ok(())
     }
 
-    #[instrument(target = "exex::wal", skip_all, fields(
+    #[instrument(skip_all, fields(
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
     fn commit(&self, notification: &ExExNotification) -> eyre::Result<()> {
-        let file_id = self.block_cache.back().map_or(0, |block| block.0 + 1);
-        self.storage.write_notification(file_id, notification)?;
+        let mut block_cache = self.block_cache.write();
 
-        debug!(?file_id, "Inserting notification blocks into the block cache");
-        self.block_cache.insert_notification_blocks_with_file_id(file_id, notification);
+        let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
+        let size = self.storage.write_notification(file_id, notification)?;
+
+        debug!(target: "exex::wal", ?file_id, "Inserting notification blocks into the block cache");
+        block_cache.insert_notification_blocks_with_file_id(file_id, notification);
+
+        self.update_metrics(&block_cache, size as i64);
 
         Ok(())
     }
 
-    /// Finalizes the WAL to the given block, inclusive.
-    ///
-    /// 1. Finds a notification with first unfinalized block (first notification containing a
-    ///    committed block higher than `to_block`).
-    /// 2. Removes the notifications from the beginning of WAL until the found notification. If this
-    ///    notification includes both finalized and non-finalized blocks, it will not be removed.
-    #[instrument(target = "exex::wal", skip(self))]
+    #[instrument(skip(self))]
     fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
-        // First, walk cache to find the file ID of the notification with the finalized block and
-        // save the file ID with the first unfinalized block. Do not remove any notifications
-        // yet.
-        let mut unfinalized_from_file_id = None;
-        {
-            let mut block_cache = self.block_cache.iter().peekable();
-            while let Some((file_id, block)) = block_cache.next() {
-                debug!(?file_id, ?block, "Iterating over the block cache");
-                if block.action.is_commit() &&
-                    block.block.number == to_block.number &&
-                    block.block.hash == to_block.hash
-                {
-                    let notification = self
-                        .storage
-                        .read_notification(file_id)?
-                        .ok_or_eyre("notification not found")?;
-                    if notification.committed_chain().unwrap().blocks().len() == 1 {
-                        unfinalized_from_file_id = Some(
-                            block_cache.peek().map(|(file_id, _)| *file_id).unwrap_or(u64::MAX),
-                        );
-                    } else {
-                        unfinalized_from_file_id = Some(file_id);
-                    }
-
-                    debug!(
-                        ?file_id,
-                        ?block,
-                        ?unfinalized_from_file_id,
-                        "Found the finalized block in the block cache"
-                    );
-                    break
-                }
-
-                unfinalized_from_file_id = Some(file_id);
-            }
-        }
-
-        // If the finalized block is still not found, we can't do anything and just return.
-        let Some(remove_to_file_id) = unfinalized_from_file_id else {
-            debug!("Could not find the finalized block in WAL");
-            return Ok(())
-        };
-
-        // Remove notifications from the storage from the beginning up to the unfinalized block, not
-        // inclusive.
-        let (mut file_range_start, mut file_range_end) = (None, None);
-        while let Some((file_id, _)) = self.block_cache.front() {
-            if file_id == remove_to_file_id {
-                break
-            }
-            self.block_cache.pop_front();
-
-            file_range_start.get_or_insert(file_id);
-            file_range_end = Some(file_id);
-        }
-        debug!(?remove_to_file_id, "Block cache was finalized");
+        let mut block_cache = self.block_cache.write();
+        let file_ids = block_cache.remove_before(to_block.number);
 
         // Remove notifications from the storage.
-        if let Some((file_range_start, file_range_end)) = file_range_start.zip(file_range_end) {
-            let removed_notifications =
-                self.storage.remove_notifications(file_range_start..=file_range_end)?;
-            debug!(?removed_notifications, "Storage was finalized");
-        } else {
-            debug!("No notifications were finalized from the storage");
+        if file_ids.is_empty() {
+            debug!(target: "exex::wal", "No notifications were finalized from the storage");
+            return Ok(())
         }
 
+        let (removed_notifications, removed_size) = self.storage.remove_notifications(file_ids)?;
+        debug!(target: "exex::wal", ?removed_notifications, ?removed_size, "Storage was finalized");
+
+        self.update_metrics(&block_cache, -(removed_size as i64));
+
         Ok(())
+    }
+
+    fn update_metrics(&self, block_cache: &BlockCache, size_delta: i64) {
+        if size_delta >= 0 {
+            self.metrics.size_bytes.increment(size_delta as f64);
+        } else {
+            self.metrics.size_bytes.decrement(size_delta as f64);
+        }
+
+        self.metrics.notifications_total.set(block_cache.notification_max_blocks.len() as f64);
+
+        self.metrics.committed_blocks_total.set(block_cache.committed_blocks.len() as f64);
+
+        if let Some(lowest_committed_block_height) = block_cache.lowest_committed_block_height {
+            self.metrics.lowest_committed_block_height.set(lowest_committed_block_height as f64);
+        }
+
+        if let Some(highest_committed_block_height) = block_cache.highest_committed_block_height {
+            self.metrics.highest_committed_block_height.set(highest_committed_block_height as f64);
+        }
     }
 
     /// Returns an iterator over all notifications in the WAL.
@@ -202,7 +193,7 @@ impl WalInner {
             return Ok(Box::new(std::iter::empty()))
         };
 
-        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.1))))
+        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.2))))
     }
 }
 
@@ -218,12 +209,15 @@ impl WalHandle {
         &self,
         block_hash: &B256,
     ) -> eyre::Result<Option<ExExNotification>> {
-        let Some(file_id) = self.wal.block_cache.get_file_id_by_committed_block_hash(block_hash)
+        let Some(file_id) = self.wal.block_cache().get_file_id_by_committed_block_hash(block_hash)
         else {
             return Ok(None)
         };
 
-        self.wal.storage.read_notification(file_id)
+        self.wal
+            .storage
+            .read_notification(file_id)
+            .map(|entry| entry.map(|(notification, _)| notification))
     }
 }
 
@@ -231,17 +225,16 @@ impl WalHandle {
 mod tests {
     use std::sync::Arc;
 
+    use alloy_primitives::B256;
     use eyre::OptionExt;
+    use itertools::Itertools;
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
 
-    use crate::wal::{
-        cache::{CachedBlock, CachedBlockAction},
-        Wal,
-    };
+    use crate::wal::{cache::CachedBlock, Wal};
 
     fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
         let Some(files_range) = wal.inner.storage.files_range()? else { return Ok(Vec::new()) };
@@ -249,8 +242,17 @@ mod tests {
         wal.inner
             .storage
             .iter_notifications(files_range)
-            .map(|entry| Ok(entry?.1))
+            .map(|entry| Ok(entry?.2))
             .collect::<eyre::Result<_>>()
+    }
+
+    fn sort_committed_blocks(
+        committed_blocks: Vec<(B256, u32, CachedBlock)>,
+    ) -> Vec<(B256, u32, CachedBlock)> {
+        committed_blocks
+            .into_iter()
+            .sorted_by_key(|(_, _, block)| (block.block.number, block.block.hash))
+            .collect()
     }
 
     #[test]
@@ -261,8 +263,8 @@ mod tests {
 
         // Create an instance of the WAL in a temporary directory
         let temp_dir = tempfile::tempdir()?;
-        let mut wal = Wal::new(&temp_dir)?;
-        assert!(wal.inner.block_cache.is_empty());
+        let wal = Wal::new(&temp_dir)?;
+        assert!(wal.inner.block_cache().is_empty());
 
         // Create 4 canonical blocks and one reorged block with number 2
         let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
@@ -321,19 +323,20 @@ mod tests {
 
         // First notification (commit block 0, 1)
         let file_id = 0;
-        let committed_notification_1_cache = vec![
+        let committed_notification_1_cache_blocks = (blocks[1].number, file_id);
+        let committed_notification_1_cache_committed_blocks = vec![
             (
+                blocks[0].hash(),
                 file_id,
                 CachedBlock {
-                    action: CachedBlockAction::Commit,
                     block: (blocks[0].number, blocks[0].hash()).into(),
                     parent_hash: blocks[0].parent_hash,
                 },
             ),
             (
+                blocks[1].hash(),
                 file_id,
                 CachedBlock {
-                    action: CachedBlockAction::Commit,
                     block: (blocks[1].number, blocks[1].hash()).into(),
                     parent_hash: blocks[1].parent_hash,
                 },
@@ -341,25 +344,26 @@ mod tests {
         ];
         wal.commit(&committed_notification_1)?;
         assert_eq!(
-            wal.inner.block_cache.iter().collect::<Vec<_>>(),
-            committed_notification_1_cache
+            wal.inner.block_cache().blocks_sorted(),
+            [committed_notification_1_cache_blocks]
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            committed_notification_1_cache_committed_blocks
         );
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
 
         // Second notification (revert block 1)
         wal.commit(&reverted_notification)?;
         let file_id = 1;
-        let reverted_notification_cache = vec![(
-            file_id,
-            CachedBlock {
-                action: CachedBlockAction::Revert,
-                block: (blocks[1].number, blocks[1].hash()).into(),
-                parent_hash: blocks[1].parent_hash,
-            },
-        )];
+        let reverted_notification_cache_blocks = (blocks[1].number, file_id);
         assert_eq!(
-            wal.inner.block_cache.iter().collect::<Vec<_>>(),
-            [committed_notification_1_cache.clone(), reverted_notification_cache.clone()].concat()
+            wal.inner.block_cache().blocks_sorted(),
+            [reverted_notification_cache_blocks, committed_notification_1_cache_blocks]
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            committed_notification_1_cache_committed_blocks
         );
         assert_eq!(
             read_notifications(&wal)?,
@@ -369,32 +373,42 @@ mod tests {
         // Third notification (commit block 1, 2)
         wal.commit(&committed_notification_2)?;
         let file_id = 2;
-        let committed_notification_2_cache = vec![
+        let committed_notification_2_cache_blocks = (blocks[2].number, file_id);
+        let committed_notification_2_cache_committed_blocks = vec![
             (
+                block_1_reorged.hash(),
                 file_id,
                 CachedBlock {
-                    action: CachedBlockAction::Commit,
                     block: (block_1_reorged.number, block_1_reorged.hash()).into(),
                     parent_hash: block_1_reorged.parent_hash,
                 },
             ),
             (
+                blocks[2].hash(),
                 file_id,
                 CachedBlock {
-                    action: CachedBlockAction::Commit,
                     block: (blocks[2].number, blocks[2].hash()).into(),
                     parent_hash: blocks[2].parent_hash,
                 },
             ),
         ];
         assert_eq!(
-            wal.inner.block_cache.iter().collect::<Vec<_>>(),
+            wal.inner.block_cache().blocks_sorted(),
             [
-                committed_notification_1_cache.clone(),
-                reverted_notification_cache.clone(),
-                committed_notification_2_cache.clone()
+                committed_notification_2_cache_blocks,
+                reverted_notification_cache_blocks,
+                committed_notification_1_cache_blocks,
             ]
-            .concat()
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            sort_committed_blocks(
+                [
+                    committed_notification_1_cache_committed_blocks.clone(),
+                    committed_notification_2_cache_committed_blocks.clone()
+                ]
+                .concat()
+            )
         );
         assert_eq!(
             read_notifications(&wal)?,
@@ -408,47 +422,50 @@ mod tests {
         // Fourth notification (revert block 2, commit block 2, 3)
         wal.commit(&reorged_notification)?;
         let file_id = 3;
-        let reorged_notification_cache = vec![
+        let reorged_notification_cache_blocks = (blocks[3].number, file_id);
+        let reorged_notification_cache_committed_blocks = vec![
             (
+                block_2_reorged.hash(),
                 file_id,
                 CachedBlock {
-                    action: CachedBlockAction::Revert,
-                    block: (blocks[2].number, blocks[2].hash()).into(),
-                    parent_hash: blocks[2].parent_hash,
-                },
-            ),
-            (
-                file_id,
-                CachedBlock {
-                    action: CachedBlockAction::Commit,
                     block: (block_2_reorged.number, block_2_reorged.hash()).into(),
                     parent_hash: block_2_reorged.parent_hash,
                 },
             ),
             (
+                blocks[3].hash(),
                 file_id,
                 CachedBlock {
-                    action: CachedBlockAction::Commit,
                     block: (blocks[3].number, blocks[3].hash()).into(),
                     parent_hash: blocks[3].parent_hash,
                 },
             ),
         ];
         assert_eq!(
-            wal.inner.block_cache.iter().collect::<Vec<_>>(),
+            wal.inner.block_cache().blocks_sorted(),
             [
-                committed_notification_1_cache,
-                reverted_notification_cache,
-                committed_notification_2_cache.clone(),
-                reorged_notification_cache.clone()
+                reorged_notification_cache_blocks,
+                committed_notification_2_cache_blocks,
+                reverted_notification_cache_blocks,
+                committed_notification_1_cache_blocks,
             ]
-            .concat()
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            sort_committed_blocks(
+                [
+                    committed_notification_1_cache_committed_blocks,
+                    committed_notification_2_cache_committed_blocks.clone(),
+                    reorged_notification_cache_committed_blocks.clone()
+                ]
+                .concat()
+            )
         );
         assert_eq!(
             read_notifications(&wal)?,
             vec![
-                committed_notification_1.clone(),
-                reverted_notification.clone(),
+                committed_notification_1,
+                reverted_notification,
                 committed_notification_2.clone(),
                 reorged_notification.clone()
             ]
@@ -460,8 +477,39 @@ mod tests {
         // the notifications before it.
         wal.finalize((block_1_reorged.number, block_1_reorged.hash()).into())?;
         assert_eq!(
-            wal.inner.block_cache.iter().collect::<Vec<_>>(),
-            [committed_notification_2_cache, reorged_notification_cache].concat()
+            wal.inner.block_cache().blocks_sorted(),
+            [reorged_notification_cache_blocks, committed_notification_2_cache_blocks]
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            sort_committed_blocks(
+                [
+                    committed_notification_2_cache_committed_blocks.clone(),
+                    reorged_notification_cache_committed_blocks.clone()
+                ]
+                .concat()
+            )
+        );
+        assert_eq!(
+            read_notifications(&wal)?,
+            vec![committed_notification_2.clone(), reorged_notification.clone()]
+        );
+
+        // Re-open the WAL and verify that the cache population works correctly
+        let wal = Wal::new(&temp_dir)?;
+        assert_eq!(
+            wal.inner.block_cache().blocks_sorted(),
+            [reorged_notification_cache_blocks, committed_notification_2_cache_blocks]
+        );
+        assert_eq!(
+            wal.inner.block_cache().committed_blocks_sorted(),
+            sort_committed_blocks(
+                [
+                    committed_notification_2_cache_committed_blocks,
+                    reorged_notification_cache_committed_blocks
+                ]
+                .concat()
+            )
         );
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_2, reorged_notification]);
 

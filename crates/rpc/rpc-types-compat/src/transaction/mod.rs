@@ -129,7 +129,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,
-        gas: Some(gas as u128),
+        gas: Some(gas),
         value: Some(value),
         input: TransactionInput::new(input),
         nonce: Some(nonce),

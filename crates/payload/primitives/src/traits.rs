@@ -80,7 +80,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: std::error::Error;
+    type Error: core::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
@@ -164,7 +164,7 @@ pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
     /// The payload attributes type returned by the builder.
     type PayloadAttributes: PayloadAttributes;
     /// The error type returned by [`PayloadAttributesBuilder::build`].
-    type Error: std::error::Error + Send + Sync;
+    type Error: core::error::Error + Send + Sync;
 
     /// Return a new payload attribute from the builder.
     fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;

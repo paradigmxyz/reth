@@ -78,13 +78,10 @@ impl FromIterator<PooledTransactionsElement> for PooledTransactions {
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use alloy_consensus::{TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, TxKind, U256};
+    use alloy_primitives::{hex, Parity, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_primitives::{
-        alloy_primitives::Parity, PooledTransactionsElement, Signature, Transaction,
-        TransactionSigned,
-    };
+    use reth_primitives::{PooledTransactionsElement, Signature, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -287,7 +284,7 @@ mod tests {
                     nonce: 26u64,
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
@@ -426,7 +423,7 @@ mod tests {
                     nonce: 26u64,
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),

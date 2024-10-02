@@ -2336,7 +2336,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_paris_block_and_total_difficulty() {
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let paris_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
@@ -2348,7 +2348,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)

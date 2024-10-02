@@ -11,8 +11,8 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned,
+    BlockWithSenders, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -241,6 +241,9 @@ impl CanonicalInMemoryState {
     }
 
     /// Append new blocks to the in memory state.
+    ///
+    /// This removes all reorged blocks and appends the new blocks to the tracked chain and connects
+    /// them to their parent blocks.
     fn update_blocks<I>(&self, new_blocks: I, reorged: I)
     where
         I: IntoIterator<Item = ExecutedBlock>,
@@ -316,16 +319,18 @@ impl CanonicalInMemoryState {
             // clear all numbers
             numbers.clear();
 
-            // drain all blocks and only keep the ones that are not persisted
+            // drain all blocks and only keep the ones that are not persisted (below the persisted
+            // height)
             let mut old_blocks = blocks
                 .drain()
+                .filter(|(_, b)| b.block().block().number > persisted_height)
                 .map(|(_, b)| b.block.clone())
-                .filter(|b| b.block().number > persisted_height)
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
             old_blocks.sort_unstable_by_key(|block| block.block().number);
 
+            // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
                 let parent = blocks.get(&block.block().parent_hash).cloned();
                 let block_state = BlockState::with_parent(block.clone(), parent);
@@ -410,7 +415,7 @@ impl CanonicalInMemoryState {
         self.inner.chain_info_tracker.on_transition_configuration_exchanged();
     }
 
-    /// Returns the timepstamp of the last transition configuration exchanged,
+    /// Returns the timestamp of the last transition configuration exchanged,
     pub fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
         self.inner.chain_info_tracker.last_transition_configuration_exchanged_at()
     }
@@ -498,6 +503,20 @@ impl CanonicalInMemoryState {
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider_from_state(
+        &self,
+        state: &BlockState,
+        historical: StateProviderBox,
+    ) -> MemoryOverlayStateProvider {
+        let in_memory = state.chain().into_iter().map(|block_state| block_state.block()).collect();
+
+        MemoryOverlayStateProvider::new(historical, in_memory)
+    }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the requested block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(
         &self,
         hash: B256,
@@ -552,18 +571,9 @@ impl CanonicalInMemoryState {
                     index: index as u64,
                     block_hash: block_state.hash(),
                     block_number: block_state.block().block.number,
-                    base_fee: block_state
-                        .block()
-                        .block()
-                        .header
-                        .base_fee_per_gas
-                        .map(|base_fee| base_fee as u64),
+                    base_fee: block_state.block().block().header.base_fee_per_gas,
                     timestamp: block_state.block().block.timestamp,
-                    excess_blob_gas: block_state
-                        .block()
-                        .block
-                        .excess_blob_gas
-                        .map(|excess_blob| excess_blob as u64),
+                    excess_blob_gas: block_state.block().block.excess_blob_gas,
                 };
                 return Some((tx.clone(), meta))
             }
@@ -606,6 +616,25 @@ impl BlockState {
     /// Returns the executed block that determines the state.
     pub fn block(&self) -> ExecutedBlock {
         self.block.clone()
+    }
+
+    /// Returns a reference to the executed block that determines the state.
+    pub const fn block_ref(&self) -> &ExecutedBlock {
+        &self.block
+    }
+
+    /// Returns the block with senders for the state.
+    pub fn block_with_senders(&self) -> BlockWithSenders {
+        let block = self.block.block().clone();
+        let senders = self.block.senders().clone();
+        BlockWithSenders { block: block.unseal(), senders }
+    }
+
+    /// Returns the sealed block with senders for the state.
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+        let block = self.block.block().clone();
+        let senders = self.block.senders().clone();
+        SealedBlockWithSenders { block, senders }
     }
 
     /// Returns the hash of executed block that determines the state.

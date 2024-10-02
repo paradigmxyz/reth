@@ -24,6 +24,8 @@ pub(crate) struct EngineApiMetrics {
 pub(crate) struct EngineMetrics {
     /// How many executed blocks are currently stored.
     pub(crate) executed_blocks: Gauge,
+    /// How many already executed blocks were directly inserted into the tree.
+    pub(crate) inserted_already_executed_blocks: Counter,
     /// The number of times the pipeline was run.
     pub(crate) pipeline_runs: Counter,
     /// The total count of forkchoice updated messages received.

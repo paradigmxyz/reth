@@ -1,6 +1,6 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types::{
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Index,

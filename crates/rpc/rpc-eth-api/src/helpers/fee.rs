@@ -162,7 +162,7 @@ pub trait EthFees: LoadFee {
 
 
                 for header in &headers {
-                    base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default());
+                    base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
                     base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
                     blob_gas_used_ratio.push(
@@ -180,8 +180,8 @@ pub trait EthFees: LoadFee {
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
-                                header.gas_used as u64,
-                                header.base_fee_per_gas.unwrap_or_default() as u64,
+                                header.gas_used,
+                                header.base_fee_per_gas.unwrap_or_default(),
                                 &transactions,
                                 &receipts,
                             )
@@ -204,7 +204,7 @@ pub trait EthFees: LoadFee {
                             last_header.gas_used ,
                             last_header.gas_limit,
                             last_header.base_fee_per_gas.unwrap_or_default() ,
-                        ),
+                        ) as u128,
                 );
 
                 // Same goes for the `base_fee_per_blob_gas`:

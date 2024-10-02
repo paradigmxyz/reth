@@ -1,6 +1,7 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -26,7 +27,17 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     let transactions = payload
         .transactions
         .iter()
-        .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
+        .map(|tx| {
+            let mut buf = tx.as_ref();
+
+            let tx = TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+
+            if !buf.is_empty() {
+                return Err(alloy_rlp::Error::UnexpectedLength);
+            }
+
+            Ok(tx)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
 
@@ -39,8 +50,8 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         withdrawals_root: None,
         logs_bloom: payload.logs_bloom,
         number: payload.block_number,
-        gas_limit: payload.gas_limit.into(),
-        gas_used: payload.gas_used.into(),
+        gas_limit: payload.gas_limit,
+        gas_used: payload.gas_used,
         timestamp: payload.timestamp,
         mix_hash: payload.prev_randao,
         // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
@@ -84,8 +95,8 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     // used and excess blob gas
     let mut base_block = try_payload_v2_to_block(payload.payload_inner)?;
 
-    base_block.header.blob_gas_used = Some(payload.blob_gas_used.into());
-    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas.into());
+    base_block.header.blob_gas_used = Some(payload.blob_gas_used);
+    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas);
 
     Ok(base_block)
 }
@@ -143,8 +154,8 @@ pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
         logs_bloom: value.logs_bloom,
         prev_randao: value.mix_hash,
         block_number: value.number,
-        gas_limit: value.gas_limit as u64,
-        gas_used: value.gas_used as u64,
+        gas_limit: value.gas_limit,
+        gas_used: value.gas_used,
         timestamp: value.timestamp,
         extra_data: value.extra_data.clone(),
         base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
@@ -166,8 +177,8 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
             logs_bloom: value.logs_bloom,
             prev_randao: value.mix_hash,
             block_number: value.number,
-            gas_limit: value.gas_limit as u64,
-            gas_used: value.gas_used as u64,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
             timestamp: value.timestamp,
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
@@ -182,8 +193,8 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
 pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV3 {
-        blob_gas_used: value.blob_gas_used.unwrap_or_default() as u64,
-        excess_blob_gas: value.excess_blob_gas.unwrap_or_default() as u64,
+        blob_gas_used: value.blob_gas_used.unwrap_or_default(),
+        excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         payload_inner: ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
                 parent_hash: value.parent_hash,
@@ -193,8 +204,8 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
                 logs_bloom: value.logs_bloom,
                 prev_randao: value.mix_hash,
                 block_number: value.number,
-                gas_limit: value.gas_limit as u64,
-                gas_used: value.gas_used as u64,
+                gas_limit: value.gas_limit,
+                gas_used: value.gas_used,
                 timestamp: value.timestamp,
                 extra_data: value.extra_data.clone(),
                 base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
@@ -360,7 +371,7 @@ pub fn validate_block_hash(
 pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     let transactions = value.body.transactions.into_iter().map(|tx| {
         let mut out = Vec::new();
-        tx.encode_enveloped(&mut out);
+        tx.encode_2718(&mut out);
         out.into()
     });
     ExecutionPayloadBodyV1 {
@@ -373,7 +384,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
 pub fn convert_to_payload_body_v2(value: Block) -> ExecutionPayloadBodyV2 {
     let transactions = value.body.transactions.into_iter().map(|tx| {
         let mut out = Vec::new();
-        tx.encode_enveloped(&mut out);
+        tx.encode_2718(&mut out);
         out.into()
     });
 
@@ -426,8 +437,8 @@ pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPaylo
         logs_bloom: value.logs_bloom,
         prev_randao: value.mix_hash,
         block_number: value.number,
-        gas_limit: value.gas_limit as u64,
-        gas_used: value.gas_used as u64,
+        gas_limit: value.gas_limit,
+        gas_used: value.gas_used,
         timestamp: value.timestamp,
         extra_data: value.extra_data.clone(),
         base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),

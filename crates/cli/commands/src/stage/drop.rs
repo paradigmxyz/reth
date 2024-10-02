@@ -5,7 +5,7 @@ use itertools::Itertools;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
-use reth_db_api::transaction::DbTxMut;
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
     DbTool,
@@ -13,6 +13,7 @@ use reth_db_common::{
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
 use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
+use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
 
@@ -89,6 +90,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
+                // Reset pruned numbers to not count them in the next rerun's stage progress
+                if let Some(mut prune_checkpoint) =
+                    tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?
+                {
+                    prune_checkpoint.block_number = None;
+                    prune_checkpoint.tx_number = None;
+                    tx.put::<tables::PruneCheckpoints>(
+                        PruneSegment::SenderRecovery,
+                        prune_checkpoint,
+                    )?;
+                }
                 tx.put::<tables::StageCheckpoints>(
                     StageId::SenderRecovery.to_string(),
                     Default::default(),

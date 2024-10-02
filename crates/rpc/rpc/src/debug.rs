@@ -1,3 +1,4 @@
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
@@ -417,9 +418,7 @@ where
                                 let frame: FlatCallFrame = inspector
                                     .with_transaction_gas_limit(env.tx.gas_limit)
                                     .into_parity_builder()
-                                    .into_localized_transaction_traces(tx_info)
-                                    .pop()
-                                    .unwrap();
+                                    .into_localized_transaction_traces(tx_info);
                                 Ok(frame)
                             })
                             .await?;
@@ -667,7 +666,8 @@ where
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
                 Ok(ExecutionWitness {
-                    state: std::collections::HashMap::from_iter(state.into_iter()),
+                    state: HashMap::from_iter(state.into_iter()),
+                    codes: Default::default(),
                     keys: include_preimages.then_some(keys),
                 })
             })
@@ -772,9 +772,7 @@ where
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info)
-                            .pop()
-                            .unwrap();
+                            .into_localized_transaction_traces(tx_info);
 
                         return Ok((frame.into(), res.state));
                     }
@@ -886,7 +884,7 @@ where
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
             .unwrap_or_default();
-        Ok(block.into_transactions_ecrecovered().map(|tx| tx.envelope_encoded()).collect())
+        Ok(block.into_transactions_ecrecovered().map(|tx| tx.encoded_2718().into()).collect())
     }
 
     /// Handler for `debug_getRawReceipts`
