@@ -1,48 +1,40 @@
 //! Engine node related functionality.
 
-use alloy_rpc_types::engine::{CancunPayloadFields, ClientVersionV1, PayloadStatus};
+use alloy_rpc_types::engine::ClientVersionV1;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
-    BeaconConsensusEngineHandle, BeaconEngineMessage,
+    BeaconConsensusEngineHandle,
 };
 use reth_blockchain_tree::BlockchainTreeConfig;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
-use reth_engine_service::service::{ChainEvent, EngineService};
-use reth_engine_tree::{
-    engine::{EngineApiRequest, EngineRequestHandler},
-    tree::TreeConfig,
-};
+use reth_engine_service::service::EngineService;
+use reth_engine_tree::tree::TreeConfig;
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypesWithEngine};
+use reth_node_api::{FullNodeTypes, NodeAddOns, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    primitives::Head,
-    rpc::{
-        compat::engine::payload::block_to_payload,
-        eth::{helpers::AddDevSigners, FullEthApiServer},
-    },
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
-use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, error, info};
+use reth_tracing::tracing::{debug, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
+    engine_task::EngineServiceTask,
     hooks::NodeHooks,
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
     setup::build_networked_pipeline,
@@ -214,7 +206,7 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         // Configure the consensus engine
-        let mut eth_service = EngineService::new(
+        let eth_service = EngineService::new(
             ctx.consensus(),
             ctx.components().block_executor().clone(),
             ctx.chain_spec(),
@@ -325,111 +317,25 @@ where
         }
 
         // Run consensus engine to completion
-        let payload_building_validation_enabled =
-            ctx.node_config().debug.payload_building_validation;
-        let initial_target = ctx.initial_backfill_target()?;
-        let network_handle = ctx.components().network().clone();
-        let mut built_payloads = ctx
-            .components()
-            .payload_builder()
-            .subscribe()
-            .await
-            .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
-            .into_built_payload_stream()
-            .fuse();
-        let chainspec = ctx.chain_spec();
+        let built_payloads_sub =
+            ctx.components().payload_builder().subscribe().await.map_err(|e| {
+                eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e)
+            })?;
+        let engine_service_task = EngineServiceTask::new(
+            ctx.chain_spec(),
+            ctx.components().network().clone(),
+            built_payloads_sub.into_built_payload_stream().fuse(),
+            eth_service,
+            event_sender,
+            ctx.initial_backfill_target()?,
+            ctx.node_config().debug.payload_building_validation,
+        );
+
         let (exit, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", async move {
-            if let Some(initial_target) = initial_target {
-                debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                eth_service.orchestrator_mut().start_backfill_sync(initial_target);
-            }
-
-            let mut res = Ok(());
-
-            // advance the chain and await payloads built locally to add into the engine api tree handler to prevent re-execution if that block is received as payload from the CL
-            let mut new_payload_responses = futures::stream::FuturesUnordered::default();
-            loop {
-                tokio::select! {
-                    payload = built_payloads.select_next_some() => {
-                        if let Some(executed_block) = payload.executed_block() {
-                            let request = if payload_building_validation_enabled {
-                                debug!(target: "reth::cli", block=?executed_block.block().num_hash(), "inserting built payload with validation");
-                                let (tx, rx) = oneshot::channel();
-                                new_payload_responses.push(rx);
-
-                                let message = BeaconEngineMessage::NewPayload {
-                                    payload: block_to_payload(executed_block.block.as_ref().clone()),
-                                    cancun_fields: executed_block.block.parent_beacon_block_root.map(|parent_beacon_block_root| {
-                                        CancunPayloadFields {
-                                            parent_beacon_block_root,
-                                            versioned_hashes: executed_block.block.blob_versioned_hashes_iter().copied().collect(),
-                                        }
-                                    }),
-                                    tx,
-                                };
-                                EngineApiRequest::Beacon(message)
-                            } else {
-                                debug!(target: "reth::cli", block=?executed_block.block().num_hash(), "inserting built payload without validation");
-                                EngineApiRequest::InsertExecutedBlock(executed_block)
-                            };
-                            eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(request.into());
-                        }
-                    }
-                    Some(response) = new_payload_responses.next() => {
-                        match response {
-                            Ok(Ok(PayloadStatus { status, latest_valid_hash })) => {
-                                if status.is_invalid() {
-                                    error!(target: "reth::cli", ?status, ?latest_valid_hash, "Invalid built payload");
-                                } else {
-                                    info!(target: "reth::cli", ?status, ?latest_valid_hash, "Received response for built payload");
-                                }
-                            }
-                            Ok(Err(error)) => {
-                                error!(target: "reth::cli", %error, "Error validating newly built payload");
-                            }
-                            Err(_error) => {
-                                error!(target: "reth::cli", "Channel for built payload result closed");
-                            }
-                        };
-                    }
-                    event = eth_service.next() => {
-                        let Some(event) = event else { break };
-                        debug!(target: "reth::cli", "Event: {event}");
-                        match event {
-                            ChainEvent::BackfillSyncFinished => {
-                                network_handle.update_sync_state(SyncState::Idle);
-                            }
-                            ChainEvent::BackfillSyncStarted => {
-                                network_handle.update_sync_state(SyncState::Syncing);
-                            }
-                            ChainEvent::FatalError => {
-                                error!(target: "reth::cli", "Fatal error in consensus engine");
-                                res = Err(eyre::eyre!("Fatal error in consensus engine"));
-                                break
-                            }
-                            ChainEvent::Handler(ev) => {
-                                if let Some(head) = ev.canonical_header() {
-                                    let head_block = Head {
-                                        number: head.number,
-                                        hash: head.hash(),
-                                        difficulty: head.difficulty,
-                                        timestamp: head.timestamp,
-                                        total_difficulty: chainspec
-                                            .final_paris_total_difficulty(head.number)
-                                            .unwrap_or_default(),
-                                    };
-                                    network_handle.update_status(head_block);
-                                }
-                                event_sender.notify(ev);
-                            }
-                        }
-                    }
-                }
-            }
-
-            let _ = exit.send(res);
+            let result = engine_service_task.await;
+            let _ = exit.send(result);
         });
 
         let full_node = FullNode {
