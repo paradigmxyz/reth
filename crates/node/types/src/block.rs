@@ -1,7 +1,7 @@
 //! Block abstraction.
 
 use alloc::fmt;
-use core::mem;
+use core::{mem, ops};
 
 use alloy_consensus::{BlockHeader, Requests, Transaction, TxType};
 use alloy_primitives::{Address, B256};
@@ -102,12 +102,60 @@ pub trait BlockBody:
 
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     fn size(&self) -> usize {
-        self.transactions.iter().map(Self::SignedTransaction::size).sum::<usize>() +
+        self.transactions().iter().map(Self::SignedTransaction::size).sum::<usize>() +
             self.transactions().capacity() * mem::size_of::<Self::SignedTransaction>() +
             self.ommers().iter().map(Self::Header::size).sum::<usize>() +
             self.ommers().capacity() * core::mem::size_of::<Self::Header>() +
             self.withdrawals()
-                .as_ref()
-                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+                .map_or(mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl<T> BlockBody for T
+where
+    T: ops::Deref<Target: BlockBody>
+        + Clone
+        + fmt::Debug
+        + PartialEq
+        + Eq
+        + Default
+        + serde::Serialize
+        + for<'de> serde::Deserialize<'de>
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable,
+{
+    type Header = <T::Target as BlockBody>::Header;
+    type SignedTransaction = <T::Target as BlockBody>::SignedTransaction;
+
+    fn transactions(&self) -> &Vec<Self::SignedTransaction> {
+        self.deref().transactions()
+    }
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.deref().withdrawals()
+    }
+
+    fn ommers(&self) -> &Vec<Self::Header> {
+        self.deref().ommers()
+    }
+
+    fn requests(&self) -> Option<&Requests> {
+        self.deref().requests()
+    }
+
+    fn calculate_tx_root(&self) -> B256 {
+        self.deref().calculate_tx_root()
+    }
+
+    fn calculate_ommers_root(&self) -> B256 {
+        self.deref().calculate_ommers_root()
+    }
+
+    fn recover_signers(&self) -> Option<Vec<Address>> {
+        self.deref().recover_signers()
+    }
+
+    fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.deref().blob_versioned_hashes_iter()
     }
 }
