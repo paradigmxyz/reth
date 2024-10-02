@@ -15,6 +15,12 @@ workspace = true
 reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-engine-primitives.workspace = true
+reth-primitives.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
+
+[features]
+optimism = [
+    "reth-primitives/optimism",
+]

@@ -22,11 +22,10 @@ use reth_db_api::{
 use reth_engine_primitives::EngineTypes;
 
 /// Configures all the primitive types of the node.
-// TODO(mattsse): this is currently a placeholder
-pub trait NodePrimitives {}
-
-// TODO(mattsse): Placeholder
-impl NodePrimitives for () {}
+pub trait NodePrimitives {
+    /// Block primitive.
+    type Block: Block;
+}
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///

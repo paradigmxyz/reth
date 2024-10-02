@@ -11,7 +11,9 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
-use reth_node_api::{ConfigureEvm, EngineValidator, FullNodeComponents, NodeAddOns};
+use reth_node_api::{
+    ConfigureEvm, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
+};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
@@ -21,7 +23,7 @@ use reth_node_builder::{
     BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -31,6 +33,14 @@ use reth_transaction_pool::{
 };
 
 use crate::{EthEngineTypes, EthEvmConfig};
+
+/// Ethereum primitive types.
+#[derive(Debug)]
+pub struct EthPrimitives;
+
+impl NodePrimitives for EthPrimitives {
+    type Block = Block;
+}
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -68,7 +78,7 @@ impl EthereumNode {
 }
 
 impl NodeTypes for EthereumNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
 }
 
