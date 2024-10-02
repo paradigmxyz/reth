@@ -1,9 +1,13 @@
 //! Loads and formats OP transaction RPC response.
 
+use std::sync::Arc;
+
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
-use op_alloy_rpc_types::Transaction;
+use op_alloy_rpc_types::{OpTransactionReceipt, Transaction};
+use reth_chainspec::ChainSpec;
 use reth_node_api::FullNodeComponents;
+use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
@@ -98,13 +102,21 @@ where
 #[derive(Clone, Debug, Copy)]
 pub struct OpTxBuilder;
 
-impl TransactionCompat for OpTxBuilder {
-    type Transaction = Transaction;
-
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+impl OpTxBuilder {
+    /// fills a transaction with the given spec.
+    pub fn fill_with_spec(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo, chain_spec: Option<Arc<ChainSpec>>) -> <OpTxBuilder as TransactionCompat>::Transaction {
         let signed_tx = tx.clone().into_signed();
 
         let inner = EthTxBuilder::fill(tx, tx_info).inner;
+
+        let deposit_receipt_version = if signed_tx.is_deposit() && tx_info.block_number.is_some() {
+            chain_spec.as_ref().and_then(|spec| 
+                spec.is_fork_active_at_block(OptimismHardfork::Canyon, tx_info.block_number.unwrap_or(0))
+                    .then_some(1)
+            )
+        } else {
+            None
+        };
 
         Transaction {
             inner,
@@ -112,8 +124,43 @@ impl TransactionCompat for OpTxBuilder {
             mint: signed_tx.mint(),
             // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
-            deposit_receipt_version: None, // todo: how to fill this field?
+            deposit_receipt_version,
         }
+    }
+
+    /// fills a transaction with the given receipt.
+    pub fn fill_with_receipt(tx: TransactionSignedEcRecovered, 
+        tx_info: TransactionInfo, 
+        receipt: OpTransactionReceipt) -> <OpTxBuilder as TransactionCompat>::Transaction {
+        let signed_tx = tx.clone().into_signed();
+
+        let inner = EthTxBuilder::fill(tx, tx_info).inner;
+
+        let deposit_receipt_version = if signed_tx.is_deposit() {
+            receipt
+                .inner
+                .inner.as_deposit_receipt()
+                .and_then(|deposit_receipt| deposit_receipt.deposit_receipt_version)
+        } else {
+            None
+        };
+
+        Transaction {
+            inner,
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint(),
+            // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
+            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+            deposit_receipt_version,
+        }
+    }
+}
+
+impl TransactionCompat for OpTxBuilder {
+    type Transaction = Transaction;
+
+    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+        Self::fill_with_spec(tx, tx_info, None)
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
@@ -124,3 +171,15 @@ impl TransactionCompat for OpTxBuilder {
         tx.inner.transaction_type.unwrap_or_default()
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use std::sync::Arc;
+//     use reth_primitives::{TransactionSignedEcRecovered, TransactionInfo, ChainSpec};
+
+//     #[test]
+//     fn fill_with_spec_deposit_receipt_version_some() {
+//         assert_eq!(1, 1);
+//     }
+// }
