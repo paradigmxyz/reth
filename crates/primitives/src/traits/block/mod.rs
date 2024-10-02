@@ -24,6 +24,7 @@ pub trait Block:
 {
     /// Header part of the block.
     type Header: BlockHeader + Sealable;
+    
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;
 

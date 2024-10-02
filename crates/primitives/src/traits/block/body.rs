@@ -28,13 +28,13 @@ pub trait BlockBody:
     type Header: BlockHeader;
 
     /// Returns reference to transactions in block.
-    fn transactions(&self) -> &Vec<Self::SignedTransaction>;
+    fn transactions(&self) -> &[Self::SignedTransaction];
 
     /// Returns [`Withdrawals`] in the block, if any.
     fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns reference to uncle block headers.
-    fn ommers(&self) -> &Vec<Self::Header>;
+    fn ommers(&self) -> &[Self::Header];
 
     /// Returns [`Request`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
