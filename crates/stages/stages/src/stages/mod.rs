@@ -22,6 +22,12 @@ mod sender_recovery;
 /// The transaction lookup stage
 mod tx_lookup;
 
+/// Maximum number of channels that can exist in memory.
+const MAXIMUM_CHANNELS: usize = 10_000;
+
+/// Maximum number of accounts to hash per rayon worker job.
+const WORKER_CHUNK_SIZE: usize = 100;
+
 pub use bodies::*;
 pub use execution::*;
 pub use finish::*;

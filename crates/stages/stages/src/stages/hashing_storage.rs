@@ -1,3 +1,4 @@
+use crate::stages::{MAXIMUM_CHANNELS, WORKER_CHUNK_SIZE};
 use alloy_primitives::{bytes::BufMut, keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
@@ -21,12 +22,6 @@ use std::{
     sync::mpsc::{self, Receiver},
 };
 use tracing::*;
-
-/// Maximum number of channels that can exist in memory.
-const MAXIMUM_CHANNELS: usize = 10_000;
-
-/// Maximum number of storage entries to hash per rayon worker job.
-const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
