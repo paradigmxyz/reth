@@ -6,12 +6,12 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
-use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -219,8 +219,8 @@ mod tests {
 
     #[test]
     fn parse_help_node_command() {
-        let err = NodeCommand::<EthChainSpecParser>::try_parse_args_from(["reth", "--help"])
-            .unwrap_err();
+        let err =
+            NodeCommand::<EthChainSpecParser>::try_parse_args_from(["reth", "--help"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 

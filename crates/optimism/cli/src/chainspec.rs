@@ -1,10 +1,9 @@
-use std::path::PathBuf;
-use std::sync::Arc;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_optimism_chainspec::{
     OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
 };
+use std::{path::PathBuf, sync::Arc};
 
 /// Clap value parser for [`OpChainSpec`]s.
 ///
@@ -41,7 +40,6 @@ pub fn parse_custom_chain_spec(s: &str) -> eyre::Result<ChainSpec, eyre::Error> 
 
     Ok(genesis.into())
 }
-
 
 /// Optimism chain specification parser.
 #[derive(Debug, Clone, Default)]

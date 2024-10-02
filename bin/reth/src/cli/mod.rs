@@ -15,8 +15,8 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -34,8 +34,7 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
-{
+pub struct Cli<C: ChainSpecParser = EthChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<C, Ext>,
@@ -117,8 +116,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
+    /// use reth::cli::Cli;
     /// use reth_ethereum_cli::chainspec::EthChainSpecParser;
-    /// use reth::{cli::Cli};
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
