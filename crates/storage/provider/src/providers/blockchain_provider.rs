@@ -240,6 +240,92 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
+    /// Fetches data from either in-memory state or persistent storage for a range of transactions.
+    ///
+    /// * `fetch_from_db`: has a [`DatabaseProviderRO`] and the storage specific range.
+    /// * `fetch_from_block_state`: has the number of elements that should be fetched from
+    ///   [`BlockState`].
+    fn get_in_memory_or_storage_by_tx_range<S, M, R>(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<Vec<R>>
+    where
+        S: FnOnce(
+            DatabaseProviderRO<N::DB, N::ChainSpec>,
+            RangeInclusive<TxNumber>,
+        ) -> ProviderResult<Vec<R>>,
+        M: Fn(usize, Arc<BlockState>) -> ProviderResult<Vec<R>>,
+    {
+        let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let provider = self.database.provider()?;
+
+        // Get the last block number stored in the storage which does NOT overlap with in-memory
+        // chain.
+        let mut last_database_block_number = provider.last_block_number()?;
+        if let Some(lowest_in_mem_block) = in_mem_chain.last() {
+            if lowest_in_mem_block.number() <= last_database_block_number {
+                last_database_block_number = lowest_in_mem_block.number().saturating_sub(1);
+            }
+        }
+
+        // Get the next tx number for the last block stored in the storage, which marks the start of
+        // the in-memory state.
+        let last_block_body_index = provider
+            .block_body_indices(last_database_block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
+        let mut in_memory_tx_num = last_block_body_index.next_tx_num();
+
+        let (start, end) = self.convert_range_bounds(range, || {
+            in_mem_chain
+                .iter()
+                .map(|b| b.block_ref().block().body.transactions.len() as u64)
+                .sum::<u64>() +
+                last_block_body_index.last_tx_num()
+        });
+        let mut tx_range = start..=end;
+
+        // If the range is entirely before the first in-memory transaction number, fetch from
+        // storage
+        if *tx_range.end() < in_memory_tx_num {
+            return fetch_from_db(provider, tx_range);
+        }
+
+        let mut items = Vec::with_capacity((tx_range.end() - tx_range.start() + 1) as usize);
+
+        // If the range spans storage and memory, get elements from storage first.
+        if *tx_range.start() < in_memory_tx_num {
+            // Determine the range that needs to be fetched from storage.
+            let db_range = *tx_range.start()..=in_memory_tx_num.saturating_sub(1);
+
+            // Set the remaining transaction range for in-memory
+            tx_range = in_memory_tx_num..=*tx_range.end();
+
+            items.extend(fetch_from_db(provider, db_range)?);
+        }
+
+        // Iterate from the lowest block to the highest in-memory chain
+        for block_state in in_mem_chain.into_iter().rev() {
+            let block_tx_count = block_state.block_ref().block().body.transactions.len();
+            let remaining = (tx_range.end() - tx_range.start() + 1) as usize;
+
+            items.extend(fetch_from_block_state(remaining.min(block_tx_count), block_state)?);
+
+            in_memory_tx_num += block_tx_count as u64;
+
+            // Break if the range has been fully processed
+            if in_memory_tx_num > *tx_range.end() {
+                break
+            }
+
+            // Set updated range
+            tx_range = (tx_range.start() + block_tx_count as u64)..=*tx_range.end();
+        }
+
+        Ok(items)
+    }
+
     /// Fetches data from either in-memory state or persistent storage by transaction
     /// [`HashOrNumber`].
     fn get_in_memory_or_storage_by_tx<S, M, R>(
@@ -805,14 +891,35 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        self.database.transactions_by_tx_range(range)
+        self.get_in_memory_or_storage_by_tx_range(
+            range,
+            |db_provider, db_range| db_provider.transactions_by_tx_range(db_range),
+            |num_items, block_state| {
+                Ok(block_state
+                    .block_ref()
+                    .block()
+                    .body
+                    .transactions
+                    .iter()
+                    .take(num_items)
+                    .cloned()
+                    .map(Into::into)
+                    .collect())
+            },
+        )
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.database.senders_by_tx_range(range)
+        self.get_in_memory_or_storage_by_tx_range(
+            range,
+            |db_provider, db_range| db_provider.senders_by_tx_range(db_range),
+            |num_items, block_state| {
+                Ok(block_state.block_ref().senders.iter().take(num_items).copied().collect())
+            },
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
@@ -878,7 +985,15 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.database.receipts_by_tx_range(range)
+        self.get_in_memory_or_storage_by_tx_range(
+            range,
+            |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
+            |num_items, block_state| {
+                let mut receipts = block_state.executed_block_receipts();
+                receipts.truncate(num_items);
+                Ok(receipts)
+            },
+        )
     }
 }
 
