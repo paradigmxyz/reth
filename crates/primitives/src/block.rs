@@ -1,5 +1,5 @@
 use crate::{
-    traits, traits::Block as _, GotExpected, SealedHeader, TransactionSigned,
+    traits, traits::{Block as _, BlockBody as _}, GotExpected, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals,
 };
 use alloc::vec::Vec;
@@ -52,6 +52,11 @@ impl traits::Block for Block {
 
     fn body(&self) -> &Self::Body {
         &self.body
+    }
+
+    #[inline]
+    fn size(&self) -> usize {
+        self.header().size() + self.body().size()
     }
 }
 
@@ -438,7 +443,7 @@ impl SealedBlock {
     /// Returns a vector of transactions RLP encoded with
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.transactions().map(|tx| tx.encoded_2718().into()).collect()
+        self.body.transactions().iter().map(|tx| tx.encoded_2718().into()).collect()
     }
 }
 
@@ -481,7 +486,7 @@ impl SealedBlockWithSenders {
     /// Returns an iterator over all transactions in the block.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.block.body.transactions()
+        self.block.body.transactions().iter()
     }
 
     /// Returns an iterator over all transactions and their sender.

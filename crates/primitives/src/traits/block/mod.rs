@@ -100,10 +100,9 @@ pub trait Block:
     }
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
-    #[inline]
-    fn size(&self) -> usize {
-        self.header().size() + self.body().size()
-    }
+    // todo: default impl when alloy prs merged
+    // <https://github.com/alloy-rs/alloy/pull/1414>
+    fn size(&self) -> usize;
 }
 
 impl<T> Block for T
@@ -128,5 +127,9 @@ where
 
     fn body(&self) -> &Self::Body {
         self.deref().body()
+    }
+
+    fn size(&self) -> usize {
+        self.deref().size()
     }
 }
