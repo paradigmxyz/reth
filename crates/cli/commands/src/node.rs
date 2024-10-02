@@ -211,7 +211,7 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,

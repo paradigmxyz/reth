@@ -3,6 +3,9 @@ use reth_chainspec::{ChainSpec, DEV, HOLESKY, MAINNET, SEPOLIA};
 use reth_cli::chainspec::ChainSpecParser;
 use std::{fs, path::PathBuf, sync::Arc};
 
+/// Chains supported by reth. First value should be used as the default.
+pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
+
 /// Clap value parser for [`ChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
@@ -42,7 +45,7 @@ pub struct EthChainSpecParser;
 impl ChainSpecParser for EthChainSpecParser {
     type ChainSpec = ChainSpec;
 
-    const SUPPORTED_CHAINS: &'static [&'static str] = &["mainnet", "sepolia", "holesky", "dev"];
+    const SUPPORTED_CHAINS: &'static [&'static str] = SUPPORTED_CHAINS;
 
     fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
         chain_value_parser(s)

@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use crate::args::ColorMode;
     use clap::CommandFactory;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
 
     #[test]
     fn parse_color_mode() {

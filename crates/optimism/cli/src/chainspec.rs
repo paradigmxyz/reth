@@ -1,7 +1,7 @@
+use std::path::PathBuf;
 use std::sync::Arc;
-
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_node_core::args::utils::parse_custom_chain_spec;
 use reth_optimism_chainspec::{
     OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
 };
@@ -20,6 +20,28 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>, eyre::Error> {
         _ => Arc::new(OpChainSpec { inner: parse_custom_chain_spec(s)? }),
     })
 }
+
+/// Parses a custom [`ChainSpec`].
+pub fn parse_custom_chain_spec(s: &str) -> eyre::Result<ChainSpec, eyre::Error> {
+    // try to read json from path first
+    let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+        Ok(raw) => raw,
+        Err(io_err) => {
+            // valid json may start with "\n", but must contain "{"
+            if s.contains('{') {
+                s.to_string()
+            } else {
+                return Err(io_err.into()) // assume invalid path
+            }
+        }
+    };
+
+    // both serialized Genesis and ChainSpec structs supported
+    let genesis: Genesis = serde_json::from_str(&raw)?;
+
+    Ok(genesis.into())
+}
+
 
 /// Optimism chain specification parser.
 #[derive(Debug, Clone, Default)]
