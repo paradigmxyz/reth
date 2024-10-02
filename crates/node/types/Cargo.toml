@@ -18,3 +18,7 @@ reth-engine-primitives.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+
+# io
+serde.workspace = true
