@@ -99,7 +99,7 @@ where
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
-        recover_batch_range(batch, provider, &mut senders_cursor)?;
+        execute_batch_recovery(batch, provider, &mut senders_cursor)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
@@ -130,7 +130,7 @@ where
     }
 }
 
-fn recover_batch_range<Provider, CURSOR>(
+fn execute_batch_recovery<Provider, CURSOR>(
     tx_batch_range: Vec<Range<u64>>,
     provider: &Provider,
     senders_cursor: &mut CURSOR,
@@ -146,7 +146,7 @@ where
 
     let (tx_batch_sender, tx_batch_receiver) = mpsc::sync_channel(WORKER_CHUNK_SIZE);
     let (receiver_sender, receiver_receiver) = mpsc::channel();
-    let total_expected: u64 = tx_batch_range.iter().map(|range| range.end - range.start).sum();
+    let total_expected = tx_batch_range.iter().map(|range| range.end - range.start).sum();
 
     let static_file_provider = provider.static_file_provider();
 
@@ -242,20 +242,20 @@ where
     let mut processed_transactions = 0;
     // Process all results in the main thread
     while let Ok(receiver) = receiver_receiver.recv() {
-        while let Ok(result) = receiver.recv() {
-            match result {
-                Ok((tx_id, sender_address)) => {
-                    senders_cursor.append(tx_id, sender_address)?;
-                    processed_transactions += 1;
-                }
+        while let Ok(recovered) = receiver.recv() {
+            let (tx_id, sender) = match recovered {
+                Ok(result) => result,
                 Err(error) => {
                     return match *error {
                         SenderRecoveryStageError::FailedRecovery(err) => {
+                            // get the block number for the bad transaction
                             let block_number = provider
                                 .tx_ref()
                                 .get::<tables::TransactionBlocks>(err.tx)?
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
+                            // fetch the sealed header so we can use it in the sender recovery
+                            // unwind
                             let sealed_header = provider
                                 .sealed_header(block_number)?
                                 .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
@@ -275,7 +275,9 @@ where
                         }
                     }
                 }
-            }
+            };
+            senders_cursor.append(tx_id, sender)?;
+            processed_transactions += 1;
         }
     }
 
