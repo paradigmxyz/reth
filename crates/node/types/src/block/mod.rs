@@ -107,6 +107,20 @@ pub trait Block:
     }
 }
 
+// todo: move to ethereum and op primitives crates
+impl Block for reth_primitives::Block {
+    type Header = Header;
+    type Body = reth_primitives::BlockBody;
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+}
+
 impl<T> Block for T
 where
     T: ops::Deref<Target: Block>
