@@ -8203,6 +8203,7 @@ name = "reth-optimism-primitives"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "derive_more 1.0.0",
  "reth-primitives",
  "reth-primitives-traits",
 ]
@@ -8416,7 +8417,6 @@ dependencies = [
  "reth-network-p2p",
  "reth-nippy-jar",
  "reth-node-types",
- "reth-optimism-primitives",
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
