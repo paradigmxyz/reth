@@ -125,6 +125,9 @@ pub enum StageError {
     /// The prune checkpoint for the given segment is missing.
     #[error("missing prune checkpoint for {0}")]
     MissingPruneCheckpoint(PruneSegment),
+    /// Post Execute Commit error
+    #[error("post execute commit error occurred: {_0}")]
+    PostExecuteCommit(&'static str),
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),

@@ -15,7 +15,7 @@ use alloy_rpc_types::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    args::utils::DefaultChainSpecParser,
+    args::utils::EthereumChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
     primitives::BlockNumberOrTag,
@@ -30,7 +30,7 @@ use reth::{
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
-    Cli::<DefaultChainSpecParser, RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

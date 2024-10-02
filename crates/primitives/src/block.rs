@@ -293,7 +293,7 @@ impl BlockWithSenders {
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.transactions_vec())
+        self.senders.iter().zip(self.block.body.transactions_iter())
     }
 
     /// Returns an iterator over all transactions in the chain.
@@ -499,7 +499,7 @@ impl SealedBlock {
     /// Returns a vector of transactions RLP encoded with
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.transactions_vec().iter().map(|tx| tx.encoded_2718().into()).collect()
+        self.body.transactions().iter().map(|tx| tx.encoded_2718().into()).collect()
     }
 }
 
@@ -542,7 +542,7 @@ impl SealedBlockWithSenders {
     /// Returns an iterator over all transactions in the block.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.block.body.transactions_vec().iter()
+        self.block.body.transactions().iter()
     }
 
     /// Returns an iterator over all transactions and their sender.
@@ -550,7 +550,7 @@ impl SealedBlockWithSenders {
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.transactions_vec())
+        self.senders.iter().zip(self.block.body.transactions_iter())
     }
 
     /// Consumes the block and returns the transactions of the block.
@@ -680,7 +680,7 @@ impl BlockBody {
 
     /// See abstraction [`BlockBody`](traits::BlockBody).
     #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+    pub fn transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
     }
 
@@ -701,7 +701,7 @@ impl traits::BlockBody for BlockBody {
     type Header = Header;
     type SignedTransaction = TransactionSigned;
 
-    fn transactions_vec(&self) -> &Vec<Self::SignedTransaction> {
+    fn transactions(&self) -> &[Self::SignedTransaction] {
         &self.transactions
     }
 
@@ -709,7 +709,7 @@ impl traits::BlockBody for BlockBody {
         self.withdrawals.as_ref()
     }
 
-    fn ommers(&self) -> &Vec<Self::Header> {
+    fn ommers(&self) -> &[Self::Header] {
         &self.ommers
     }
 
@@ -718,7 +718,7 @@ impl traits::BlockBody for BlockBody {
     }
 
     fn calculate_tx_root(&self) -> B256 {
-        crate::proofs::calculate_transaction_root(self.transactions_vec())
+        crate::proofs::calculate_transaction_root(self.transactions())
     }
 
     fn calculate_ommers_root(&self) -> B256 {
@@ -726,7 +726,7 @@ impl traits::BlockBody for BlockBody {
     }
 
     fn recover_signers(&self) -> Option<Vec<Address>> {
-        TransactionSigned::recover_signers(self.transactions_vec(), self.transactions_vec().len())
+        TransactionSigned::recover_signers(self.transactions(), self.transactions().len())
     }
 
     fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
@@ -736,10 +736,10 @@ impl traits::BlockBody for BlockBody {
     }
 
     fn size(&self) -> usize {
-        self.transactions_vec().iter().map(Self::SignedTransaction::size).sum::<usize>() +
-            self.transactions_vec().capacity() * mem::size_of::<Self::SignedTransaction>() +
+        self.transactions().iter().map(Self::SignedTransaction::size).sum::<usize>() +
+            self.transactions.capacity() * mem::size_of::<Self::SignedTransaction>() +
             self.ommers().iter().map(Self::Header::size).sum::<usize>() +
-            self.ommers().capacity() * core::mem::size_of::<Self::Header>() +
+            self.ommers.capacity() * core::mem::size_of::<Self::Header>() +
             self.withdrawals()
                 .map_or(mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }

@@ -58,7 +58,6 @@ impl core::fmt::Display for DisplayFork {
     }
 }
 
-// Todo: This will result in dep cycle so currently commented out
 // # Examples
 //
 // ```
@@ -90,6 +89,7 @@ impl core::fmt::Display for DisplayFork {
 // - Paris                            @58750000000000000000000 (network is known to be merged)
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
+// - Cancun                           @1710338135"
 /// ```
 #[derive(Debug)]
 pub struct DisplayHardforks {

@@ -285,7 +285,9 @@ impl StaticFileProvider {
                 let fixed_block_range = self.find_fixed_range(block_range.start());
                 let jar_provider = self
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
-                    .ok_or(ProviderError::MissingStaticFileBlock(segment, block_range.start()))?;
+                    .ok_or_else(|| {
+                        ProviderError::MissingStaticFileBlock(segment, block_range.start())
+                    })?;
 
                 entries += jar_provider.rows();
 
@@ -323,7 +325,7 @@ impl StaticFileProvider {
             || self.get_segment_ranges_from_block(segment, block),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingStaticFileBlock(segment, block))
+        .ok_or(ProviderError::MissingStaticFileBlock(segment, block))
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and transaction.
@@ -338,7 +340,7 @@ impl StaticFileProvider {
             || self.get_segment_ranges_from_transaction(segment, tx),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingStaticFileTx(segment, tx))
+        .ok_or(ProviderError::MissingStaticFileTx(segment, tx))
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block or transaction.

@@ -28,13 +28,14 @@ pub trait BlockBody:
     type Header: BlockHeader;
 
     /// Returns reference to transactions in block.
-    fn transactions_vec(&self) -> &Vec<Self::SignedTransaction>;
+    fn transactions(&self) -> &[Self::SignedTransaction];
 
     /// Returns [`Withdrawals`] in the block, if any.
+    // todo: branch out into extension trait
     fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns reference to uncle block headers.
-    fn ommers(&self) -> &Vec<Self::Header>;
+    fn ommers(&self) -> &[Self::Header];
 
     /// Returns [`Request`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
@@ -67,17 +68,17 @@ pub trait BlockBody:
 
     /// Returns whether or not the block body contains any blob transactions.
     fn has_blob_transactions(&self) -> bool {
-        self.transactions_vec().iter().any(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
+        self.transactions().iter().any(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
     }
 
     /// Returns whether or not the block body contains any EIP-7702 transactions.
     fn has_eip7702_transactions(&self) -> bool {
-        self.transactions_vec().iter().any(|tx| tx.ty() as u8 == TxType::Eip7702 as u8)
+        self.transactions().iter().any(|tx| tx.ty() as u8 == TxType::Eip7702 as u8)
     }
 
     /// Returns an iterator over all blob transactions of the block
     fn blob_transactions_iter(&self) -> impl Iterator<Item = &Self::SignedTransaction> + '_ {
-        self.transactions_vec().iter().filter(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
+        self.transactions().iter().filter(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
     }
 
     /// Returns only the blob transactions, if any, from the block body.
@@ -94,9 +95,6 @@ pub trait BlockBody:
     }
 
     /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    // todo: default impl when alloy prs merged
-    // <https://github.com/alloy-rs/alloy/pull/1414>
-    // <https://github.com/alloy-rs/alloy/pull/1415>
     fn size(&self) -> usize;
 }
 
@@ -116,15 +114,15 @@ where
     type Header = <T::Target as BlockBody>::Header;
     type SignedTransaction = <T::Target as BlockBody>::SignedTransaction;
 
-    fn transactions_vec(&self) -> &Vec<Self::SignedTransaction> {
-        self.deref().transactions_vec()
+    fn transactions(&self) -> &[Self::SignedTransaction] {
+        self.deref().transactions()
     }
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.deref().withdrawals()
     }
 
-    fn ommers(&self) -> &Vec<Self::Header> {
+    fn ommers(&self) -> &[Self::Header] {
         self.deref().ommers()
     }
 

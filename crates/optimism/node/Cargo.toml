@@ -18,7 +18,6 @@ reth-payload-builder.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-consensus.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true

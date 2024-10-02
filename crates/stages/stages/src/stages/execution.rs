@@ -350,12 +350,13 @@ where
 
             let previous_input =
                 self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
-            debug_assert!(
-                previous_input.is_none(),
-                "Previous post execute commit input wasn't processed"
-            );
-            if let Some(previous_input) = previous_input {
-                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+
+            if previous_input.is_some() {
+                // Not processing the previous post execute commit input is a critical error, as it
+                // means that we didn't send the notification to ExExes
+                return Err(StageError::PostExecuteCommit(
+                    "Previous post execute commit input wasn't processed",
+                ))
             }
         }
 
