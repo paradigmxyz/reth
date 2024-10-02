@@ -4,9 +4,9 @@ name: book
 
 on:
   push:
-    branches: [main]
+    branches: [main, scroll]
   pull_request:
-    branches: [main]
+    branches: [main, scroll]
   merge_group:
 
 jobs:

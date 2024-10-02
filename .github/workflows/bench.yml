@@ -4,7 +4,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: [main, scroll]
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,8 +18,7 @@ concurrency:
 name: bench
 jobs:
   iai:
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     # Only run benchmarks in merge groups and on main
     if: github.event_name != 'pull_request'
     steps:

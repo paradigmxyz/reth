@@ -4,10 +4,10 @@ name: deny
 
 on:
   push:
-    branches: [main]
+    branches: [main, scroll]
     paths: [Cargo.lock]
   pull_request:
-    branches: [main]
+    branches: [main, scroll]
     paths: [Cargo.lock]
   merge_group:
 

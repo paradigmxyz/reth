@@ -6,7 +6,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [ main ]
+    branches: [ main, scroll ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,8 +20,7 @@ jobs:
     name: sync / 100k blocks
     # Only run sync tests in merge groups
     if: github.event_name == 'merge_group'
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1

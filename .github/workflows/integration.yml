@@ -6,7 +6,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: [main, scroll]
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,8 +19,7 @@ concurrency:
 jobs:
   test:
     name: test / ${{ matrix.network }}
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: 1
     strategy:
@@ -28,6 +27,8 @@ jobs:
         network: ["ethereum", "optimism"]
     timeout-minutes: 60
     steps:
+      - name: Free up disk space
+        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
