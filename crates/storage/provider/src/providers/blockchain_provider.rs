@@ -582,7 +582,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             let mut stored_indices = self
                 .database
                 .block_body_indices(anchor_num)?
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
             stored_indices.first_tx_num = stored_indices.next_tx_num();
 
             for state in parent_chain {

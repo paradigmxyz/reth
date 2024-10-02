@@ -120,7 +120,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let best: ChainInfo = provider.chain_info()?;
         let latest_header = provider
             .header_by_number(best.best_number)?
-            .ok_or(ProviderError::HeaderNotFound(best.best_number.into()))?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
 
         let finalized_header = provider
             .last_finalized_block_number()?
