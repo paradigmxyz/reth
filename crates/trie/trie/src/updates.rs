@@ -396,59 +396,6 @@ fn exclude_empty_from_pair<V>(
     iter.into_iter().filter(|(n, _)| !n.is_empty())
 }
 
-#[cfg(all(test, feature = "serde"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_trie_updates_serde_roundtrip() {
-        let mut default_updates = TrieUpdates::default();
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-
-        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-
-        default_updates
-            .account_nodes
-            .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-
-        default_updates.storage_tries.insert(B256::default(), StorageTrieUpdates::default());
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-    }
-
-    #[test]
-    fn test_storage_trie_updates_serde_roundtrip() {
-        let mut default_updates = StorageTrieUpdates::default();
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: StorageTrieUpdates =
-            serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-
-        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: StorageTrieUpdates =
-            serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-
-        default_updates
-            .storage_nodes
-            .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
-        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        let updates_deserialized: StorageTrieUpdates =
-            serde_json::from_str(&updates_serialized).unwrap();
-        assert_eq!(updates_deserialized, default_updates);
-    }
-}
-
 /// Bincode-compatible trie updates type serde implementations.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
@@ -660,5 +607,58 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
         }
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_trie_updates_serde_roundtrip() {
+        let mut default_updates = TrieUpdates::default();
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
+
+        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
+
+        default_updates
+            .account_nodes
+            .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
+
+        default_updates.storage_tries.insert(B256::default(), StorageTrieUpdates::default());
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
+    }
+
+    #[test]
+    fn test_storage_trie_updates_serde_roundtrip() {
+        let mut default_updates = StorageTrieUpdates::default();
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: StorageTrieUpdates =
+            serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
+
+        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: StorageTrieUpdates =
+            serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
+
+        default_updates
+            .storage_nodes
+            .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
+        let updates_serialized = serde_json::to_string(&default_updates).unwrap();
+        let updates_deserialized: StorageTrieUpdates =
+            serde_json::from_str(&updates_serialized).unwrap();
+        assert_eq!(updates_deserialized, default_updates);
     }
 }
