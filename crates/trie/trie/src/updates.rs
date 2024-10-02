@@ -396,6 +396,220 @@ fn exclude_empty_from_pair<V>(
     iter.into_iter().filter(|(n, _)| !n.is_empty())
 }
 
+/// Bincode-compatible trie updates type serde implementations.
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+pub mod serde_bincode_compat {
+    use std::{
+        borrow::Cow,
+        collections::{HashMap, HashSet},
+    };
+
+    use alloy_primitives::B256;
+    use reth_trie_common::{BranchNodeCompact, Nibbles};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::TrieUpdates`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie::{serde_bincode_compat, updates::TrieUpdates};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::updates::TrieUpdates")]
+    ///     trie_updates: TrieUpdates,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TrieUpdates<'a> {
+        account_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
+        removed_nodes: Cow<'a, HashSet<Nibbles>>,
+        storage_tries: HashMap<B256, StorageTrieUpdates<'a>>,
+    }
+
+    impl<'a> From<&'a super::TrieUpdates> for TrieUpdates<'a> {
+        fn from(value: &'a super::TrieUpdates) -> Self {
+            Self {
+                account_nodes: Cow::Borrowed(&value.account_nodes),
+                removed_nodes: Cow::Borrowed(&value.removed_nodes),
+                storage_tries: value.storage_tries.iter().map(|(k, v)| (*k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl<'a> From<TrieUpdates<'a>> for super::TrieUpdates {
+        fn from(value: TrieUpdates<'a>) -> Self {
+            Self {
+                account_nodes: value.account_nodes.into_owned(),
+                removed_nodes: value.removed_nodes.into_owned(),
+                storage_tries: value
+                    .storage_tries
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<'a> SerializeAs<super::TrieUpdates> for TrieUpdates<'a> {
+        fn serialize_as<S>(source: &super::TrieUpdates, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TrieUpdates::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TrieUpdates> for TrieUpdates<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TrieUpdates, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TrieUpdates::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::StorageTrieUpdates`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie::{serde_bincode_compat, updates::StorageTrieUpdates};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::updates::StorageTrieUpdates")]
+    ///     trie_updates: StorageTrieUpdates,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct StorageTrieUpdates<'a> {
+        is_deleted: bool,
+        storage_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
+        removed_nodes: Cow<'a, HashSet<Nibbles>>,
+    }
+
+    impl<'a> From<&'a super::StorageTrieUpdates> for StorageTrieUpdates<'a> {
+        fn from(value: &'a super::StorageTrieUpdates) -> Self {
+            Self {
+                is_deleted: value.is_deleted,
+                storage_nodes: Cow::Borrowed(&value.storage_nodes),
+                removed_nodes: Cow::Borrowed(&value.removed_nodes),
+            }
+        }
+    }
+
+    impl<'a> From<StorageTrieUpdates<'a>> for super::StorageTrieUpdates {
+        fn from(value: StorageTrieUpdates<'a>) -> Self {
+            Self {
+                is_deleted: value.is_deleted,
+                storage_nodes: value.storage_nodes.into_owned(),
+                removed_nodes: value.removed_nodes.into_owned(),
+            }
+        }
+    }
+
+    impl<'a> SerializeAs<super::StorageTrieUpdates> for StorageTrieUpdates<'a> {
+        fn serialize_as<S>(
+            source: &super::StorageTrieUpdates,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            StorageTrieUpdates::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::StorageTrieUpdates> for StorageTrieUpdates<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::StorageTrieUpdates, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            StorageTrieUpdates::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::updates::StorageTrieUpdates;
+
+        use super::super::{serde_bincode_compat, TrieUpdates};
+
+        use alloy_primitives::B256;
+        use reth_trie_common::{BranchNodeCompact, Nibbles};
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_trie_updates_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::TrieUpdates")]
+                trie_updates: TrieUpdates,
+            }
+
+            let mut data = Data { trie_updates: TrieUpdates::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.account_nodes.insert(
+                Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]),
+                BranchNodeCompact::default(),
+            );
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.storage_tries.insert(B256::default(), StorageTrieUpdates::default());
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_storage_trie_updates_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::StorageTrieUpdates")]
+                trie_updates: StorageTrieUpdates,
+            }
+
+            let mut data = Data { trie_updates: StorageTrieUpdates::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.storage_nodes.insert(
+                Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]),
+                BranchNodeCompact::default(),
+            );
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+    }
+}
+
 #[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::*;
@@ -416,7 +630,6 @@ mod tests {
             .account_nodes
             .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
-        println!("{updates_serialized}");
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 

@@ -732,7 +732,7 @@ pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
-    use reth_trie::updates::TrieUpdates;
+    use reth_trie::serde_bincode_compat::updates::TrieUpdates;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -757,7 +757,7 @@ pub(super) mod serde_bincode_compat {
     pub struct Chain<'a> {
         blocks: BTreeMap<BlockNumber, SealedBlockWithSenders<'a>>,
         execution_outcome: Cow<'a, ExecutionOutcome>,
-        trie_updates: Cow<'a, Option<TrieUpdates>>,
+        trie_updates: Option<TrieUpdates<'a>>,
     }
 
     impl<'a> From<&'a super::Chain> for Chain<'a> {
@@ -769,7 +769,7 @@ pub(super) mod serde_bincode_compat {
                     .map(|(block_number, block)| (*block_number, block.into()))
                     .collect(),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
-                trie_updates: Cow::Borrowed(&value.trie_updates),
+                trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
         }
     }
@@ -783,7 +783,7 @@ pub(super) mod serde_bincode_compat {
                     .map(|(block_number, block)| (block_number, block.into()))
                     .collect(),
                 execution_outcome: value.execution_outcome.into_owned(),
-                trie_updates: value.trie_updates.into_owned(),
+                trie_updates: value.trie_updates.map(Into::into),
             }
         }
     }
