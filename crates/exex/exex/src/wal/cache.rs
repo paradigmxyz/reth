@@ -14,18 +14,25 @@ use reth_exex_types::ExExNotification;
 #[derive(Debug, Default)]
 pub struct BlockCache {
     /// A min heap of `(Block Number, File ID)` tuples.
-    pub(super) blocks: BinaryHeap<Reverse<(BlockNumber, u32)>>,
+    ///
+    /// Contains one highest block in notification. In a notification with both committed and
+    /// reverted chain, the highest block is chosen between both chains.
+    pub(super) notification_max_blocks: BinaryHeap<Reverse<(BlockNumber, u32)>>,
     /// A mapping of committed blocks `Block Hash -> Block`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
     /// block.
     pub(super) committed_blocks: FbHashMap<32, (u32, CachedBlock)>,
+    /// Block height of the lowest committed block currently in the cache.
+    pub(super) lowest_committed_block_height: Option<BlockNumber>,
+    /// Block height of the highest committed block currently in the cache.
+    pub(super) highest_committed_block_height: Option<BlockNumber>,
 }
 
 impl BlockCache {
     /// Returns `true` if the cache is empty.
     pub(super) fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
+        self.notification_max_blocks.is_empty()
     }
 
     /// Removes all files from the cache that has notifications with a tip block less than or equal
@@ -37,9 +44,11 @@ impl BlockCache {
     pub(super) fn remove_before(&mut self, block_number: BlockNumber) -> HashSet<u32> {
         let mut file_ids = HashSet::default();
 
-        while let Some(block @ Reverse((max_block, file_id))) = self.blocks.peek().copied() {
+        while let Some(block @ Reverse((max_block, file_id))) =
+            self.notification_max_blocks.peek().copied()
+        {
             if max_block <= block_number {
-                let popped_block = self.blocks.pop().unwrap();
+                let popped_block = self.notification_max_blocks.pop().unwrap();
                 debug_assert_eq!(popped_block, block);
                 file_ids.insert(file_id);
             } else {
@@ -47,7 +56,25 @@ impl BlockCache {
             }
         }
 
-        self.committed_blocks.retain(|_, (file_id, _)| !file_ids.contains(file_id));
+        let (mut lowest_committed_block_height, mut highest_committed_block_height) = (None, None);
+        self.committed_blocks.retain(|_, (file_id, block)| {
+            let retain = !file_ids.contains(file_id);
+
+            if retain {
+                lowest_committed_block_height = Some(
+                    lowest_committed_block_height
+                        .map_or(block.block.number, |lowest| block.block.number.min(lowest)),
+                );
+                highest_committed_block_height = Some(
+                    highest_committed_block_height
+                        .map_or(block.block.number, |highest| block.block.number.max(highest)),
+                );
+            }
+
+            retain
+        });
+        self.lowest_committed_block_height = lowest_committed_block_height;
+        self.highest_committed_block_height = highest_committed_block_height;
 
         file_ids
     }
@@ -70,7 +97,7 @@ impl BlockCache {
         let max_block =
             reverted_chain.iter().chain(&committed_chain).map(|chain| chain.tip().number).max();
         if let Some(max_block) = max_block {
-            self.blocks.push(Reverse((max_block, file_id)));
+            self.notification_max_blocks.push(Reverse((max_block, file_id)));
         }
 
         if let Some(committed_chain) = &committed_chain {
@@ -81,12 +108,19 @@ impl BlockCache {
                 };
                 self.committed_blocks.insert(block.hash(), (file_id, cached_block));
             }
+
+            self.highest_committed_block_height = Some(committed_chain.tip().number);
         }
     }
 
     #[cfg(test)]
     pub(super) fn blocks_sorted(&self) -> Vec<(BlockNumber, u32)> {
-        self.blocks.clone().into_sorted_vec().into_iter().map(|entry| entry.0).collect()
+        self.notification_max_blocks
+            .clone()
+            .into_sorted_vec()
+            .into_iter()
+            .map(|entry| entry.0)
+            .collect()
     }
 
     #[cfg(test)]
