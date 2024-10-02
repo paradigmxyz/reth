@@ -1570,7 +1570,6 @@ impl<T> WithEncoded<Option<T>> {
     }
 }
 
-
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
@@ -2184,4 +2183,3 @@ mod tests {
         assert!(res.is_err());
     }
 }
-
