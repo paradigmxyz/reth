@@ -4,7 +4,8 @@
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
 use clap::{Args, Parser};
-use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
+use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth::{cli::Cli};
 use reth_node_builder::{
     engine_tree_config::{
         TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
@@ -50,7 +51,7 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<EthereumChainSpecParser, EngineArgs>::parse().run(|builder, engine_args| async move {
+        Cli::<EthChainSpecParser, EngineArgs>::parse().run(|builder, engine_args| async move {
             let enable_engine2 = engine_args.experimental;
             match enable_engine2 {
                 true => {

@@ -160,13 +160,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::{EthereumChainSpecParser, SUPPORTED_CHAINS};
+    use reth_ethereum_cli::chainspec::EthChainSpecParser;
+    use reth_node_core::args::utils::{SUPPORTED_CHAINS};
     use std::path::Path;
 
     #[test]
     fn parse_stats_globals() {
         let path = format!("../{}", SUPPORTED_CHAINS[0]);
-        let cmd = Command::<EthereumChainSpecParser>::try_parse_from([
+        let cmd = Command::<EthChainSpecParser>::try_parse_from([
             "reth",
             "--datadir",
             &path,

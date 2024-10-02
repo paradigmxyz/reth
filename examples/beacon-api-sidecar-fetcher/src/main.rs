@@ -22,8 +22,9 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
+use reth_ethereum_cli::chainspec::EthChainSpecParser;
 use reth::{
-    args::utils::EthereumChainSpecParser, builder::NodeHandle, cli::Cli,
+    builder::NodeHandle, cli::Cli,
     providers::CanonStateSubscriptions,
 };
 use reth_node_ethereum::EthereumNode;
@@ -31,7 +32,7 @@ use reth_node_ethereum::EthereumNode;
 pub mod mined_sidecar;
 
 fn main() {
-    Cli::<EthereumChainSpecParser, BeaconSidecarConfig>::parse()
+    Cli::<EthChainSpecParser, BeaconSidecarConfig>::parse()
         .run(|builder, beacon_config| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

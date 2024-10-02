@@ -21,13 +21,14 @@ use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
-use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
+use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth::{cli::Cli};
 use reth_node_ethereum::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 
 fn main() {
-    Cli::<EthereumChainSpecParser, BeaconEventsConfig>::parse()
+    Cli::<EthChainSpecParser, BeaconEventsConfig>::parse()
         .run(|builder, args| async move {
             let handle = builder.node(EthereumNode::default()).launch().await?;
 

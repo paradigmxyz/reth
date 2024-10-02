@@ -231,12 +231,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::{EthereumChainSpecParser, SUPPORTED_CHAINS};
+    use reth_ethereum_cli::chainspec::EthChainSpecParser;
+    use reth_node_core::args::utils::{SUPPORTED_CHAINS};
 
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: ImportCommand<EthereumChainSpecParser> =
+            let args: ImportCommand<EthChainSpecParser> =
                 ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),
