@@ -353,7 +353,8 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         if exex_finished_heights.iter().all(|(_, _, is_canonical)| *is_canonical) {
             // If there is a finalized header and all ExExs are on the canonical chain, finalize
-            // the WAL with the lowest finished height among all ExExes
+            // the WAL with either the lowest finished height among all ExExes, or finalized header
+            // – whichever is lower.
             let lowest_finished_height = exex_finished_heights
                 .iter()
                 .copied()
