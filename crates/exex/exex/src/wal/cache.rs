@@ -58,16 +58,20 @@ impl BlockCache {
 
         let (mut lowest_committed_block_height, mut highest_committed_block_height) = (None, None);
         self.committed_blocks.retain(|_, (file_id, block)| {
-            lowest_committed_block_height = Some(
-                lowest_committed_block_height
-                    .map_or(block.block.number, |lowest| block.block.number.min(lowest)),
-            );
-            highest_committed_block_height = Some(
-                highest_committed_block_height
-                    .map_or(block.block.number, |highest| block.block.number.max(highest)),
-            );
+            let retain = !file_ids.contains(file_id);
 
-            !file_ids.contains(file_id)
+            if retain {
+                lowest_committed_block_height = Some(
+                    lowest_committed_block_height
+                        .map_or(block.block.number, |lowest| block.block.number.min(lowest)),
+                );
+                highest_committed_block_height = Some(
+                    highest_committed_block_height
+                        .map_or(block.block.number, |highest| block.block.number.max(highest)),
+                );
+            }
+
+            retain
         });
         self.lowest_committed_block_height = lowest_committed_block_height;
         self.highest_committed_block_height = highest_committed_block_height;
