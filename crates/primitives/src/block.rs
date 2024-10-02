@@ -546,93 +546,42 @@ pub struct BlockBody {
     pub requests: Option<Requests>,
 }
 
-impl BlockBody {
-    /// Create a [`Block`] from the body and its header.
-    pub const fn into_block(self, header: Header) -> Block {
-        Block { header, body: self }
+impl traits::BlockBody for BlockBody {
+    type Header = Header;
+    type SignedTransaction = TransactionSigned;
+
+    fn transactions(&self) -> &Vec<Self::SignedTransaction> {
+        &self.transactions
     }
 
-    /// Calculate the transaction root for the block body.
-    pub fn calculate_tx_root(&self) -> B256 {
-        crate::proofs::calculate_transaction_root(&self.transactions)
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
     }
 
-    /// Calculate the ommers root for the block body.
-    pub fn calculate_ommers_root(&self) -> B256 {
-        crate::proofs::calculate_ommers_root(&self.ommers)
+    fn ommers(&self) -> &Vec<Self::Header> {
+        &self.ommers
     }
 
-    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
-    /// withdrawals, this will return `None`.
-    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
-        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    fn requests(&self) -> Option<&Requests> {
+        self.requests.as_ref()
     }
 
-    /// Calculate the requests root for the block body, if requests exist. If there are no
-    /// requests, this will return `None`.
-    pub fn calculate_requests_root(&self) -> Option<B256> {
-        self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
+    fn calculate_tx_root(&self) -> B256 {
+        crate::proofs::calculate_transaction_root(self.transactions())
     }
 
-    /// Recover signer addresses for all transactions in the block body.
-    pub fn recover_signers(&self) -> Option<Vec<Address>> {
-        TransactionSigned::recover_signers(&self.transactions, self.transactions.len())
+    fn calculate_ommers_root(&self) -> B256 {
+        crate::proofs::calculate_ommers_root(self.ommers())
     }
 
-    /// Returns whether or not the block body contains any blob transactions.
-    #[inline]
-    pub fn has_blob_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip4844())
+    fn recover_signers(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers(self.transactions(), self.transactions().len())
     }
 
-    /// Returns whether or not the block body contains any EIP-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip7702())
-    }
-
-    /// Returns an iterator over all blob transactions of the block
-    #[inline]
-    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter().filter(|tx| tx.is_eip4844())
-    }
-
-    /// Returns only the blob transactions, if any, from the block body.
-    #[inline]
-    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.blob_transactions_iter().collect()
-    }
-
-    /// Returns an iterator over all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+    fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
         self.blob_transactions_iter()
             .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
             .flatten()
-    }
-
-    /// Returns all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
-        self.blob_versioned_hashes_iter().collect()
-    }
-
-    /// Returns an iterator over all transactions.
-    #[inline]
-    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.transactions.iter()
-    }
-
-    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<Header>() +
-            self.withdrawals
-                .as_ref()
-                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
