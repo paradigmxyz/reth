@@ -383,7 +383,7 @@ where
                     .into())
                 }
 
-                let sealed_target = headers.remove(0).seal_slow();
+                let sealed_target = headers.swap_remove(0).seal_slow();
                 let (header, seal) = sealed_target.into_parts();
                 let target = SealedHeader::new(header, seal);
 
