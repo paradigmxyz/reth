@@ -98,7 +98,6 @@ members = [
     "crates/rpc/rpc-server-types/",
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types-compat/",
-    "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
     "crates/stages/api/",
     "crates/stages/stages/",
@@ -388,7 +387,6 @@ reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = false }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
-reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
