@@ -89,6 +89,24 @@ pub trait Block: From<(Self::Header, Self::Body)> + Into<(Self::Header, Self::Bo
     }
 }
 
+impl<T> Block for T
+where
+    T: ops::Deref<Target: Block>
+        + From<(<T::Target as Block>::Header, <T::Target as Block>::Body)>
+        + Into<(<T::Target as Block>::Header, <T::Target as Block>::Body)>,
+{
+    type Header = <T::Target as Block>::Header;
+    type Body = <T::Target as Block>::Body;
+
+    fn header(&self) -> &Self::Header {
+        self.deref().header()
+    }
+
+    fn body(&self) -> &Self::Body {
+        self.deref().body()
+    }
+}
+
 /// Abstraction for block's body.
 pub trait BlockBody:
     Clone
