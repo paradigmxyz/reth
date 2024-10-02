@@ -1191,7 +1191,9 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
+                        debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
                         self.state.tree_state.insert_executed(block);
+                        self.metrics.engine.inserted_already_executed_blocks.increment(1);
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
