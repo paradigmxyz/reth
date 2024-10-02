@@ -10,9 +10,7 @@
 
 extern crate alloc;
 
-pub mod block;
-
-pub use block::{body::BlockBody, Block};
+pub use reth_primitives::traits::{Block, BlockBody};
 
 use std::marker::PhantomData;
 

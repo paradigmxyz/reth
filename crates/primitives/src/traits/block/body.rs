@@ -5,7 +5,8 @@ use core::{mem, ops};
 
 use alloy_consensus::{BlockHeader, Requests, Transaction, TxType};
 use alloy_primitives::{Address, B256};
-use reth_primitives::{proofs, Withdrawals};
+
+use crate::{proofs, traits::Block, Withdrawals};
 
 /// Abstraction for block's body.
 pub trait BlockBody:

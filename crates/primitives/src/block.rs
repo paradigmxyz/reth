@@ -1,8 +1,9 @@
 use crate::{
-    GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
+    traits, traits::Block as _, GotExpected, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered, Withdrawals,
 };
 use alloc::vec::Vec;
-use alloy_consensus::Sealable;
+use alloy_consensus::Header;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
@@ -31,13 +32,26 @@ prop_compose! {
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Block {
     /// Block header.
-    #[deref]
     pub header: Header,
     /// Block body.
     pub body: BlockBody,
+}
+
+// todo: move to ethereum and op primitives crates
+impl traits::Block for Block {
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
 }
 
 impl From<(Header, BlockBody)> for Block {

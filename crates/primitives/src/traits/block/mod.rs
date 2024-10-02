@@ -2,24 +2,23 @@
 
 pub mod body;
 
+use alloc::fmt;
 use core::ops;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
-use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
 
-use crate::BlockBody;
+use crate::{traits::BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
 
 /// Abstraction of block data type.
 pub trait Block:
-    Debug
+    fmt::Debug
     + Clone
     + PartialEq
     + Eq
     + Default
-    + Serialize
-    + Deserialize
-    + Deref
+    + serde::Serialize
+    + for<'a> serde::Deserialize<'a>
     + From<(Self::Header, Self::Body)>
     + Into<(Self::Header, Self::Body)>
 {
@@ -107,23 +106,16 @@ pub trait Block:
     }
 }
 
-// todo: move to ethereum and op primitives crates
-impl Block for reth_primitives::Block {
-    type Header = Header;
-    type Body = reth_primitives::BlockBody;
-
-    fn header(&self) -> &Self::Header {
-        &self.header
-    }
-
-    fn body(&self) -> &Self::Body {
-        &self.body
-    }
-}
-
 impl<T> Block for T
 where
     T: ops::Deref<Target: Block>
+        + fmt::Debug
+        + Clone
+        + PartialEq
+        + Eq
+        + Default
+        + serde::Serialize
+        + for<'a> serde::Deserialize<'a>
         + From<(<T::Target as Block>::Header, <T::Target as Block>::Body)>
         + Into<(<T::Target as Block>::Header, <T::Target as Block>::Body)>,
 {
