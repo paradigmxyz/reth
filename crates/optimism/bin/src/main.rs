@@ -10,6 +10,8 @@ use reth_optimism_node::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
 
+use tracing as _;
+
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 

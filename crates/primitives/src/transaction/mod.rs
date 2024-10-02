@@ -1982,8 +1982,8 @@ mod tests {
 pub mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{
-        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy},
-        TxEip4844, TxEip7702,
+        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
+        TxEip4844,
     };
     use alloy_primitives::{Signature, TxHash};
     #[cfg(feature = "optimism")]
@@ -2013,7 +2013,7 @@ pub mod serde_bincode_compat {
         Eip2930(TxEip2930<'a>),
         Eip1559(TxEip1559<'a>),
         Eip4844(Cow<'a, TxEip4844>),
-        Eip7702(Cow<'a, TxEip7702>),
+        Eip7702(TxEip7702<'a>),
         #[cfg(feature = "optimism")]
         #[cfg(feature = "optimism")]
         Deposit(TxDeposit<'a>),
@@ -2026,7 +2026,7 @@ pub mod serde_bincode_compat {
                 super::Transaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
                 super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
                 super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
-                super::Transaction::Eip7702(tx) => Self::Eip7702(Cow::Borrowed(tx)),
+                super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
                 #[cfg(feature = "optimism")]
                 super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
             }
@@ -2040,7 +2040,7 @@ pub mod serde_bincode_compat {
                 Transaction::Eip2930(tx) => Self::Eip2930(tx.into()),
                 Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
                 Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
-                Transaction::Eip7702(tx) => Self::Eip7702(tx.into_owned()),
+                Transaction::Eip7702(tx) => Self::Eip7702(tx.into()),
                 #[cfg(feature = "optimism")]
                 Transaction::Deposit(tx) => Self::Deposit(tx.into()),
             }
