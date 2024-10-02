@@ -28,6 +28,13 @@ const BATCH_SIZE: usize = 100_000;
 /// Maximum number of senders to recover per rayon worker job.
 const WORKER_CHUNK_SIZE: usize = 100;
 
+/// Type alias for a sender that transmits a batch of transaction chunks.
+/// Each chunk is a pair of a range of transaction IDs and a sender that
+/// communicates the result of sender recovery for that range.
+type TxBatchSender = mpsc::Sender<
+    Vec<(Range<u64>, mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>)>,
+>;
+
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
 /// in [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
@@ -99,7 +106,11 @@ where
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
-        execute_batch_recovery(batch, provider, &mut senders_cursor)?;
+        let tx_batch_sender = setup_range_recovery(provider);
+
+        for range in batch {
+            recover_range(range, provider, tx_batch_sender.clone(), &mut senders_cursor)?;
+        }
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
@@ -130,119 +141,39 @@ where
     }
 }
 
-fn execute_batch_recovery<Provider, CURSOR>(
-    tx_batch_range: Vec<Range<u64>>,
+fn recover_range<Provider, CURSOR>(
+    tx_range: Range<u64>,
     provider: &Provider,
+    tx_batch_sender: TxBatchSender,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
-    // 1. Spawn two threads. One thread acts as a producer, while the other acts as a consumer.
-    // 2. Preallocate channels for the chunks in the range of each batch.
-    // 3. Spin up Rayon threads to process each chunk.
-    // 4. Listen for responses on the receiver for each chunk until completion or a failure occurs.
+    debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
 
-    let (tx_batch_sender, tx_batch_receiver) = mpsc::channel();
-    let (receiver_sender, receiver_receiver) = mpsc::channel();
-    let total_expected = tx_batch_range.iter().map(|range| range.end - range.start).sum();
+    // Preallocate channels for each chunks in the batch
+    let (chunks, receivers): (Vec<_>, Vec<_>) = tx_range
+        .clone()
+        .step_by(WORKER_CHUNK_SIZE)
+        .map(|start| {
+            let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
+            let (tx, rx) = mpsc::channel();
+            // Range and channel sender will be sent to rayon worker
+            ((range, tx), rx)
+        })
+        .unzip();
 
-    let static_file_provider = provider.static_file_provider();
+    if let Some(err) = tx_batch_sender.send(chunks).err() {
+        return Err(StageError::Fatal(err.into()));
+    }
 
-    // Spawn a producer thread for all the batches using tokio.
-    std::thread::spawn(move || {
-        for tx_range in tx_batch_range {
-            debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
-
-            // Preallocate channels
-            let (chunks, receivers): (Vec<_>, Vec<_>) = tx_range
-                .clone()
-                .step_by(WORKER_CHUNK_SIZE)
-                .map(|start| {
-                    let range =
-                        start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
-                    let (tx, rx) = mpsc::channel();
-                    // Range and channel sender will be sent to rayon worker
-                    ((range, tx), rx)
-                })
-                .unzip();
-
-            if tx_batch_sender.send(chunks).is_err() {
-                break; // Exit early, if receiver has dropped
-            }
-
-            // Send the chunks from the current batch to the consumer thread for processing.
-            for receiver in receivers {
-                let _ = receiver_sender.send(receiver);
-            }
-        }
-    });
-
-    // Spawn the consumer thread to process all received chunks.
-    //
-    // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
-    // there will be a timeout grace period in which Tokio does not allow spawning
-    // additional blocking tasks. This would cause this function to return
-    // `SenderRecoveryStageError::RecoveredSendersMismatch` at the end.
-    //
-    // However, using `std::thread::spawn` allows us to utilize the timeout grace
-    // period to complete some work without throwing errors during the shutdown.
-    std::thread::spawn(move || {
-        while let Ok(chunks) = tx_batch_receiver.recv() {
-            for (chunk_range, recovered_senders_tx) in chunks {
-                // Read the raw value, and let the rayon worker to decompress & decode.
-                let chunk = match static_file_provider.fetch_range_with_predicate(
-                    StaticFileSegment::Transactions,
-                    chunk_range.clone(),
-                    |cursor, number| {
-                        Ok(cursor
-                            .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
-                                number.into(),
-                            )?
-                            .map(|tx| (number, tx)))
-                    },
-                    |_| true,
-                ) {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        // We exit early since we could not process this chunk.
-                        let _ = recovered_senders_tx
-                            .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                        break
-                    }
-                };
-
-                rayon::spawn(move || {
-                    let mut rlp_buf = Vec::with_capacity(128);
-                    for (number, tx) in chunk {
-                        rlp_buf.clear();
-
-                        let res = tx
-                            .value()
-                            .map_err(|err| {
-                                Box::new(SenderRecoveryStageError::StageError(err.into()))
-                            })
-                            .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
-
-                        let is_err = res.is_err();
-
-                        let _ = recovered_senders_tx.send(res);
-
-                        // Finish early
-                        if is_err {
-                            break
-                        }
-                    }
-                });
-            }
-        }
-    });
+    debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
 
     let mut processed_transactions = 0;
-    // Process all results in the main thread
-    while let Ok(receiver) = receiver_receiver.recv() {
-        while let Ok(recovered) = receiver.recv() {
+    for channel in receivers {
+        while let Ok(recovered) = channel.recv() {
             let (tx_id, sender) = match recovered {
                 Ok(result) => result,
                 Err(error) => {
@@ -254,8 +185,8 @@ where
                                 .get::<tables::TransactionBlocks>(err.tx)?
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
-                            // fetch the sealed header so we can use it in the sender recovery
-                            // unwind
+                            // fetch the sealed header so we can use it in the sender
+                            // recovery unwind
                             let sealed_header = provider
                                 .sealed_header(block_number)?
                                 .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
@@ -280,20 +211,90 @@ where
             processed_transactions += 1;
         }
     }
+    debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
 
-    // Fail safe check
-    if processed_transactions != total_expected {
+    // Fail safe to ensure that we do not proceed without having recovered all senders.
+    let expected = tx_range.end - tx_range.start;
+    if processed_transactions != expected {
         return Err(StageError::Fatal(
             SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected {
                 got: processed_transactions,
-                expected: total_expected,
+                expected,
             })
             .into(),
         ));
     }
-
-    debug!(target: "sync::stages::sender_recovery", "Finished processing all batches");
     Ok(())
+}
+
+fn setup_range_recovery<Provider>(provider: &Provider) -> TxBatchSender
+where
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
+{
+    let (tx_sender, tx_receiver) = mpsc::channel::<
+        Vec<(Range<u64>, mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>)>,
+    >();
+    let static_file_provider = provider.static_file_provider();
+
+    // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
+    // there will be a timeout grace period in which Tokio does not allow spawning
+    // additional blocking tasks. This would cause this function to return
+    // `SenderRecoveryStageError::RecoveredSendersMismatch` at the end.
+    //
+    // However, using `std::thread::spawn` allows us to utilize the timeout grace
+    // period to complete some work without throwing errors during the shutdown.
+    std::thread::spawn(move || {
+        while let Ok(chunks) = tx_receiver.recv() {
+            for (chunk_range, recovered_senders_tx) in chunks {
+                // Read the raw value, and let the rayon worker to decompress & decode.
+                let chunk = match static_file_provider.fetch_range_with_predicate(
+                    StaticFileSegment::Transactions,
+                    chunk_range.clone(),
+                    |cursor, number| {
+                        Ok(cursor
+                            .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
+                                number.into(),
+                            )?
+                            .map(|tx| (number, tx)))
+                    },
+                    |_| true,
+                ) {
+                    Ok(chunk) => chunk,
+                    Err(err) => {
+                        // We exit early since we could not process this chunk.
+                        let _ = recovered_senders_tx
+                            .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
+                        break
+                    }
+                };
+
+                // Spawn the task onto the global rayon pool
+                // This task will send the results through the channel after it has read the
+                // transaction and calculated the sender.
+                rayon::spawn(move || {
+                    let mut rlp_buf = Vec::with_capacity(128);
+                    for (number, tx) in chunk {
+                        let res = tx
+                            .value()
+                            .map_err(|err| {
+                                Box::new(SenderRecoveryStageError::StageError(err.into()))
+                            })
+                            .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
+
+                        let is_err = res.is_err();
+
+                        let _ = recovered_senders_tx.send(res);
+
+                        // Finish early
+                        if is_err {
+                            break
+                        }
+                    }
+                });
+            }
+        }
+    });
+    tx_sender
 }
 
 #[inline]
