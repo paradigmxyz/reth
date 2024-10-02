@@ -2839,7 +2839,6 @@ dependencies = [
  "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -2858,7 +2857,6 @@ dependencies = [
  "reth-node-types",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
 ]
 
 [[package]]
@@ -7032,7 +7030,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
- "reth-rpc-types",
  "reth-stages-api",
  "reth-tracing",
  "reth-transaction-pool",
@@ -7876,7 +7873,6 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
- "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages-types",
  "reth-storage-api",
@@ -8143,7 +8139,6 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
- "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tracing",
  "reth-transaction-pool",
@@ -8638,7 +8633,6 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-layer",
  "reth-rpc-server-types",
- "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-tokio-util",
@@ -8755,7 +8749,6 @@ dependencies = [
  "reth-primitives",
  "reth-revm",
  "reth-rpc-server-types",
- "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-storage-api",
  "reth-tasks",
@@ -8801,13 +8794,6 @@ dependencies = [
  "reth-primitives",
  "serde",
  "strum",
-]
-
-[[package]]
-name = "reth-rpc-types"
-version = "1.0.7"
-dependencies = [
- "jsonrpsee-types",
 ]
 
 [[package]]

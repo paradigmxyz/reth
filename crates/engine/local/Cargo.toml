@@ -44,7 +44,6 @@ reth-ethereum-engine-primitives.workspace = true
 reth-exex-test-utils.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-rpc-types.workspace = true
 reth-tracing.workspace = true
 
 [lints]
