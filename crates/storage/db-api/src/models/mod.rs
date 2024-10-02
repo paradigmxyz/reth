@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
         assert_eq!(Receipt::bitflag_encoded_bytes(), 1);
         assert_eq!(ReceiptWithBloom::bitflag_encoded_bytes(), 0);
-        assert_eq!(SealedHeader::bitflag_encoded_bytes(), 0);
+        assert_eq!(SealedHeader::<Header>::bitflag_encoded_bytes(), 0);
         assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
