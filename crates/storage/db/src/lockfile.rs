@@ -104,7 +104,10 @@ impl ProcessUID {
     fn new(pid: usize) -> Option<Self> {
         let mut system = System::new();
         let pid2 = sysinfo::Pid::from(pid);
-        system.refresh_process_specifics(pid2, ProcessRefreshKind::new());
+        system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[pid2]),
+            ProcessRefreshKind::new(),
+        );
         system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })
     }
 

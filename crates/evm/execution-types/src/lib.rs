@@ -26,7 +26,7 @@ pub use execution_outcome::*;
 /// all fields are serialized.
 ///
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
     pub use super::chain::serde_bincode_compat::*;
 }

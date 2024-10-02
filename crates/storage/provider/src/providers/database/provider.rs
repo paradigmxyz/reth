@@ -630,7 +630,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                             // recover the sender from the transaction if not found
                             let sender = tx
                                 .recover_signer_unchecked()
-                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                .ok_or(ProviderError::SenderRecoveryError)?;
                             senders.push(sender);
                         }
                         Some(sender) => senders.push(*sender),

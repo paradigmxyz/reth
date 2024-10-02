@@ -40,7 +40,6 @@ impl Storage {
     }
 
     /// Removes notification for the given file ID from the storage.
-    #[instrument(skip(self))]
     fn remove_notification(&self, file_id: u32) -> bool {
         match reth_fs_util::remove_file(self.file_path(file_id)) {
             Ok(()) => {
