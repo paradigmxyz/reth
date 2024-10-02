@@ -235,7 +235,7 @@ mod tests {
     use reth::primitives::Signature;
     use reth_chainspec::MAINNET;
     use reth_primitives::{
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
+        transaction::TxDeposit, Transaction, TransactionSigned, TransactionSignedEcRecovered,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
