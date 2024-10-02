@@ -106,7 +106,7 @@ where
     /// # Panics
     /// If the index is out of bounds.
     pub fn remove_peer(&mut self, index: usize) -> Peer<C, Pool> {
-        self.peers.swap_remove(index)
+        self.peers.remove(index)
     }
 
     /// Return a mutable iterator over all peers.
