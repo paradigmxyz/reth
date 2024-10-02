@@ -1,4 +1,4 @@
-use alloy_primitives::{BlockHash, BlockNumber, B256};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::Consensus;
@@ -55,7 +55,7 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// ETL collector with `HeaderHash` -> `BlockNumber`
     hash_collector: Collector<BlockHash, BlockNumber>,
     /// ETL collector with `BlockNumber` -> `BincodeSealedHeader`
-    header_collector: Collector<BlockNumber, Vec<u8>>,
+    header_collector: Collector<BlockNumber, Bytes>,
     /// Returns true if the ETL collector has all necessary headers to fill the gap.
     is_etl_ready: bool,
 }
@@ -246,8 +246,8 @@ where
                         self.hash_collector.insert(header.hash(), header_number)?;
                         self.header_collector.insert(
                             header_number,
-                            bincode::serialize(&serde_bincode_compat::SealedHeader::from(&header))
-                                .map_err(|err| StageError::Fatal(Box::new(err)))?,
+                            Bytes::from(bincode::serialize(&serde_bincode_compat::SealedHeader::from(&header))
+                                .map_err(|err| StageError::Fatal(Box::new(err)))?),
                         )?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have

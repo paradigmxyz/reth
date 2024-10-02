@@ -5,7 +5,7 @@ use crate::{
     DatabaseError,
 };
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, Log, B256, U256};
+use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::{
     Account, Bytecode, Header, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxType,
@@ -209,6 +209,7 @@ macro_rules! impl_compression_for_compact {
 }
 
 impl_compression_for_compact!(
+    Bytes,
     Header,
     Account,
     Log,
