@@ -279,7 +279,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // the in-memory state.
         let last_block_body_index = provider
             .block_body_indices(last_database_block_number)?
-            .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
         let mut in_memory_tx_num = last_block_body_index.next_tx_num();
 
         let (start, end) = self.convert_range_bounds(range, || {
