@@ -1,8 +1,8 @@
 use crate::{
-    traits,
-    traits::{Block as _, BlockBody as _},
-    GotExpected, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
+    traits, traits::BlockBody as _, GotExpected, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered, Withdrawals,
 };
+use alloy_consensus::Sealable;
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 pub use alloy_eips::eip1898::{
@@ -40,6 +40,60 @@ pub struct Block {
     pub header: Header,
     /// Block body.
     pub body: BlockBody,
+}
+
+// todo: remove in favour of bringing traits::{Block, BlockBody} into scope where needed
+impl Block {
+    /// See abstraction [Block](traits::Block).
+    pub fn seal_slow(self) -> SealedBlock {
+        let sealed = self.header.seal_slow();
+        let (header, seal) = sealed.into_parts();
+        SealedBlock { header: SealedHeader::new(header, seal), body: self.body }
+    }
+
+    /// See abstraction [Block](traits::Block).
+    pub fn seal(self, hash: B256) -> SealedBlock {
+        SealedBlock { header: SealedHeader::new(self.header, hash), body: self.body }
+    }
+
+    /// See abstraction [Block](traits::Block).
+    pub fn senders(&self) -> Option<Vec<Address>> {
+        self.body.recover_signers()
+    }
+
+    /// See abstraction [Block](traits::Block).
+    #[track_caller]
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// See abstraction [Block](traits::Block).
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<BlockWithSenders, Self> {
+        let senders = if self.body.transactions.len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) = self.body.recover_signers() else { return Err(self) };
+            senders
+        };
+
+        Ok(BlockWithSenders { block: self, senders })
+    }
+
+    /// See abstraction [Block](traits::Block).
+    pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
+        let senders = self.senders()?;
+        Some(BlockWithSenders { block: self, senders })
+    }
+
+    /// See abstraction [Block](traits::Block).
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.header.size() + self.body.size()
+    }
 }
 
 // todo: move to ethereum and op primitives crates
