@@ -12,24 +12,48 @@ use serde::{Deserialize, Serialize};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
 #[add_arbitrary_tests(rlp, compact)]
-pub struct SealedHeader {
+pub struct SealedHeader<H = Header> {
     /// Locked Header hash.
     hash: BlockHash,
     /// Locked Header fields.
     #[as_ref]
     #[deref]
-    header: Header,
+    header: H,
+}
+
+impl<H: Compact> Compact for SealedHeader<H> {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let mut buffer = Vec::new();
+        self.hash.to_compact(&mut buffer);
+        self.header.to_compact(&mut buffer);
+        buf.put(&buffer[..]);
+        buffer.len()
+    }
+
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let (hash, new_buf) = BlockHash::from_compact(buf, buf.len());
+        buf = new_buf;
+        let (header, new_buf) = H::from_compact(buf, buf.len());
+        buf = new_buf;
+        let sealed_header = Self { hash, header };
+        (sealed_header, buf)
+    }
+}
+
+impl<H> SealedHeader<H> {
+    /// Creates the sealed header with the corresponding block hash.
+    #[inline]
+    pub const fn new(header: H, hash: BlockHash) -> Self {
+        Self { header, hash }
+    }
 }
 
 impl SealedHeader {
-    /// Creates the sealed header with the corresponding block hash.
-    #[inline]
-    pub const fn new(header: Header, hash: BlockHash) -> Self {
-        Self { header, hash }
-    }
-
     /// Returns the sealed Header fields.
     #[inline]
     pub const fn header(&self) -> &Header {

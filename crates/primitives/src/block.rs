@@ -299,16 +299,25 @@ impl BlockWithSenders {
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
 }
 
+impl<H, B> Default for SealedBlock<H, B>
+where
+    H: Default,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: SealedHeader::<H>::new(H::default(), B256::ZERO), body: Default::default() }
+    }
+}
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
