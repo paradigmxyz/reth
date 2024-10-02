@@ -288,7 +288,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 .sum::<u64>() +
                 last_block_body_index.last_tx_num()
         });
-        
+
         if start > end {
             return Ok(vec![])
         }
