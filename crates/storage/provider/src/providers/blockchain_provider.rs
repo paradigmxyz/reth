@@ -167,6 +167,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
         });
 
+        if start > end {
+            return Ok(vec![])
+        }
+
         // Split range into storage_range and in-memory range. If the in-memory range is not
         // necessary drop it early.
         //
@@ -284,6 +288,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 .sum::<u64>() +
                 last_block_body_index.last_tx_num()
         });
+        
+        if start > end {
+            return Ok(vec![])
+        }
+
         let mut tx_range = start..=end;
 
         // If the range is entirely before the first in-memory transaction number, fetch from
