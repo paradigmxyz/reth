@@ -139,18 +139,19 @@ where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
-    // 1. Spawn two thread using std::thread (one as a producer and the other as a consumer)
-    // 2. Preallocate channels for the chunk in the range of each batch
-    // 3. Spin up raynon thread on each chunk
-    // 4. Start listening to response on receiver for each chunk till completion / failure case.
+    // 1. Spawn two threads. One thread acts as a producer, while the other acts as a consumer.
+    // 2. Preallocate channels for the chunks in the range of each batch.
+    // 3. Spin up Rayon threads to process each chunk.
+    // 4. Listen for responses on the receiver for each chunk until completion or a failure occurs.
 
-    let (tx_batch_sender, tx_batch_receiver) = mpsc::channel();
+    let (tx_batch_sender, tx_batch_receiver) = mpsc::sync_channel(WORKER_CHUNK_SIZE);
     let (receiver_sender, receiver_receiver) = mpsc::channel();
     let total_expected: u64 = tx_batch_range.iter().map(|range| range.end - range.start).sum();
 
     let static_file_provider = provider.static_file_provider();
-    std::thread::spawn(move || {
-        // Send all batches to the processing thread
+
+    // Spawn a producer thread for all the batches using tokio.
+    tokio::spawn(async move {
         for tx_range in tx_batch_range {
             debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
 
@@ -167,15 +168,26 @@ where
                 })
                 .unzip();
 
-            // Send the chunks to the processing thread
-            let _ = tx_batch_sender.send(chunks);
+            if let Err(_) = tx_batch_sender.send(chunks) {
+                break; // Exit early, if receiver has dropped
+            }
+
+            // Send the chunks from the current batch to the consumer thread for processing.
             for receiver in receivers {
                 let _ = receiver_sender.send(receiver);
             }
         }
     });
 
-    // Spawn the processing thread for all the batches
+    // Spawn the consumer thread to process all received chunks.
+    //
+    // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
+    // there will be a timeout grace period in which Tokio does not allow spawning
+    // additional blocking tasks. This would cause this function to return
+    // `SenderRecoveryStageError::RecoveredSendersMismatch` at the end.
+    //
+    // However, using `std::thread::spawn` allows us to utilize the timeout grace
+    // period to complete some work without throwing errors during the shutdown.
     std::thread::spawn(move || {
         while let Ok(chunks) = tx_batch_receiver.recv() {
             for (chunk_range, recovered_senders_tx) in chunks {
