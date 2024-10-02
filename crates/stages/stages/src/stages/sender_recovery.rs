@@ -168,7 +168,7 @@ where
                 })
                 .unzip();
 
-            if let Err(_) = tx_batch_sender.send(chunks) {
+            if tx_batch_sender.send(chunks).is_err(){
                 break; // Exit early, if receiver has dropped
             }
 
