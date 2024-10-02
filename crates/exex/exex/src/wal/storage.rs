@@ -97,7 +97,8 @@ impl Storage {
         range: RangeInclusive<u32>,
     ) -> impl Iterator<Item = eyre::Result<(u32, ExExNotification)>> + '_ {
         range.map(move |id| {
-            let notification = self.read_notification(id)?.ok_or_eyre("notification not found")?;
+            let notification =
+                self.read_notification(id)?.ok_or_eyre("notification {id} not found")?;
 
             Ok((id, notification))
         })
