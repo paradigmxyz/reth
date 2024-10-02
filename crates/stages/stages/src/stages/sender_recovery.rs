@@ -147,9 +147,8 @@ where
 
     let (tx_batch_sender, tx_batch_receiver) = mpsc::channel();
     let (receiver_sender, receiver_receiver) = mpsc::channel();
-    let total_expected = tx_batch_range[0].start - tx_batch_range[tx_batch_range.len() - 1].end;
     let total_expected: u64 = tx_batch_range.iter().map(|range| range.end - range.start).sum();
-    
+
     let static_file_provider = provider.static_file_provider().clone();
     std::thread::spawn(move || {
         // Send all batches to the processing thread
