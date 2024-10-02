@@ -590,7 +590,90 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
-        into_ethereum_chain_spec(genesis)
+        // Block-based hardforks
+        let hardfork_opts = [
+            (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
+            (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
+            (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
+            (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
+            (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
+            (EthereumHardfork::Constantinople.boxed(), genesis.config.constantinople_block),
+            (EthereumHardfork::Petersburg.boxed(), genesis.config.petersburg_block),
+            (EthereumHardfork::Istanbul.boxed(), genesis.config.istanbul_block),
+            (EthereumHardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
+            (EthereumHardfork::Berlin.boxed(), genesis.config.berlin_block),
+            (EthereumHardfork::London.boxed(), genesis.config.london_block),
+            (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
+            (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
+        ];
+        let mut hardforks = hardfork_opts
+            .into_iter()
+            .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+            .collect::<Vec<_>>();
+
+        // Paris
+        let paris_block_and_final_difficulty =
+            if let Some(ttd) = genesis.config.terminal_total_difficulty {
+                hardforks.push((
+                    EthereumHardfork::Paris.boxed(),
+                    ForkCondition::TTD {
+                        total_difficulty: ttd,
+                        fork_block: genesis.config.merge_netsplit_block,
+                    },
+                ));
+
+                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+            } else {
+                None
+            };
+
+        // Time-based hardforks
+        let time_hardfork_opts = [
+            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
+            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
+            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
+        ];
+
+        let mut time_hardforks = time_hardfork_opts
+            .into_iter()
+            .filter_map(|(hardfork, opt)| {
+                opt.map(|time| (hardfork, ForkCondition::Timestamp(time)))
+            })
+            .collect::<Vec<_>>();
+
+        hardforks.append(&mut time_hardforks);
+
+        // Ordered Hardforks
+        let mainnet_hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
+        let mainnet_order = mainnet_hardforks.forks_iter();
+
+        let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
+        for (hardfork, _) in mainnet_order {
+            if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
+                ordered_hardforks.push(hardforks.remove(pos));
+            }
+        }
+
+        // append the remaining unknown hardforks to ensure we don't filter any out
+        ordered_hardforks.append(&mut hardforks);
+
+        // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
+        // have the deployment block in the genesis file, so we use block zero. We use the same
+        // deposit topic as the mainnet contract if we have the deposit contract address in the
+        // genesis json.
+        let deposit_contract = genesis.config.deposit_contract_address.map(|address| {
+            DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
+        });
+
+        Self {
+            chain: genesis.config.chain_id.into(),
+            genesis,
+            genesis_hash: OnceCell::new(),
+            hardforks: ChainHardforks::new(ordered_hardforks),
+            paris_block_and_final_difficulty,
+            deposit_contract,
+            ..Default::default()
+        }
     }
 }
 
@@ -628,94 +711,6 @@ impl EthereumHardforks for ChainSpec {
 
 #[cfg(feature = "optimism")]
 impl reth_optimism_forks::OptimismHardforks for ChainSpec {}
-
-/// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
-fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
-    // Block-based hardforks
-    let hardfork_opts = [
-        (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
-        (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
-        (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
-        (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
-        (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
-        (EthereumHardfork::Constantinople.boxed(), genesis.config.constantinople_block),
-        (EthereumHardfork::Petersburg.boxed(), genesis.config.petersburg_block),
-        (EthereumHardfork::Istanbul.boxed(), genesis.config.istanbul_block),
-        (EthereumHardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
-        (EthereumHardfork::Berlin.boxed(), genesis.config.berlin_block),
-        (EthereumHardfork::London.boxed(), genesis.config.london_block),
-        (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
-        (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-    ];
-    let mut hardforks = hardfork_opts
-        .into_iter()
-        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
-        .collect::<Vec<_>>();
-
-    // Paris
-    let paris_block_and_final_difficulty =
-        if let Some(ttd) = genesis.config.terminal_total_difficulty {
-            hardforks.push((
-                EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD {
-                    total_difficulty: ttd,
-                    fork_block: genesis.config.merge_netsplit_block,
-                },
-            ));
-
-            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-        } else {
-            None
-        };
-
-    // Time-based hardforks
-    let time_hardfork_opts = [
-        (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-        (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
-        (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-    ];
-
-    let mut time_hardforks = time_hardfork_opts
-        .into_iter()
-        .filter_map(|(hardfork, opt)| opt.map(|time| (hardfork, ForkCondition::Timestamp(time))))
-        .collect::<Vec<_>>();
-
-    hardforks.append(&mut time_hardforks);
-
-    // Ordered Hardforks
-    let mainnet_hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
-    let mainnet_order = mainnet_hardforks.forks_iter();
-
-    let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
-    for (hardfork, _) in mainnet_order {
-        if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
-            ordered_hardforks.push(hardforks.remove(pos));
-        }
-    }
-
-    // append the remaining unknown hardforks to ensure we don't filter any out
-    ordered_hardforks.append(&mut hardforks);
-
-    // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
-    // have the deployment block in the genesis file, so we use block zero. We use the same
-    // deposit topic as the mainnet contract if we have the deposit contract address in the
-    // genesis json.
-    let deposit_contract = genesis.config.deposit_contract_address.map(|address| DepositContract {
-        address,
-        block: 0,
-        topic: MAINNET_DEPOSIT_CONTRACT.topic,
-    });
-
-    ChainSpec {
-        chain: genesis.config.chain_id.into(),
-        genesis,
-        genesis_hash: OnceCell::new(),
-        hardforks: ChainHardforks::new(ordered_hardforks),
-        paris_block_and_final_difficulty,
-        deposit_contract,
-        ..Default::default()
-    }
-}
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
@@ -2344,7 +2339,7 @@ Post-merge hard forks (timestamp based):
             ..Default::default()
         };
 
-        let chain_spec = into_ethereum_chain_spec(genesis);
+        let chain_spec: ChainSpec = genesis.into();
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
