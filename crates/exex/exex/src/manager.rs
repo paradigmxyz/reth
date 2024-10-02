@@ -373,6 +373,8 @@ where
                 .format_with(", ", |(exex_id, num_hash), f| {
                     f(&format_args!("{exex_id} = {num_hash:?}"))
                 })
+                // We need this because `debug!` uses the argument twice when formatting the final
+                // log message, but the result of `format_with` can only be used once
                 .to_string();
             debug!(
                 target: "exex::manager",
