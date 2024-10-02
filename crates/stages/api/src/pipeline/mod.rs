@@ -463,6 +463,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         self.provider_factory.static_file_provider(),
                     )?;
 
+                    stage.post_execute_commit()?;
+
                     if done {
                         let block_number = checkpoint.block_number;
                         return Ok(if made_progress {
@@ -586,6 +588,8 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
@@ -628,15 +632,19 @@ mod tests {
     async fn run_pipeline() {
         let provider_factory = create_test_provider_factory();
 
+        let stage_a = TestStage::new(StageId::Other("A"))
+            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }));
+        let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
+        let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
+
+        let stage_b = TestStage::new(StageId::Other("B"))
+            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }));
+        let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
+        let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
+
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .add_stage(
-                TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true })),
-            )
-            .add_stage(
-                TestStage::new(StageId::Other("B"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
-            )
+            .add_stage(stage_a)
+            .add_stage(stage_b)
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
@@ -689,6 +697,12 @@ mod tests {
                 },
             ]
         );
+
+        assert_eq!(post_execute_commit_counter_a.load(Ordering::Relaxed), 1);
+        assert_eq!(post_unwind_commit_counter_a.load(Ordering::Relaxed), 0);
+
+        assert_eq!(post_execute_commit_counter_b.load(Ordering::Relaxed), 1);
+        assert_eq!(post_unwind_commit_counter_b.load(Ordering::Relaxed), 0);
     }
 
     /// Unwinds a simple pipeline.
@@ -696,22 +710,28 @@ mod tests {
     async fn unwind_pipeline() {
         let provider_factory = create_test_provider_factory();
 
+        let stage_a = TestStage::new(StageId::Other("A"))
+            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+            .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
+        let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
+        let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
+
+        let stage_b = TestStage::new(StageId::Other("B"))
+            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+            .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
+        let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
+        let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
+
+        let stage_c = TestStage::new(StageId::Other("C"))
+            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
+            .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
+        let (stage_c, post_execute_commit_counter_c) = stage_c.with_post_execute_commit_counter();
+        let (stage_c, post_unwind_commit_counter_c) = stage_c.with_post_unwind_commit_counter();
+
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .add_stage(
-                TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
-                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
-            )
-            .add_stage(
-                TestStage::new(StageId::Other("B"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
-                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
-            )
-            .add_stage(
-                TestStage::new(StageId::Other("C"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
-                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
-            )
+            .add_stage(stage_a)
+            .add_stage(stage_b)
+            .add_stage(stage_c)
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
@@ -823,6 +843,15 @@ mod tests {
                 },
             ]
         );
+
+        assert_eq!(post_execute_commit_counter_a.load(Ordering::Relaxed), 1);
+        assert_eq!(post_unwind_commit_counter_a.load(Ordering::Relaxed), 1);
+
+        assert_eq!(post_execute_commit_counter_b.load(Ordering::Relaxed), 1);
+        assert_eq!(post_unwind_commit_counter_b.load(Ordering::Relaxed), 1);
+
+        assert_eq!(post_execute_commit_counter_c.load(Ordering::Relaxed), 1);
+        assert_eq!(post_unwind_commit_counter_c.load(Ordering::Relaxed), 1);
     }
 
     /// Unwinds a pipeline with intermediate progress.
