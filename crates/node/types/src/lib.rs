@@ -12,7 +12,7 @@ extern crate alloc;
 
 pub mod block;
 
-pub use block::{Block, BlockBody};
+pub use block::{body::BlockBody, Block};
 
 use std::marker::PhantomData;
 
