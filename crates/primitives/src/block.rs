@@ -2,11 +2,12 @@ use crate::{
     GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
 };
 use alloc::vec::Vec;
+use alloy_consensus::Sealable;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, Bytes, Sealable, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -37,6 +38,22 @@ pub struct Block {
     pub header: Header,
     /// Block body.
     pub body: BlockBody,
+}
+
+impl From<(Header, BlockBody)> for Block {
+    fn from(value: (Header, BlockBody)) -> Self {
+        let (header, body) = value;
+
+        Self { header, body }
+    }
+}
+
+impl From<Block> for (Header, BlockBody) {
+    fn from(value: Block) -> Self {
+        let Block { header, body } = value;
+
+        (header, body)
+    }
 }
 
 /// We need to implement RLP traits manually because we currently don't have a way to flatten
@@ -228,14 +245,24 @@ impl BlockWithSenders {
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
     pub body: B,
+}
+
+impl<H, B> Default for SealedBlock<H, B>
+where
+    H: Default,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: SealedHeader::<H>::new(H::default(), B256::ZERO), body: Default::default() }
+    }
 }
 
 impl SealedBlock {
@@ -408,11 +435,11 @@ impl From<SealedBlock> for Block {
 
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlockWithSenders {
+pub struct SealedBlockWithSenders<H = Header, B = BlockBody> {
     /// Sealed block
     #[deref]
     #[deref_mut]
-    pub block: SealedBlock,
+    pub block: SealedBlock<H, B>,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
 }
