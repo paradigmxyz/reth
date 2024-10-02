@@ -158,7 +158,7 @@ impl WalInner {
         }
 
         let (removed_notifications, removed_size) = self.storage.remove_notifications(file_ids)?;
-        debug!(target: "exex::wak", ?removed_notifications, ?removed_size, "Storage was finalized");
+        debug!(target: "exex::wal", ?removed_notifications, ?removed_size, "Storage was finalized");
 
         self.update_metrics(&block_cache, -(removed_size as i64));
 
