@@ -246,8 +246,12 @@ where
                         self.hash_collector.insert(header.hash(), header_number)?;
                         self.header_collector.insert(
                             header_number,
-                            Bytes::from(bincode::serialize(&serde_bincode_compat::SealedHeader::from(&header))
-                                .map_err(|err| StageError::Fatal(Box::new(err)))?),
+                            Bytes::from(
+                                bincode::serialize(&serde_bincode_compat::SealedHeader::from(
+                                    &header,
+                                ))
+                                .map_err(|err| StageError::Fatal(Box::new(err)))?,
+                            ),
                         )?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
