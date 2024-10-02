@@ -370,13 +370,10 @@ where
                 .filter_map(|(exex_id, num_hash, is_canonical)| {
                     is_canonical.not().then_some((exex_id, num_hash))
                 })
-                .format_with(", ", |(exex_id, num_hash), f| {
-                    f(&format_args!("{exex_id} = {num_hash:?}"))
-                })
-                .to_string();
+                .collect::<Vec<_>>();
             debug!(
                 target: "exex::manager",
-                %unfinalized_exexes,
+                ?unfinalized_exexes,
                 "Not all ExExes are on the canonical chain, can't finalize the WAL"
             );
         }
