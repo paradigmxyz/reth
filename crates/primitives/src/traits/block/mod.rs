@@ -121,14 +121,17 @@ where
     type Header = <T::Target as Block>::Header;
     type Body = <T::Target as Block>::Body;
 
+    #[inline]
     fn header(&self) -> &Self::Header {
         self.deref().header()
     }
 
+    #[inline]
     fn body(&self) -> &Self::Body {
         self.deref().body()
     }
 
+    #[inline]
     fn size(&self) -> usize {
         self.deref().size()
     }

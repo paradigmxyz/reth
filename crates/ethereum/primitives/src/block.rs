@@ -16,10 +16,12 @@ impl Block for EthBlock {
     type Header = Header;
     type Body = BlockBody;
 
+    #[inline]
     fn header(&self) -> &Self::Header {
         &self.header
     }
 
+    #[inline]
     fn body(&self) -> &Self::Body {
         &self.body
     }
