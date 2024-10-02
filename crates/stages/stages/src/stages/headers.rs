@@ -11,7 +11,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{SealedHeader, StaticFileSegment};
+use reth_primitives::{Header, SealedHeader, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
@@ -121,7 +121,8 @@ where
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
-            let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
+            let (sealed_header, _) =
+                SealedHeader::<Header>::from_compact(&header_buf, header_buf.len());
             let (header, header_hash) = sealed_header.split();
             if header.number == 0 {
                 continue
