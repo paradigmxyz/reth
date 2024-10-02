@@ -96,7 +96,7 @@ impl WalInner {
     }
 
     /// Fills the block cache with the notifications from the storage.
-    #[instrument(target = "exex::wal", skip(self))]
+    #[instrument(skip(self))]
     fn fill_block_cache(&mut self) -> eyre::Result<()> {
         let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
         self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
@@ -128,7 +128,7 @@ impl WalInner {
         Ok(())
     }
 
-    #[instrument(target = "exex::wal", skip_all, fields(
+    #[instrument(skip_all, fields(
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
@@ -138,7 +138,7 @@ impl WalInner {
         let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
         let size = self.storage.write_notification(file_id, notification)?;
 
-        debug!(?file_id, "Inserting notification blocks into the block cache");
+        debug!(target: "exex::wal", ?file_id, "Inserting notification blocks into the block cache");
         block_cache.insert_notification_blocks_with_file_id(file_id, notification);
 
         self.update_metrics(&block_cache, size as i64);
@@ -146,19 +146,19 @@ impl WalInner {
         Ok(())
     }
 
-    #[instrument(target = "exex::wal", skip(self))]
+    #[instrument(skip(self))]
     fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
         let mut block_cache = self.block_cache.write();
         let file_ids = block_cache.remove_before(to_block.number);
 
         // Remove notifications from the storage.
         if file_ids.is_empty() {
-            debug!("No notifications were finalized from the storage");
+            debug!(target: "exex::wal", "No notifications were finalized from the storage");
             return Ok(())
         }
 
         let (removed_notifications, removed_size) = self.storage.remove_notifications(file_ids)?;
-        debug!(?removed_notifications, ?removed_size, "Storage was finalized");
+        debug!(target: "exex::wal", ?removed_notifications, ?removed_size, "Storage was finalized");
 
         self.update_metrics(&block_cache, -(removed_size as i64));
 
