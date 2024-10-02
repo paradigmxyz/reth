@@ -16,7 +16,7 @@ reth-codecs-derive = { path = "./derive", default-features = false }
 
 
 # eth
-alloy-consensus = { workspace = true, optional = true,features = ["serde"] }
+alloy-consensus = { workspace = true, optional = true, features = ["serde"] }
 alloy-eips = { workspace = true, optional = true, features = ["serde"] }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true

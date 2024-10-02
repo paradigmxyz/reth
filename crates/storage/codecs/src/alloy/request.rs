@@ -79,9 +79,6 @@ impl Compact for Request {
 
 #[cfg(test)]
 mod tests {
-    use core::default;
-
-    use crate::alloy::request;
 
     use super::*;
     use alloy_eips::eip6110::DepositRequest;
