@@ -10,7 +10,7 @@
 
 pub mod block;
 
-pub use block::Block;
+pub use block::{Block, BlockBody};
 
 use std::marker::PhantomData;
 

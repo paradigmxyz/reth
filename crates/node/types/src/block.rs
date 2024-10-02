@@ -16,14 +16,3 @@ pub trait BlockBody {
     // todo: requires trait for signed transaction
     type SignedTransaction: Transaction;
 }
-
-// todo: remove in favour of moving block type to ethereum primitives crate
-impl Block for reth_primitives::Block {
-    type Header = reth_primitives::Header;
-    type Body = reth_primitives::BlockBody;
-}
-
-// todo: remove in favour of moving block body type to ethereum primitives crate
-impl BlockBody for reth_primitives::BlockBody {
-    type SignedTransaction = reth_primitives::TransactionSigned;
-}

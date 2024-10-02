@@ -1,5 +1,5 @@
 [package]
-name = "reth-node-types"
+name = "reth-ethereum-primitives"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,9 +12,8 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-db-api.workspace = true
-reth-engine-primitives.workspace = true
+reth-primitives.workspace = true
+reth-node-api.workspace = true
 
-# ethereum
-alloy-consensus.workspace = true
+# misc
+derive_more = { workspace = true, features = ["deref"] }

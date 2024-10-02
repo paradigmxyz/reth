@@ -29,6 +29,7 @@ reth-rpc.workspace = true
 reth-node-api.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # misc
 eyre.workspace = true
