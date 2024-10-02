@@ -223,8 +223,6 @@ where
     /// - ExEx is at the same block number as the node head (`node_head.number ==
     ///   exex_head.number`). Nothing to do.
     fn check_backfill(&mut self) -> eyre::Result<()> {
-        debug!(target: "exex::notifications", "Synchronizing ExEx head");
-
         let backfill_job_factory =
             BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
         match self.exex_head.block.number.cmp(&self.node_head.number) {
