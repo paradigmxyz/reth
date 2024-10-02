@@ -171,15 +171,3 @@ impl TransactionCompat for OpTxBuilder {
         tx.inner.transaction_type.unwrap_or_default()
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use std::sync::Arc;
-//     use reth_primitives::{TransactionSignedEcRecovered, TransactionInfo, ChainSpec};
-
-//     #[test]
-//     fn fill_with_spec_deposit_receipt_version_some() {
-//         assert_eq!(1, 1);
-//     }
-// }
