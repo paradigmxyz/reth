@@ -927,7 +927,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
             range,
             |db_provider, db_range| db_provider.senders_by_tx_range(db_range),
             |index_range, block_state| {
-                Ok(block_state.block_ref().senders[index_range].iter().copied().collect())
+                Ok(block_state.block_ref().senders[index_range].to_vec())
             },
         )
     }
