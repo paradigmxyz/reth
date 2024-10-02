@@ -144,7 +144,7 @@ where
     // 3. Spin up Rayon threads to process each chunk.
     // 4. Listen for responses on the receiver for each chunk until completion or a failure occurs.
 
-    let (tx_batch_sender, tx_batch_receiver) = mpsc::sync_channel(WORKER_CHUNK_SIZE);
+    let (tx_batch_sender, tx_batch_receiver) = mpsc::channel();
     let (receiver_sender, receiver_receiver) = mpsc::channel();
     let total_expected = tx_batch_range.iter().map(|range| range.end - range.start).sum();
 
