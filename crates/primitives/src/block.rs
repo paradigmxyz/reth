@@ -2,9 +2,8 @@ use crate::{
     traits, traits::BlockBody as _, GotExpected, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals,
 };
-use alloy_consensus::Sealable;
 use alloc::vec::Vec;
-use alloy_consensus::Header;
+use alloy_consensus::{Header, Sealable};
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
@@ -294,7 +293,7 @@ impl BlockWithSenders {
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.transactions())
+        self.senders.iter().zip(self.block.body.transactions_vec())
     }
 
     /// Returns an iterator over all transactions in the chain.
@@ -500,7 +499,7 @@ impl SealedBlock {
     /// Returns a vector of transactions RLP encoded with
     /// [`alloy_eips::eip2718::Encodable2718::encoded_2718`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body.transactions().iter().map(|tx| tx.encoded_2718().into()).collect()
+        self.body.transactions_vec().iter().map(|tx| tx.encoded_2718().into()).collect()
     }
 }
 
@@ -543,7 +542,7 @@ impl SealedBlockWithSenders {
     /// Returns an iterator over all transactions in the block.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
-        self.block.body.transactions().iter()
+        self.block.body.transactions_vec().iter()
     }
 
     /// Returns an iterator over all transactions and their sender.
@@ -551,7 +550,7 @@ impl SealedBlockWithSenders {
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
-        self.senders.iter().zip(self.block.body.transactions())
+        self.senders.iter().zip(self.block.body.transactions_vec())
     }
 
     /// Consumes the block and returns the transactions of the block.
@@ -609,11 +608,100 @@ pub struct BlockBody {
     pub requests: Option<Requests>,
 }
 
+// todo: remove in favour of bringing traits::{Block, BlockBody} into scope where needed
+impl BlockBody {
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    pub const fn into_block(self, header: Header) -> Block {
+        Block { header, body: self }
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    pub fn calculate_tx_root(&self) -> B256 {
+        crate::proofs::calculate_transaction_root(&self.transactions)
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    pub fn calculate_ommers_root(&self) -> B256 {
+        crate::proofs::calculate_ommers_root(&self.ommers)
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
+        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    pub fn calculate_requests_root(&self) -> Option<B256> {
+        self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    pub fn recover_signers(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers(&self.transactions, self.transactions.len())
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn has_blob_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip4844())
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.transactions.iter().any(|tx| tx.is_eip7702())
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.transactions.iter().filter(|tx| tx.is_eip4844())
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.blob_transactions_iter().collect()
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes_iter().collect()
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.transactions.iter()
+    }
+
+    /// See abstraction [`BlockBody`](traits::BlockBody).
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals
+                .as_ref()
+                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
 impl traits::BlockBody for BlockBody {
     type Header = Header;
     type SignedTransaction = TransactionSigned;
 
-    fn transactions(&self) -> &Vec<Self::SignedTransaction> {
+    fn transactions_vec(&self) -> &Vec<Self::SignedTransaction> {
         &self.transactions
     }
 
@@ -630,7 +718,7 @@ impl traits::BlockBody for BlockBody {
     }
 
     fn calculate_tx_root(&self) -> B256 {
-        crate::proofs::calculate_transaction_root(self.transactions())
+        crate::proofs::calculate_transaction_root(self.transactions_vec())
     }
 
     fn calculate_ommers_root(&self) -> B256 {
@@ -638,7 +726,7 @@ impl traits::BlockBody for BlockBody {
     }
 
     fn recover_signers(&self) -> Option<Vec<Address>> {
-        TransactionSigned::recover_signers(self.transactions(), self.transactions().len())
+        TransactionSigned::recover_signers(self.transactions_vec(), self.transactions_vec().len())
     }
 
     fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
@@ -648,8 +736,8 @@ impl traits::BlockBody for BlockBody {
     }
 
     fn size(&self) -> usize {
-        self.transactions().iter().map(Self::SignedTransaction::size).sum::<usize>() +
-            self.transactions().capacity() * mem::size_of::<Self::SignedTransaction>() +
+        self.transactions_vec().iter().map(Self::SignedTransaction::size).sum::<usize>() +
+            self.transactions_vec().capacity() * mem::size_of::<Self::SignedTransaction>() +
             self.ommers().iter().map(Self::Header::size).sum::<usize>() +
             self.ommers().capacity() * core::mem::size_of::<Self::Header>() +
             self.withdrawals()

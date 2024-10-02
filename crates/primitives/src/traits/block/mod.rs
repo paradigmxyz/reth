@@ -80,7 +80,7 @@ pub trait Block:
         self,
         senders: Vec<Address>,
     ) -> Result<BlockWithSenders<Self>, Self> {
-        let senders = if self.body().transactions().len() == senders.len() {
+        let senders = if self.body().transactions_vec().len() == senders.len() {
             senders
         } else {
             let Some(senders) = self.body().recover_signers() else { return Err(self) };

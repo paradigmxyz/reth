@@ -28,7 +28,7 @@ pub trait BlockBody:
     type Header: BlockHeader;
 
     /// Returns reference to transactions in block.
-    fn transactions(&self) -> &Vec<Self::SignedTransaction>;
+    fn transactions_vec(&self) -> &Vec<Self::SignedTransaction>;
 
     /// Returns [`Withdrawals`] in the block, if any.
     fn withdrawals(&self) -> Option<&Withdrawals>;
@@ -67,17 +67,17 @@ pub trait BlockBody:
 
     /// Returns whether or not the block body contains any blob transactions.
     fn has_blob_transactions(&self) -> bool {
-        self.transactions().iter().any(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
+        self.transactions_vec().iter().any(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
     }
 
     /// Returns whether or not the block body contains any EIP-7702 transactions.
     fn has_eip7702_transactions(&self) -> bool {
-        self.transactions().iter().any(|tx| tx.ty() as u8 == TxType::Eip7702 as u8)
+        self.transactions_vec().iter().any(|tx| tx.ty() as u8 == TxType::Eip7702 as u8)
     }
 
     /// Returns an iterator over all blob transactions of the block
     fn blob_transactions_iter(&self) -> impl Iterator<Item = &Self::SignedTransaction> + '_ {
-        self.transactions().iter().filter(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
+        self.transactions_vec().iter().filter(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
     }
 
     /// Returns only the blob transactions, if any, from the block body.
@@ -116,8 +116,8 @@ where
     type Header = <T::Target as BlockBody>::Header;
     type SignedTransaction = <T::Target as BlockBody>::SignedTransaction;
 
-    fn transactions(&self) -> &Vec<Self::SignedTransaction> {
-        self.deref().transactions()
+    fn transactions_vec(&self) -> &Vec<Self::SignedTransaction> {
+        self.deref().transactions_vec()
     }
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
