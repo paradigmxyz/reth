@@ -115,6 +115,7 @@ impl ExExHandle {
                     // I.e., the ExEx has already processed the notification.
                     if finished_height.number >= new.tip().number {
                         debug!(
+                            target: "exex::manager",
                             exex_id = %self.id,
                             %notification_id,
                             ?finished_height,
@@ -135,6 +136,7 @@ impl ExExHandle {
         }
 
         debug!(
+            target: "exex::manager",
             exex_id = %self.id,
             %notification_id,
             "Reserving slot for notification"
@@ -145,6 +147,7 @@ impl ExExHandle {
         }
 
         debug!(
+            target: "exex::manager",
             exex_id = %self.id,
             %notification_id,
             "Sending notification"
@@ -327,7 +330,7 @@ where
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
     fn finalize_wal(&self, finalized_header: SealedHeader) -> eyre::Result<()> {
-        debug!(header = ?finalized_header.num_hash(), "Received finalized header");
+        debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
 
         // Check if all ExExes are on the canonical chain
         let exex_finished_heights = self
@@ -368,9 +371,13 @@ where
                     is_canonical.not().then_some((exex_id, num_hash))
                 })
                 .format_with(", ", |(exex_id, num_hash), f| {
-                    f(&format_args!("{exex_id:?} = {num_hash:?}"))
-                });
+                    f(&format_args!("{exex_id} = {num_hash:?}"))
+                })
+                // We need this because `debug!` uses the argument twice when formatting the final
+                // log message, but the result of `format_with` can only be used once
+                .to_string();
             debug!(
+                target: "exex::manager",
                 %unfinalized_exexes,
                 "Not all ExExes are on the canonical chain, can't finalize the WAL"
             );
@@ -403,7 +410,7 @@ where
         // Handle incoming ExEx events
         for exex in &mut this.exex_handles {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(exex_id = %exex.id, ?event, "Received event from ExEx");
+                debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
@@ -424,10 +431,12 @@ where
         while this.buffer.len() < this.max_capacity {
             if let Poll::Ready(Some(notification)) = this.handle_rx.poll_recv(cx) {
                 debug!(
+                    target: "exex::manager",
                     committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
                     reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
                     "Received new notification"
                 );
+                this.wal.commit(&notification)?;
                 this.push_notification(notification);
                 continue
             }
@@ -459,7 +468,7 @@ where
         }
 
         // Remove processed buffered notifications
-        debug!(%min_id, "Updating lowest notification id in buffer");
+        debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
         this.buffer.retain(|&(id, _)| id >= min_id);
         this.min_id = min_id;
 
@@ -602,7 +611,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use eyre::OptionExt;
-    use futures::StreamExt;
+    use futures::{FutureExt, StreamExt};
     use rand::Rng;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{test_utils::create_test_provider_factory, BlockWriter, Chain};
@@ -1121,7 +1130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_exex_wal_finalize() -> eyre::Result<()> {
+    async fn test_exex_wal() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         let mut rng = generators::rng();
@@ -1141,12 +1150,11 @@ mod tests {
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
         };
-        wal.commit(&notification)?;
 
         let (finalized_headers_tx, rx) = watch::channel(None);
         let finalized_header_stream = ForkChoiceStream::new(rx);
 
-        let (exex_handle, events_tx, _) =
+        let (exex_handle, events_tx, mut notifications) =
             ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
 
         let mut exex_manager = std::pin::pin!(ExExManager::new(
@@ -1159,7 +1167,13 @@ mod tests {
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
-        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        exex_manager.handle().send(notification.clone())?;
+
+        assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
+        assert_eq!(
+            notifications.next().poll_unpin(&mut cx),
+            Poll::Ready(Some(notification.clone()))
+        );
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
             [notification.clone()]
