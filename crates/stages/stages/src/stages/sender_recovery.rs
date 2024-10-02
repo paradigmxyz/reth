@@ -168,7 +168,7 @@ where
                 })
                 .unzip();
 
-            if tx_batch_sender.send(chunks).is_err(){
+            if tx_batch_sender.send(chunks).is_err() {
                 break; // Exit early, if receiver has dropped
             }
 
