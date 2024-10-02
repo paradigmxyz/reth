@@ -8,21 +8,3 @@ use reth_primitives::{BlockBody, Header};
 // todo: move reth_primitives type here.
 #[derive(Debug, Deref)]
 pub struct EthBlock(reth_primitives::Block);
-
-impl Block for EthBlock {
-    type Header = Header;
-    type Body = BlockBody;
-
-    type Header = Header;
-    type Body = BlockBody;
-
-    #[inline]
-    fn header(&self) -> &Self::Header {
-        &self.header
-    }
-
-    #[inline]
-    fn body(&self) -> &Self::Body {
-        &self.body
-    }
-}
