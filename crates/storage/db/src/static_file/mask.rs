@@ -26,9 +26,6 @@ macro_rules! add_segments {
             $(
                 #[doc = concat!("Mask for ", stringify!($segment), " static file segment. See [`Mask`] for more.")]
                 #[derive(Debug)]
-                // TODO: remove next attribute when nightly is fixed (ie. does
-                // not return wrong warnings for never constructed structs).
-                #[allow(dead_code)]
                 pub struct [<$segment Mask>]<FIRST, SECOND = (), THIRD = ()>(Mask<FIRST, SECOND, THIRD>);
             )+
         }
