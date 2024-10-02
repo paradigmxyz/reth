@@ -609,7 +609,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use eyre::OptionExt;
-    use futures::StreamExt;
+    use futures::{FutureExt, StreamExt};
     use rand::Rng;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{test_utils::create_test_provider_factory, BlockWriter, Chain};
@@ -1128,7 +1128,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_exex_wal_finalize() -> eyre::Result<()> {
+    async fn test_exex_wal() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         let mut rng = generators::rng();
@@ -1148,12 +1148,11 @@ mod tests {
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
         };
-        wal.commit(&notification)?;
 
         let (finalized_headers_tx, rx) = watch::channel(None);
         let finalized_header_stream = ForkChoiceStream::new(rx);
 
-        let (exex_handle, events_tx, _) =
+        let (exex_handle, events_tx, mut notifications) =
             ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
 
         let mut exex_manager = std::pin::pin!(ExExManager::new(
@@ -1166,7 +1165,13 @@ mod tests {
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
-        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        exex_manager.handle().send(notification.clone())?;
+
+        assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
+        assert_eq!(
+            notifications.next().poll_unpin(&mut cx),
+            Poll::Ready(Some(notification.clone()))
+        );
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
             [notification.clone()]
