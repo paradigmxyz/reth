@@ -36,7 +36,7 @@ pub struct TxPoolMetrics {
     /// Total amount of memory used by the transactions in the blob sub-pool in bytes
     pub(crate) blob_pool_size_bytes: Gauge,
 
-    /// Number of all transactions of all sub-pools: pending + basefee + queued
+    /// Number of all transactions of all sub-pools: pending + basefee + queued + blob
     pub(crate) total_transactions: Gauge,
     /// Number of all legacy transactions in the pool
     pub(crate) total_legacy_transactions: Gauge,
