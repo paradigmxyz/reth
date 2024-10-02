@@ -1,25 +1,26 @@
 //! L1 ethereum block primitive.
 
 use derive_more::Deref;
-use reth_node_api::{Block, BlockBody};
+use reth_node_api::Block;
+use reth_primitives::{BlockBody, Header};
 
+/// An L1 Ethereum block.
+// todo: move reth_primitives type here.
 #[derive(Debug, Deref)]
 pub struct EthBlock(reth_primitives::Block);
 
-#[derive(Debug, Deref)]
-pub struct EthHeader(reth_primitives::Header);
-
-#[derive(Debug, Deref)]
-pub struct EthBlockBody(reth_primitives::BlockBody);
-
-#[derive(Debug, Deref)]
-pub struct EthSignedTransaction(reth_primitives::TransactionSigned);
-
 impl Block for EthBlock {
-    type Header = EthHeader;
-    type Body = EthBlockBody;
-}
+    type Header = Header;
+    type Body = BlockBody;
 
-impl BlockBody for EthBlockBody {
-    type SignedTransaction = EthSignedTransaction;
+    type Header = Header;
+    type Body = BlockBody;
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
 }
