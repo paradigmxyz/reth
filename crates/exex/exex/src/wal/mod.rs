@@ -166,14 +166,8 @@ impl WalInner {
     }
 
     fn update_metrics(&self, block_cache: &BlockCache, size_delta: i64) {
-        if size_delta >= 0 {
-            self.metrics.size_bytes.increment(size_delta as f64);
-        } else {
-            self.metrics.size_bytes.decrement(size_delta as f64);
-        }
-
+        self.metrics.size_bytes.increment(size_delta as f64);
         self.metrics.notifications_total.set(block_cache.notification_max_blocks.len() as f64);
-
         self.metrics.committed_blocks_total.set(block_cache.committed_blocks.len() as f64);
 
         if let Some(lowest_committed_block_height) = block_cache.lowest_committed_block_height {
