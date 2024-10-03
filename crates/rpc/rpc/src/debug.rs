@@ -621,6 +621,7 @@ where
                 let mut hashed_state = HashedPostState::default();
                 let mut keys = HashMap::default();
                 let mut codes = HashMap::default();
+
                 let _ = block_executor
                     .execute_with_state_witness(
                         (&block.clone().unseal(), block.difficulty).into(),
@@ -645,14 +646,14 @@ where
                                     );
 
                                 if let Some(account) = &account.account {
-                                    keys.insert(hashed_address, alloy_rlp::encode(address).into());
+                                    keys.insert(hashed_address, address.to_vec().into());
 
                                     for (slot, value) in &account.storage {
                                         let slot = B256::from(*slot);
                                         let hashed_slot = keccak256(slot);
                                         storage.storage.insert(hashed_slot, *value);
 
-                                        keys.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                                        keys.insert(hashed_slot, slot.into());
                                     }
                                 }
                             }
