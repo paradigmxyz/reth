@@ -1,0 +1,45 @@
+# Windows build
+
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+jobs:
+  build-reth:
+    runs-on: ubuntu-latest
+    name: Build Reth
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-pc-windows-gnu
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build Reth
+        run: make build-reth-x86_64-pc-windows-gnu
+
+  build-op-reth:
+    runs-on: ubuntu-latest
+    name: Build OP-Reth
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-pc-windows-gnu
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build OP-Reth
+        run: make build-op-x86_64-pc-windows-gnu
