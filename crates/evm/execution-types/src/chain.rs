@@ -7,8 +7,8 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered,
+    traits::BlockBody, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
@@ -233,7 +233,7 @@ impl Chain {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
-            for (tx, receipt) in block.body.transactions().zip(receipts.iter()) {
+            for (tx, receipt) in block.body.transactions().iter().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -631,13 +631,14 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_primitives::B256;
-    use reth_primitives::{Receipt, Receipts, TxType};
+    use reth_primitives::{BlockBody, Receipt, Receipts, TxType};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
     fn chain_append() {
-        let block = SealedBlockWithSenders::default();
+        let block = SealedBlockWithSenders::<Header, BlockBody>::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -701,13 +702,13 @@ mod tests {
             vec![],
         );
 
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1 = SealedBlockWithSenders::<Header, BlockBody>::default();
         let block1_hash = B256::new([15; 32]);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
         block1.senders.push(Address::new([4; 20]));
 
-        let mut block2 = SealedBlockWithSenders::default();
+        let mut block2 = SealedBlockWithSenders::<Header, BlockBody>::default();
         let block2_hash = B256::new([16; 32]);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
@@ -767,7 +768,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block = SealedBlockWithSenders::default();
+        let block = SealedBlockWithSenders::<Header, BlockBody>::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);

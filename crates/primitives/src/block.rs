@@ -33,9 +33,10 @@ prop_compose! {
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, Serialize, Deserialize)]
 pub struct Block {
     /// Block header.
+    #[deref]
     pub header: Header,
     /// Block body.
     pub body: BlockBody,
@@ -339,6 +340,7 @@ where
         Self { header: SealedHeader::<H>::new(H::default(), B256::ZERO), body: Default::default() }
     }
 }
+
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]

@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-node-api.workspace = true
 
 # misc
 derive_more = { workspace = true, features = ["deref"] }

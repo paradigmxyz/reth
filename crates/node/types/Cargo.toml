@@ -16,11 +16,3 @@ reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-primitives.workspace = true
-
-# ethereum
-alloy-consensus.workspace = true
-alloy-rlp.workspace = true
-alloy-primitives.workspace = true
-
-# io
-serde.workspace = true

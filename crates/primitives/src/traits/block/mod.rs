@@ -10,7 +10,15 @@ use alloy_primitives::{Address, Sealable, B256};
 
 use crate::{traits::BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
 
+/// Helper trait, unifies behaviour required of a block header.
+pub trait Header: BlockHeader + Sealable {}
+
+impl<T> Header for T where T: BlockHeader + Sealable {}
+
 /// Abstraction of block data type.
+// todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
+// todo: make with senders extension trait, so block can be impl by block type already containing
+// senders
 pub trait Block:
     fmt::Debug
     + Clone
@@ -19,11 +27,12 @@ pub trait Block:
     + Default
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
+    + ops::Deref<Target: Header>
     + From<(Self::Header, Self::Body)>
     + Into<(Self::Header, Self::Body)>
 {
     /// Header part of the block.
-    type Header: BlockHeader + Sealable;
+    type Header: Header;
 
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;
@@ -104,7 +113,7 @@ pub trait Block:
     fn size(&self) -> usize;
 }
 
-impl<T> Block for T
+/*impl<T> Block for T
 where
     T: ops::Deref<Target: Block>
         + fmt::Debug
@@ -135,3 +144,4 @@ where
         self.deref().size()
     }
 }
+*/

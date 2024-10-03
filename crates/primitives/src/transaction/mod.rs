@@ -877,7 +877,7 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip4844(tx) => tx.max_fee_per_gas(),
             Self::Eip7702(tx) => tx.max_fee_per_gas(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.max_fee_oer_gas(),
+            Self::Deposit(tx) => tx.max_fee_per_gas(),
         }
     }
 

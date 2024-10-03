@@ -8,8 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-extern crate alloc;
-
 pub use reth_primitives::traits::{Block, BlockBody};
 
 use std::marker::PhantomData;
@@ -24,7 +22,11 @@ use reth_engine_primitives::EngineTypes;
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives {
     /// Block primitive.
-    type Block: Block;
+    type Block;
+}
+
+impl NodePrimitives for () {
+    type Block = ();
 }
 
 /// The type that configures the essential types of an Ethereum-like node.

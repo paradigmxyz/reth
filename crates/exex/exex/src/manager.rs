@@ -609,11 +609,12 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_primitives::B256;
     use eyre::OptionExt;
     use futures::{FutureExt, StreamExt};
     use rand::Rng;
-    use reth_primitives::SealedBlockWithSenders;
+    use reth_primitives::{BlockBody, SealedBlockWithSenders};
     use reth_provider::{test_utils::create_test_provider_factory, BlockWriter, Chain};
     use reth_testing_utils::generators::{self, random_block};
 
@@ -692,7 +693,7 @@ mod tests {
             ExExManager::new((), vec![exex_handle], 10, wal, empty_finalized_header_stream());
 
         // Define the notification for testing
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1 = SealedBlockWithSenders::<Header, BlockBody>::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
@@ -710,7 +711,7 @@ mod tests {
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
-        let mut block2 = SealedBlockWithSenders::default();
+        let mut block2 = SealedBlockWithSenders::<Header, BlockBody>::default();
         block2.block.header.set_hash(B256::new([0x02; 32]));
         block2.block.header.set_block_number(20);
 
@@ -748,7 +749,7 @@ mod tests {
         );
 
         // Push some notifications to fill part of the buffer
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1 = SealedBlockWithSenders::<Header, BlockBody>::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
@@ -986,11 +987,11 @@ mod tests {
         assert_eq!(exex_handle.next_notification_id, 0);
 
         // Setup two blocks for the chain commit notification
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1 = SealedBlockWithSenders::<Header, BlockBody>::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 
-        let mut block2 = SealedBlockWithSenders::default();
+        let mut block2 = SealedBlockWithSenders::<Header, BlockBody>::default();
         block2.block.header.set_hash(B256::new([0x02; 32]));
         block2.block.header.set_block_number(11);
 
@@ -1030,7 +1031,7 @@ mod tests {
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
-        let mut block1 = SealedBlockWithSenders::default();
+        let mut block1 = SealedBlockWithSenders::<Header, BlockBody>::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
         block1.block.header.set_block_number(10);
 

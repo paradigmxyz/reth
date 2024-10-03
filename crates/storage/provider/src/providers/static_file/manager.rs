@@ -643,8 +643,9 @@ impl StaticFileProvider {
         // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
         #[cfg(feature = "optimism")]
         {
-            const OVM_HEADER_1_HASH: B256 =
-                b256!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+            const OVM_HEADER_1_HASH: B256 = alloy_primitives::b256!(
+                "bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453"
+            );
             if reth_chainspec::EthChainSpec::chain(&provider.chain_spec()) ==
                 reth_chainspec::Chain::optimism_mainnet() &&
                 provider.block_number(OVM_HEADER_1_HASH)?.is_some()
