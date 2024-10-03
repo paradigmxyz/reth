@@ -1,30 +1,68 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use eyre::Result;
-use reth_db::DatabaseEnv;
+use reth_chainspec::ChainSpecBuilder;
+use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory, StateProvider,
-    TryIntoHistoricalStateProvider,
+    providers::StaticFileProvider, BlockNumReader, DatabaseProviderFactory, ProviderError,
+    ProviderFactory, StateProvider, TryIntoHistoricalStateProvider,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 /// A tower-like layer that should be used as a [ProviderLayer](https://docs.rs/alloy/latest/alloy/providers/trait.ProviderLayer.html) in alloy when wrapping the
 /// [Provider](https://docs.rs/alloy/latest/alloy/providers/trait.Provider.html) trait over reth-db.
 #[derive(Debug, Clone)]
-pub struct RethDbLayer {
+pub struct RethDbLayer<P> {
     db_path: PathBuf,
+    _pd: PhantomData<P>,
 }
 
-impl RethDbLayer {
+impl<P> RethDbLayer<P> {
     /// Initialize the `RethDbLayer` with the path to the reth datadir.
     pub const fn new(db_path: PathBuf) -> Self {
-        Self { db_path }
+        Self { db_path, _pd: PhantomData }
     }
 
     /// Get the provided path.
     pub const fn db_path(&self) -> &PathBuf {
         &self.db_path
+    }
+}
+
+/// A provider that overrides the vanilla `Provider` trait to get results from the reth-db.
+#[derive(Clone, Debug)]
+pub struct RethDbProvider<P, T> {
+    #[allow(dead_code)]
+    inner: P,
+    db_path: PathBuf,
+    provider_factory: DbAccessor,
+    _pd: PhantomData<T>,
+}
+
+impl<P, T> RethDbProvider<P, T> {
+    /// Create a new `RethDbProvider` instance.
+    pub fn new(inner: P, db_path: PathBuf) -> Self {
+        let db = open_db_read_only(&db_path, Default::default()).unwrap();
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let static_file_provider =
+            StaticFileProvider::read_only(db_path.join("static_files"), false).unwrap();
+
+        let provider_factory =
+            ProviderFactory::new(db.into(), chain_spec.into(), static_file_provider);
+
+        let db_accessor = DbAccessor::new(provider_factory);
+        Self { inner, db_path, provider_factory: db_accessor, _pd: PhantomData }
+    }
+
+    /// Get the underlying `DbAccessor`.
+    pub const fn factory(&self) -> &DbAccessor {
+        &self.provider_factory
+    }
+
+    /// Get the DB Path
+    pub fn db_path(&self) -> PathBuf {
+        self.db_path.clone()
     }
 }
 

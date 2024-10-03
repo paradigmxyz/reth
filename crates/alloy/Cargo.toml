@@ -17,9 +17,12 @@ reth-db.workspace = true
 reth-provider.workspace = true
 reth-node-types.workspace = true
 reth-node-ethereum.workspace = true
+reth-chainspec.workspace = true
 
 # alloy
 alloy-eips.workspace = true
+alloy-provider.workspace = true
+alloy-transport.workspace = true
 
 ## misc
 eyre.workspace = true
