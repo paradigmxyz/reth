@@ -163,12 +163,17 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         DB: Database<Error: Into<ProviderError> + Display>;
 }
 
+/// A factory for creating block execution strategies.
 pub trait BlockExecutionStrategyFactory {
+    /// The specific [`BlockExecutionStrategy`] type this factory produces.
     type Strategy: BlockExecutionStrategy;
+
+    /// The error type returned by this factory and its produced strategies.
     type Error: From<ProviderError>
         + From<<Self::Strategy as BlockExecutionStrategy>::Error>
         + std::error::Error;
 
+    /// Creates a new block execution strategy instance.
     fn new(
         &self,
         block: &BlockWithSenders,
@@ -176,28 +181,41 @@ pub trait BlockExecutionStrategyFactory {
     ) -> Result<Self::Strategy, Self::Error>;
 }
 
+/// Defines the strategy for executing a single block.
 pub trait BlockExecutionStrategy {
+    /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + std::error::Error;
+    /// The database type used by this strategy.
     type DB: Database;
 
+    /// Configures the environment before start applying any changes.
     fn configure_environment(&mut self) -> Result<(), Self::Error>;
 
+    /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
 
+    /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
     ) -> Result<(Vec<Receipt>, u64), Self::Error>;
 
+    /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error>;
 
-    fn finish(self) -> BundleState;
-
+    /// Returns a reference to the current state.
     fn state_ref(&self) -> &State<Self::DB>;
 
+    /// Sets a hook to be called after each state change during execution.
     fn set_state_hook<F: OnStateHook + 'static>(&mut self, hook: Option<F>);
+
+    /// Consumes the strategy and returns the final bundle state.
+    fn finish(self) -> BundleState;
 }
 
+/// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
+/// create and run block execution strategies.
+#[allow(missing_debug_implementations)]
 pub struct GenericBlockExecutor<F>
 where
     F: BlockExecutionStrategyFactory,
@@ -209,6 +227,7 @@ impl<F> GenericBlockExecutor<F>
 where
     F: BlockExecutionStrategyFactory,
 {
+    /// Creates a new `GenericBlockExecutor` with the given strategy factory.
     pub fn new(strategy_factory: F) -> Self {
         Self { strategy_factory }
     }
