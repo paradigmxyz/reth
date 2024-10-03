@@ -381,7 +381,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
         // Iterate from the lowest block to the highest
         for block_state in in_mem_chain.into_iter().rev() {
-            let executed_block = block_state.block();
+            let executed_block = block_state.block_ref();
             let block = executed_block.block();
 
             for tx_index in 0..block.body.transactions.len() {
@@ -482,7 +482,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
-            |block_state| Ok(Some(block_state.block().block().header.header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
         )
     }
 
@@ -490,7 +490,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             num.into(),
             |db_provider| db_provider.header_by_number(num),
-            |block_state| Ok(Some(block_state.block().block().header.header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
         )
     }
 
@@ -528,7 +528,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.headers_range(range),
-            |block_state, _| Some(block_state.block().block().header.header().clone()),
+            |block_state, _| Some(block_state.block_ref().block().header.header().clone()),
             |_| true,
         )
     }
@@ -537,7 +537,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
             |db_provider| db_provider.sealed_header(number),
-            |block_state| Ok(Some(block_state.block().block().header.clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header.clone())),
         )
     }
 
@@ -548,7 +548,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_headers_range(range),
-            |block_state, _| Some(block_state.block().block().header.clone()),
+            |block_state, _| Some(block_state.block_ref().block().header.clone()),
             |_| true,
         )
     }
@@ -562,7 +562,8 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
             |block_state, predicate| {
-                Some(block_state.block().block().header.clone()).filter(|header| predicate(header))
+                Some(block_state.block_ref().block().header.clone())
+                    .filter(|header| predicate(header))
             },
             predicate,
         )
@@ -640,7 +641,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                 self.get_in_memory_or_storage_by_block(
                     hash.into(),
                     |db_provider| db_provider.find_block_by_hash(hash, source),
-                    |block_state| Ok(Some(block_state.block().block().clone().unseal())),
+                    |block_state| Ok(Some(block_state.block_ref().block().clone().unseal())),
                 )
             }
             BlockSource::Pending => {
@@ -653,7 +654,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
-            |block_state| Ok(Some(block_state.block().block().clone().unseal())),
+            |block_state| Ok(Some(block_state.block_ref().block().clone().unseal())),
         )
     }
 
@@ -683,7 +684,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                     return Ok(Some(Vec::new()))
                 }
 
-                Ok(Some(block_state.block().block().body.ommers.clone()))
+                Ok(Some(block_state.block_ref().block().body.ommers.clone()))
             },
         )
     }
@@ -709,7 +710,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
 
                 // Iterate from the lowest block in memory until our target block
                 for state in block_state.chain().into_iter().rev() {
-                    let block_tx_count = state.block().block.body.transactions.len() as u64;
+                    let block_tx_count = state.block_ref().block.body.transactions.len() as u64;
                     if state.block_ref().block().number == number {
                         stored_indices.tx_count = block_tx_count;
                     } else {
@@ -756,7 +757,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_range(range),
-            |block_state, _| Some(block_state.block().block().clone().unseal()),
+            |block_state, _| Some(block_state.block_ref().block().clone().unseal()),
             |_| true,
         )
     }
@@ -800,7 +801,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
             id.into(),
             |provider| provider.transaction_by_id(id),
             |tx_index, _, block_state| {
-                Ok(block_state.block().block().body.transactions.get(tx_index).cloned())
+                Ok(block_state.block_ref().block().body.transactions.get(tx_index).cloned())
             },
         )
     }
@@ -850,7 +851,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_block(id),
-            |_, _, block_state| Ok(Some(block_state.block().block().number)),
+            |_, _, block_state| Ok(Some(block_state.block_ref().block().number)),
         )
     }
 
@@ -861,7 +862,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
-            |block_state| Ok(Some(block_state.block().block().body.transactions.clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().body.transactions.clone())),
         )
     }
 
@@ -872,7 +873,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
-            |block_state, _| Some(block_state.block().block().body.transactions.clone()),
+            |block_state, _| Some(block_state.block_ref().block().body.transactions.clone()),
             |_| true,
         )
     }
@@ -909,7 +910,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_sender(id),
-            |tx_index, _, block_state| Ok(block_state.block().senders.get(tx_index).copied()),
+            |tx_index, _, block_state| Ok(block_state.block_ref().senders.get(tx_index).copied()),
         )
     }
 }
@@ -927,7 +928,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         for block_state in self.canonical_in_memory_state.canonical_chain() {
-            let executed_block = block_state.block();
+            let executed_block = block_state.block_ref();
             let block = executed_block.block();
             let receipts = block_state.executed_block_receipts();
 
@@ -1014,7 +1015,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.withdrawals_by_block(id, timestamp),
-            |block_state| Ok(block_state.block().block().body.withdrawals.clone()),
+            |block_state| Ok(block_state.block_ref().block().body.withdrawals.clone()),
         )
     }
 
@@ -1025,7 +1026,13 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
             best_block_num.into(),
             |db_provider| db_provider.latest_withdrawal(),
             |block_state| {
-                Ok(block_state.block().block().body.withdrawals.clone().and_then(|mut w| w.pop()))
+                Ok(block_state
+                    .block_ref()
+                    .block()
+                    .body
+                    .withdrawals
+                    .clone()
+                    .and_then(|mut w| w.pop()))
             },
         )
     }
@@ -1044,7 +1051,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.requests_by_block(id, timestamp),
-            |block_state| Ok(block_state.block().block().body.requests.clone()),
+            |block_state| Ok(block_state.block_ref().block().body.requests.clone()),
         )
     }
 }
@@ -1450,7 +1457,7 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
 impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
-            let state = state.block().execution_outcome().clone();
+            let state = state.block_ref().execution_outcome().clone();
             Ok(Some(state))
         } else {
             self.database.provider()?.get_state(block..=block)
