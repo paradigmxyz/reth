@@ -78,16 +78,6 @@ pub use arbitrary;
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
 
-/// Optimism specific re-exports
-#[cfg(feature = "optimism")]
-mod optimism {
-    pub use crate::transaction::{optimism_deposit_tx_signature, TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
-}
-
-#[cfg(feature = "optimism")]
-pub use optimism::*;
-
 /// Bincode-compatible serde implementations for commonly used types in Reth.
 ///
 /// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
