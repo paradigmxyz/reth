@@ -696,34 +696,35 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        if let Some(indices) = self.database.block_body_indices(number)? {
-            Ok(Some(indices))
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
-            // we have to construct the stored indices for the in memory blocks
-            //
-            // To calculate this we will fetch the anchor block and walk forward from all parents
-            let mut parent_chain = state.parent_state_chain();
-            parent_chain.reverse();
-            let anchor_num = state.anchor().number;
-            let mut stored_indices = self
-                .database
-                .block_body_indices(anchor_num)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
-            stored_indices.first_tx_num = stored_indices.next_tx_num();
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.block_body_indices(number),
+            |block_state| {
+                // we have to construct the stored indices for the in memory blocks
+                //
+                // To calculate this we will fetch the anchor block and walk forward from all
+                // parents
+                let mut parent_chain = block_state.parent_state_chain();
+                parent_chain.reverse();
+                let anchor_num = block_state.anchor().number;
+                let mut stored_indices = self
+                    .database
+                    .block_body_indices(anchor_num)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
+                stored_indices.first_tx_num = stored_indices.next_tx_num();
 
-            for state in parent_chain {
-                let txs = state.block().block.body.transactions.len() as u64;
-                if state.block().block().number == number {
-                    stored_indices.tx_count = txs;
-                } else {
-                    stored_indices.first_tx_num += txs;
+                for state in parent_chain {
+                    let txs = state.block().block.body.transactions.len() as u64;
+                    if state.block().block().number == number {
+                        stored_indices.tx_count = txs;
+                    } else {
+                        stored_indices.first_tx_num += txs;
+                    }
                 }
-            }
 
-            Ok(Some(stored_indices))
-        } else {
-            Ok(None)
-        }
+                Ok(Some(stored_indices))
+            },
+        )
     }
 
     /// Returns the block with senders with matching number or hash from database.
