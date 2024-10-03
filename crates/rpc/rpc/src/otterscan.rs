@@ -106,11 +106,10 @@ where
                         value: op.value,
                         r#type: match op.kind {
                             TransferKind::Call => OperationType::OpTransfer,
-                            TransferKind::Create | TransferKind::EofCreate => {
-                                OperationType::OpCreate
-                            }
+                            TransferKind::Create => OperationType::OpCreate,
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
+                            TransferKind::EofCreate => OperationType::OpEofCreate,
                         },
                     })
                     .collect::<Vec<_>>()
