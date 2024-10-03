@@ -562,8 +562,8 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
             |block_state, predicate| {
-                Some(block_state.block_ref().block().header.clone())
-                    .filter(|header| predicate(header))
+                let header = &block_state.block_ref().block().header;
+                predicate(header).then(|| header.clone())
             },
             predicate,
         )
