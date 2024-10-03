@@ -297,7 +297,6 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlock<H = Header, B = BlockBody> {
@@ -486,6 +485,19 @@ impl From<SealedBlock> for Block {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock<Header, B>
+where
+    B: for<'b> arbitrary::Arbitrary<'b>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header = SealedHeader::arbitrary(u)?;
+        let body = B::arbitrary(u)?;
+
+        Ok(Self { header, body })
+    }
+}
+
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders {
@@ -553,7 +565,7 @@ impl SealedBlockWithSenders {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = SealedBlock::arbitrary(u)?;
+        let block: SealedBlock<Header, BlockBody> = SealedBlock::arbitrary(u)?;
 
         let senders = block
             .body
