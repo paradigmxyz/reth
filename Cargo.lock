@@ -8822,6 +8822,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
+ "bincode",
  "criterion",
  "futures-util",
  "itertools 0.13.0",
