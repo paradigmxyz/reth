@@ -696,34 +696,34 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        if let Some(indices) = self.database.block_body_indices(number)? {
-            Ok(Some(indices))
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
-            // we have to construct the stored indices for the in memory blocks
-            //
-            // To calculate this we will fetch the anchor block and walk forward from all parents
-            let mut parent_chain = state.parent_state_chain();
-            parent_chain.reverse();
-            let anchor_num = state.anchor().number;
-            let mut stored_indices = self
-                .database
-                .block_body_indices(anchor_num)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
-            stored_indices.first_tx_num = stored_indices.next_tx_num();
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.block_body_indices(number),
+            |block_state| {
+                // Find the last block indices on database
+                let last_storage_block_number = block_state.anchor().number;
+                let mut stored_indices = self
+                    .database
+                    .block_body_indices(last_storage_block_number)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(last_storage_block_number))?;
 
-            for state in parent_chain {
-                let txs = state.block().block.body.transactions.len() as u64;
-                if state.block().block().number == number {
-                    stored_indices.tx_count = txs;
-                } else {
-                    stored_indices.first_tx_num += txs;
+                // Prepare our block indices
+                stored_indices.first_tx_num = stored_indices.next_tx_num();
+                stored_indices.tx_count = 0;
+
+                // Iterate from the lowest block in memory until our target block
+                for state in block_state.chain().into_iter().rev() {
+                    let block_tx_count = state.block().block.body.transactions.len() as u64;
+                    if state.block_ref().block().number == number {
+                        stored_indices.tx_count = block_tx_count;
+                    } else {
+                        stored_indices.first_tx_num += block_tx_count;
+                    }
                 }
-            }
 
-            Ok(Some(stored_indices))
-        } else {
-            Ok(None)
-        }
+                Ok(Some(stored_indices))
+            },
+        )
     }
 
     /// Returns the block with senders with matching number or hash from database.
