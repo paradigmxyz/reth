@@ -6286,7 +6286,9 @@ name = "reth-alloy"
 version = "1.0.7"
 dependencies = [
  "alloy-eips",
+ "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-transport",
  "eyre",
  "reth-chainspec",

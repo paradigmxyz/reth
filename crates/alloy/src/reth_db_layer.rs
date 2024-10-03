@@ -1,4 +1,8 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_primitives::{Address, U64};
+use alloy_provider::{Provider, ProviderCall, ProviderLayer, RootProvider, RpcWithBlock};
+use alloy_rpc_client::NoParams;
+use alloy_transport::{Transport, TransportErrorKind};
 use eyre::Result;
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
@@ -13,20 +17,32 @@ use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 /// A tower-like layer that should be used as a [ProviderLayer](https://docs.rs/alloy/latest/alloy/providers/trait.ProviderLayer.html) in alloy when wrapping the
 /// [Provider](https://docs.rs/alloy/latest/alloy/providers/trait.Provider.html) trait over reth-db.
 #[derive(Debug, Clone)]
-pub struct RethDbLayer<P> {
+pub struct RethDbLayer {
     db_path: PathBuf,
-    _pd: PhantomData<P>,
 }
 
-impl<P> RethDbLayer<P> {
+impl RethDbLayer {
     /// Initialize the `RethDbLayer` with the path to the reth datadir.
     pub const fn new(db_path: PathBuf) -> Self {
-        Self { db_path, _pd: PhantomData }
+        Self { db_path }
     }
 
     /// Get the provided path.
     pub const fn db_path(&self) -> &PathBuf {
         &self.db_path
+    }
+}
+
+/// Implement the `ProviderLayer` trait for the `RethDBLayer` struct.
+impl<P, T> ProviderLayer<P, T> for RethDbLayer
+where
+    P: Provider<T>,
+    T: Transport + Clone,
+{
+    type Provider = RethDbProvider<P, T>;
+
+    fn layer(&self, inner: P) -> Self::Provider {
+        RethDbProvider::new(inner, self.db_path().clone())
     }
 }
 
@@ -67,6 +83,45 @@ impl<P, T> RethDbProvider<P, T> {
     /// Get the DB Path
     pub fn db_path(&self) -> PathBuf {
         self.db_path.clone()
+    }
+}
+
+/// Implement the `Provider` trait for the `RethDbProvider` struct.
+///
+/// This is where we override specific RPC methods to fetch from the reth-db.
+impl<P, T> Provider<T> for RethDbProvider<P, T>
+where
+    P: Provider<T>,
+    T: Transport + Clone,
+{
+    fn root(&self) -> &RootProvider<T> {
+        self.inner().root()
+    }
+
+    /// Override the `get_block_number` method to fetch the latest block number from the reth-db.
+    fn get_block_number(&self) -> ProviderCall<T, NoParams, U64, u64> {
+        let provider = self.accessor().provider().map_err(TransportErrorKind::custom).unwrap();
+
+        let best = provider.best_block_number().map_err(TransportErrorKind::custom);
+
+        ProviderCall::ready(best)
+    }
+
+    /// Override the `get_transaction_count` method to fetch the transaction count of an address.
+    ///
+    /// `RpcWithBlock` uses `ProviderCall` under the hood.
+    fn get_transaction_count(&self, address: Address) -> RpcWithBlock<T, Address, U64, u64> {
+        let this = self.accessor().clone();
+        RpcWithBlock::new_provider(move |block_id| {
+            let provider = this.provider_at(block_id).map_err(TransportErrorKind::custom).unwrap();
+
+            let maybe_acc =
+                provider.basic_account(address).map_err(TransportErrorKind::custom).unwrap();
+
+            let nonce = maybe_acc.map(|acc| acc.nonce).unwrap_or_default();
+
+            ProviderCall::ready(Ok(nonce))
+        })
     }
 }
 
