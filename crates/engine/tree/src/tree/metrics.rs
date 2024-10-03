@@ -34,6 +34,14 @@ pub(crate) struct EngineMetrics {
     pub(crate) new_payload_messages: Counter,
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
+    /// Tracks the how often we failed to deliver a newPayload response.
+    ///
+    /// This effectively tracks how often the message sender dropped the channel and indicates a CL
+    /// request timeout (e.g. it took more than 8s to send the response and the CL terminated the
+    /// request which resulted in a closed channel).
+    pub(crate) failed_new_payload_response_deliveries: Counter,
+    /// Tracks the how often we failed to deliver a forkchoice update response.
+    pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     // TODO add latency metrics
 }
 
