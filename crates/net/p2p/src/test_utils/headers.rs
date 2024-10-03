@@ -10,11 +10,12 @@ use crate::{
     },
     priority::Priority,
 };
+use alloy_primitives::Sealable;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{alloy_primitives::Sealable, Header, SealedHeader};
+use reth_primitives::{Header, SealedHeader};
 use std::{
     fmt,
     pin::Pin,

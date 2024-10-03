@@ -411,10 +411,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(
-            &self.hardforks,
-            self.paris_block_and_final_difficulty.map(|(block, _)| block),
-        )
+        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
     }
 
     /// Get the fork id for the given hardfork.
@@ -612,6 +609,18 @@ impl Hardforks for ChainSpec {
 
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.hardforks.forks_iter()
+    }
+
+    fn fork_id(&self, head: &Head) -> ForkId {
+        self.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> ForkId {
+        self.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: Head) -> ForkFilter {
+        self.fork_filter(head)
     }
 }
 
@@ -816,13 +825,13 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
     }
 }
 
-/// A trait for reading the current [`ChainSpec`].
+/// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
     /// The chain spec type.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec + 'static;
 
-    /// Get an [`Arc`] to the [`ChainSpec`].
+    /// Get an [`Arc`] to the chainspec.
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 }
 
@@ -2327,7 +2336,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_paris_block_and_total_difficulty() {
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let paris_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
@@ -2339,7 +2348,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)

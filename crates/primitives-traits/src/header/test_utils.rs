@@ -27,8 +27,8 @@ pub const fn generate_valid_header(
 
     // Set fields based on EIP-4844 being active
     if eip_4844_active {
-        header.blob_gas_used = Some(blob_gas_used as u128);
-        header.excess_blob_gas = Some(excess_blob_gas as u128);
+        header.blob_gas_used = Some(blob_gas_used);
+        header.excess_blob_gas = Some(excess_blob_gas);
         header.parent_beacon_block_root = Some(parent_beacon_block_root);
     } else {
         header.blob_gas_used = None;

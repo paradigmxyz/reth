@@ -141,7 +141,7 @@ pub fn append_matching_block_logs(
                     let transaction_id = first_tx_num + receipt_idx as u64;
                     let transaction = provider
                         .transaction_by_id(transaction_id)?
-                        .ok_or(ProviderError::TransactionNotFound(transaction_id.into()))?;
+                        .ok_or_else(|| ProviderError::TransactionNotFound(transaction_id.into()))?;
 
                     transaction_hash = Some(transaction.hash());
                 }

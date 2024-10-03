@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use alloy_consensus::TxEip2930;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use eyre::OptionExt;
@@ -10,7 +11,7 @@ use reth_evm::execute::{
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{
     constants::ETH_TO_WEI, Block, BlockBody, BlockWithSenders, Header, Receipt, Requests,
-    SealedBlockWithSenders, Transaction, TxEip2930,
+    SealedBlockWithSenders, Transaction,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
@@ -100,8 +101,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
-            gas_limit: MIN_TRANSACTION_GAS.into(),
-            gas_used: MIN_TRANSACTION_GAS.into(),
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
         body: BlockBody {
@@ -110,7 +111,7 @@ fn blocks(
                 Transaction::Eip2930(TxEip2930 {
                     chain_id: chain_spec.chain.id(),
                     nonce: 0,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     gas_price: 1_500_000_000,
                     to: TxKind::Call(Address::ZERO),
                     value: U256::from(0.1 * ETH_TO_WEI as f64),
@@ -132,8 +133,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,
-            gas_limit: MIN_TRANSACTION_GAS.into(),
-            gas_used: MIN_TRANSACTION_GAS.into(),
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
         body: BlockBody {
@@ -142,7 +143,7 @@ fn blocks(
                 Transaction::Eip2930(TxEip2930 {
                     chain_id: chain_spec.chain.id(),
                     nonce: 1,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     gas_price: 1_500_000_000,
                     to: TxKind::Call(Address::ZERO),
                     value: U256::from(0.1 * ETH_TO_WEI as f64),

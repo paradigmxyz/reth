@@ -7,18 +7,17 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    alloy_primitives::Sealable, BlockNumberOrTag, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -74,12 +73,7 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone
-        + Send
-        + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -100,12 +94,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    Client: StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone
-        + Send
-        + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -119,12 +108,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = SealedHeader::new(header, seal);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            block_gas_limit: latest.gas_limit as u64,
+            block_gas_limit: latest.gas_limit,
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
                 .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
-                .unwrap_or_default() as u64,
+                .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
         pool.set_block_info(info);
@@ -138,7 +127,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         FinalizedBlockTracker::new(client.finalized_block_number().ok().flatten());
 
     // keeps track of any dirty accounts that we know of are out of sync with the pool
-    let mut dirty_addresses = HashSet::new();
+    let mut dirty_addresses = HashSet::default();
 
     // keeps track of the state of the pool wrt to blocks
     let mut maintained_state = MaintainedPoolState::InSync;
@@ -357,7 +346,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // update the pool first
                 let update = CanonicalStateUpdate {
                     new_tip: &new_tip.block,
-                    pending_block_base_fee: pending_block_base_fee as u64,
+                    pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
@@ -406,10 +395,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        block_gas_limit: tip.gas_limit as u64,
+                        block_gas_limit: tip.gas_limit,
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
-                        pending_basefee: pending_block_base_fee as u64,
+                        pending_basefee: pending_block_base_fee,
                         pending_blob_fee: pending_block_blob_fee,
                     };
                     pool.set_block_info(info);
@@ -440,7 +429,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // Canonical update
                 let update = CanonicalStateUpdate {
                     new_tip: &tip.block,
-                    pending_block_base_fee: pending_block_base_fee as u64,
+                    pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,

@@ -151,7 +151,9 @@ impl<TX, Spec> StaticFileProviderFactory for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: Send + Sync, Spec: EthChainSpec> ChainSpecProvider for DatabaseProvider<TX, Spec> {
+impl<TX: Send + Sync, Spec: EthChainSpec + 'static> ChainSpecProvider
+    for DatabaseProvider<TX, Spec>
+{
     type ChainSpec = Spec;
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
@@ -628,7 +630,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                             // recover the sender from the transaction if not found
                             let sender = tx
                                 .recover_signer_unchecked()
-                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                .ok_or(ProviderError::SenderRecoveryError)?;
                             senders.push(sender);
                         }
                         Some(sender) => senders.push(*sender),
@@ -911,14 +913,14 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
-        let mut state: BundleStateInit = HashMap::new();
+        let mut state: BundleStateInit = HashMap::default();
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
         // anything.
 
-        let mut reverts: RevertsInit = HashMap::new();
+        let mut reverts: RevertsInit = HashMap::default();
 
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
@@ -926,7 +928,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
+                    entry.insert((old_info, new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     // overwrite old account state.
@@ -944,7 +946,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
+                    entry.insert((present_info, present_info, HashMap::default()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
             };
@@ -1354,7 +1356,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                 };
                 self.tx.put::<T>(
                     sharded_key_factory(partial_key, highest_block_number),
-                    BlockNumberList::new_pre_sorted(list),
+                    BlockNumberList::new_pre_sorted(list.iter().copied()),
                 )?;
             }
         }
@@ -1956,10 +1958,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
                                 index,
                                 block_hash,
                                 block_number,
-                                base_fee: header.base_fee_per_gas.map(|base_fee| base_fee as u64),
-                                excess_blob_gas: header
-                                    .excess_blob_gas
-                                    .map(|excess_blob| excess_blob as u64),
+                                base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                                 timestamp: header.timestamp,
                             };
 

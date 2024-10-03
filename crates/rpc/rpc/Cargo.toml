@@ -39,6 +39,7 @@ reth-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
+alloy-eips.workspace = true
 alloy-dyn-abi.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
@@ -89,6 +90,8 @@ reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+
+alloy-consensus.workspace = true
 
 jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }

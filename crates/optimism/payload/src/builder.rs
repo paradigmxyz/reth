@@ -5,19 +5,18 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpec, ChainSpecProvider, EthereumHardforks};
-use reth_evm::{
-    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
-    NextBlockEnvAttributes,
-};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::BEACON_NONCE,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -26,9 +25,9 @@ use reth_transaction_pool::{
 };
 use reth_trie::HashedPostState;
 use revm::{
-    db::states::bundle_state::BundleRetention,
+    db::{states::bundle_state::BundleRetention, State},
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
-    DatabaseCommit, State,
+    DatabaseCommit,
 };
 use revm_primitives::calc_excess_blob_gas;
 use tracing::{debug, trace, warn};
@@ -93,7 +92,7 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -164,7 +163,7 @@ pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
@@ -202,28 +201,29 @@ where
     );
 
     // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &evm_config,
-        &chain_spec,
-        &initialized_cfg,
-        &initialized_block_env,
-        attributes.payload_attributes.parent_beacon_block_root,
-    )
-    .map_err(|err| {
-        warn!(target: "payload_builder",
-            parent_hash=%parent_block.hash(),
-            %err,
-            "failed to apply beacon root contract call for empty payload"
-        );
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    let mut system_caller = SystemCaller::new(&evm_config, &chain_spec);
+
+    system_caller
+        .pre_block_beacon_root_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+            attributes.payload_attributes.parent_beacon_block_root,
+        )
+        .map_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to apply beacon root contract call for payload"
+            );
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
     // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     // blocks will always have at least a single transaction in them (the L1 info transaction),
     // so we can safely assume that this will always be triggered upon the transition and that
     // the above check for empty blocks will never be hit on OP chains.
-    reth_evm_optimism::ensure_create2_deployer(
+    reth_optimism_evm::ensure_create2_deployer(
         chain_spec.clone(),
         attributes.payload_attributes.timestamp,
         &mut db,
@@ -443,11 +443,9 @@ where
         Vec::new(),
     );
     let receipts_root = execution_outcome
-        .optimism_receipts_root_slow(
-            block_number,
-            &chain_spec,
-            attributes.payload_attributes.timestamp,
-        )
+        .generic_receipts_root_slow(block_number, |receipts| {
+            calculate_receipt_root_no_memo_optimism(receipts, &chain_spec, attributes.timestamp())
+        })
         .expect("Number is in range");
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
@@ -459,7 +457,7 @@ where
             warn!(target: "payload_builder",
                 parent_hash=%parent_block.hash(),
                 %err,
-                "failed to calculate state root for empty payload"
+                "failed to calculate state root for payload"
             );
         })?
     };
@@ -477,7 +475,7 @@ where
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64))
+            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
@@ -499,11 +497,11 @@ where
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
         nonce: BEACON_NONCE.into(),
-        base_fee_per_gas: Some(base_fee.into()),
+        base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
-        gas_limit: block_gas_limit.into(),
+        gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
-        gas_used: cumulative_gas_used.into(),
+        gas_used: cumulative_gas_used,
         extra_data,
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,

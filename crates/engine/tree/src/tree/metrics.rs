@@ -1,3 +1,4 @@
+use reth_blockchain_tree::metrics::TreeMetrics;
 use reth_evm::metrics::ExecutorMetrics;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
@@ -13,6 +14,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) executor: ExecutorMetrics,
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
+    /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
+    pub(crate) tree: TreeMetrics,
 }
 
 /// Metrics for the `EngineApi`.
@@ -21,6 +24,8 @@ pub(crate) struct EngineApiMetrics {
 pub(crate) struct EngineMetrics {
     /// How many executed blocks are currently stored.
     pub(crate) executed_blocks: Gauge,
+    /// How many already executed blocks were directly inserted into the tree.
+    pub(crate) inserted_already_executed_blocks: Counter,
     /// The number of times the pipeline was run.
     pub(crate) pipeline_runs: Counter,
     /// The total count of forkchoice updated messages received.

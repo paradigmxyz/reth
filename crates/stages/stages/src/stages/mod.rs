@@ -42,6 +42,7 @@ use utils::*;
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
@@ -55,10 +56,7 @@ mod tests {
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
-    use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, BlockNumber, Bytecode, SealedBlock,
-        StaticFileSegment, B256, U256,
-    };
+    use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,

@@ -16,9 +16,15 @@ reth-network-peers.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 tokio.workspace = true
 tokio-stream.workspace = true
 
 serde_json.workspace = true
+
+alloy-primitives.workspace = true

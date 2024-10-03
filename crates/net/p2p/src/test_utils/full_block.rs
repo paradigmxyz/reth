@@ -106,8 +106,8 @@ pub struct TestFullBlockClient {
 impl Default for TestFullBlockClient {
     fn default() -> Self {
         Self {
-            headers: Arc::new(Mutex::new(HashMap::new())),
-            bodies: Arc::new(Mutex::new(HashMap::new())),
+            headers: Arc::new(Mutex::new(HashMap::default())),
+            bodies: Arc::new(Mutex::new(HashMap::default())),
             soft_limit: 20,
         }
     }

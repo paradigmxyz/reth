@@ -28,10 +28,13 @@ reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 
 # op-reth
-reth-evm-optimism.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-consensus.workspace = true
+reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types.workspace = true
@@ -59,7 +62,7 @@ reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = [
-    "reth-evm-optimism/optimism",
+    "reth-optimism-evm/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",

@@ -88,7 +88,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                 self.evm_env_at(block.unwrap_or_default()).await?;
 
             // Gas cap for entire operation
-            let total_gas_limit = self.call_gas_limit() as u128;
+            let total_gas_limit = self.call_gas_limit();
 
             let base_block = self.block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent_hash = base_block.header.hash();
@@ -1042,10 +1042,7 @@ pub trait Call: LoadState + SpawnBlocking {
 
         #[allow(clippy::needless_update)]
         let env = TxEnv {
-            gas_limit: gas_limit
-                .try_into()
-                .map_err(|_| RpcInvalidTransactionError::GasUintOverflow)
-                .map_err(Self::Error::from_eth_err)?,
+            gas_limit,
             nonce,
             caller: from.unwrap_or_default(),
             gas_price,

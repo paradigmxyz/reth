@@ -1,11 +1,12 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
-    ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
+    constants::EMPTY_OMMER_ROOT_HASH, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
+    Request, TransactionSigned, Withdrawal,
 };
 use alloc::vec::Vec;
-use alloy_eips::eip7685::Encodable7685;
+use alloy_eips::{eip2718::Encodable2718, eip7685::Encodable7685};
+use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 /// Calculate a transaction root.
@@ -15,7 +16,7 @@ pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
 where
     T: AsRef<TransactionSigned>,
 {
-    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_inner(buf, false))
+    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_2718(buf))
 }
 
 /// Calculates the root hash of the withdrawals.
@@ -49,47 +50,6 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
     })
 }
 
-/// Calculates the receipt root for a header for the reference type of [Receipt].
-///
-/// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
-#[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[&Receipt],
-    chain_spec: impl reth_chainspec::Hardforks,
-    timestamp: u64,
-) -> B256 {
-    // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
-    // the receipt root calculation does not include the deposit nonce in the receipt
-    // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
-    // receipts before calculating the receipt root. This was corrected in the Canyon
-    // hardfork.
-
-    if chain_spec
-        .is_fork_active_at_timestamp(reth_optimism_forks::OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(
-            reth_optimism_forks::OptimismHardfork::Canyon,
-            timestamp,
-        )
-    {
-        let receipts = receipts
-            .iter()
-            .map(|r| {
-                let mut r = (*r).clone();
-                r.deposit_nonce = None;
-                r
-            })
-            .collect::<Vec<_>>();
-
-        return ordered_trie_root_with_encoder(&receipts, |r, buf| {
-            ReceiptWithBloomRef::from(r).encode_inner(buf, false)
-        })
-    }
-
-    ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
-    })
-}
-
 /// Calculates the root hash for ommer/uncle headers.
 pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     // Check if `ommers` list is empty
@@ -105,9 +65,9 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, U256};
+    use crate::{constants::EMPTY_ROOT_HASH, Block};
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, Address};
+    use alloy_primitives::{b256, hex_literal::hex, Address, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};

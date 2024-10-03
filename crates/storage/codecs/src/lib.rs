@@ -150,21 +150,7 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        encode_varuint(self.len(), buf);
-
-        let mut tmp: Vec<u8> = Vec::with_capacity(64);
-
-        for element in self {
-            tmp.clear();
-
-            // We don't know the length until we compact it
-            let length = element.to_compact(&mut tmp);
-            encode_varuint(length, buf);
-
-            buf.put_slice(&tmp);
-        }
-
-        0
+        self.as_slice().to_compact(buf)
     }
 
     #[inline]
@@ -190,11 +176,7 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        encode_varuint(self.len(), buf);
-        for element in self {
-            element.to_compact(buf);
-        }
-        0
+        self.as_slice().specialized_to_compact(buf)
     }
 
     /// To be used by fixed sized types like `Vec<B256>`.

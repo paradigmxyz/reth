@@ -87,7 +87,7 @@ where
             |input| {
                 {
                     for (_, k, _, _) in input {
-                        let _ = <T as Table>::Key::decode(k);
+                        let _ = <T as Table>::Key::decode(&k);
                     }
                 };
                 black_box(());
@@ -115,7 +115,7 @@ where
             |input| {
                 {
                     for (_, _, _, v) in input {
-                        let _ = <T as Table>::Value::decompress(v);
+                        let _ = <T as Table>::Value::decompress(&v);
                     }
                 };
                 black_box(());

@@ -1,3 +1,4 @@
+use alloy_primitives::{bytes::BufMut, keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::tables;
@@ -8,7 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::{keccak256, BufMut, StorageEntry, B256};
+use reth_primitives::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -133,7 +134,7 @@ where
                     B256::from_slice(&addr_key[..32]),
                     StorageEntry {
                         key: B256::from_slice(&addr_key[32..]),
-                        value: CompactU256::decompress(value)?.into(),
+                        value: CompactU256::decompress_owned(value)?.into(),
                     },
                 )?;
             }
@@ -211,13 +212,14 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
+    use alloy_primitives::{Address, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db_api::{
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
-    use reth_primitives::{Address, SealedBlock, U256};
+    use reth_primitives::SealedBlock;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
         self, random_block_range, random_contract_account_range, BlockRangeParams,

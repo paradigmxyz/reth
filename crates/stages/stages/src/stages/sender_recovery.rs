@@ -1,3 +1,4 @@
+use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
@@ -6,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
+use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -230,9 +231,10 @@ where
 
                             // fetch the sealed header so we can use it in the sender recovery
                             // unwind
-                            let sealed_header = provider
-                                .sealed_header(block_number)?
-                                .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
+                            let sealed_header =
+                                provider.sealed_header(block_number)?.ok_or_else(|| {
+                                    ProviderError::HeaderNotFound(block_number.into())
+                                })?;
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
@@ -333,9 +335,10 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
+    use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_provider::{
         providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
         StaticFileProviderFactory, TransactionsProvider,

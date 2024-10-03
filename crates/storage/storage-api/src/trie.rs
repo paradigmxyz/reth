@@ -1,9 +1,11 @@
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, Bytes, B256,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use std::collections::{HashMap, HashSet};
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
