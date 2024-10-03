@@ -89,6 +89,7 @@ optimism = [
     "reth-revm/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-optimism-rpc/optimism",
+    "reth-optimism-primitives/optimism",
 ]
 asm-keccak = ["reth-primitives/asm-keccak"]
 test-utils = ["reth-node-builder/test-utils"]

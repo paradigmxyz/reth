@@ -112,36 +112,3 @@ pub trait Block:
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     fn size(&self) -> usize;
 }
-
-/*impl<T> Block for T
-where
-    T: ops::Deref<Target: Block>
-        + fmt::Debug
-        + Clone
-        + PartialEq
-        + Eq
-        + Default
-        + serde::Serialize
-        + for<'a> serde::Deserialize<'a>
-        + From<(<T::Target as Block>::Header, <T::Target as Block>::Body)>
-        + Into<(<T::Target as Block>::Header, <T::Target as Block>::Body)>,
-{
-    type Header = <T::Target as Block>::Header;
-    type Body = <T::Target as Block>::Body;
-
-    #[inline]
-    fn header(&self) -> &Self::Header {
-        self.deref().header()
-    }
-
-    #[inline]
-    fn body(&self) -> &Self::Body {
-        self.deref().body()
-    }
-
-    #[inline]
-    fn size(&self) -> usize {
-        self.deref().size()
-    }
-}
-*/
