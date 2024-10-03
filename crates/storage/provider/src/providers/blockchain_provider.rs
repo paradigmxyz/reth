@@ -873,35 +873,12 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
-        });
-
-        let mut transactions = Vec::new();
-        let mut last_in_memory_block = None;
-
-        for number in start..=end {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                transactions.push(block_state.block().block().body.transactions.clone());
-                last_in_memory_block = Some(number);
-            } else {
-                break
-            }
-        }
-
-        if let Some(last_block) = last_in_memory_block {
-            if last_block < end {
-                let mut db_transactions =
-                    self.database.transactions_by_block_range((last_block + 1)..=end)?;
-                transactions.append(&mut db_transactions);
-            }
-        } else {
-            transactions = self.database.transactions_by_block_range(start..=end)?;
-        }
-
-        Ok(transactions)
+        self.get_in_memory_or_storage_by_block_range_while(
+            range,
+            |db_provider, range, _| db_provider.transactions_by_block_range(range),
+            |block_state, _| Some(block_state.block().block().body.transactions.clone()),
+            |_| true,
+        )
     }
 
     fn transactions_by_tx_range(
