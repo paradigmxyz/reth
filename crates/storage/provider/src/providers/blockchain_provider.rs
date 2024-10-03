@@ -700,25 +700,21 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             number.into(),
             |db_provider| db_provider.block_body_indices(number),
             |block_state| {
-                // we have to construct the stored indices for the in memory blocks
-                //
-                // To calculate this we will fetch the anchor block and walk forward from all
-                // parents
-                let mut parent_chain = block_state.parent_state_chain();
-                parent_chain.reverse();
-                let anchor_num = block_state.anchor().number;
+                // Find the last block indices on database
+                let last_storage_block_number = block_state.anchor().number;
                 let mut stored_indices = self
                     .database
-                    .block_body_indices(anchor_num)?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
-                stored_indices.first_tx_num = stored_indices.next_tx_num();
+                    .block_body_indices(last_storage_block_number)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(last_storage_block_number))?;
 
-                for state in parent_chain {
-                    let txs = state.block().block.body.transactions.len() as u64;
-                    if state.block().block().number == number {
-                        stored_indices.tx_count = txs;
+                // Iterate from the lowest block in memory to find the stored indices of the requested block
+                stored_indices.first_tx_num = stored_indices.next_tx_num();
+                for state in block_state.chain().into_iter().rev() {
+                    let block_tx_count = state.block().block.body.transactions.len() as u64;
+                    if state.block_ref().block().number == number {
+                        stored_indices.tx_count = block_tx_count;
                     } else {
-                        stored_indices.first_tx_num += txs;
+                        stored_indices.first_tx_num += block_tx_count;
                     }
                 }
 
