@@ -285,7 +285,9 @@ impl StaticFileProvider {
                 let fixed_block_range = self.find_fixed_range(block_range.start());
                 let jar_provider = self
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
-                    .ok_or(ProviderError::MissingStaticFileBlock(segment, block_range.start()))?;
+                    .ok_or_else(|| {
+                        ProviderError::MissingStaticFileBlock(segment, block_range.start())
+                    })?;
 
                 entries += jar_provider.rows();
 
@@ -323,7 +325,7 @@ impl StaticFileProvider {
             || self.get_segment_ranges_from_block(segment, block),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingStaticFileBlock(segment, block))
+        .ok_or(ProviderError::MissingStaticFileBlock(segment, block))
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and transaction.
@@ -338,7 +340,7 @@ impl StaticFileProvider {
             || self.get_segment_ranges_from_transaction(segment, tx),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingStaticFileTx(segment, tx))
+        .ok_or(ProviderError::MissingStaticFileTx(segment, tx))
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block or transaction.
@@ -533,15 +535,16 @@ impl StaticFileProvider {
                             })
                             .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                     }
-                } else if tx_index.get(&segment).map(|index| index.len()) == Some(1) {
-                    // Only happens if we unwind all the txs/receipts from the first static file.
-                    // Should only happen in test scenarios.
-                    if jar.user_header().expected_block_start() == 0 &&
-                        matches!(
-                            segment,
-                            StaticFileSegment::Receipts | StaticFileSegment::Transactions
-                        )
-                    {
+                } else if segment.is_tx_based() {
+                    // The unwinded file has no more transactions/receipts. However, the highest
+                    // block is within this files' block range. We only retain
+                    // entries with block ranges before the current one.
+                    tx_index.entry(segment).and_modify(|index| {
+                        index.retain(|_, block_range| block_range.start() < fixed_range.start());
+                    });
+
+                    // If the index is empty, just remove it.
+                    if tx_index.get(&segment).is_some_and(|index| index.is_empty()) {
                         tx_index.remove(&segment);
                     }
                 }
@@ -1145,10 +1148,16 @@ impl StaticFileProvider {
         Ok(data)
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Returns `static_files` directory
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns `static_files` transaction index
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
+        &self.static_files_tx_index
     }
 }
 

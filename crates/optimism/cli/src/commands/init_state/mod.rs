@@ -1,11 +1,11 @@
 //! Command that initializes the node from a genesis file.
 
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment};
 use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::bedrock::BEDROCK_HEADER;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
@@ -35,7 +35,7 @@ pub struct InitStateCommandOp<C: ChainSpecParser> {
     without_ovm: bool,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommandOp<C> {
+impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
     /// Execute the `init` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,

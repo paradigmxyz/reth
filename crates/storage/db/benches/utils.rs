@@ -1,7 +1,5 @@
-#![cfg(feature = "test-utils")]
 #![allow(missing_docs)]
-
-use std::{path::Path, sync::Arc};
+#![cfg(feature = "test-utils")]
 
 use alloy_primitives::Bytes;
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
@@ -11,6 +9,7 @@ use reth_db_api::{
     Database,
 };
 use reth_fs_util as fs;
+use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
 #[allow(dead_code)]

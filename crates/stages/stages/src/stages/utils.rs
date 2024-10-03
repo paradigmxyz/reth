@@ -1,4 +1,5 @@
 //! Utils for `stages`.
+use alloy_primitives::BlockNumber;
 use reth_config::config::EtlConfig;
 use reth_db::BlockNumberList;
 use reth_db_api::{
@@ -9,7 +10,6 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_etl::Collector;
-use reth_primitives::BlockNumber;
 use reth_provider::DBProvider;
 use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
@@ -51,14 +51,14 @@ where
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
+    let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
     let mut collect = |cache: &HashMap<P, Vec<u64>>| {
-        for (key, indice_list) in cache {
-            let last = indice_list.last().expect("qed");
+        for (key, indices) in cache {
+            let last = indices.last().expect("qed");
             collector.insert(
                 sharded_key_factory(*key, *last),
-                BlockNumberList::new_pre_sorted(indice_list),
+                BlockNumberList::new_pre_sorted(indices.iter().copied()),
             )?;
         }
         Ok::<(), StageError>(())

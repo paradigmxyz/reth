@@ -5,6 +5,7 @@ pub mod core;
 pub mod filter;
 pub mod helpers;
 pub mod pubsub;
+pub mod sim_bundle;
 
 /// Implementation of `eth` namespace API.
 pub use bundle::EthBundle;

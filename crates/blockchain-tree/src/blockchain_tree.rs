@@ -5,6 +5,7 @@ use crate::{
     state::{SidechainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
 };
+use alloy_eips::{BlockNumHash, ForkBlock};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -16,8 +17,8 @@ use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    BlockNumHash, EthereumHardfork, ForkBlock, GotExpected, Hardforks, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    EthereumHardfork, GotExpected, Hardforks, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
@@ -589,7 +590,7 @@ where
         // Find all forks of given block.
         let mut dependent_block =
             self.block_indices().fork_to_child().get(block).cloned().unwrap_or_default();
-        let mut dependent_chains = HashSet::new();
+        let mut dependent_chains = HashSet::default();
 
         while let Some(block) = dependent_block.pop_back() {
             // Get chain of dependent block.
@@ -1375,6 +1376,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, Sealable, B256};
     use assert_matches::assert_matches;
@@ -1390,7 +1392,7 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, TxEip1559, Withdrawals,
+        TransactionSignedEcRecovered, Withdrawals,
     };
     use reth_provider::{
         test_utils::{
@@ -1566,7 +1568,7 @@ mod tests {
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
                     nonce,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: Address::ZERO.into(),
                     max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                     ..Default::default()
@@ -1602,10 +1604,10 @@ mod tests {
             let sealed = Header {
                 number,
                 parent_hash: parent.unwrap_or_default(),
-                gas_used: (body.len() as u64 * MIN_TRANSACTION_GAS) as u128,
-                gas_limit: chain_spec.max_gas_limit.into(),
+                gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
+                gas_limit: chain_spec.max_gas_limit,
                 mix_hash: B256::random(),
-                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),
+                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                 transactions_root,
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(
@@ -2179,7 +2181,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2.hash()])),
             ]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         assert_matches!(tree.make_canonical(block1a_hash), Ok(_));
@@ -2203,7 +2205,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1.hash()])),
                 (block1.hash(), HashSet::from([block2.hash()])),
             ]))
-            .with_pending_blocks((block1a.number + 1, HashSet::new()))
+            .with_pending_blocks((block1a.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
@@ -2240,7 +2242,7 @@ mod tests {
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2a_hash])),
             ]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.
@@ -2309,7 +2311,7 @@ mod tests {
             .with_chain_num(1)
             .with_block_to_chain(HashMap::from([(block2a_hash, 4.into())]))
             .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
-            .with_pending_blocks((block2.number + 1, HashSet::new()))
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
             .assert(&tree);
 
         // check notification.

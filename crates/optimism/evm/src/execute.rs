@@ -10,7 +10,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::apply_beacon_root_contract_call,
+    system_calls::SystemCaller,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -32,23 +32,20 @@ use tracing::trace;
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]
 pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     evm_config: EvmConfig,
 }
 
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
-    pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(
-            chain_spec.clone(),
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() })),
-        )
+    pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
+        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
     }
 }
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, evm_config }
     }
 }
@@ -98,7 +95,7 @@ where
 #[derive(Debug, Clone)]
 pub struct OpEvmExecutor<EvmConfig> {
     /// The chainspec
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
 }
@@ -122,10 +119,10 @@ where
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
+        let mut system_caller = SystemCaller::new(&self.evm_config, &self.chain_spec);
+
         // apply pre execution changes
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
+        system_caller.apply_beacon_root_contract_call(
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
@@ -149,12 +146,12 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas as u64 &&
+            if transaction.gas_limit() > block_available_gas &&
                 (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas: block_available_gas as u64,
+                    block_available_gas,
                 }
                 .into())
             }
@@ -199,7 +196,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used() as u128;
+            cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -207,7 +204,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
-                cumulative_gas_used: cumulative_gas_used as u64,
+                cumulative_gas_used,
                 logs: result.into_logs(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -221,7 +218,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used as u64))
+        Ok((receipts, cumulative_gas_used))
     }
 }
 
@@ -240,7 +237,11 @@ pub struct OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     /// Creates a new Optimism block executor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(
+        chain_spec: Arc<OpChainSpec>,
+        evm_config: EvmConfig,
+        state: State<DB>,
+    ) -> Self {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 
@@ -464,13 +465,11 @@ where
 mod tests {
     use super::*;
     use crate::OpChainSpec;
+    use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
-    use reth_optimism_chainspec::optimism_deposit_tx_signature;
-    use reth_primitives::{
-        Account, Block, BlockBody, Signature, Transaction, TransactionSigned, TxEip1559,
-        BASE_MAINNET,
-    };
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
+    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -482,7 +481,7 @@ mod tests {
         let l1_block_contract_account =
             Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
 
-        let mut l1_block_storage = HashMap::with_capacity(4);
+        let mut l1_block_storage = HashMap::default();
         // base fee
         l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
         // l1 fee overhead
@@ -504,12 +503,8 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
-                inner: (*chain_spec).clone(),
-            })),
-            chain_spec,
-        }
+        let chain_spec = Arc::new(OpChainSpec::new(Arc::unwrap_or_clone(chain_spec)));
+        OpExecutorProvider { evm_config: OptimismEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
     #[test]
@@ -529,7 +524,7 @@ mod tests {
 
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
@@ -541,7 +536,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -549,10 +544,10 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
             Signature::test_signature(),
@@ -613,7 +608,7 @@ mod tests {
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
 
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
@@ -625,7 +620,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -633,10 +628,10 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
             optimism_deposit_tx_signature(),

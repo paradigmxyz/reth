@@ -3,12 +3,13 @@
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_node_optimism::node::{OptimismAddOns, OptimismNode};
+use reth_optimism_chainspec::BASE_MAINNET;
+use reth_optimism_node::{node::OptimismAddOns, OptimismNode};
 
 #[test]
 fn test_basic_setup() {
     // parse CLI -> config
-    let config = NodeConfig::test();
+    let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
     let _builder = NodeBuilder::new(config)
         .with_database(db)

@@ -125,6 +125,9 @@ pub enum StageError {
     /// The prune checkpoint for the given segment is missing.
     #[error("missing prune checkpoint for {0}")]
     MissingPruneCheckpoint(PruneSegment),
+    /// Post Execute Commit error
+    #[error("post execute commit error occurred: {_0}")]
+    PostExecuteCommit(&'static str),
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
@@ -133,12 +136,12 @@ pub enum StageError {
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
     /// of the stage.
     #[error(transparent)]
-    Recoverable(Box<dyn std::error::Error + Send + Sync>),
+    Recoverable(Box<dyn core::error::Error + Send + Sync>),
     /// The stage encountered a fatal error.
     ///
     /// These types of errors stop the pipeline.
     #[error(transparent)]
-    Fatal(Box<dyn std::error::Error + Send + Sync>),
+    Fatal(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl StageError {

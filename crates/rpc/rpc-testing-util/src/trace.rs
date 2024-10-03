@@ -1,6 +1,6 @@
 //! Helpers for testing trace calls.
 
-use alloy_primitives::{Bytes, TxHash, B256};
+use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
 use alloy_rpc_types::Index;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_rpc_types_trace::{
@@ -13,7 +13,6 @@ use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
 use std::{
-    collections::HashSet,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -540,7 +539,7 @@ mod tests {
             "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
         ];
 
-        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+        let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
 
         let mut stream = client.replay_transactions(transactions, trace_types);
         let mut successes = 0;
@@ -572,7 +571,7 @@ mod tests {
 
         let call_request_1 = TransactionRequest::default();
         let call_request_2 = TransactionRequest::default();
-        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+        let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
         let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
 
         let mut stream = client.trace_call_many_stream(calls, None);

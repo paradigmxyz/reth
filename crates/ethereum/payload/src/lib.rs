@@ -17,14 +17,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
-use reth_evm::{
-    system_calls::{
-        post_block_consolidation_requests_contract_call,
-        post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
-        pre_block_blockhashes_contract_call,
-    },
-    ConfigureEvm, NextBlockEnvAttributes,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -33,8 +26,7 @@ use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs::{self, calculate_requests_root},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt,
-    EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, EthereumHardforks, Header, Receipt, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -43,9 +35,9 @@ use reth_transaction_pool::{
 };
 use reth_trie::HashedPostState;
 use revm::{
-    db::states::bundle_state::BundleRetention,
+    db::{states::bundle_state::BundleRetention, State},
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
-    DatabaseCommit, State,
+    DatabaseCommit,
 };
 use revm_primitives::calc_excess_blob_gas;
 use std::sync::Arc;
@@ -168,35 +160,34 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
+    let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+
     // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &evm_config,
-        &chain_spec,
-        &initialized_cfg,
-        &initialized_block_env,
-        attributes.parent_beacon_block_root,
-    )
-    .map_err(|err| {
-        warn!(target: "payload_builder",
-            parent_hash=%parent_block.hash(),
-            %err,
-            "failed to apply beacon root contract call for empty payload"
-        );
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    system_caller
+        .pre_block_beacon_root_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+            attributes.parent_beacon_block_root,
+        )
+        .map_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to apply beacon root contract call for payload"
+            );
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
     // apply eip-2935 blockhashes update
-    pre_block_blockhashes_contract_call(
+    system_caller.pre_block_blockhashes_contract_call(
         &mut db,
-        &evm_config,
-        &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
         parent_block.hash(),
     )
     .map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for payload");
         PayloadBuilderError::Internal(err.into())
     })?;
 
@@ -321,20 +312,20 @@ where
     {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-            &evm_config,
-            &mut db,
-            &initialized_cfg,
-            &initialized_block_env,
-        )
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-        let consolidation_requests = post_block_consolidation_requests_contract_call(
-            &evm_config,
-            &mut db,
-            &initialized_cfg,
-            &initialized_block_env,
-        )
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let withdrawal_requests = system_caller
+            .post_block_withdrawal_requests_contract_call(
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = system_caller
+            .post_block_consolidation_requests_contract_call(
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
         let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
         let requests_root = calculate_requests_root(&requests);
@@ -368,7 +359,7 @@ where
             warn!(target: "payload_builder",
                 parent_hash=%parent_block.hash(),
                 %err,
-                "failed to calculate state root for empty payload"
+                "failed to calculate state root for payload"
             );
         })?
     };
@@ -391,7 +382,7 @@ where
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas as u64, parent_blob_gas_used as u64))
+            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
@@ -413,11 +404,11 @@ where
         timestamp: attributes.timestamp,
         mix_hash: attributes.prev_randao,
         nonce: BEACON_NONCE.into(),
-        base_fee_per_gas: Some(base_fee.into()),
+        base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
-        gas_limit: block_gas_limit.into(),
+        gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
-        gas_used: cumulative_gas_used.into(),
+        gas_used: cumulative_gas_used,
         extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used: blob_gas_used.map(Into::into),

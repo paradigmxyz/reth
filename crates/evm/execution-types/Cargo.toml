@@ -12,21 +12,28 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-chainspec = { workspace = true, optional = true }
 reth-execution-errors.workspace = true
 reth-trie.workspace = true
 
 revm.workspace = true
 
-serde = { workspace = true, optional = true }
-
-[dev-dependencies]
-reth-primitives = { workspace = true, features = ["test-utils"] }
+# alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-eips.workspace = true
+arbitrary.workspace = true
+bincode.workspace = true
+rand.workspace = true
+reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+
 [features]
 default = ["std"]
-optimism = ["dep:reth-chainspec"]
+optimism = ["reth-primitives/optimism", "revm/optimism"]
 serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
+serde-bincode-compat = ["reth-primitives/serde-bincode-compat", "reth-trie/serde-bincode-compat", "serde_with"]
 std = []

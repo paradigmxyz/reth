@@ -15,12 +15,11 @@ pub enum StateRootError {
     StorageRootError(StorageRootError),
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StateRootError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for StateRootError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Database(source) => std::error::Error::source(source),
-            Self::StorageRootError(source) => std::error::Error::source(source),
+            Self::Database(source) => core::error::Error::source(source),
+            Self::StorageRootError(source) => core::error::Error::source(source),
         }
     }
 }
@@ -49,11 +48,10 @@ impl From<StorageRootError> for DatabaseError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StorageRootError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for StorageRootError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Database(source) => std::error::Error::source(source),
+            Self::Database(source) => core::error::Error::source(source),
         }
     }
 }
@@ -76,12 +74,11 @@ impl From<StateProofError> for ProviderError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StateProofError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for StateProofError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Database(source) => std::error::Error::source(source),
-            Self::Rlp(source) => std::error::Error::source(source),
+            Self::Database(source) => core::error::Error::source(source),
+            Self::Rlp(source) => core::error::Error::source(source),
         }
     }
 }
@@ -101,6 +98,9 @@ pub enum TrieWitnessError {
     /// Missing target node.
     #[display("target node missing from proof {_0:?}")]
     MissingTargetNode(Nibbles),
+    /// Unexpected empty root.
+    #[display("unexpected empty root: {_0:?}")]
+    UnexpectedEmptyRoot(Nibbles),
 }
 
 impl From<TrieWitnessError> for ProviderError {
@@ -109,12 +109,11 @@ impl From<TrieWitnessError> for ProviderError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for TrieWitnessError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for TrieWitnessError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Proof(source) => std::error::Error::source(source),
-            Self::Rlp(source) => std::error::Error::source(source),
+            Self::Proof(source) => core::error::Error::source(source),
+            Self::Rlp(source) => core::error::Error::source(source),
             _ => Option::None,
         }
     }

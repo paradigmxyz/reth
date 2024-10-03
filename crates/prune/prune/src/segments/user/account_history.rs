@@ -275,10 +275,8 @@ mod tests {
                     .iter()
                     .filter(|(key, _)| key.highest_block_number > last_pruned_block_number)
                     .map(|(key, blocks)| {
-                        let new_blocks = blocks
-                            .iter()
-                            .skip_while(|block| *block <= last_pruned_block_number)
-                            .collect::<Vec<_>>();
+                        let new_blocks =
+                            blocks.iter().skip_while(|block| *block <= last_pruned_block_number);
                         (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
                     })
                     .collect::<Vec<_>>();

@@ -1,6 +1,5 @@
-use alloy_primitives::BlockHash;
+use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_db::{
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
@@ -8,8 +7,8 @@ use reth_db::{
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives::{hex, Header};
-use reth_provider::StaticFileProviderFactory;
+use reth_primitives::Header;
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
@@ -54,10 +53,7 @@ enum Subcommand {
 
 impl Command {
     /// Execute `db get` command
-    pub fn execute<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-        self,
-        tool: &DbTool<N>,
-    ) -> eyre::Result<()> {
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, raw })?
@@ -148,7 +144,7 @@ struct GetValueViewer<'a, N: NodeTypesWithDB> {
     raw: bool,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TableViewer<()> for GetValueViewer<'_, N> {
+impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {

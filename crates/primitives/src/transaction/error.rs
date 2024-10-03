@@ -1,4 +1,5 @@
-use crate::{GotExpectedBoxed, U256};
+use crate::GotExpectedBoxed;
+use alloy_primitives::U256;
 
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)
@@ -61,8 +62,7 @@ pub enum InvalidTransactionError {
     SignerAccountHasBytecode,
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for InvalidTransactionError {}
+impl core::error::Error for InvalidTransactionError {}
 
 /// Represents error variants that can happen when trying to convert a transaction to
 /// [`PooledTransactionsElement`](crate::PooledTransactionsElement)
@@ -87,5 +87,4 @@ pub enum TryFromRecoveredTransactionError {
     BlobSidecarMissing,
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for TryFromRecoveredTransactionError {}
+impl core::error::Error for TryFromRecoveredTransactionError {}

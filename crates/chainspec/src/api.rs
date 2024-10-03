@@ -1,14 +1,16 @@
 use crate::{ChainSpec, DepositContract};
+use alloc::vec::Vec;
 use alloy_chains::Chain;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use core::fmt::{Debug, Display};
+use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
 
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthChainSpec: Send + Sync + Unpin + Debug + 'static {
+pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     // todo: make chain spec type generic over hardfork
     //type Hardfork: Clone + Copy + 'static;
 
@@ -41,6 +43,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug + 'static {
 
     /// The block gas limit.
     fn max_gas_limit(&self) -> u64;
+
+    /// The bootnodes for the chain, if any.
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
 }
 
 impl EthChainSpec for ChainSpec {
@@ -82,5 +87,9 @@ impl EthChainSpec for ChainSpec {
 
     fn max_gas_limit(&self) -> u64 {
         self.max_gas_limit
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.bootnodes()
     }
 }

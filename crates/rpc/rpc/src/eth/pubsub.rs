@@ -16,7 +16,6 @@ use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, FullEthApiTypes, RpcTransaction};
 use reth_rpc_eth_types::logs_utils;

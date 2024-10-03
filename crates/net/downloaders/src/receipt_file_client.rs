@@ -5,7 +5,7 @@ use reth_primitives::{Receipt, Receipts};
 use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::{DecodedFileChunk, FileClientError};
 
@@ -106,6 +106,11 @@ where
 
                 match receipt {
                     Some(ReceiptWithBlockNumber { receipt, number }) => {
+                        if block_number > number {
+                            warn!(target: "downloaders::file", previous_block_number = block_number, "skipping receipt from a lower block: {number}");
+                            continue
+                        }
+
                         total_receipts += 1;
 
                         if first_block.is_none() {
@@ -208,9 +213,12 @@ pub struct ReceiptWithBlockNumber {
 
 #[cfg(test)]
 mod test {
-    use alloy_primitives::{hex, Address, Bytes, Log, LogData, B256};
+    use alloy_primitives::{
+        bytes::{Buf, BytesMut},
+        hex, Address, Bytes, Log, LogData, B256,
+    };
     use alloy_rlp::{Decodable, RlpDecodable};
-    use reth_primitives::{Buf, BytesMut, Receipt, TxType};
+    use reth_primitives::{Receipt, TxType};
     use reth_tracing::init_test_tracing;
     use tokio_util::codec::Decoder;
 

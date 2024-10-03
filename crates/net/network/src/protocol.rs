@@ -9,12 +9,12 @@ use std::{
     pin::Pin,
 };
 
+use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network_api::{Direction, PeerId};
-use reth_primitives::BytesMut;
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
