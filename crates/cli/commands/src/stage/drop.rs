@@ -78,6 +78,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
                 tx.clear::<tables::Transactions>()?;
+                if let Some(mut prune_checkpoint) =
+                    tx.get::<tables::PruneCheckpoints>(PruneSegment::Transactions)?
+                {
+                    prune_checkpoint.block_number = None;
+                    prune_checkpoint.tx_number = None;
+                    tx.put::<tables::PruneCheckpoints>(
+                        PruneSegment::Transactions,
+                        prune_checkpoint,
+                    )?;
+                }
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
@@ -113,6 +123,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::StorageChangeSets>()?;
                 tx.clear::<tables::Bytecodes>()?;
                 tx.clear::<tables::Receipts>()?;
+                if let Some(mut prune_checkpoint) =
+                    tx.get::<tables::PruneCheckpoints>(PruneSegment::Receipts)?
+                {
+                    prune_checkpoint.block_number = None;
+                    prune_checkpoint.tx_number = None;
+                    tx.put::<tables::PruneCheckpoints>(
+                        PruneSegment::Receipts,
+                        prune_checkpoint,
+                    )?;
+                }
                 tx.put::<tables::StageCheckpoints>(
                     StageId::Execution.to_string(),
                     Default::default(),
@@ -180,6 +200,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
+                if let Some(mut prune_checkpoint) =
+                    tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?
+                {
+                    prune_checkpoint.block_number = None;
+                    prune_checkpoint.tx_number = None;
+                    tx.put::<tables::PruneCheckpoints>(
+                        PruneSegment::TransactionLookup,
+                        prune_checkpoint,
+                    )?;
+                }
+
                 tx.put::<tables::StageCheckpoints>(
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
