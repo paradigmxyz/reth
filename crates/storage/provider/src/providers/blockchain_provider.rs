@@ -268,12 +268,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
         // Get the last block number stored in the storage which does NOT overlap with in-memory
         // chain.
-        let mut last_database_block_number = provider.last_block_number()?;
-        if let Some(lowest_in_mem_block) = in_mem_chain.last() {
-            if lowest_in_mem_block.number() <= last_database_block_number {
-                last_database_block_number = lowest_in_mem_block.number().saturating_sub(1);
-            }
-        }
+        let last_database_block_number = in_mem_chain
+            .last()
+            .map(|b| Ok(b.anchor().number))
+            .unwrap_or_else(|| provider.last_block_number())?;
 
         // Get the next tx number for the last block stored in the storage, which marks the start of
         // the in-memory state.
@@ -361,12 +359,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
         // Get the last block number stored in the database which does NOT overlap with in-memory
         // chain.
-        let mut last_database_block_number = provider.last_block_number()?;
-        if let Some(lowest_in_mem_block) = in_mem_chain.last() {
-            if lowest_in_mem_block.number() <= last_database_block_number {
-                last_database_block_number = lowest_in_mem_block.number().saturating_sub(1);
-            }
-        }
+        let last_database_block_number = in_mem_chain
+            .last()
+            .map(|b| Ok(b.anchor().number))
+            .unwrap_or_else(|| provider.last_block_number())?;
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
