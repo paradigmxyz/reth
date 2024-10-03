@@ -2,7 +2,7 @@
 
 pub mod body;
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use core::ops;
 
 use alloy_consensus::BlockHeader;
