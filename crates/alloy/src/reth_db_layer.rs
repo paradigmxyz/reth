@@ -33,10 +33,9 @@ impl<P> RethDbLayer<P> {
 /// A provider that overrides the vanilla `Provider` trait to get results from the reth-db.
 #[derive(Clone, Debug)]
 pub struct RethDbProvider<P, T> {
-    #[allow(dead_code)]
     inner: P,
     db_path: PathBuf,
-    provider_factory: DbAccessor,
+    accessor: DbAccessor,
     _pd: PhantomData<T>,
 }
 
@@ -51,13 +50,18 @@ impl<P, T> RethDbProvider<P, T> {
         let provider_factory =
             ProviderFactory::new(db.into(), chain_spec.into(), static_file_provider);
 
-        let db_accessor = DbAccessor::new(provider_factory);
-        Self { inner, db_path, provider_factory: db_accessor, _pd: PhantomData }
+        let accessor = DbAccessor::new(provider_factory);
+        Self { inner, db_path, accessor, _pd: PhantomData }
+    }
+
+    /// Get the underlying `Provider`.
+    pub const fn inner(&self) -> &P {
+        &self.inner
     }
 
     /// Get the underlying `DbAccessor`.
-    pub const fn factory(&self) -> &DbAccessor {
-        &self.provider_factory
+    pub const fn accessor(&self) -> &DbAccessor {
+        &self.accessor
     }
 
     /// Get the DB Path
