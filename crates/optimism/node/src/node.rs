@@ -34,6 +34,14 @@ use crate::{
     OptimismEngineTypes,
 };
 
+/// Optimism primitive types.
+#[derive(Debug)]
+pub struct OpPrimitives;
+
+impl NodePrimitives for OpPrimitives {
+    type Block = OpBlock;
+}
+
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -105,7 +113,7 @@ where
 }
 
 impl NodeTypes for OptimismNode {
-    type Primitives = ();
+    type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
 }
 
