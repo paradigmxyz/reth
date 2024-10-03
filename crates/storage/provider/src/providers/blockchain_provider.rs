@@ -707,8 +707,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                     .block_body_indices(last_storage_block_number)?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(last_storage_block_number))?;
 
-                // Iterate from the lowest block in memory to find the stored indices of the requested block
+                // Prepare our block indices
+                stored_indices.tx_count = 0;
                 stored_indices.first_tx_num = stored_indices.next_tx_num();
+
+                // Iterate from the lowest block in memory until our target block
                 for state in block_state.chain().into_iter().rev() {
                     let block_tx_count = state.block().block.body.transactions.len() as u64;
                     if state.block_ref().block().number == number {
