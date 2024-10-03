@@ -488,8 +488,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock |
-            InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
+            InvalidTransaction::CallerGasLimitMoreThanBlock => {
+                // tx.gas > block.gas_limit
+                Self::GasTooHigh
+            }
+            InvalidTransaction::CallGasCostMoreThanGasLimit => {
+                // tx.gas < cost
+                Self::GasTooLow
+            }
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
                 Self::InsufficientFunds { cost: *fee, balance: *balance }
