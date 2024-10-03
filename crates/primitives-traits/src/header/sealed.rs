@@ -1,4 +1,5 @@
 use super::Header;
+use alloc::vec::Vec;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable};
 #[cfg(any(test, feature = "test-utils"))]
@@ -9,7 +10,6 @@ use core::mem;
 use derive_more::{AsRef, Deref};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
-use alloc::vec::Vec;
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.

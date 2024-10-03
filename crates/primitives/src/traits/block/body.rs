@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use core::ops;
 
 use alloy_consensus::{BlockHeader, Transaction, TxType};
