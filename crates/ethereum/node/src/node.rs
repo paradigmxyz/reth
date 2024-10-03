@@ -105,6 +105,10 @@ where
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components()
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        EthereumAddOns::default()
+    }
 }
 
 /// A regular ethereum evm and executor builder.

@@ -183,7 +183,7 @@ where
                 hooks: NodeHooks::default(),
                 rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
-                addons
+                addons,
             },
         }
     }

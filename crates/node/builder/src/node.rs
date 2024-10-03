@@ -41,17 +41,22 @@ pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
 
 /// A [`Node`] type builder
 #[derive(Clone, Default, Debug)]
-pub struct AnyNode<N = (), C = (), AO = ()>(PhantomData<(N, AO)>, C);
+pub struct AnyNode<N = (), C = (), AO = ()>(PhantomData<N>, C, AO);
 
-impl<N, C> AnyNode<N, C> {
+impl<N, C, AO> AnyNode<N, C, AO> {
     /// Configures the types of the node.
-    pub fn types<T>(self) -> AnyNode<T, C> {
-        AnyNode::<T, C>(PhantomData::<(T, ())>, self.1)
+    pub fn types<T>(self) -> AnyNode<T, C, AO> {
+        AnyNode(PhantomData, self.1, self.2)
     }
 
     /// Sets the node components builder.
-    pub const fn components_builder<T>(&self, value: T) -> AnyNode<N, T> {
-        AnyNode::<N, T>(PhantomData::<(N, ())>, value)
+    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T, AO> {
+        AnyNode(PhantomData, value, self.2)
+    }
+
+    /// Sets the node add-ons.
+    pub fn add_ons<T>(self, value: T) -> AnyNode<N, C, T> {
+        AnyNode(PhantomData, self.1, value)
     }
 }
 
@@ -89,7 +94,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-       self.1.add_ons()
+        self.2.clone()
     }
 }
 
