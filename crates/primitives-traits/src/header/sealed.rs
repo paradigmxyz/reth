@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
-#[add_arbitrary_tests(rlp, compact)]
+#[add_arbitrary_tests(rlp)]
 pub struct SealedHeader<H = Header> {
     /// Locked Header hash.
     hash: BlockHash,

@@ -468,10 +468,8 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
-    use reth_optimism_chainspec::optimism_deposit_tx_signature;
-    use reth_primitives::{
-        Account, Block, BlockBody, Signature, Transaction, TransactionSigned, BASE_MAINNET,
-    };
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
+    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -546,7 +544,7 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -630,7 +628,7 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,

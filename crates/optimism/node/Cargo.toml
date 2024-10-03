@@ -74,6 +74,7 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
+op-alloy-consensus.workspace = true
 
 [features]
 optimism = [
@@ -86,7 +87,7 @@ optimism = [
     "reth-beacon-consensus/optimism",
     "reth-revm/optimism",
     "reth-auto-seal-consensus/optimism",
-    "reth-optimism-rpc/optimism"
+    "reth-optimism-rpc/optimism",
 ]
 asm-keccak = ["reth-primitives/asm-keccak"]
 test-utils = ["reth-node-builder/test-utils"]

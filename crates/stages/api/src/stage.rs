@@ -199,8 +199,8 @@ pub trait Stage<Provider>: Send + Sync {
     /// Returns `Poll::Ready(Ok(()))` when the stage is ready to execute the given range.
     ///
     /// This method is heavily inspired by [tower](https://crates.io/crates/tower)'s `Service` trait.
-    /// Any asynchronous tasks or communication should be handled in `poll_ready`, e.g. moving
-    /// downloaded items from downloaders to an internal buffer in the stage.
+    /// Any asynchronous tasks or communication should be handled in `poll_execute_ready`, e.g.
+    /// moving downloaded items from downloaders to an internal buffer in the stage.
     ///
     /// If the stage has any pending external state, then `Poll::Pending` is returned.
     ///
@@ -208,18 +208,18 @@ pub trait Stage<Provider>: Send + Sync {
     /// depending on the specific error. In that case, an unwind must be issued instead.
     ///
     /// Once `Poll::Ready(Ok(()))` is returned, the stage may be executed once using `execute`.
-    /// Until the stage has been executed, repeated calls to `poll_ready` must return either
+    /// Until the stage has been executed, repeated calls to `poll_execute_ready` must return either
     /// `Poll::Ready(Ok(()))` or `Poll::Ready(Err(_))`.
     ///
-    /// Note that `poll_ready` may reserve shared resources that are consumed in a subsequent call
-    /// of `execute`, e.g. internal buffers. It is crucial for implementations to not assume that
-    /// `execute` will always be invoked and to ensure that those resources are appropriately
-    /// released if the stage is dropped before `execute` is called.
+    /// Note that `poll_execute_ready` may reserve shared resources that are consumed in a
+    /// subsequent call of `execute`, e.g. internal buffers. It is crucial for implementations
+    /// to not assume that `execute` will always be invoked and to ensure that those resources
+    /// are appropriately released if the stage is dropped before `execute` is called.
     ///
     /// For the same reason, it is also important that any shared resources do not exhibit
-    /// unbounded growth on repeated calls to `poll_ready`.
+    /// unbounded growth on repeated calls to `poll_execute_ready`.
     ///
-    /// Unwinds may happen without consulting `poll_ready` first.
+    /// Unwinds may happen without consulting `poll_execute_ready` first.
     fn poll_execute_ready(
         &mut self,
         _cx: &mut Context<'_>,
