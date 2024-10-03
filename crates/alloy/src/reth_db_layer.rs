@@ -14,8 +14,8 @@ use reth_provider::{
 };
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
-/// A tower-like layer that should be used as a [ProviderLayer] to wrap the [Provider] trait over
-/// reth-db.
+/// A tower-like layer that should be used as a [`ProviderLayer`] to wrap the [`Provider`] trait
+/// over reth-db.
 #[derive(Debug, Clone)]
 pub struct RethDbLayer {
     db_path: PathBuf,
@@ -33,7 +33,7 @@ impl RethDbLayer {
     }
 }
 
-/// Implement the [`ProviderLayer`] trait for the [`RethDBLayer`] struct.
+/// Implement the [`ProviderLayer`] trait for the [`RethDbLayer`] struct.
 impl<P, T> ProviderLayer<P, T> for RethDbLayer
 where
     P: Provider<T>,
