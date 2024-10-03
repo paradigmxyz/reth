@@ -8,7 +8,7 @@ use reth::{
         DebugApiServer,
     },
 };
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_node_builder::{EthApiTypes, NodeTypes};
 
 #[allow(missing_debug_implementations)]
@@ -18,7 +18,7 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
-    Node: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     EthApi: EthApiSpec + EthTransactions + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server

@@ -1,14 +1,16 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, B256,
+};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use std::collections::{HashMap, HashSet};
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
 /// or an underlying state provider.

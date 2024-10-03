@@ -1,10 +1,10 @@
-mod eip1559;
-mod eip2930;
-mod eip4844;
-mod eip7702;
-mod legacy;
+pub(crate) mod eip1559;
+pub(crate) mod eip2930;
+pub(crate) mod eip4844;
+pub(crate) mod eip7702;
+pub(crate) mod legacy;
 #[cfg(feature = "optimism")]
-mod optimism;
+pub(crate) mod optimism;
 
 #[cfg(test)]
 mod tests {

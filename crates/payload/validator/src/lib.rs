@@ -8,9 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_rpc_types::engine::{ExecutionPayload, MaybeCancunPayloadFields, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_primitives::SealedBlock;
-use reth_rpc_types::{engine::MaybeCancunPayloadFields, ExecutionPayload, PayloadError};
 use reth_rpc_types_compat::engine::payload::try_into_block;
 use std::sync::Arc;
 
@@ -102,7 +102,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     ///
     /// If the cancun fields are provided this also validates that the versioned hashes in the block
     /// match the versioned hashes passed in the
-    /// [`CancunPayloadFields`](reth_rpc_types::engine::CancunPayloadFields), if the cancun payload
+    /// [`CancunPayloadFields`](alloy_rpc_types::engine::CancunPayloadFields), if the cancun payload
     /// fields are provided. If the payload fields are not provided, but versioned hashes exist
     /// in the block, this is considered an error: [`PayloadError::InvalidVersionedHashes`].
     ///
@@ -160,7 +160,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
-        if !shanghai_active && sealed_block.withdrawals.is_some() {
+        if !shanghai_active && sealed_block.body.withdrawals.is_some() {
             // shanghai not active but withdrawals present
             return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
         }

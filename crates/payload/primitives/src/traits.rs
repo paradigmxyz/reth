@@ -1,16 +1,12 @@
-use crate::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    PayloadBuilderError, PayloadEvents, PayloadTypes,
-};
+use crate::{PayloadBuilderError, PayloadEvents, PayloadTypes};
 use alloy_primitives::{Address, B256, U256};
-use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpec;
-use reth_primitives::{SealedBlock, Withdrawals};
-use reth_rpc_types::{
+use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
-    optimism::OptimismPayloadAttributes,
     Withdrawal,
 };
+use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
+use reth_chain_state::ExecutedBlock;
+use reth_primitives::{SealedBlock, Withdrawals};
 use std::{future::Future, pin::Pin};
 use tokio::sync::oneshot;
 
@@ -84,7 +80,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: std::error::Error;
+    type Error: core::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
@@ -133,14 +129,6 @@ pub trait PayloadAttributes:
 
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
-
-    /// Ensures that the payload attributes are valid for the given [`ChainSpec`] and
-    /// [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -154,14 +142,6 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
-    }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())
     }
 }
 
@@ -177,22 +157,6 @@ impl PayloadAttributes for OptimismPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
     }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())?;
-
-        if self.gas_limit.is_none() {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ))
-        }
-
-        Ok(())
-    }
 }
 
 /// A builder that can return the current payload attribute.
@@ -200,7 +164,7 @@ pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
     /// The payload attributes type returned by the builder.
     type PayloadAttributes: PayloadAttributes;
     /// The error type returned by [`PayloadAttributesBuilder::build`].
-    type Error: std::error::Error + Send + Sync;
+    type Error: core::error::Error + Send + Sync;
 
     /// Return a new payload attribute from the builder.
     fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;

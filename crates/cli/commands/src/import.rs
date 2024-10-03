@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
@@ -20,12 +20,12 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
-    StageCheckpointReader,
+    providers::ProviderNodeTypes, BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError,
+    ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
@@ -56,7 +56,7 @@ pub struct ImportCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportCommand<C> {
     /// Execute `import` command
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
@@ -168,7 +168,7 @@ pub fn build_import_pipeline<N, C, E>(
     executor: E,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     C: Consensus + 'static,
     E: BlockExecutorProvider,
 {
@@ -180,7 +180,7 @@ where
     let last_block_number = provider_factory.last_block_number()?;
     let local_head = provider_factory
         .sealed_header(last_block_number)?
-        .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
+        .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
@@ -231,12 +231,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::{DefaultChainSpecParser, SUPPORTED_CHAINS};
+    use reth_node_core::args::utils::{EthereumChainSpecParser, SUPPORTED_CHAINS};
 
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: ImportCommand<DefaultChainSpecParser> =
+            let args: ImportCommand<EthereumChainSpecParser> =
                 ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),

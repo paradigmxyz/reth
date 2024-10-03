@@ -1,18 +1,21 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_primitives::Parity;
+use alloy_rpc_types::{
+    simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    Block, BlockTransactionsKind,
+};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     logs_bloom,
     proofs::{calculate_receipt_root, calculate_transaction_root},
-    BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned, TransactionSignedNoHash,
+    BlockBody, BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned,
+    TransactionSignedNoHash,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types::{
-    simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    Block, BlockTransactionsKind, ToRpcError, TransactionRequest,
-};
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -20,7 +23,8 @@ use revm::{db::CacheDB, Database};
 use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper, EthApiError, RevertError, RpcInvalidTransactionError,
+    cache::db::StateProviderTraitObjWrapper, error::ToRpcError, EthApiError, RevertError,
+    RpcInvalidTransactionError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -57,7 +61,7 @@ impl ToRpcError for EthSimulateError {
 pub fn resolve_transactions<DB: Database>(
     txs: &mut [TransactionRequest],
     validation: bool,
-    block_gas_limit: u128,
+    block_gas_limit: u64,
     chain_id: u64,
     db: &mut DB,
 ) -> Result<Vec<TransactionSigned>, EthApiError>
@@ -67,7 +71,7 @@ where
     let mut transactions = Vec::with_capacity(txs.len());
 
     let default_gas_limit = {
-        let total_specified_gas = txs.iter().filter_map(|tx| tx.gas).sum::<u128>();
+        let total_specified_gas = txs.iter().filter_map(|tx| tx.gas).sum::<u64>();
         let txs_without_gas_limit = txs.iter().filter(|tx| tx.gas.is_none()).count();
 
         if total_specified_gas > block_gas_limit {
@@ -75,7 +79,7 @@ where
         }
 
         if txs_without_gas_limit > 0 {
-            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u128
+            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u64
         } else {
             0
         }
@@ -132,7 +136,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature =
-            Signature { odd_y_parity: false, r: Default::default(), s: Default::default() };
+            Signature::new(Default::default(), Default::default(), Parity::Parity(false));
 
         let tx = match tx {
             TypedTransaction::Legacy(tx) => {
@@ -191,7 +195,7 @@ pub fn build_block<T: TransactionCompat>(
             ExecutionResult::Halt { reason, gas_used } => {
                 let error = RpcInvalidTransactionError::halt(reason, tx.gas_limit());
                 SimCallResult {
-                    return_value: Bytes::new(),
+                    return_data: Bytes::new(),
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
@@ -204,7 +208,7 @@ pub fn build_block<T: TransactionCompat>(
             ExecutionResult::Revert { output, gas_used } => {
                 let error = RevertError::new(output.clone());
                 SimCallResult {
-                    return_value: output,
+                    return_data: output,
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
@@ -215,14 +219,14 @@ pub fn build_block<T: TransactionCompat>(
                 }
             }
             ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_value: output.into_data(),
+                return_data: output.into_data(),
                 error: None,
                 gas_used,
                 logs: logs
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
-                        reth_rpc_types::Log {
+                        alloy_rpc_types::Log {
                             inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(transaction_index as u64),
@@ -290,7 +294,10 @@ pub fn build_block<T: TransactionCompat>(
     };
 
     let block = BlockWithSenders {
-        block: reth_primitives::Block { header, body: transactions, ..Default::default() },
+        block: reth_primitives::Block {
+            header,
+            body: BlockBody { transactions, ..Default::default() },
+        },
         senders,
     };
 

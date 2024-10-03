@@ -5,7 +5,7 @@ use crate::{
     headers::client::{HeadersClient, SingleHeaderRequest},
     BlockClient,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Sealable, B256};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
@@ -94,7 +94,7 @@ where
             client,
             headers: None,
             pending_headers: VecDeque::new(),
-            bodies: HashMap::new(),
+            bodies: HashMap::default(),
             consensus: Arc::clone(&self.consensus),
         }
     }
@@ -182,8 +182,15 @@ where
                 ResponseResult::Header(res) => {
                     match res {
                         Ok(maybe_header) => {
-                            let (peer, maybe_header) =
-                                maybe_header.map(|h| h.map(|h| h.seal_slow())).split();
+                            let (peer, maybe_header) = maybe_header
+                                .map(|h| {
+                                    h.map(|h| {
+                                        let sealed = h.seal_slow();
+                                        let (header, seal) = sealed.into_parts();
+                                        SealedHeader::new(header, seal)
+                                    })
+                                })
+                                .split();
                             if let Some(header) = maybe_header {
                                 if header.hash() == this.hash {
                                     this.header = Some(header);
@@ -483,8 +490,17 @@ where
     }
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Header>>) {
-        let (peer, mut headers_falling) =
-            headers.map(|h| h.into_iter().map(|h| h.seal_slow()).collect::<Vec<_>>()).split();
+        let (peer, mut headers_falling) = headers
+            .map(|h| {
+                h.into_iter()
+                    .map(|h| {
+                        let sealed = h.seal_slow();
+                        let (header, seal) = sealed.into_parts();
+                        SealedHeader::new(header, seal)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .split();
 
         // fill in the response if it's the correct length
         if headers_falling.len() == self.count as usize {
@@ -719,7 +735,10 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
 
-            sealed_header = header.seal_slow();
+            let sealed = header.seal_slow();
+            let (header, seal) = sealed.into_parts();
+            sealed_header = SealedHeader::new(header, seal);
+
             client.insert(sealed_header.clone(), body.clone());
         }
 

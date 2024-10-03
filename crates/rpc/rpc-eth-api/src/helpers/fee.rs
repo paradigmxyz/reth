@@ -1,14 +1,14 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
 use alloy_primitives::U256;
+use alloy_rpc_types::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, EthStateCache,
     FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_rpc_types::{BlockNumberOrTag, FeeHistory};
 use tracing::debug;
 
 use crate::FromEthApiError;
@@ -147,7 +147,7 @@ pub trait EthFees: LoadFee {
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
                 base_fee_per_gas
-                    .push(last_entry.next_block_base_fee(&LoadFee::provider(self).chain_spec())
+                    .push(last_entry.next_block_base_fee(LoadFee::provider(self).chain_spec())
                         as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
@@ -159,6 +159,7 @@ pub trait EthFees: LoadFee {
                 if headers.len() != block_count as usize {
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
+
 
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
@@ -200,10 +201,10 @@ pub trait EthFees: LoadFee {
                         .chain_spec()
                         .base_fee_params_at_timestamp(last_header.timestamp)
                         .next_block_base_fee(
-                            last_header.gas_used as u128,
-                            last_header.gas_limit as u128,
-                            last_header.base_fee_per_gas.unwrap_or_default() as u128,
-                        ),
+                            last_header.gas_used ,
+                            last_header.gas_limit,
+                            last_header.base_fee_per_gas.unwrap_or_default() ,
+                        ) as u128,
                 );
 
                 // Same goes for the `base_fee_per_blob_gas`:
@@ -246,7 +247,7 @@ pub trait LoadFee: LoadBlock {
     /// Data access in default (L1) trait method implementations.
     fn provider(
         &self,
-    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec>;
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>;
 
     /// Returns a handle for reading data from memory.
     ///

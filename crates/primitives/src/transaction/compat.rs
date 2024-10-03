@@ -1,4 +1,5 @@
-use crate::{Address, Transaction, TransactionSigned, TxKind, U256};
+use crate::{Transaction, TransactionSigned};
+use alloy_primitives::{Address, TxKind, U256};
 use revm_primitives::{AuthorizationList, TxEnv};
 
 /// Implements behaviour to fill a [`TxEnv`] from another transaction.
@@ -10,16 +11,12 @@ pub trait FillTxEnv {
 impl FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
         #[cfg(feature = "optimism")]
-        let envelope = {
-            let mut envelope = alloc::vec::Vec::with_capacity(self.length_without_header());
-            self.encode_enveloped(&mut envelope);
-            envelope
-        };
+        let envelope = alloy_eips::eip2718::Encodable2718::encoded_2718(self);
 
         tx_env.caller = sender;
         match self.as_ref() {
             Transaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit as u64;
+                tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.gas_price);
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;
@@ -33,7 +30,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.authorization_list = None;
             }
             Transaction::Eip2930(tx) => {
-                tx_env.gas_limit = tx.gas_limit as u64;
+                tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.gas_price);
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;
@@ -47,7 +44,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.authorization_list = None;
             }
             Transaction::Eip1559(tx) => {
-                tx_env.gas_limit = tx.gas_limit as u64;
+                tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.max_fee_per_gas);
                 tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
                 tx_env.transact_to = tx.to;
@@ -61,7 +58,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.authorization_list = None;
             }
             Transaction::Eip4844(tx) => {
-                tx_env.gas_limit = tx.gas_limit as u64;
+                tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.max_fee_per_gas);
                 tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
                 tx_env.transact_to = TxKind::Call(tx.to);
@@ -75,7 +72,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.authorization_list = None;
             }
             Transaction::Eip7702(tx) => {
-                tx_env.gas_limit = tx.gas_limit as u64;
+                tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.max_fee_per_gas);
                 tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
                 tx_env.transact_to = tx.to.into();
@@ -92,7 +89,7 @@ impl FillTxEnv for TransactionSigned {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(tx) => {
                 tx_env.access_list.clear();
-                tx_env.gas_limit = tx.gas_limit as u64;
+                tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::ZERO;
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;

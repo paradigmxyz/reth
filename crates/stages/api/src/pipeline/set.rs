@@ -51,7 +51,7 @@ pub struct StageSetBuilder<Provider> {
 
 impl<Provider> Default for StageSetBuilder<Provider> {
     fn default() -> Self {
-        Self { stages: HashMap::new(), order: Vec::new() }
+        Self { stages: HashMap::default(), order: Vec::new() }
     }
 }
 

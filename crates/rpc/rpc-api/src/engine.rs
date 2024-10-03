@@ -6,18 +6,18 @@
 use alloy_eips::{eip4844::BlobAndProofV1, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
+use alloy_rpc_types::{
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
+};
+use alloy_rpc_types_engine::{
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
+    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
+    PayloadId, PayloadStatus, TransitionConfiguration,
+};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_engine_primitives::EngineTypes;
-use reth_rpc_types::{
-    engine::{
-        ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2,
-        ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
-        ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
-    },
-    state::StateOverride,
-    BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log, SyncStatus,
-    TransactionRequest,
-};
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
 // By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
@@ -219,7 +219,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "getBlobsV1")]
     async fn get_blobs_v1(
         &self,
-        transaction_ids: Vec<B256>,
+        versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 }
 

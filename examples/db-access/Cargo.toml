@@ -11,9 +11,11 @@ reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
-reth-rpc-types.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-types.workspace = true
+
+alloy-rpc-types.workspace = true
+alloy-primitives.workspace = true
 
 
 eyre.workspace = true

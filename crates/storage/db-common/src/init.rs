@@ -2,7 +2,7 @@
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, B256, U256};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::tables;
@@ -71,10 +71,7 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
 where
-    PF: DatabaseProviderFactory
-        + StaticFileProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + BlockHashReader,
+    PF: DatabaseProviderFactory + StaticFileProviderFactory + ChainSpecProvider + BlockHashReader,
     PF::ProviderRW: StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
@@ -294,13 +291,14 @@ where
 }
 
 /// Inserts header for the genesis state.
-pub fn insert_genesis_header<Provider>(
+pub fn insert_genesis_header<Provider, Spec>(
     provider: &Provider,
     static_file_provider: &StaticFileProvider,
-    chain: &ChainSpec,
+    chain: &Spec,
 ) -> ProviderResult<()>
 where
     Provider: DBProvider<Tx: DbTxMut>,
+    Spec: EthChainSpec,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
 
@@ -335,7 +333,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockNumReader
         + BlockHashReader
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider
         + StageCheckpointWriter
         + HistoryWriter
         + HeaderProvider
@@ -348,7 +346,7 @@ where
     let hash = provider_rw.block_hash(block)?.unwrap();
     let expected_state_root = provider_rw
         .header_by_number(block)?
-        .ok_or(ProviderError::HeaderNotFound(block.into()))?
+        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
         .state_root;
 
     // first line can be state root
@@ -368,7 +366,7 @@ where
 
     debug!(target: "reth::cli",
         block,
-        chain=%provider_rw.chain_spec().chain,
+        chain=%provider_rw.chain_spec().chain(),
         "Initializing state at block"
     );
 
@@ -584,7 +582,7 @@ struct GenesisAccountWithAddress {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, HOLESKY, MAINNET, SEPOLIA};
+    use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,

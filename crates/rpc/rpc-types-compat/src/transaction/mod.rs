@@ -1,19 +1,15 @@
 //! Compatibility functions for rpc `Transaction` type.
-
 mod signature;
-mod typed;
 
 pub use signature::*;
-pub use typed::*;
-
 use std::fmt;
 
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
-    TransactionInfo,
+    Transaction, TransactionInfo,
 };
+use alloy_serde::WithOtherFields;
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
-use reth_rpc_types::{Transaction, WithOtherFields};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
@@ -133,7 +129,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,
-        gas: Some(gas as u128),
+        gas: Some(gas),
         value: Some(value),
         input: TransactionInput::new(input),
         nonce: Some(nonce),

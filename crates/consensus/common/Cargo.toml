@@ -18,8 +18,11 @@ reth-consensus.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+revm-primitives.workspace = true
 
 [dev-dependencies]
 reth-storage-api.workspace = true
 rand.workspace = true
-mockall = "0.12"
+mockall = "0.13"
+
+alloy-consensus.workspace = true

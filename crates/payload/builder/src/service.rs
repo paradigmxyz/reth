@@ -7,13 +7,13 @@ use crate::{
     metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator, KeepPayloadJobAlive,
     PayloadJob,
 };
+use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_payload_primitives::{
     BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
     PayloadEvents, PayloadTypes,
 };
 use reth_provider::CanonStateNotification;
-use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
     future::Future,
@@ -303,7 +303,7 @@ where
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
 
         if keep_alive == KeepPayloadJobAlive::No {
-            let (_, id) = self.payload_jobs.remove(job);
+            let (_, id) = self.payload_jobs.swap_remove(job);
             trace!(%id, "terminated resolved job");
         }
 

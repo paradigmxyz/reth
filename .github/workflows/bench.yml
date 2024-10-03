@@ -1,4 +1,4 @@
-# Runs benchmarks.
+# Runs benchmarks on serialization/deserialization of storage values and keys.
 
 on:
   pull_request:
@@ -48,13 +48,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref || 'main' }}
+      # On `main` branch, generates test vectors and serializes them to disk using `serde-json`.
       - name: Generate test vectors
         run: cargo run --bin reth --features dev -- test-vectors tables
+      # Runs iai and stores `main` baseline report for comparison later on $BASELINE.
       - name: Save baseline
         run: cargo bench -p reth-db --bench iai --profile profiling --features test-utils -- --save-baseline=$BASELINE
       - name: Checkout PR
         uses: actions/checkout@v4
         with:
           clean: false
+      # Runs iai on incoming merge using previously generated test-vectors and compares the report against `main` report.
       - name: Compare PR benchmarks
         run: cargo bench -p reth-db --bench iai --profile profiling --features test-utils -- --baseline=$BASELINE

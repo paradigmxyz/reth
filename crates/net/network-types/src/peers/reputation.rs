@@ -129,6 +129,21 @@ pub struct ReputationChangeWeights {
 // === impl ReputationChangeWeights ===
 
 impl ReputationChangeWeights {
+    /// Creates a new instance that doesn't penalize any kind of reputation change.
+    pub const fn zero() -> Self {
+        Self {
+            bad_block: 0,
+            bad_transactions: 0,
+            already_seen_transactions: 0,
+            bad_message: 0,
+            timeout: 0,
+            bad_protocol: 0,
+            failed_to_connect: 0,
+            dropped: 0,
+            bad_announcement: 0,
+        }
+    }
+
     /// Returns the quantifiable [`ReputationChange`] for the given [`ReputationChangeKind`] using
     /// the configured weights
     pub fn change(&self, kind: ReputationChangeKind) -> ReputationChange {

@@ -11,11 +11,15 @@ use std::{
 };
 
 use alloy_primitives::TxHash;
+use alloy_rpc_types::{
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    PendingTransactionFilterKind,
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_node_api::EthApiTypes;
-use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered};
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
@@ -23,10 +27,6 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::ToRpcResult;
-use reth_rpc_types::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind,
-};
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -379,7 +379,7 @@ where
                 let block = self
                     .provider
                     .header_by_hash_or_number(block_hash.into())?
-                    .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
 
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
@@ -511,7 +511,7 @@ where
                         None => self
                             .provider
                             .block_hash(header.number)?
-                            .ok_or(ProviderError::HeaderNotFound(header.number.into()))?,
+                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
@@ -551,7 +551,7 @@ pub struct ActiveFilters<T> {
 impl<T> ActiveFilters<T> {
     /// Returns an empty instance.
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(HashMap::new())) }
+        Self { inner: Arc::new(Mutex::new(HashMap::default())) }
     }
 }
 
@@ -698,28 +698,28 @@ impl Iterator for BlockRangeInclusiveIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
+    use reth_testing_utils::generators;
 
     #[test]
     fn test_block_range_iter() {
-        for _ in 0..100 {
-            let mut rng = thread_rng();
-            let start = rng.gen::<u32>() as u64;
-            let end = start.saturating_add(rng.gen::<u32>() as u64);
-            let step = rng.gen::<u16>() as u64;
-            let range = start..=end;
-            let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
-            let (from, mut end) = iter.next().unwrap();
-            assert_eq!(from, start);
-            assert_eq!(end, (from + step).min(*range.end()));
+        let mut rng = generators::rng();
 
-            for (next_from, next_end) in iter {
-                // ensure range starts with previous end + 1
-                assert_eq!(next_from, end + 1);
-                end = next_end;
-            }
+        let start = rng.gen::<u32>() as u64;
+        let end = start.saturating_add(rng.gen::<u32>() as u64);
+        let step = rng.gen::<u16>() as u64;
+        let range = start..=end;
+        let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
+        let (from, mut end) = iter.next().unwrap();
+        assert_eq!(from, start);
+        assert_eq!(end, (from + step).min(*range.end()));
 
-            assert_eq!(end, *range.end());
+        for (next_from, next_end) in iter {
+            // ensure range starts with previous end + 1
+            assert_eq!(next_from, end + 1);
+            end = next_end;
         }
+
+        assert_eq!(end, *range.end());
     }
 }

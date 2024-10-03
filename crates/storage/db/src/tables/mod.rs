@@ -429,8 +429,8 @@ impl Encode for ChainStateKey {
 }
 
 impl Decode for ChainStateKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
-        if value.as_ref() == [0] {
+    fn decode(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
+        if value == [0] {
             Ok(Self::LastFinalizedBlock)
         } else {
             Err(reth_db_api::DatabaseError::Decode)

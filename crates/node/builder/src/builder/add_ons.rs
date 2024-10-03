@@ -1,7 +1,5 @@
 //! Node add-ons. Depend on core [`NodeComponents`](crate::NodeComponents).
 
-use std::marker::PhantomData;
-
 use reth_node_api::{EthApiTypes, FullNodeComponents, NodeAddOns};
 
 use crate::{exex::BoxedLaunchExEx, hooks::NodeHooks, rpc::RpcHooks};
@@ -22,8 +20,6 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
 /// required for launching the node, such as RPC.
 #[derive(Default)]
 pub struct RpcAddOns<Node: FullNodeComponents, EthApi: EthApiTypes> {
-    /// Core `eth` API type to install on the RPC server, configured w.r.t. network.
-    pub _eth_api: PhantomData<EthApi>,
     /// Additional RPC hooks.
     pub hooks: RpcHooks<Node, EthApi>,
 }

@@ -3,11 +3,11 @@
 //! Log parsing for building filter.
 
 use alloy_primitives::TxHash;
+use alloy_rpc_types::{FilterId, FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
 use reth_primitives::{BlockNumHash, Receipt};
 use reth_rpc_server_types::result::rpc_error_with_code;
-use reth_rpc_types::{FilterId, FilteredParams, Log};
 use reth_storage_api::BlockReader;
 
 use crate::EthApiError;
@@ -141,7 +141,7 @@ pub fn append_matching_block_logs(
                     let transaction_id = first_tx_num + receipt_idx as u64;
                     let transaction = provider
                         .transaction_by_id(transaction_id)?
-                        .ok_or(ProviderError::TransactionNotFound(transaction_id.into()))?;
+                        .ok_or_else(|| ProviderError::TransactionNotFound(transaction_id.into()))?;
 
                     transaction_hash = Some(transaction.hash());
                 }
@@ -210,7 +210,7 @@ pub fn get_filter_block_range(
 
 #[cfg(test)]
 mod tests {
-    use reth_rpc_types::Filter;
+    use alloy_rpc_types::Filter;
 
     use super::*;
 
@@ -273,8 +273,8 @@ mod tests {
         let start_block = info.best_number;
 
         let (from_block_number, to_block_number) = get_filter_block_range(
-            from_block.and_then(reth_rpc_types::BlockNumberOrTag::as_number),
-            to_block.and_then(reth_rpc_types::BlockNumberOrTag::as_number),
+            from_block.and_then(alloy_rpc_types::BlockNumberOrTag::as_number),
+            to_block.and_then(alloy_rpc_types::BlockNumberOrTag::as_number),
             start_block,
             info,
         );
