@@ -621,10 +621,18 @@ where
 
                 let mut hashed_state = HashedPostState::default();
                 let mut keys = HashMap::default();
+                let mut codes = HashMap::default();
                 let _ = block_executor
                     .execute_with_state_witness(
                         (&block.clone().unseal(), block.difficulty).into(),
                         |statedb| {
+                            codes = statedb
+                                .cache
+                                .contracts
+                                .iter()
+                                .map(|(hash, code)| (*hash, code.bytes()))
+                                .collect();
+
                             for (address, account) in &statedb.cache.accounts {
                                 let hashed_address = keccak256(address);
                                 hashed_state.accounts.insert(
@@ -667,7 +675,7 @@ where
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
                 Ok(ExecutionWitness {
                     state: HashMap::from_iter(state.into_iter()),
-                    codes: Default::default(),
+                    codes,
                     keys: include_preimages.then_some(keys),
                 })
             })

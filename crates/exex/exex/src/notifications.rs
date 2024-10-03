@@ -223,21 +223,19 @@ where
     /// - ExEx is at the same block number as the node head (`node_head.number ==
     ///   exex_head.number`). Nothing to do.
     fn check_backfill(&mut self) -> eyre::Result<()> {
-        debug!(target: "exex::manager", "Synchronizing ExEx head");
-
         let backfill_job_factory =
             BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
         match self.exex_head.block.number.cmp(&self.node_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head, start backfill
-                debug!(target: "exex::manager", "ExEx is behind the node head and on the canonical chain, starting backfill");
+                debug!(target: "exex::notifications", "ExEx is behind the node head and on the canonical chain, starting backfill");
                 let backfill = backfill_job_factory
                     .backfill(self.exex_head.block.number + 1..=self.node_head.number)
                     .into_stream();
                 self.backfill_job = Some(backfill);
             }
             std::cmp::Ordering::Equal => {
-                debug!(target: "exex::manager", "ExEx is at the node head");
+                debug!(target: "exex::notifications", "ExEx is at the node head");
             }
             std::cmp::Ordering::Greater => {
                 return Err(eyre::eyre!("ExEx is ahead of the node head"))

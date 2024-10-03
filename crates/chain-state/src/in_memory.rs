@@ -618,6 +618,11 @@ impl BlockState {
         self.block.clone()
     }
 
+    /// Returns a reference to the executed block that determines the state.
+    pub const fn block_ref(&self) -> &ExecutedBlock {
+        &self.block
+    }
+
     /// Returns the block with senders for the state.
     pub fn block_with_senders(&self) -> BlockWithSenders {
         let block = self.block.block().clone();

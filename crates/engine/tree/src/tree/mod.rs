@@ -1219,6 +1219,10 @@ where
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
+                                    self.metrics
+                                        .engine
+                                        .failed_forkchoice_updated_response_deliveries
+                                        .increment(1);
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
@@ -1230,6 +1234,10 @@ where
                                     )
                                 })) {
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
                                 }
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
