@@ -1107,6 +1107,14 @@ pub trait Call: LoadState + SpawnBlocking {
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
     {
+        // TODO(mattsse): cleanup, by not disabling gaslimit and instead use self.call_gas_limit
+        if request.gas > Some(gas_limit) {
+            // configured gas exceeds limit
+            return Err(
+                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+            )
+        }
+
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
