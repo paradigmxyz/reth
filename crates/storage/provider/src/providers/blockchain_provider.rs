@@ -815,7 +815,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
             |provider| provider.transaction_by_id_no_hash(id),
             |tx_index, _, block_state| {
                 Ok(block_state
-                    .block()
+                    .block_ref()
                     .block()
                     .body
                     .transactions
@@ -1427,7 +1427,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
             let changesets = state
-                .block()
+                .block_ref()
                 .execution_output
                 .bundle
                 .reverts
