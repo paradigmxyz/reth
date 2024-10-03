@@ -174,7 +174,7 @@ pub trait BlockExecutionStrategyFactory {
         + std::error::Error;
 
     /// Creates a new block execution strategy instance.
-    fn new(
+    fn create(
         &self,
         block: &BlockWithSenders,
         total_difficulty: U256,
@@ -228,7 +228,7 @@ where
     F: BlockExecutionStrategyFactory,
 {
     /// Creates a new `GenericBlockExecutor` with the given strategy factory.
-    pub fn new(strategy_factory: F) -> Self {
+    pub const fn new(strategy_factory: F) -> Self {
         Self { strategy_factory }
     }
 }
@@ -244,7 +244,7 @@ where
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
 
-        let mut strategy = self.strategy_factory.new(block, total_difficulty)?;
+        let mut strategy = self.strategy_factory.create(block, total_difficulty)?;
 
         strategy.configure_environment()?;
         strategy.apply_pre_execution_changes()?;
@@ -265,7 +265,7 @@ where
     {
         let BlockExecutionInput { block, total_difficulty } = input;
 
-        let mut strategy = self.strategy_factory.new(block, total_difficulty)?;
+        let mut strategy = self.strategy_factory.create(block, total_difficulty)?;
 
         strategy.configure_environment()?;
         strategy.apply_pre_execution_changes()?;
@@ -289,7 +289,7 @@ where
     {
         let BlockExecutionInput { block, total_difficulty } = input;
 
-        let mut strategy = self.strategy_factory.new(block, total_difficulty)?;
+        let mut strategy = self.strategy_factory.create(block, total_difficulty)?;
 
         strategy.set_state_hook(Some(state_hook));
 
