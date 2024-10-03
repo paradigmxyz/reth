@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
-#[add_arbitrary_tests(rlp, compact)]
+#[add_arbitrary_tests(rlp)]
 pub struct SealedHeader<H = Header> {
     /// Locked Header hash.
     hash: BlockHash,
@@ -155,9 +155,12 @@ impl SealedHeader {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
+impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
+where
+    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
+{
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = Header::arbitrary(u)?;
+        let header = H::arbitrary(u)?;
 
         let sealed = header.seal_slow();
         let (header, seal) = sealed.into_parts();
