@@ -307,6 +307,9 @@ where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
     E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
     let mut tmp_path = file_path.to_path_buf();
     tmp_path.set_extension("tmp");
 
