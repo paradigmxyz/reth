@@ -6282,6 +6282,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-alloy"
+version = "1.0.7"
+dependencies = [
+ "alloy-eips",
+ "eyre",
+ "reth-db",
+ "reth-node-ethereum",
+ "reth-node-types",
+ "reth-provider",
+]
+
+[[package]]
 name = "reth-auto-seal-consensus"
 version = "1.0.7"
 dependencies = [

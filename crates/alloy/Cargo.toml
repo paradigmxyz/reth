@@ -1,0 +1,25 @@
+[package]
+name = "reth-alloy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth helper types that aid in working with alloy"
+
+[lints]
+workspace = true
+
+[dependencies]
+## reth
+reth-db.workspace = true
+reth-provider.workspace = true
+reth-node-types.workspace = true
+reth-node-ethereum.workspace = true
+
+# alloy
+alloy-eips.workspace = true
+
+## misc
+eyre.workspace = true
