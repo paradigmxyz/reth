@@ -14,8 +14,8 @@ use reth_provider::{
 };
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
-/// A tower-like layer that should be used as a [ProviderLayer](https://docs.rs/alloy/latest/alloy/providers/trait.ProviderLayer.html) in alloy when wrapping the
-/// [Provider](https://docs.rs/alloy/latest/alloy/providers/trait.Provider.html) trait over reth-db.
+/// A tower-like layer that should be used as a [ProviderLayer] to wrap the [Provider] trait over
+/// reth-db.
 #[derive(Debug, Clone)]
 pub struct RethDbLayer {
     db_path: PathBuf,
@@ -33,7 +33,7 @@ impl RethDbLayer {
     }
 }
 
-/// Implement the `ProviderLayer` trait for the `RethDBLayer` struct.
+/// Implement the [`ProviderLayer`] trait for the [`RethDBLayer`] struct.
 impl<P, T> ProviderLayer<P, T> for RethDbLayer
 where
     P: Provider<T>,
@@ -46,7 +46,7 @@ where
     }
 }
 
-/// A provider that overrides the vanilla `Provider` trait to get results from the reth-db.
+/// A provider that overrides the vanilla [`Provider`] trait to get results from the reth-db.
 #[derive(Clone, Debug)]
 pub struct RethDbProvider<P, T> {
     inner: P,
@@ -56,7 +56,7 @@ pub struct RethDbProvider<P, T> {
 }
 
 impl<P, T> RethDbProvider<P, T> {
-    /// Create a new `RethDbProvider` instance.
+    /// Create a new [`RethDbProvider`] instance.
     pub fn new(inner: P, db_path: PathBuf) -> Self {
         let db = open_db_read_only(&db_path, Default::default()).unwrap();
         let chain_spec = ChainSpecBuilder::mainnet().build();
@@ -70,12 +70,12 @@ impl<P, T> RethDbProvider<P, T> {
         Self { inner, db_path, accessor, _pd: PhantomData }
     }
 
-    /// Get the underlying `Provider`.
+    /// Get the underlying [`Provider`].
     pub const fn inner(&self) -> &P {
         &self.inner
     }
 
-    /// Get the underlying `DbAccessor`.
+    /// Get the underlying [`DbAccessor`].
     pub const fn accessor(&self) -> &DbAccessor {
         &self.accessor
     }
@@ -86,7 +86,7 @@ impl<P, T> RethDbProvider<P, T> {
     }
 }
 
-/// Implement the `Provider` trait for the `RethDbProvider` struct.
+/// Implement the [`Provider`] trait for the [`RethDbProvider`] struct.
 ///
 /// This is where we override specific RPC methods to fetch from the reth-db.
 impl<P, T> Provider<T> for RethDbProvider<P, T>
@@ -109,7 +109,7 @@ where
 
     /// Override the `get_transaction_count` method to fetch the transaction count of an address.
     ///
-    /// `RpcWithBlock` uses `ProviderCall` under the hood.
+    /// [`RpcWithBlock`] uses [`ProviderCall`] under the hood.
     fn get_transaction_count(&self, address: Address) -> RpcWithBlock<T, Address, U64, u64> {
         let this = self.accessor().clone();
         RpcWithBlock::new_provider(move |block_id| {
@@ -138,7 +138,7 @@ impl<DB> DbAccessor<DB>
 where
     DB: DatabaseProviderFactory<Provider: TryIntoHistoricalStateProvider + BlockNumReader>,
 {
-    /// Initialize the `DbAccessor` with the provided `DB` type.
+    /// Initialize the [`DbAccessor`] with the provided `DB` type.
     pub const fn new(inner: DB) -> Self {
         Self { inner }
     }
