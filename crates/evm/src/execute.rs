@@ -9,10 +9,10 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use alloy_primitives::BlockNumber;
 use core::fmt::Display;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
-use revm::State;
-use revm_primitives::db::Database;
+use revm::{db::BundleState, State};
+use revm_primitives::{db::Database, U256};
 
 use crate::system_calls::OnStateHook;
 
@@ -161,6 +161,111 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>;
+}
+
+pub trait BlockExecutionStrategy {
+    type Error: From<ProviderError> + std::error::Error;
+    type DB: Database;
+
+    fn configure_environment(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<(), Self::Error>;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
+
+    fn execute_transactions(
+        &mut self,
+        block: &BlockWithSenders,
+    ) -> Result<(Vec<Receipt>, u64), Self::Error>;
+
+    fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error>;
+
+    fn take_state_bundle(&mut self) -> BundleState;
+
+    fn state_ref(&self) -> &State<Self::DB>;
+
+    fn set_state_hook<F: OnStateHook + 'static>(&mut self, hook: Option<F>);
+}
+
+pub struct GenericBlockExecutor<T>
+where
+    T: BlockExecutionStrategy,
+{
+    strategy: T,
+}
+
+impl<T: BlockExecutionStrategy> Executor<T::DB> for GenericBlockExecutor<T> {
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Output = BlockExecutionOutput<Receipt>;
+    type Error = T::Error;
+
+    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        self.strategy.configure_environment(block, total_difficulty)?;
+        self.strategy.apply_pre_execution_changes()?;
+        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes()?;
+
+        Ok(BlockExecutionOutput {
+            state: self.strategy.take_state_bundle(),
+            receipts,
+            requests,
+            gas_used,
+        })
+    }
+
+    fn execute_with_state_witness<F>(
+        mut self,
+        input: Self::Input<'_>,
+        mut witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<T::DB>),
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        self.strategy.configure_environment(block, total_difficulty)?;
+        self.strategy.apply_pre_execution_changes()?;
+        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes()?;
+
+        witness(self.strategy.state_ref());
+
+        Ok(BlockExecutionOutput {
+            state: self.strategy.take_state_bundle(),
+            receipts,
+            requests,
+            gas_used,
+        })
+    }
+
+    fn execute_with_state_hook<F>(
+        mut self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook + 'static,
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        self.strategy.set_state_hook(Some(state_hook));
+
+        self.strategy.configure_environment(block, total_difficulty)?;
+        self.strategy.apply_pre_execution_changes()?;
+        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes()?;
+
+        Ok(BlockExecutionOutput {
+            state: self.strategy.take_state_bundle(),
+            receipts,
+            requests,
+            gas_used,
+        })
+    }
 }
 
 #[cfg(test)]
