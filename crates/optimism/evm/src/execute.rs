@@ -544,7 +544,7 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::transaction::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -628,7 +628,7 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::transaction::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,
