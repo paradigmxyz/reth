@@ -32,7 +32,7 @@ impl CanonicalChain {
     /// Returns the block number of the (non-finalized) canonical block with the given hash.
     #[inline]
     pub(crate) fn canonical_number(&self, block_hash: &BlockHash) -> Option<BlockNumber> {
-        self.chain.iter().find_map(|(number, hash)| (hash == block_hash).then(|| *number))
+        self.chain.iter().find_map(|(number, hash)| (hash == block_hash).then_some(*number))
     }
 
     /// Extends all items from the given iterator to the chain.
@@ -104,7 +104,7 @@ mod tests {
 
         // Verify replaced chain state
         assert_eq!(canonical_chain.chain.len(), 3);
-        assert!(canonical_chain.chain.get(&BlockNumber::from(1u64)).is_none());
+        assert!(!canonical_chain.chain.contains_key(&BlockNumber::from(1u64)));
         assert_eq!(
             canonical_chain.chain.get(&BlockNumber::from(3u64)),
             Some(&BlockHash::from([0x03; 32]))
