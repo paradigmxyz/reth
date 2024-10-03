@@ -8,6 +8,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use std::{
+    fmt::Debug,
+    future::{poll_fn, Future},
+    sync::Arc,
+    task::Poll,
+};
+
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -48,13 +55,7 @@ use reth_provider::{
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::{
-    env::temp_dir,
-    fmt::Debug,
-    future::{poll_fn, Future},
-    sync::Arc,
-    task::Poll,
-};
+
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
@@ -312,7 +313,7 @@ pub async fn test_exex_context_with_chain_spec(
         components.components.executor.clone(),
         notifications_rx,
         // TODO(alexey): do we want to expose WAL to the user?
-        Wal::new(temp_dir())?.handle(),
+        Wal::new(tempfile::tempdir()?.path())?.handle(),
     );
 
     let ctx = ExExContext {
@@ -367,5 +368,15 @@ impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
             Poll::Pending => Poll::Ready(Ok(())),
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn check_test_context_creation() {
+        let _ = test_exex_context().await.unwrap();
     }
 }
