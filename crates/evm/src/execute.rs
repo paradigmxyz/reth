@@ -9,7 +9,7 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use alloc::vec::Vec;
 use alloy_primitives::BlockNumber;
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, State};
@@ -165,13 +165,16 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 }
 
 /// A factory for creating block execution strategies.
-pub trait BlockExecutionStrategyFactory {
+pub trait BlockExecutionStrategyFactory<DB>
+where
+    DB: Database,
+{
     /// The specific [`BlockExecutionStrategy`] type this factory produces.
-    type Strategy: BlockExecutionStrategy;
+    type Strategy: BlockExecutionStrategy<DB>;
 
     /// The error type returned by this factory and its produced strategies.
     type Error: From<ProviderError>
-        + From<<Self::Strategy as BlockExecutionStrategy>::Error>
+        + From<<Self::Strategy as BlockExecutionStrategy<DB>>::Error>
         + core::error::Error;
 
     /// Creates a new block execution strategy instance.
@@ -183,11 +186,9 @@ pub trait BlockExecutionStrategyFactory {
 }
 
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy {
+pub trait BlockExecutionStrategy<DB> {
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
-    /// The database type used by this strategy.
-    type DB: Database;
 
     /// Configures the environment before start applying any changes.
     fn configure_environment(&mut self) -> Result<(), Self::Error>;
@@ -205,7 +206,7 @@ pub trait BlockExecutionStrategy {
     fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error>;
 
     /// Returns a reference to the current state.
-    fn state_ref(&self) -> &State<Self::DB>;
+    fn state_ref(&self) -> &State<DB>;
 
     /// Sets a hook to be called after each state change during execution.
     fn set_state_hook<F: OnStateHook + 'static>(&mut self, hook: Option<F>);
@@ -217,26 +218,30 @@ pub trait BlockExecutionStrategy {
 /// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
 /// create and run block execution strategies.
 #[allow(missing_debug_implementations)]
-pub struct GenericBlockExecutor<F>
+pub struct GenericBlockExecutor<F, DB>
 where
-    F: BlockExecutionStrategyFactory,
+    F: BlockExecutionStrategyFactory<DB>,
+    DB: Database,
 {
     strategy_factory: F,
+    _phanttom: PhantomData<DB>,
 }
 
-impl<F> GenericBlockExecutor<F>
+impl<F, DB> GenericBlockExecutor<F, DB>
 where
-    F: BlockExecutionStrategyFactory,
+    F: BlockExecutionStrategyFactory<DB>,
+    DB: Database,
 {
     /// Creates a new `GenericBlockExecutor` with the given strategy factory.
     pub const fn new(strategy_factory: F) -> Self {
-        Self { strategy_factory }
+        Self { strategy_factory, _phanttom: PhantomData }
     }
 }
 
-impl<F> Executor<<F::Strategy as BlockExecutionStrategy>::DB> for GenericBlockExecutor<F>
+impl<F, DB> Executor<DB> for GenericBlockExecutor<F, DB>
 where
-    F: BlockExecutionStrategyFactory,
+    F: BlockExecutionStrategyFactory<DB>,
+    DB: Database,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -262,7 +267,7 @@ where
         mut witness: W,
     ) -> Result<Self::Output, Self::Error>
     where
-        W: FnMut(&State<<F::Strategy as BlockExecutionStrategy>::DB>),
+        W: FnMut(&State<DB>),
     {
         let BlockExecutionInput { block, total_difficulty } = input;
 
