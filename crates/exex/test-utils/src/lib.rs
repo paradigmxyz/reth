@@ -56,6 +56,7 @@ use reth_provider::{
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
+use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
@@ -184,6 +185,8 @@ pub struct TestExExHandle {
     pub notifications_tx: Sender<ExExNotification>,
     /// Node task manager
     pub tasks: TaskManager,
+    /// WAL temp directory handle
+    _wal_directory: TempDir,
 }
 
 impl TestExExHandle {
@@ -305,6 +308,9 @@ pub async fn test_exex_context_with_chain_spec(
         total_difficulty: Default::default(),
     };
 
+    let wal_directory = tempfile::tempdir()?;
+    let wal = Wal::new(wal_directory.path())?;
+
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
     let notifications = ExExNotifications::new(
@@ -312,8 +318,7 @@ pub async fn test_exex_context_with_chain_spec(
         components.provider.clone(),
         components.components.executor.clone(),
         notifications_rx,
-        // TODO(alexey): do we want to expose WAL to the user?
-        Wal::new(tempfile::tempdir()?.path())?.handle(),
+        wal.handle(),
     );
 
     let ctx = ExExContext {
@@ -325,7 +330,17 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
+    Ok((
+        ctx,
+        TestExExHandle {
+            genesis,
+            provider_factory,
+            events_rx,
+            notifications_tx,
+            tasks,
+            _wal_directory: wal_directory,
+        },
+    ))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.
