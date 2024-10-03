@@ -570,7 +570,6 @@ where
                             cfg.clone(),
                             block_env.clone(),
                             tx,
-                            gas_limit,
                             &mut db,
                             overrides,
                         )?;

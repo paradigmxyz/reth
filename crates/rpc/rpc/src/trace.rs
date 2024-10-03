@@ -168,7 +168,6 @@ where
                         cfg.clone(),
                         block_env.clone(),
                         call,
-                        gas_limit,
                         &mut db,
                         Default::default(),
                     )?;
