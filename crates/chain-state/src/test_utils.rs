@@ -89,7 +89,7 @@ impl TestBlockBuilder {
             let tx = Transaction::Eip1559(TxEip1559 {
                 chain_id: self.chain_spec.chain.id(),
                 nonce,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: Address::random().into(),
                 max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                 max_priority_fee_per_gas: 1,
@@ -132,10 +132,10 @@ impl TestBlockBuilder {
         let header = Header {
             number,
             parent_hash,
-            gas_used: transactions.len() as u128 * MIN_TRANSACTION_GAS as u128,
-            gas_limit: self.chain_spec.max_gas_limit.into(),
+            gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
+            gas_limit: self.chain_spec.max_gas_limit,
             mix_hash: B256::random(),
-            base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),
+            base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(&transactions),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),

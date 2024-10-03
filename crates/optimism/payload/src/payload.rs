@@ -2,6 +2,7 @@
 
 //! Optimism builder support
 
+use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
@@ -53,8 +54,15 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                TransactionSigned::decode_enveloped(&mut data.as_ref())
-                    .map(|tx| WithEncoded::new(data, tx))
+                let mut buf = data.as_ref();
+                let tx =
+                    TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+
+                if !buf.is_empty() {
+                    return Err(alloy_rlp::Error::UnexpectedLength);
+                }
+
+                Ok(WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;
 

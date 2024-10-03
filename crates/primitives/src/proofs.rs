@@ -5,7 +5,7 @@ use crate::{
     Request, TransactionSigned, Withdrawal,
 };
 use alloc::vec::Vec;
-use alloy_eips::eip7685::Encodable7685;
+use alloy_eips::{eip2718::Encodable2718, eip7685::Encodable7685};
 use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
@@ -16,7 +16,7 @@ pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
 where
     T: AsRef<TransactionSigned>,
 {
-    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_inner(buf, false))
+    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_2718(buf))
 }
 
 /// Calculates the root hash of the withdrawals.

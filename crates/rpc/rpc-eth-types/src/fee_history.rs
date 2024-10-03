@@ -359,16 +359,16 @@ impl FeeHistoryEntry {
     /// Note: This does not calculate the rewards for the block.
     pub fn new(block: &SealedBlock) -> Self {
         Self {
-            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default() as u64,
+            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),
             blob_gas_used_ratio: block.blob_gas_used() as f64 /
                 reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
-            excess_blob_gas: block.excess_blob_gas.map(|excess_blob| excess_blob as u64),
-            blob_gas_used: block.blob_gas_used.map(|block_gas| block_gas as u64),
-            gas_used: block.gas_used as u64,
+            excess_blob_gas: block.excess_blob_gas,
+            blob_gas_used: block.blob_gas_used,
+            gas_used: block.gas_used,
             header_hash: block.hash(),
-            gas_limit: block.gas_limit as u64,
+            gas_limit: block.gas_limit,
             rewards: Vec::new(),
             timestamp: block.timestamp,
         }
@@ -377,11 +377,11 @@ impl FeeHistoryEntry {
     /// Returns the base fee for the next block according to the EIP-1559 spec.
     pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
         calc_next_block_base_fee(
-            self.gas_used as u128,
-            self.gas_limit as u128,
-            self.base_fee_per_gas as u128,
+            self.gas_used,
+            self.gas_limit,
+            self.base_fee_per_gas,
             chain_spec.base_fee_params_at_timestamp(self.timestamp),
-        ) as u64
+        )
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.

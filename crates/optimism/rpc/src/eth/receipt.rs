@@ -1,5 +1,6 @@
 //! Loads and formats OP receipt RPC response.
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{
@@ -119,7 +120,7 @@ impl OpReceiptFieldsBuilder {
         tx: &TransactionSigned,
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
-        let raw_tx = tx.envelope_encoded();
+        let raw_tx = tx.encoded_2718();
         let timestamp = self.l1_block_timestamp;
 
         self.l1_fee = Some(
@@ -300,6 +301,7 @@ impl OpReceiptBuilder {
 #[cfg(test)]
 mod test {
     use alloy_primitives::hex;
+    use op_alloy_network::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_primitives::{Block, BlockBody};
 
@@ -341,14 +343,13 @@ mod test {
     #[test]
     fn op_receipt_fields_from_block_and_tx() {
         // rig
-        let tx_0 = TransactionSigned::decode_enveloped(
+        let tx_0 = TransactionSigned::decode_2718(
             &mut TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056.as_slice(),
         )
         .unwrap();
 
-        let tx_1 =
-            TransactionSigned::decode_enveloped(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
-                .unwrap();
+        let tx_1 = TransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
+            .unwrap();
 
         let block = Block {
             body: BlockBody { transactions: [tx_0, tx_1.clone()].to_vec(), ..Default::default() },

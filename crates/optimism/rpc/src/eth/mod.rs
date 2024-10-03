@@ -67,7 +67,7 @@ pub struct OpEthApi<N: FullNodeComponents> {
     inner: Arc<EthApiNodeBackend<N>>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    sequencer_client: OnceCell<SequencerClient>,
+    sequencer_client: Arc<OnceCell<SequencerClient>>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
@@ -93,7 +93,7 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), sequencer_client: OnceCell::new() }
+        Self { inner: Arc::new(inner), sequencer_client: Arc::new(OnceCell::new()) }
     }
 }
 

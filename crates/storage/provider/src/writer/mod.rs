@@ -413,7 +413,7 @@ where
 
             let mut tx_index = first_tx_index
                 .or(last_tx_idx)
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             for tx in transactions.borrow() {
                 self.static_file_mut().append_transaction(tx_index, tx)?;
@@ -483,7 +483,7 @@ where
 
             let first_tx_index = first_tx_index
                 .or(last_tx_idx)
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             // update for empty blocks
             last_tx_idx = Some(first_tx_index);

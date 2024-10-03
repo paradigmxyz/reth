@@ -196,7 +196,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                 let fields = other
                     .deserialize_into::<op_alloy_rpc_types::OptimismTransactionFields>()
                     .map_err(|e| ConversionError::Custom(e.to_string()))?;
-                Ok(Self::Deposit(crate::transaction::TxDeposit {
+                Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
                     source_hash: fields
                         .source_hash
                         .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?,

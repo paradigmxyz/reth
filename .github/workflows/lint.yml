@@ -24,6 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
+        with:
+          toolchain: nightly-2024-09-25
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
