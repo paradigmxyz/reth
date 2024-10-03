@@ -1,6 +1,6 @@
 # Windows build
 
-name: Windows build
+name: windows
 
 on:
   push:
@@ -12,7 +12,6 @@ on:
 jobs:
   build-reth:
     runs-on: ubuntu-latest
-    name: Build Reth
     timeout-minutes: 60
 
     steps:
@@ -25,11 +24,10 @@ jobs:
         with:
           cache-on-failure: true
       - name: Build Reth
-        run: make build-reth-x86_64-pc-windows-gnu
+        run: make build-x86_64-pc-windows-gnu
 
   build-op-reth:
     runs-on: ubuntu-latest
-    name: Build OP-Reth
     timeout-minutes: 60
 
     steps:
@@ -42,4 +40,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: Build OP-Reth
-        run: make build-op-x86_64-pc-windows-gnu
+        run: make op-build-x86_64-pc-windows-gnu
