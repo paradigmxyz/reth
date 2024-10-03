@@ -8,6 +8,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use std::{
+    fmt::Debug,
+    future::{poll_fn, Future},
+    sync::Arc,
+    task::Poll,
+};
+
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -48,13 +55,8 @@ use reth_provider::{
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::{
-    env::temp_dir,
-    fmt::Debug,
-    future::{poll_fn, Future},
-    sync::Arc,
-    task::Poll,
-};
+
+use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
@@ -183,6 +185,8 @@ pub struct TestExExHandle {
     pub notifications_tx: Sender<ExExNotification>,
     /// Node task manager
     pub tasks: TaskManager,
+    /// WAL temp directory handle
+    _wal_directory: TempDir,
 }
 
 impl TestExExHandle {
@@ -304,6 +308,9 @@ pub async fn test_exex_context_with_chain_spec(
         total_difficulty: Default::default(),
     };
 
+    let wal_directory = tempfile::tempdir()?;
+    let wal = Wal::new(wal_directory.path())?;
+
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
     let notifications = ExExNotifications::new(
@@ -311,8 +318,7 @@ pub async fn test_exex_context_with_chain_spec(
         components.provider.clone(),
         components.components.executor.clone(),
         notifications_rx,
-        // TODO(alexey): do we want to expose WAL to the user?
-        Wal::new(temp_dir())?.handle(),
+        wal.handle(),
     );
 
     let ctx = ExExContext {
@@ -324,7 +330,17 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
+    Ok((
+        ctx,
+        TestExExHandle {
+            genesis,
+            provider_factory,
+            events_rx,
+            notifications_tx,
+            tasks,
+            _wal_directory: wal_directory,
+        },
+    ))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.
@@ -367,5 +383,15 @@ impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
             Poll::Pending => Poll::Ready(Ok(())),
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn check_test_context_creation() {
+        let _ = test_exex_context().await.unwrap();
     }
 }
