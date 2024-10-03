@@ -7,6 +7,7 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
+use alloc::vec::Vec;
 use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_primitives::{BlockWithSenders, Receipt, Request};
@@ -171,7 +172,7 @@ pub trait BlockExecutionStrategyFactory {
     /// The error type returned by this factory and its produced strategies.
     type Error: From<ProviderError>
         + From<<Self::Strategy as BlockExecutionStrategy>::Error>
-        + std::error::Error;
+        + core::error::Error;
 
     /// Creates a new block execution strategy instance.
     fn create(
@@ -184,7 +185,7 @@ pub trait BlockExecutionStrategyFactory {
 /// Defines the strategy for executing a single block.
 pub trait BlockExecutionStrategy {
     /// The error type returned by this strategy's methods.
-    type Error: From<ProviderError> + std::error::Error;
+    type Error: From<ProviderError> + core::error::Error;
     /// The database type used by this strategy.
     type DB: Database;
 
