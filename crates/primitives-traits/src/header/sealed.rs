@@ -155,9 +155,12 @@ impl SealedHeader {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
+impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
+where
+    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
+{
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = Header::arbitrary(u)?;
+        let header = H::arbitrary(u)?;
 
         let sealed = header.seal_slow();
         let (header, seal) = sealed.into_parts();

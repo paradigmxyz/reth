@@ -486,12 +486,13 @@ impl From<SealedBlock> for Block {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock<Header, B>
+impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
 where
+    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
     B: for<'b> arbitrary::Arbitrary<'b>,
 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = SealedHeader::arbitrary(u)?;
+        let header = SealedHeader::<H>::arbitrary(u)?;
         let body = B::arbitrary(u)?;
 
         Ok(Self { header, body })
