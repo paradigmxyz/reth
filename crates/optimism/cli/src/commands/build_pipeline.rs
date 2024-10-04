@@ -1,6 +1,5 @@
 use alloy_primitives::B256;
 use futures_util::{Stream, StreamExt};
-use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_downloaders::{
@@ -8,13 +7,14 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_errors::ProviderError;
-use reth_evm_optimism::OpExecutorProvider;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_events::node::NodeEvent;
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::OpExecutorProvider;
 use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderFactory};
 use reth_prune::PruneModes;
 use reth_stages::{sets::DefaultStages, Pipeline, StageSet};
@@ -36,7 +36,7 @@ pub(crate) async fn build_import_pipeline<N, C>(
     disable_exec: bool,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: NodeTypesWithDB<ChainSpec = OpChainSpec>,
     C: Consensus + 'static,
 {
     if !file_client.has_canonical_blocks() {
@@ -47,7 +47,7 @@ where
     let last_block_number = provider_factory.last_block_number()?;
     let local_head = provider_factory
         .sealed_header(last_block_number)?
-        .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
+        .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())

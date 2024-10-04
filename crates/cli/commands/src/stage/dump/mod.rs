@@ -1,7 +1,7 @@
 //! Database debugging tool
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
 use reth_db_api::{
@@ -75,24 +75,26 @@ pub struct StageCommand {
 macro_rules! handle_stage {
     ($stage_fn:ident, $tool:expr, $command:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
-        let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
+        let output_datadir =
+            output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
     }};
 
     ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
-        let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
+        let output_datadir =
+            output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor).await?
     }};
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `dump-stage` command
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
         N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
-        F: FnOnce(Arc<ChainSpec>) -> E,
+        F: FnOnce(Arc<C::ChainSpec>) -> E,
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;

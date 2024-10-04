@@ -5,7 +5,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
@@ -16,8 +16,8 @@ use reth_exex::ExExManagerHandle;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
+    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -48,7 +48,7 @@ pub struct Command<C: ChainSpecParser> {
     offline: bool,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db stage unwind` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
@@ -189,7 +189,7 @@ impl Subcommands {
     /// Returns the block range to unwind.
     ///
     /// This returns an inclusive range: [target..=latest]
-    fn unwind_range<N: NodeTypesWithDB<ChainSpec = ChainSpec, DB = Arc<DatabaseEnv>>>(
+    fn unwind_range<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         factory: ProviderFactory<N>,
     ) -> eyre::Result<RangeInclusive<u64>> {
@@ -213,13 +213,13 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
-    use reth_node_core::args::utils::DefaultChainSpecParser;
+    use reth_node_core::args::utils::EthereumChainSpecParser;
 
     use super::*;
 
     #[test]
     fn parse_unwind() {
-        let cmd = Command::<DefaultChainSpecParser>::parse_from([
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--datadir",
             "dir",
@@ -228,7 +228,7 @@ mod tests {
         ]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
 
-        let cmd = Command::<DefaultChainSpecParser>::parse_from([
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--datadir",
             "dir",

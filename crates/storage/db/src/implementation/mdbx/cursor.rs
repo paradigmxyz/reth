@@ -81,7 +81,7 @@ macro_rules! compress_to_buf_or_ref {
         if let Some(value) = $value.uncompressable_ref() {
             Some(value)
         } else {
-            $self.buf.truncate(0);
+            $self.buf.clear();
             $value.compress_to_buf(&mut $self.buf);
             None
         }

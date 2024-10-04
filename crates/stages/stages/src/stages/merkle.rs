@@ -1,8 +1,9 @@
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_primitives::{alloy_primitives::Sealable, BlockNumber, GotExpected, SealedHeader, B256};
+use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
     StatsReader, TrieWriter,
@@ -373,9 +374,10 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
+    use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{keccak256, SealedBlock, StaticFileSegment, StorageEntry, U256};
+    use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
@@ -523,7 +525,7 @@ mod tests {
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
-            let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
+            let SealedBlock { header, body } = random_block(
                 &mut rng,
                 stage_progress,
                 BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
@@ -536,16 +538,9 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-
             let sealed = header.seal_slow();
             let (header, seal) = sealed.into_parts();
-            let sealed_head = SealedBlock {
-                header: SealedHeader::new(header, seal),
-                body,
-                ommers,
-                withdrawals,
-                requests,
-            };
+            let sealed_head = SealedBlock { header: SealedHeader::new(header, seal), body };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

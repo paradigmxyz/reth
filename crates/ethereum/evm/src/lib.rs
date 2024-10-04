@@ -12,12 +12,12 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
+use reth_primitives::{transaction::FillTxEnv, Header, TransactionSigned};
 use revm_primitives::{
-    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, Env,
-    SpecId, TxEnv, TxKind,
+    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
 use std::sync::Arc;
 
@@ -145,7 +145,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
                     None
                 }
             })
-            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64));
+            .map(BlobExcessGasAndPrice::new);
 
         let mut basefee = parent.next_block_base_fee(
             self.chain_spec.base_fee_params_at_timestamp(attributes.timestamp),
@@ -165,7 +165,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             gas_limit *= U256::from(elasticity_multiplier);
 
             // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(EIP1559_INITIAL_BASE_FEE.into())
+            basefee = Some(EIP1559_INITIAL_BASE_FEE)
         }
 
         let block_env = BlockEnv {
@@ -194,11 +194,13 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::Genesis;
+    use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Genesis, Header, B256, KECCAK_EMPTY, U256,
+        Header, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

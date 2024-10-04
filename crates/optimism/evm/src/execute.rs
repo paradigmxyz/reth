@@ -10,7 +10,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::apply_beacon_root_contract_call,
+    system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -32,23 +32,20 @@ use tracing::trace;
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]
 pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     evm_config: EvmConfig,
 }
 
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
-    pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(
-            chain_spec.clone(),
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() })),
-        )
+    pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
+        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
     }
 }
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, evm_config }
     }
 }
@@ -98,7 +95,7 @@ where
 #[derive(Debug, Clone)]
 pub struct OpEvmExecutor<EvmConfig> {
     /// The chainspec
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
 }
@@ -111,21 +108,26 @@ where
     ///
     /// This applies the pre-execution changes, and executes the transactions.
     ///
+    /// The optional `state_hook` will be executed with the state changes if present.
+    ///
     /// # Note
     ///
     /// It does __not__ apply post-execution changes.
-    fn execute_pre_and_transactions<Ext, DB>(
+    fn execute_pre_and_transactions<Ext, DB, F>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        state_hook: Option<F>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
+        F: OnStateHook,
     {
+        let mut system_caller =
+            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
+
         // apply pre execution changes
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
+        system_caller.apply_beacon_root_contract_call(
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
@@ -144,17 +146,17 @@ where
             .map_err(|_| OptimismBlockExecutionError::ForceCreate2DeployerFail)?;
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
+        let mut receipts = Vec::with_capacity(block.body.transactions.len());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas as u64 &&
+            if transaction.gas_limit() > block_available_gas &&
                 (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas: block_available_gas as u64,
+                    block_available_gas,
                 }
                 .into())
             }
@@ -181,7 +183,7 @@ where
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+            let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
@@ -195,11 +197,12 @@ where
                 ?transaction,
                 "Executed transaction"
             );
-
+            system_caller.on_state(&result_and_state);
+            let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used() as u128;
+            cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -207,7 +210,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
-                cumulative_gas_used: cumulative_gas_used as u64,
+                cumulative_gas_used,
                 logs: result.into_logs(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -221,7 +224,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used as u64))
+        Ok((receipts, cumulative_gas_used))
     }
 }
 
@@ -240,7 +243,11 @@ pub struct OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     /// Creates a new Optimism block executor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(
+        chain_spec: Arc<OpChainSpec>,
+        evm_config: EvmConfig,
+        state: State<DB>,
+    ) -> Self {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 
@@ -277,16 +284,30 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
-    /// Execute a single block and apply the state changes to the internal state.
-    ///
-    /// Returns the receipts of the transactions in the block and the total gas used.
-    ///
-    /// Returns an error if execution fails.
+    /// Convenience method to invoke `execute_without_verification_with_state_hook` setting the
+    /// state hook as `None`.
     fn execute_without_verification(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        self.execute_without_verification_with_state_hook(block, total_difficulty, None::<NoopHook>)
+    }
+
+    /// Execute a single block and apply the state changes to the internal state.
+    ///
+    /// Returns the receipts of the transactions in the block and the total gas used.
+    ///
+    /// Returns an error if execution fails.
+    fn execute_without_verification_with_state_hook<F>(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+        state_hook: Option<F>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
+    where
+        F: OnStateHook,
+    {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -295,7 +316,7 @@ where
 
         let (receipts, gas_used) = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_pre_and_transactions(block, evm)
+            self.executor.execute_pre_and_transactions(block, evm, state_hook)
         }?;
 
         // 3. apply post execution changes
@@ -374,6 +395,32 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
+
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests: vec![],
+            gas_used,
+        })
+    }
+
+    fn execute_with_state_hook<F>(
+        mut self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+        let (receipts, gas_used) = self.execute_without_verification_with_state_hook(
+            block,
+            total_difficulty,
+            Some(state_hook),
+        )?;
+
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
@@ -464,12 +511,11 @@ where
 mod tests {
     use super::*;
     use crate::OpChainSpec;
+    use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
-    use reth_optimism_chainspec::optimism_deposit_tx_signature;
-    use reth_primitives::{
-        Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
-    };
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
+    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -481,7 +527,7 @@ mod tests {
         let l1_block_contract_account =
             Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
 
-        let mut l1_block_storage = HashMap::with_capacity(4);
+        let mut l1_block_storage = HashMap::default();
         // base fee
         l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
         // l1 fee overhead
@@ -503,12 +549,8 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
-                inner: (*chain_spec).clone(),
-            })),
-            chain_spec,
-        }
+        let chain_spec = Arc::new(OpChainSpec::new(Arc::unwrap_or_clone(chain_spec)));
+        OpExecutorProvider { evm_config: OptimismEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
     #[test]
@@ -528,7 +570,7 @@ mod tests {
 
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
@@ -540,7 +582,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -548,10 +590,10 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
             Signature::test_signature(),
@@ -569,10 +611,10 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![tx, tx_deposit],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![tx, tx_deposit],
+                                ..Default::default()
+                            },
                         },
                         senders: vec![addr, addr],
                     },
@@ -612,7 +654,7 @@ mod tests {
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
 
-        db.insert_account(addr, account, None, HashMap::new());
+        db.insert_account(addr, account, None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
@@ -624,7 +666,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -632,10 +674,10 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: MIN_TRANSACTION_GAS as u128,
+                gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
             optimism_deposit_tx_signature(),
@@ -653,10 +695,10 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![tx, tx_deposit],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![tx, tx_deposit],
+                                ..Default::default()
+                            },
                         },
                         senders: vec![addr, addr],
                     },

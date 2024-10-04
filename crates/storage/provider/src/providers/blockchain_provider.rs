@@ -7,8 +7,8 @@ use crate::{
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -20,8 +20,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    alloy_primitives::Sealable, Account, Block, BlockWithSenders, EthereumHardforks, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -122,12 +122,18 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         (start, end)
     }
 
-    /// Fetches a range of data from both in-memory state and storage.
+    /// Fetches a range of data from both in-memory state and persistent storage while a predicate
+    /// is met.
     ///
-    /// - `fetch_db_range`: Retrieves a range of items from the database.
-    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
-    ///   is returned.
-    fn fetch_db_mem_range<T, F, G, P>(
+    /// Creates a snapshot of the in-memory chain state and database provider to prevent
+    /// inconsistencies. Splits the range into in-memory and storage sections, prioritizing
+    /// recent in-memory blocks in case of overlaps.
+    ///
+    /// * `fetch_db_range` function (`F`) provides access to the database provider, allowing the
+    ///   user to retrieve the required items from the database using [`RangeInclusive`].
+    /// * `map_block_state_item` function (`G`) provides each block of the range in the in-memory
+    ///   state, allowing for selection or filtering for the desired data.
+    fn get_in_memory_or_storage_by_block_range_while<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
         fetch_db_range: F,
@@ -135,34 +141,94 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        F: FnOnce(RangeInclusive<BlockNumber>, &mut P) -> ProviderResult<Vec<T>>,
-        G: Fn(BlockNumber, &mut P) -> Option<T>,
+        F: FnOnce(
+            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            RangeInclusive<BlockNumber>,
+            &mut P,
+        ) -> ProviderResult<Vec<T>>,
+        G: Fn(Arc<BlockState>, &mut P) -> Option<T>,
         P: FnMut(&T) -> bool,
     {
+        // Each one provides a snapshot at the time of instantiation, but its order matters.
+        //
+        // If we acquire first the database provider, it's possible that before the in-memory chain
+        // snapshot is instantiated, it will flush blocks to disk. This would
+        // mean that our database provider would not have access to the flushed blocks (since it's
+        // working under an older view), while the in-memory state may have deleted them
+        // entirely. Resulting in gaps on the range.
+        let mut in_memory_chain =
+            self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let db_provider = self.database_provider_ro()?;
+
         let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
+            // the first block is the highest one.
+            in_memory_chain
+                .first()
+                .map(|b| b.number())
+                .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
         });
-        let mut range = start..=end;
-        let mut items = Vec::with_capacity((end - start + 1) as usize);
 
-        // First, fetch the items from the database
-        let mut db_items = fetch_db_range(range.clone(), &mut predicate)?;
-
-        if !db_items.is_empty() {
-            items.append(&mut db_items);
-
-            // Advance the range iterator by the number of items fetched from the database
-            range.nth(items.len() - 1);
+        if start > end {
+            return Ok(vec![])
         }
 
-        // Fetch the remaining items from the in-memory state
-        for num in range {
-            // TODO: there might be an update between loop iterations, we
-            // need to handle that situation.
-            if let Some(item) = map_block_state_item(num, &mut predicate) {
-                items.push(item);
-            } else {
-                break;
+        // Split range into storage_range and in-memory range. If the in-memory range is not
+        // necessary drop it early.
+        //
+        // The last block of `in_memory_chain` is the lowest block number.
+        let (in_memory, storage_range) = match in_memory_chain.last().as_ref().map(|b| b.number()) {
+            Some(lowest_memory_block) if lowest_memory_block <= end => {
+                let highest_memory_block =
+                    in_memory_chain.first().as_ref().map(|b| b.number()).expect("qed");
+
+                // Database will for a time overlap with in-memory-chain blocks. In
+                // case of a re-org, it can mean that the database blocks are of a forked chain, and
+                // so, we should prioritize the in-memory overlapped blocks.
+                let in_memory_range =
+                    lowest_memory_block.max(start)..=end.min(highest_memory_block);
+
+                // If requested range is in the middle of the in-memory range, remove the necessary
+                // lowest blocks
+                in_memory_chain.truncate(
+                    in_memory_chain
+                        .len()
+                        .saturating_sub(start.saturating_sub(lowest_memory_block) as usize),
+                );
+
+                let storage_range =
+                    (lowest_memory_block > start).then(|| start..=lowest_memory_block - 1);
+
+                (Some((in_memory_chain, in_memory_range)), storage_range)
+            }
+            _ => {
+                // Drop the in-memory chain so we don't hold blocks in memory.
+                drop(in_memory_chain);
+
+                (None, Some(start..=end))
+            }
+        };
+
+        let mut items = Vec::with_capacity((end - start + 1) as usize);
+
+        if let Some(storage_range) = storage_range {
+            let mut db_items = fetch_db_range(&db_provider, storage_range.clone(), &mut predicate)?;
+            items.append(&mut db_items);
+
+            // The predicate was not met, if the number of items differs from the expected. So, we
+            // return what we have.
+            if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
+                return Ok(items)
+            }
+        }
+
+        if let Some((in_memory_chain, in_memory_range)) = in_memory {
+            for (num, block) in in_memory_range.zip(in_memory_chain.into_iter().rev()) {
+                debug_assert!(num == block.number());
+                if let Some(item) = map_block_state_item(block, &mut predicate) {
+                    items.push(item);
+                } else {
+                    break
+                }
             }
         }
 
@@ -172,73 +238,208 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// This uses a given [`BlockState`] to initialize a state provider for that block.
     fn block_state_provider(
         &self,
-        state: impl AsRef<BlockState>,
+        state: &BlockState,
     ) -> ProviderResult<MemoryOverlayStateProvider> {
-        let state = state.as_ref();
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
+        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
     }
 
-    /// Returns:
-    /// 1. The block state as [`Some`] if the block is in memory, and [`None`] if the block is in
-    ///    database.
-    /// 2. The in-block transaction index.
-    fn block_state_by_tx_id(
+    /// Fetches data from either in-memory state or persistent storage for a range of transactions.
+    ///
+    /// * `fetch_from_db`: has a [`DatabaseProviderRO`] and the storage specific range.
+    /// * `fetch_from_block_state`: has a [`RangeInclusive`] of elements that should be fetched from
+    ///   [`BlockState`]. [`RangeInclusive`] is necessary to handle partial look-ups of a block.
+    fn get_in_memory_or_storage_by_tx_range<S, M, R>(
         &self,
-        provider: &DatabaseProviderRO<N::DB, N::ChainSpec>,
-        id: TxNumber,
-    ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
-        // Get the last block number stored in the database
-        let last_database_block_number = provider.last_block_number()?;
+        range: impl RangeBounds<BlockNumber>,
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<Vec<R>>
+    where
+        S: FnOnce(
+            DatabaseProviderRO<N::DB, N::ChainSpec>,
+            RangeInclusive<TxNumber>,
+        ) -> ProviderResult<Vec<R>>,
+        M: Fn(RangeInclusive<usize>, Arc<BlockState>) -> ProviderResult<Vec<R>>,
+    {
+        let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let provider = self.database.provider()?;
+
+        // Get the last block number stored in the storage which does NOT overlap with in-memory
+        // chain.
+        let last_database_block_number = in_mem_chain
+            .last()
+            .map(|b| Ok(b.anchor().number))
+            .unwrap_or_else(|| provider.last_block_number())?;
+
+        // Get the next tx number for the last block stored in the storage, which marks the start of
+        // the in-memory state.
+        let last_block_body_index = provider
+            .block_body_indices(last_database_block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
+        let mut in_memory_tx_num = last_block_body_index.next_tx_num();
+
+        let (start, end) = self.convert_range_bounds(range, || {
+            in_mem_chain
+                .iter()
+                .map(|b| b.block_ref().block().body.transactions.len() as u64)
+                .sum::<u64>() +
+                last_block_body_index.last_tx_num()
+        });
+
+        if start > end {
+            return Ok(vec![])
+        }
+
+        let mut tx_range = start..=end;
+
+        // If the range is entirely before the first in-memory transaction number, fetch from
+        // storage
+        if *tx_range.end() < in_memory_tx_num {
+            return fetch_from_db(provider, tx_range);
+        }
+
+        let mut items = Vec::with_capacity((tx_range.end() - tx_range.start() + 1) as usize);
+
+        // If the range spans storage and memory, get elements from storage first.
+        if *tx_range.start() < in_memory_tx_num {
+            // Determine the range that needs to be fetched from storage.
+            let db_range = *tx_range.start()..=in_memory_tx_num.saturating_sub(1);
+
+            // Set the remaining transaction range for in-memory
+            tx_range = in_memory_tx_num..=*tx_range.end();
+
+            items.extend(fetch_from_db(provider, db_range)?);
+        }
+
+        // Iterate from the lowest block to the highest in-memory chain
+        for block_state in in_mem_chain.into_iter().rev() {
+            let block_tx_count = block_state.block_ref().block().body.transactions.len();
+            let remaining = (tx_range.end() - tx_range.start() + 1) as usize;
+
+            // If the transaction range start is higher than this block last transaction, advance
+            if *tx_range.start() > in_memory_tx_num + block_tx_count as u64 - 1 {
+                in_memory_tx_num += block_tx_count as u64;
+                continue
+            }
+
+            // This should only be more than 0 once, in case of a partial range inside a block.
+            let skip = (tx_range.start() - in_memory_tx_num) as usize;
+
+            items.extend(fetch_from_block_state(
+                skip..=skip + (remaining.min(block_tx_count - skip) - 1),
+                block_state,
+            )?);
+
+            in_memory_tx_num += block_tx_count as u64;
+
+            // Break if the range has been fully processed
+            if in_memory_tx_num > *tx_range.end() {
+                break
+            }
+
+            // Set updated range
+            tx_range = in_memory_tx_num..=*tx_range.end();
+        }
+
+        Ok(items)
+    }
+
+    /// Fetches data from either in-memory state or persistent storage by transaction
+    /// [`HashOrNumber`].
+    fn get_in_memory_or_storage_by_tx<S, M, R>(
+        &self,
+        id: HashOrNumber,
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<Option<R>>
+    where
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        M: Fn(usize, TxNumber, Arc<BlockState>) -> ProviderResult<Option<R>>,
+    {
+        // Order of instantiation matters. More information on:
+        // `get_in_memory_or_storage_by_block_range_while`.
+        let in_mem_chain = self.canonical_in_memory_state.canonical_chain().collect::<Vec<_>>();
+        let provider = self.database.provider()?;
+
+        // Get the last block number stored in the database which does NOT overlap with in-memory
+        // chain.
+        let last_database_block_number = in_mem_chain
+            .last()
+            .map(|b| Ok(b.anchor().number))
+            .unwrap_or_else(|| provider.last_block_number())?;
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
-        let Some(last_block_body_index) =
-            provider.block_body_indices(last_database_block_number)?
-        else {
-            return Ok(None);
-        };
+        let last_block_body_index = provider
+            .block_body_indices(last_database_block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
         let mut in_memory_tx_num = last_block_body_index.next_tx_num();
 
-        if id < in_memory_tx_num {
-            // If the transaction number is less than the first in-memory transaction number, make a
-            // database lookup
-            let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
-            let Some(body_index) = provider.block_body_indices(block_number)? else {
-                return Ok(None)
-            };
-            let tx_index = body_index.last_tx_num() - id;
-            Ok(Some((None, tx_index as usize)))
-        } else {
-            // Otherwise, iterate through in-memory blocks and find the transaction with the
-            // matching number
-
-            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
-            let last_in_memory_block_number =
-                self.canonical_in_memory_state.get_canonical_block_number();
-
-            for block_number in first_in_memory_block_number..=last_in_memory_block_number {
-                let Some(block_state) =
-                    self.canonical_in_memory_state.state_by_number(block_number)
-                else {
-                    return Ok(None);
-                };
-
-                let executed_block = block_state.block();
-                let block = executed_block.block();
-
-                for tx_index in 0..block.body.len() {
-                    if id == in_memory_tx_num {
-                        return Ok(Some((Some(block_state), tx_index)))
-                    }
-
-                    in_memory_tx_num += 1;
-                }
+        // If the transaction number is less than the first in-memory transaction number, make a
+        // database lookup
+        if let HashOrNumber::Number(id) = id {
+            if id < in_memory_tx_num {
+                return fetch_from_db(provider)
             }
-
-            Ok(None)
         }
+
+        // Iterate from the lowest block to the highest
+        for block_state in in_mem_chain.into_iter().rev() {
+            let executed_block = block_state.block_ref();
+            let block = executed_block.block();
+
+            for tx_index in 0..block.body.transactions.len() {
+                match id {
+                    HashOrNumber::Hash(tx_hash) => {
+                        if tx_hash == block.body.transactions[tx_index].hash() {
+                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
+                        }
+                    }
+                    HashOrNumber::Number(id) => {
+                        if id == in_memory_tx_num {
+                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
+                        }
+                    }
+                }
+
+                in_memory_tx_num += 1;
+            }
+        }
+
+        // Not found in-memory, so check database.
+        if let HashOrNumber::Hash(_) = id {
+            return fetch_from_db(provider)
+        }
+
+        Ok(None)
+    }
+
+    /// Fetches data from either in-memory state or persistent storage by [`BlockHashOrNumber`].
+    fn get_in_memory_or_storage_by_block<S, M, R>(
+        &self,
+        id: BlockHashOrNumber,
+        fetch_from_db: S,
+        fetch_from_block_state: M,
+    ) -> ProviderResult<R>
+    where
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        M: Fn(Arc<BlockState>) -> ProviderResult<R>,
+    {
+        let block_state = match id {
+            BlockHashOrNumber::Hash(block_hash) => {
+                self.canonical_in_memory_state.state_by_hash(block_hash)
+            }
+            BlockHashOrNumber::Number(block_number) => {
+                self.canonical_in_memory_state.state_by_number(block_number)
+            }
+        };
+
+        if let Some(block_state) = block_state {
+            return fetch_from_block_state(block_state)
+        }
+        fetch_from_db(self.database_provider_ro()?)
     }
 }
 
@@ -284,19 +485,19 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> 
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(*block_hash) {
-            return Ok(Some(block_state.block().block().header.header().clone()));
-        }
-
-        self.database.header(block_hash)
+        self.get_in_memory_or_storage_by_block(
+            (*block_hash).into(),
+            |db_provider| db_provider.header(block_hash),
+            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
+        )
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-            return Ok(Some(block_state.block().block().header.header().clone()));
-        }
-
-        self.database.header_by_number(num)
+        self.get_in_memory_or_storage_by_block(
+            num.into(),
+            |db_provider| db_provider.header_by_number(num),
+            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
+        )
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -308,57 +509,52 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        // If the TD is recorded on disk, we can just return that
-        if let Some(td) = self.database.header_td_by_number(number)? {
-            Ok(Some(td))
-        } else if self.canonical_in_memory_state.hash_by_number(number).is_some() {
-            // Otherwise, if the block exists in memory, we should return a TD for it.
+        let number = if self.canonical_in_memory_state.hash_by_number(number).is_some() {
+            // If the block exists in memory, we should return a TD for it.
             //
             // The canonical in memory state should only store post-merge blocks. Post-merge blocks
             // have zero difficulty. This means we can use the total difficulty for the last
-            // persisted block number.
-            let last_persisted_block_number = self.database.last_block_number()?;
-            self.database.header_td_by_number(last_persisted_block_number)
+            // finalized block number if present (so that we are not affected by reorgs), if not the
+            // last number in the database will be used.
+            if let Some(last_finalized_num_hash) =
+                self.canonical_in_memory_state.get_finalized_num_hash()
+            {
+                last_finalized_num_hash.number
+            } else {
+                self.database.last_block_number()?
+            }
         } else {
-            // If the block does not exist in memory, and does not exist on-disk, we should not
-            // return a TD for it.
-            Ok(None)
-        }
+            // Otherwise, return what we have on disk for the input block
+            number
+        };
+        self.database.header_td_by_number(number)
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.fetch_db_mem_range(
+        self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |range, _| self.database.headers_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.header().clone())
-            },
+            |db_provider, range, _| db_provider.headers_range(range),
+            |block_state, _| Some(block_state.block_ref().block().header.header().clone()),
             |_| true,
         )
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-            return Ok(Some(block_state.block().block().header.clone()));
-        }
-
-        self.database.sealed_header(number)
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.sealed_header(number),
+            |block_state| Ok(Some(block_state.block_ref().block().header.clone())),
+        )
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_db_mem_range(
+        self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |range, _| self.database.sealed_headers_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.clone())
-            },
+            |db_provider, range, _| db_provider.sealed_headers_range(range),
+            |block_state, _| Some(block_state.block_ref().block().header.clone()),
             |_| true,
         )
     }
@@ -368,14 +564,12 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_db_mem_range(
+        self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |range, predicate| self.database.sealed_headers_while(range, predicate),
-            |num, predicate| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.clone())
-                    .filter(|header| predicate(header))
+            |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
+            |block_state, predicate| {
+                let header = &block_state.block_ref().block().header;
+                predicate(header).then(|| header.clone())
             },
             predicate,
         )
@@ -384,11 +578,11 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-            return Ok(Some(block_state.hash()));
-        }
-
-        self.database.block_hash(number)
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.block_hash(number),
+            |block_state| Ok(Some(block_state.hash())),
+        )
     }
 
     fn canonical_hashes_range(
@@ -396,14 +590,13 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.fetch_db_mem_range(
-            start..=end,
-            |range, _| self.database.canonical_hashes_range(*range.start(), *range.end()),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.hash())
+        self.get_in_memory_or_storage_by_block_range_while(
+            start..end,
+            |db_provider, inclusive_range, _| {
+                db_provider
+                    .canonical_hashes_range(*inclusive_range.start(), *inclusive_range.end() + 1)
             },
+            |block_state, _| Some(block_state.hash()),
             |_| true,
         )
     }
@@ -423,11 +616,11 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider2<N> {
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            return Ok(Some(block_state.number()));
-        }
-
-        self.database.block_number(hash)
+        self.get_in_memory_or_storage_by_block(
+            hash.into(),
+            |db_provider| db_provider.block_number(hash),
+            |block_state| Ok(Some(block_state.number())),
+        )
     }
 }
 
@@ -449,13 +642,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
-                // check in memory first
                 // Note: it's fine to return the unsealed block because the caller already has
                 // the hash
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.block().block().clone().unseal()));
-                }
-                self.database.find_block_by_hash(hash, source)
+                self.get_in_memory_or_storage_by_block(
+                    hash.into(),
+                    |db_provider| db_provider.find_block_by_hash(hash, source),
+                    |block_state| Ok(Some(block_state.block_ref().block().clone().unseal())),
+                )
             }
             BlockSource::Pending => {
                 Ok(self.canonical_in_memory_state.pending_block().map(|block| block.unseal()))
@@ -464,15 +657,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
-            BlockHashOrNumber::Number(num) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    return Ok(Some(block_state.block().block().clone().unseal()));
-                }
-                self.database.block_by_number(num)
-            }
-        }
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.block(id),
+            |block_state| Ok(Some(block_state.block_ref().block().clone().unseal())),
+        )
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
@@ -488,56 +677,56 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        match self.convert_hash_or_number(id)? {
-            Some(number) => {
-                // If the Paris (Merge) hardfork block is known and block is after it, return empty
-                // ommers.
-                if self.database.chain_spec().final_paris_total_difficulty(number).is_some() {
-                    return Ok(Some(Vec::new()));
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.ommers(id),
+            |block_state| {
+                if self
+                    .database
+                    .chain_spec()
+                    .final_paris_total_difficulty(block_state.number())
+                    .is_some()
+                {
+                    return Ok(Some(Vec::new()))
                 }
 
-                // Check in-memory state first
-                self.canonical_in_memory_state
-                    .state_by_number(number)
-                    .map(|o| o.block().block().ommers.clone())
-                    .map_or_else(|| self.database.ommers(id), |ommers| Ok(Some(ommers)))
-            }
-            None => self.database.ommers(id),
-        }
+                Ok(Some(block_state.block_ref().block().body.ommers.clone()))
+            },
+        )
     }
 
     fn block_body_indices(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        if let Some(indices) = self.database.block_body_indices(number)? {
-            Ok(Some(indices))
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
-            // we have to construct the stored indices for the in memory blocks
-            //
-            // To calculate this we will fetch the anchor block and walk forward from all parents
-            let mut parent_chain = state.parent_state_chain();
-            parent_chain.reverse();
-            let anchor_num = state.anchor().number;
-            let mut stored_indices = self
-                .database
-                .block_body_indices(anchor_num)?
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
-            stored_indices.first_tx_num = stored_indices.next_tx_num();
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.block_body_indices(number),
+            |block_state| {
+                // Find the last block indices on database
+                let last_storage_block_number = block_state.anchor().number;
+                let mut stored_indices = self
+                    .database
+                    .block_body_indices(last_storage_block_number)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(last_storage_block_number))?;
 
-            for state in parent_chain {
-                let txs = state.block().block.body.len() as u64;
-                if state.block().block().number == number {
-                    stored_indices.tx_count = txs;
-                } else {
-                    stored_indices.first_tx_num += txs;
+                // Prepare our block indices
+                stored_indices.first_tx_num = stored_indices.next_tx_num();
+                stored_indices.tx_count = 0;
+
+                // Iterate from the lowest block in memory until our target block
+                for state in block_state.chain().into_iter().rev() {
+                    let block_tx_count = state.block_ref().block.body.transactions.len() as u64;
+                    if state.block_ref().block().number == number {
+                        stored_indices.tx_count = block_tx_count;
+                    } else {
+                        stored_indices.first_tx_num += block_tx_count;
+                    }
                 }
-            }
 
-            Ok(Some(stored_indices))
-        } else {
-            Ok(None)
-        }
+                Ok(Some(stored_indices))
+            },
+        )
     }
 
     /// Returns the block with senders with matching number or hash from database.
@@ -551,23 +740,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(BlockWithSenders { block: block.unseal(), senders }));
-                }
-            }
-            BlockHashOrNumber::Number(num) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(BlockWithSenders { block: block.unseal(), senders }));
-                }
-            }
-        }
-        self.database.block_with_senders(id, transaction_kind)
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.block_with_senders(id, transaction_kind),
+            |block_state| Ok(Some(block_state.block_with_senders())),
+        )
     }
 
     fn sealed_block_with_senders(
@@ -575,34 +752,18 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(SealedBlockWithSenders { block, senders }));
-                }
-            }
-            BlockHashOrNumber::Number(num) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    return Ok(Some(SealedBlockWithSenders { block, senders }));
-                }
-            }
-        }
-        self.database.sealed_block_with_senders(id, transaction_kind)
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
+            |block_state| Ok(Some(block_state.sealed_block_with_senders())),
+        )
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        self.fetch_db_mem_range(
+        self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |range, _| self.database.block_range(range),
-            |num, _| {
-                self.canonical_in_memory_state
-                    .state_by_number(num)
-                    .map(|block_state| block_state.block().block().clone().unseal())
-            },
+            |db_provider, range, _| db_provider.block_range(range),
+            |block_state, _| Some(block_state.block_ref().block().clone().unseal()),
             |_| true,
         )
     }
@@ -611,16 +772,10 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        self.fetch_db_mem_range(
+        self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |range, _| self.database.block_with_senders_range(range),
-            |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    BlockWithSenders { block: block.unseal(), senders }
-                })
-            },
+            |db_provider, range, _| db_provider.block_with_senders_range(range),
+            |block_state, _| Some(block_state.block_with_senders()),
             |_| true,
         )
     }
@@ -629,16 +784,10 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        self.fetch_db_mem_range(
+        self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |range, _| self.database.sealed_block_with_senders_range(range),
-            |num, _| {
-                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
-                    let block = block_state.block().block().clone();
-                    let senders = block_state.block().senders().clone();
-                    SealedBlockWithSenders { block, senders }
-                })
-            },
+            |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
+            |block_state, _| Some(block_state.sealed_block_with_senders()),
             |_| true,
         )
     }
@@ -646,75 +795,41 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        // First, check the database
-        if let Some(id) = self.database.transaction_id(tx_hash)? {
-            return Ok(Some(id))
-        }
-
-        // If the transaction is not found in the database, check the in-memory state
-
-        // Get the last transaction number stored in the database
-        let last_database_block_number = self.database.last_block_number()?;
-        let last_database_tx_id = self
-            .database
-            .block_body_indices(last_database_block_number)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?
-            .last_tx_num();
-
-        // Find the transaction in the in-memory state with the matching hash, and return its
-        // number
-        let mut in_memory_tx_id = last_database_tx_id + 1;
-        for block_number in last_database_block_number.saturating_add(1)..=
-            self.canonical_in_memory_state.get_canonical_block_number()
-        {
-            // TODO: there might be an update between loop iterations, we
-            // need to handle that situation.
-            let block_state = self
-                .canonical_in_memory_state
-                .state_by_number(block_number)
-                .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
-            for tx in &block_state.block().block().body {
-                if tx.hash() == tx_hash {
-                    return Ok(Some(in_memory_tx_id))
-                }
-
-                in_memory_tx_id += 1;
-            }
-        }
-
-        Ok(None)
+        self.get_in_memory_or_storage_by_tx(
+            tx_hash.into(),
+            |db_provider| db_provider.transaction_id(tx_hash),
+            |_, tx_number, _| Ok(Some(tx_number)),
+        )
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let transaction = block_state.block().block().body.get(tx_index).cloned();
-            Ok(transaction)
-        } else {
-            provider.transaction_by_id(id)
-        }
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |provider| provider.transaction_by_id(id),
+            |tx_index, _, block_state| {
+                Ok(block_state.block_ref().block().body.transactions.get(tx_index).cloned())
+            },
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let transaction =
-                block_state.block().block().body.get(tx_index).cloned().map(Into::into);
-            Ok(transaction)
-        } else {
-            provider.transaction_by_id_no_hash(id)
-        }
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |provider| provider.transaction_by_id_no_hash(id),
+            |tx_index, _, block_state| {
+                Ok(block_state
+                    .block_ref()
+                    .block()
+                    .body
+                    .transactions
+                    .get(tx_index)
+                    .cloned()
+                    .map(Into::into))
+            },
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -739,130 +854,99 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let provider = self.database.provider()?;
-        Ok(self
-            .block_state_by_tx_id(&provider, id)?
-            .and_then(|(block_state, _)| block_state)
-            .map(|block_state| block_state.block().block().number))
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |provider| provider.transaction_block(id),
+            |_, _, block_state| Ok(Some(block_state.block_ref().block().number)),
+        )
     }
 
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        match id {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.block().block().body.clone()));
-                }
-            }
-            BlockHashOrNumber::Number(number) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                    return Ok(Some(block_state.block().block().body.clone()));
-                }
-            }
-        }
-        self.database.transactions_by_block(id)
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |provider| provider.transactions_by_block(id),
+            |block_state| Ok(Some(block_state.block_ref().block().body.transactions.clone())),
+        )
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
-        });
-
-        let mut transactions = Vec::new();
-        let mut last_in_memory_block = None;
-
-        for number in start..=end {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                transactions.push(block_state.block().block().body.clone());
-                last_in_memory_block = Some(number);
-            } else {
-                break
-            }
-        }
-
-        if let Some(last_block) = last_in_memory_block {
-            if last_block < end {
-                let mut db_transactions =
-                    self.database.transactions_by_block_range((last_block + 1)..=end)?;
-                transactions.append(&mut db_transactions);
-            }
-        } else {
-            transactions = self.database.transactions_by_block_range(start..=end)?;
-        }
-
-        Ok(transactions)
+        self.get_in_memory_or_storage_by_block_range_while(
+            range,
+            |db_provider, range, _| db_provider.transactions_by_block_range(range),
+            |block_state, _| Some(block_state.block_ref().block().body.transactions.clone()),
+            |_| true,
+        )
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        self.database.transactions_by_tx_range(range)
+        self.get_in_memory_or_storage_by_tx_range(
+            range,
+            |db_provider, db_range| db_provider.transactions_by_tx_range(db_range),
+            |index_range, block_state| {
+                Ok(block_state.block_ref().block().body.transactions[index_range]
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect())
+            },
+        )
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.database.senders_by_tx_range(range)
+        self.get_in_memory_or_storage_by_tx_range(
+            range,
+            |db_provider, db_range| db_provider.senders_by_tx_range(db_range),
+            |index_range, block_state| Ok(block_state.block_ref().senders[index_range].to_vec()),
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let sender = block_state
-                .block()
-                .block()
-                .body
-                .get(tx_index)
-                .and_then(|transaction| transaction.recover_signer());
-            Ok(sender)
-        } else {
-            provider.transaction_sender(id)
-        }
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |provider| provider.transaction_sender(id),
+            |tx_index, _, block_state| Ok(block_state.block_ref().senders.get(tx_index).copied()),
+        )
     }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        let provider = self.database.provider()?;
-        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
-        };
-
-        if let Some(block_state) = block_state {
-            let receipt = block_state.executed_block_receipts().get(tx_index).cloned();
-            Ok(receipt)
-        } else {
-            provider.receipt(id)
-        }
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |provider| provider.receipt(id),
+            |tx_index, _, block_state| {
+                Ok(block_state.executed_block_receipts().get(tx_index).cloned())
+            },
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         for block_state in self.canonical_in_memory_state.canonical_chain() {
-            let executed_block = block_state.block();
+            let executed_block = block_state.block_ref();
             let block = executed_block.block();
             let receipts = block_state.executed_block_receipts();
 
             // assuming 1:1 correspondence between transactions and receipts
             debug_assert_eq!(
-                block.body.len(),
+                block.body.transactions.len(),
                 receipts.len(),
                 "Mismatch between transaction and receipt count"
             );
 
-            if let Some(tx_index) = block.body.iter().position(|tx| tx.hash() == hash) {
+            if let Some(tx_index) = block.body.transactions.iter().position(|tx| tx.hash() == hash)
+            {
                 // safe to use tx_index for receipts due to 1:1 correspondence
                 return Ok(receipts.get(tx_index).cloned());
             }
@@ -872,27 +956,24 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        match block {
-            BlockHashOrNumber::Hash(hash) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(hash) {
-                    return Ok(Some(block_state.executed_block_receipts()));
-                }
-            }
-            BlockHashOrNumber::Number(number) => {
-                if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                    return Ok(Some(block_state.executed_block_receipts()));
-                }
-            }
-        }
-
-        self.database.receipts_by_block(block)
+        self.get_in_memory_or_storage_by_block(
+            block,
+            |db_provider| db_provider.receipts_by_block(block),
+            |block_state| Ok(Some(block_state.executed_block_receipts())),
+        )
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.database.receipts_by_tx_range(range)
+        self.get_in_memory_or_storage_by_tx_range(
+            range,
+            |db_provider, db_range| db_provider.receipts_by_tx_range(db_range),
+            |index_range, block_state| {
+                Ok(block_state.executed_block_receipts().drain(index_range).collect())
+            },
+        )
     }
 }
 
@@ -937,25 +1018,29 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
             return Ok(None)
         }
 
-        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-
-        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().withdrawals.clone())
-        } else {
-            self.database.withdrawals_by_block(id, timestamp)
-        }
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.withdrawals_by_block(id, timestamp),
+            |block_state| Ok(block_state.block_ref().block().body.withdrawals.clone()),
+        )
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         let best_block_num = self.best_block_number()?;
 
-        // If the best block is in memory, use that. Otherwise, use the latest withdrawal in the
-        // database.
-        if let Some(block) = self.canonical_in_memory_state.state_by_number(best_block_num) {
-            Ok(block.block().block().withdrawals.clone().and_then(|mut w| w.pop()))
-        } else {
-            self.database.latest_withdrawal()
-        }
+        self.get_in_memory_or_storage_by_block(
+            best_block_num.into(),
+            |db_provider| db_provider.latest_withdrawal(),
+            |block_state| {
+                Ok(block_state
+                    .block_ref()
+                    .block()
+                    .body
+                    .withdrawals
+                    .clone()
+                    .and_then(|mut w| w.pop()))
+            },
+        )
     }
 }
 
@@ -968,12 +1053,12 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
             return Ok(None)
         }
-        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
-            Ok(block.block().block().requests.clone())
-        } else {
-            self.database.requests_by_block(id, timestamp)
-        }
+
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.requests_by_block(id, timestamp),
+            |block_state| Ok(block_state.block_ref().block().body.requests.clone()),
+        )
     }
 }
 
@@ -1083,7 +1168,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
         // use latest state provider if the head state exists
         if let Some(state) = self.canonical_in_memory_state.head_state() {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            Ok(self.block_state_provider(state)?.boxed())
+            Ok(self.block_state_provider(&state)?.boxed())
         } else {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
@@ -1104,17 +1189,18 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        if let Ok(state) = self.database.history_by_block_hash(block_hash) {
-            // This could be tracked by a block in the database block
-            Ok(state)
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
-            // ... or this could be tracked by the in memory state
-            let state_provider = self.block_state_provider(state)?;
-            Ok(Box::new(state_provider))
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(block_hash))
-        }
+
+        self.get_in_memory_or_storage_by_block(
+            block_hash.into(),
+            |_| {
+                // TODO(joshie): port history_by_block_hash to DatabaseProvider and use db_provider
+                self.database.history_by_block_hash(block_hash)
+            },
+            |block_state| {
+                let state_provider = self.block_state_provider(&block_state)?;
+                Ok(Box::new(state_provider))
+            },
+        )
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1138,12 +1224,9 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
-        if let Some(block) = self.canonical_in_memory_state.pending_block_num_hash() {
-            let historical = self.database.history_by_block_hash(block.hash)?;
-            let pending_provider =
-                self.canonical_in_memory_state.state_provider(block.hash, historical);
-
-            return Ok(Box::new(pending_provider));
+        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
+            // we have a pending block
+            return Ok(Box::new(self.block_state_provider(&pending)?));
         }
 
         // fallback to latest state if the pending block is not available
@@ -1151,13 +1234,9 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     }
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        let historical = self.database.history_by_block_hash(block_hash)?;
-        if let Some(block) = self.canonical_in_memory_state.pending_block_num_hash() {
-            if block.hash == block_hash {
-                let pending_provider =
-                    self.canonical_in_memory_state.state_provider(block_hash, historical);
-
-                return Ok(Some(Box::new(pending_provider)))
+        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
+            if pending.hash() == block_hash {
+                return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
             }
         }
         Ok(None)
@@ -1354,7 +1433,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
             let changesets = state
-                .block()
+                .block_ref()
                 .execution_output
                 .bundle
                 .reverts
@@ -1384,7 +1463,7 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
 impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
-            let state = state.block().execution_outcome().clone();
+            let state = state.block_ref().execution_outcome().clone();
             Ok(Some(state))
         } else {
             self.database.provider()?.get_state(block..=block)
@@ -1423,8 +1502,8 @@ mod tests {
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
-        TransactionMeta, TransactionSignedNoHash, Withdrawals,
+        Receipt, SealedBlock, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
+        Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -1501,7 +1580,7 @@ mod tests {
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
-            .map(|block| block.body.iter())
+            .map(|block| block.body.transactions.iter())
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
@@ -1826,11 +1905,11 @@ mod tests {
         // First in memory block ommers should be found
         assert_eq!(
             provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
         assert_eq!(
             provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.ommers.clone())
+            Some(first_in_mem_block.body.ommers.clone())
         );
 
         // A random hash should return None as the block number is not found
@@ -2172,437 +2251,6 @@ mod tests {
     }
 
     #[test]
-    fn test_block_range_in_memory_only() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of in-memory blocks
-        let start_block_number = in_memory_blocks.first().unwrap().number;
-        let end_block_number = in_memory_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks = provider.block_range(range)?;
-
-        // Check if the retrieved blocks match the in-memory blocks
-        assert_eq!(blocks.len(), in_memory_blocks.len());
-        // Check if the blocks are equal
-        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter()) {
-            assert_eq!(retrieved_block, &expected_block.clone().unseal());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_range_in_database_only() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0, // No blocks in memory
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of database blocks
-        let start_block_number = database_blocks.first().unwrap().number;
-        let end_block_number = database_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks = provider.block_range(range)?;
-
-        // Check if the retrieved blocks match the database blocks
-        assert_eq!(blocks.len(), database_blocks.len());
-        // Check if the blocks are equal
-        for (retrieved_block, expected_block) in blocks.iter().zip(database_blocks.iter()) {
-            assert_eq!(retrieved_block, &expected_block.clone().unseal());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_range_across_memory_and_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let mid_point = TEST_BLOCKS_COUNT / 2;
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            mid_point,
-            TEST_BLOCKS_COUNT - mid_point,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of blocks across memory and database
-        let start_block_number = database_blocks.first().unwrap().number;
-        let end_block_number = in_memory_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks = provider.block_range(range)?;
-
-        // Check if the retrieved blocks match the database and in-memory blocks
-        assert_eq!(blocks.len(), TEST_BLOCKS_COUNT);
-        let all_expected_blocks =
-            database_blocks.iter().chain(in_memory_blocks.iter()).collect::<Vec<_>>();
-        // Check if the blocks are equal
-        for (retrieved_block, expected_block) in blocks.iter().zip(all_expected_blocks.iter()) {
-            assert_eq!(retrieved_block.clone(), (*expected_block).clone().unseal());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_range_non_existent_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Generate a non-existent range
-        let non_existent_range = 9999..=10000;
-        let blocks = provider.block_range(non_existent_range)?;
-
-        // The range is non-existent, so the blocks should be empty
-        assert!(blocks.is_empty());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_range_partial_overlap() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let mid_point = TEST_BLOCKS_COUNT / 2;
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            mid_point,
-            mid_point,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of blocks across memory and database
-        let start_block_number = database_blocks.last().unwrap().number;
-        let end_block_number = in_memory_blocks.first().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks = provider.block_range(range)?;
-
-        assert_eq!(blocks.len(), 2); // Only one block from each side of the overlap
-        assert_eq!(blocks[0], database_blocks.last().unwrap().clone().unseal());
-        assert_eq!(blocks[1], in_memory_blocks.first().unwrap().clone().unseal());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_range_across_memory_and_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let mid_point = TEST_BLOCKS_COUNT / 2;
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            mid_point,
-            TEST_BLOCKS_COUNT - mid_point,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of blocks across memory and database
-        let start_block_number = database_blocks.first().unwrap().number;
-        let end_block_number = in_memory_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks_with_senders = provider.block_with_senders_range(range)?;
-
-        // Check if the retrieved blocks match the database and in-memory blocks
-        assert_eq!(blocks_with_senders.len(), TEST_BLOCKS_COUNT);
-
-        let all_expected_blocks_with_senders = database_blocks
-            .iter()
-            .chain(in_memory_blocks.iter())
-            .map(|sealed_block| BlockWithSenders {
-                block: sealed_block.clone().unseal(),
-                senders: sealed_block.senders().unwrap(),
-            })
-            .collect::<Vec<_>>();
-
-        // Check if the blocks are equal
-        for (retrieved_block_with_senders, expected_block_with_senders) in
-            blocks_with_senders.iter().zip(all_expected_blocks_with_senders.iter())
-        {
-            assert_eq!(retrieved_block_with_senders.block, expected_block_with_senders.block);
-            assert_eq!(retrieved_block_with_senders.senders, expected_block_with_senders.senders);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_range_only_in_memory() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of in-memory blocks
-        let start_block_number = in_memory_blocks.first().unwrap().number;
-        let end_block_number = in_memory_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks_with_senders = provider.block_with_senders_range(range)?;
-
-        // Check if the retrieved blocks match the in-memory blocks
-        assert_eq!(blocks_with_senders.len(), TEST_BLOCKS_COUNT);
-
-        let expected_blocks_with_senders = in_memory_blocks
-            .iter()
-            .map(|sealed_block| BlockWithSenders {
-                block: sealed_block.clone().unseal(),
-                senders: sealed_block.senders().unwrap(),
-            })
-            .collect::<Vec<_>>();
-
-        // Check if the blocks are equal
-        for (retrieved_block_with_senders, expected_block_with_senders) in
-            blocks_with_senders.iter().zip(expected_blocks_with_senders.iter())
-        {
-            assert_eq!(retrieved_block_with_senders.block, expected_block_with_senders.block);
-            assert_eq!(retrieved_block_with_senders.senders, expected_block_with_senders.senders);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_range_only_in_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of database blocks
-        let start_block_number = database_blocks.first().unwrap().number;
-        let end_block_number = database_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let blocks_with_senders = provider.block_with_senders_range(range)?;
-
-        // Check if the retrieved blocks match the database blocks
-        assert_eq!(blocks_with_senders.len(), TEST_BLOCKS_COUNT);
-
-        let expected_blocks_with_senders = database_blocks
-            .iter()
-            .map(|sealed_block| BlockWithSenders {
-                block: sealed_block.clone().unseal(),
-                senders: sealed_block.senders().unwrap(),
-            })
-            .collect::<Vec<_>>();
-
-        // Check if the blocks are equal
-        for (retrieved_block_with_senders, expected_block_with_senders) in
-            blocks_with_senders.iter().zip(expected_blocks_with_senders.iter())
-        {
-            assert_eq!(retrieved_block_with_senders.block, expected_block_with_senders.block);
-            assert_eq!(retrieved_block_with_senders.senders, expected_block_with_senders.senders);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_range_non_existent_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Assuming this range does not exist
-        let start_block_number = 1000;
-        let end_block_number = 2000;
-
-        let range = start_block_number..=end_block_number;
-        let blocks_with_senders = provider.block_with_senders_range(range)?;
-
-        // The range is non-existent, so the blocks should be empty
-        assert!(blocks_with_senders.is_empty());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_range_across_memory_and_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let mid_point = TEST_BLOCKS_COUNT / 2;
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            mid_point,
-            TEST_BLOCKS_COUNT - mid_point,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of blocks across memory and database
-        let start_block_number = database_blocks.first().unwrap().number;
-        let end_block_number = in_memory_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
-
-        // Check if the retrieved blocks match the database and in-memory blocks
-        assert_eq!(sealed_blocks_with_senders.len(), TEST_BLOCKS_COUNT);
-
-        let all_expected_sealed_blocks_with_senders = database_blocks
-            .iter()
-            .chain(in_memory_blocks.iter())
-            .map(|sealed_block| SealedBlockWithSenders {
-                block: sealed_block.clone(),
-                senders: sealed_block.senders().unwrap(),
-            })
-            .collect::<Vec<_>>();
-
-        // Check if the blocks are equal
-        for (retrieved_sealed_block_with_senders, expected_sealed_block_with_senders) in
-            sealed_blocks_with_senders.iter().zip(all_expected_sealed_blocks_with_senders.iter())
-        {
-            assert_eq!(
-                retrieved_sealed_block_with_senders.block,
-                expected_sealed_block_with_senders.block
-            );
-            assert_eq!(
-                retrieved_sealed_block_with_senders.senders,
-                expected_sealed_block_with_senders.senders
-            );
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_range_only_in_memory() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of in-memory blocks
-        let start_block_number = in_memory_blocks.first().unwrap().number;
-        let end_block_number = in_memory_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
-
-        // Check if the retrieved blocks match the in-memory blocks
-        assert_eq!(sealed_blocks_with_senders.len(), TEST_BLOCKS_COUNT);
-
-        let expected_sealed_blocks_with_senders = in_memory_blocks
-            .iter()
-            .map(|sealed_block| SealedBlockWithSenders {
-                block: sealed_block.clone(),
-                senders: sealed_block.senders().unwrap(),
-            })
-            .collect::<Vec<_>>();
-
-        // Check if the blocks are equal
-        for (retrieved_sealed_block_with_senders, expected_sealed_block_with_senders) in
-            sealed_blocks_with_senders.iter().zip(expected_sealed_blocks_with_senders.iter())
-        {
-            assert_eq!(
-                retrieved_sealed_block_with_senders.block,
-                expected_sealed_block_with_senders.block
-            );
-            assert_eq!(
-                retrieved_sealed_block_with_senders.senders,
-                expected_sealed_block_with_senders.senders
-            );
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_range_only_in_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the range of database blocks
-        let start_block_number = database_blocks.first().unwrap().number;
-        let end_block_number = database_blocks.last().unwrap().number;
-
-        let range = start_block_number..=end_block_number;
-        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
-
-        // Check if the retrieved blocks match the database blocks
-        assert_eq!(sealed_blocks_with_senders.len(), TEST_BLOCKS_COUNT);
-
-        let expected_sealed_blocks_with_senders = database_blocks
-            .iter()
-            .map(|sealed_block| SealedBlockWithSenders {
-                block: sealed_block.clone(),
-                senders: sealed_block.senders().unwrap(),
-            })
-            .collect::<Vec<_>>();
-
-        // Check if the blocks are equal
-        for (retrieved_sealed_block_with_senders, expected_sealed_block_with_senders) in
-            sealed_blocks_with_senders.iter().zip(expected_sealed_blocks_with_senders.iter())
-        {
-            assert_eq!(
-                retrieved_sealed_block_with_senders.block,
-                expected_sealed_block_with_senders.block
-            );
-            assert_eq!(
-                retrieved_sealed_block_with_senders.senders,
-                expected_sealed_block_with_senders.senders
-            );
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_range_non_existent_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Assuming this range does not exist
-        let start_block_number = 1000;
-        let end_block_number = 2000;
-
-        let range = start_block_number..=end_block_number;
-        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
-
-        // The range is non-existent, so the blocks should be empty
-        assert!(sealed_blocks_with_senders.is_empty());
-
-        Ok(())
-    }
-
-    #[test]
     fn test_block_hash_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
@@ -2642,6 +2290,10 @@ mod tests {
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
+        // make sure that the finalized block is on db
+        let finalized_block = database_blocks.get(database_blocks.len() - 3).unwrap();
+        provider.set_finalized(finalized_block.header.clone());
+
         let blocks = [database_blocks, in_memory_blocks].concat();
 
         assert_eq!(provider.header(&database_block.hash())?, Some(database_block.header().clone()));
@@ -2669,22 +2321,12 @@ mod tests {
         );
 
         assert_eq!(
-            provider.headers_range(0..=10)?,
-            blocks.iter().map(|b| b.header().clone()).collect::<Vec<_>>()
-        );
-
-        assert_eq!(
             provider.sealed_header(database_block.number)?,
             Some(database_block.header.clone())
         );
         assert_eq!(
             provider.sealed_header(in_memory_block.number)?,
             Some(in_memory_block.header.clone())
-        );
-
-        assert_eq!(
-            provider.sealed_headers_range(0..=10)?,
-            blocks.iter().map(|b| b.header.clone()).collect::<Vec<_>>()
         );
 
         assert_eq!(
@@ -2779,7 +2421,7 @@ mod tests {
                         shainghai_timestamp
                     )?
                     .unwrap(),
-                block.withdrawals.unwrap(),
+                block.body.withdrawals.unwrap(),
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
@@ -2789,7 +2431,7 @@ mod tests {
 
         assert_eq!(
             Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.withdrawals.clone().unwrap().pop(),
+            canonical_block.body.withdrawals.clone().unwrap().pop(),
             "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
         );
 
@@ -2986,11 +2628,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.ommers
+            database_block.body.ommers
         );
 
         let block_number = in_memory_block.number;
@@ -2998,11 +2640,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.ommers
+            in_memory_block.body.ommers
         );
 
         Ok(())
@@ -3022,8 +2664,8 @@ mod tests {
 
         for block in blocks {
             let block_number = block.number as usize;
-            for (txn_number, _) in block.body.iter().enumerate() {
-                let txn_hash = block.body.get(txn_number).unwrap().hash();
+            for (txn_number, _) in block.body.transactions.iter().enumerate() {
+                let txn_hash = block.body.transactions.get(txn_number).unwrap().hash();
                 let txn_id = provider.transaction_id(txn_hash)?.unwrap();
                 assert_eq!(
                     provider.receipt(txn_id)?.unwrap(),
@@ -3265,11 +2907,11 @@ mod tests {
 
         assert_eq!(
             provider.requests_by_block(database_block.number.into(), prague_timestamp,)?,
-            database_block.requests.clone()
+            database_block.body.requests.clone()
         );
         assert_eq!(
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
-            in_memory_block.requests.clone()
+            in_memory_block.body.requests.clone()
         );
 
         Ok(())
@@ -3535,7 +3177,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction ID can be found in the database
@@ -3544,7 +3186,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction ID can be found in the in-memory state
@@ -3587,7 +3229,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3603,7 +3245,7 @@ mod tests {
 
         // Database
         // Choose a random transaction ID from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3643,7 +3285,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3660,7 +3302,7 @@ mod tests {
 
         // Database
         // Choose a random transaction ID from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3700,7 +3342,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction hash from the in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction can be retrieved by its hash from the in-memory state
@@ -3713,7 +3355,7 @@ mod tests {
 
         // Database
         // Choose a random transaction hash from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Ensure the transaction can be retrieved by its hash from the database
@@ -3749,7 +3391,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory block
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Create the expected metadata for this transaction
@@ -3758,10 +3400,7 @@ mod tests {
             index: 0,
             block_hash: in_memory_blocks[0].header.hash(),
             block_number: in_memory_blocks[0].header.number,
-            base_fee: in_memory_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: in_memory_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: in_memory_blocks[0].header.timestamp,
         };
@@ -3780,7 +3419,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database blocks
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Create the expected metadata for this transaction
@@ -3789,10 +3428,7 @@ mod tests {
             index: 0,
             block_hash: database_blocks[0].header.hash(),
             block_number: database_blocks[0].header.number,
-            base_fee: database_blocks[0]
-                .header
-                .base_fee_per_gas
-                .map(|base_fee_per_gas| base_fee_per_gas as u64),
+            base_fee: database_blocks[0].header.base_fee_per_gas,
             excess_blob_gas: None,
             timestamp: database_blocks[0].header.timestamp,
         };
@@ -3834,7 +3470,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction ID from in-memory blocks
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3852,7 +3488,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database block
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
         let tx_hash = tx.hash();
 
         // Fetch the transaction ID
@@ -3860,10 +3496,7 @@ mod tests {
 
         // Retrieve the block number for this transaction
         let result = provider.transaction_block(tx_id)?;
-        assert!(
-            result.is_none(),
-            "`block_state_by_tx_id` should be None if the block is in database"
-        );
+        assert_eq!(Some(0), result, "The block number should match the database block number");
 
         // Ensure that invalid transaction ID returns None
         let result = provider.transaction_block(67675657)?;
@@ -3896,7 +3529,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3910,7 +3543,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -3949,7 +3582,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, in_memory_blocks[0].body,
+            transactions, in_memory_blocks[0].body.transactions,
             "The transactions should match the in-memory block transactions"
         );
 
@@ -3963,7 +3596,7 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the block
         assert_eq!(
-            transactions, database_blocks[0].body,
+            transactions, database_blocks[0].body.transactions,
             "The transactions should match the database block transactions"
         );
 
@@ -4006,8 +3639,8 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the in-memory blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], in_memory_blocks[0].body);
-        assert_eq!(result[1], in_memory_blocks[1].body);
+        assert_eq!(result[0], in_memory_blocks[0].body.transactions);
+        assert_eq!(result[1], in_memory_blocks[1].body.transactions);
 
         // Database
         // Define a block range entirely within database blocks
@@ -4019,97 +3652,194 @@ mod tests {
 
         // Ensure the transactions match the expected transactions in the database blocks
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body);
-        assert_eq!(result[1], database_blocks[1].body);
+        assert_eq!(result[0], database_blocks[0].body.transactions);
+        assert_eq!(result[1], database_blocks[1].body.transactions);
 
         Ok(())
     }
 
+    macro_rules! test_by_tx_range {
+        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
+            let db_tx_count =
+                $database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+            let in_mem_tx_count =
+                $in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+
+            let db_range = 0..=(db_tx_count - 1);
+            let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
+
+            $(
+                // Retrieve the expected database data
+                let database_data =
+                    $database_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!($provider.$method(db_range.clone())?, database_data);
+
+                // Retrieve the expected in-memory data
+                let in_memory_data =
+                    $in_memory_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
+
+                // Test partial in-memory range
+                assert_eq!(
+                    &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                    &in_memory_data[1..in_memory_data.len() - 1]
+                );
+
+                // Test range in in-memory to unbounded end
+                assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
+
+                // Test last element in-memory
+                assert_eq!($provider.$method(in_mem_range.end()..)?, &in_memory_data[in_memory_data.len() -1 ..]);
+
+                // Test range that spans database and in-memory
+                assert_eq!(
+                    $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                    database_data[database_data.len() - 2..]
+                        .iter()
+                        .chain(&in_memory_data[..in_memory_data.len() - 1])
+                        .cloned()
+                        .collect::<Vec<_>>()
+                );
+
+                // Test range that spans database and in-memory with unbounded end
+                assert_eq!(
+                    $provider.$method(in_mem_range.start() - 2..)?,
+                    database_data[database_data.len() - 2..]
+                        .iter()
+                        .chain(&in_memory_data[..])
+                        .cloned()
+                        .collect::<Vec<_>>()
+                );
+
+                // Test invalid range
+                let start_tx_num = u64::MAX;
+                let end_tx_num = u64::MAX;
+                let result = $provider.$method(start_tx_num..end_tx_num)?;
+                assert!(result.is_empty(), "No data should be found for an invalid transaction range");
+
+                // Test empty range
+                let result = $provider.$method(in_mem_range.end()+10..in_mem_range.end()+20)?;
+                assert!(result.is_empty(), "No data should be found for an empty transaction range");
+            )*
+        }};
+    }
+
     #[test]
-    fn test_transactions_by_tx_range() -> eyre::Result<()> {
+    fn test_methods_by_tx_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
-            0,
+            TEST_BLOCKS_COUNT,
             BlockRangeParams {
                 tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                 ..Default::default()
             },
         )?;
 
-        // Define a valid transaction range within the database
-        let start_tx_num = 0;
-        let end_tx_num = 1;
-
-        // Retrieve the transactions for this transaction number range
-        let result = provider.transactions_by_tx_range(start_tx_num..=end_tx_num)?;
-
-        // Ensure the transactions match the expected transactions in the database
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body[0].clone().into());
-        assert_eq!(result[1], database_blocks[0].body[1].clone().into());
-
-        // Define an empty range that should return no transactions
-        let start_tx_num = u64::MAX;
-        let end_tx_num = u64::MAX;
-
-        // Retrieve the transactions for this range
-        let result = provider.transactions_by_tx_range(start_tx_num..end_tx_num)?;
-
-        // Ensure no transactions are returned
-        assert!(
-            result.is_empty(),
-            "No transactions should be found for an empty transaction range"
+        test_by_tx_range!(
+            provider,
+            database_blocks,
+            in_memory_blocks,
+            [
+                (senders_by_tx_range, |block: &SealedBlock| block.senders().unwrap()),
+                (transactions_by_tx_range, |block: &SealedBlock| block
+                    .body
+                    .transactions
+                    .iter()
+                    .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
+                    .collect::<Vec<_>>()),
+                (receipts_by_tx_range, |block: &SealedBlock| receipts[block.number as usize]
+                    .clone())
+            ]
         );
 
         Ok(())
     }
 
+    macro_rules! test_by_block_range {
+        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
+            let db_block_count = $database_blocks.len() as u64;
+            let in_mem_block_count = $in_memory_blocks.len() as u64;
+
+            let db_range = 0..=db_block_count - 1;
+            let in_mem_range = db_block_count..=(in_mem_block_count + db_range.end());
+
+            $(
+                // Retrieve the expected database data
+                let database_data =
+                    $database_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!($provider.$method(db_range.clone())?, database_data);
+
+                // Retrieve the expected in-memory data
+                let in_memory_data =
+                    $in_memory_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
+
+                // Test partial in-memory range
+                assert_eq!(
+                    &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                    &in_memory_data[1..in_memory_data.len() - 1]
+                );
+
+                // Test range that spans database and in-memory
+                assert_eq!(
+                    $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                    database_data[database_data.len() - 2..]
+                        .iter()
+                        .chain(&in_memory_data[..in_memory_data.len() - 1])
+                        .cloned()
+                        .collect::<Vec<_>>()
+                );
+
+                // Test invalid range
+                let start_block_num = u64::MAX;
+                let end_block_num = u64::MAX;
+                let result = $provider.$method(start_block_num..=end_block_num-1)?;
+                assert!(result.is_empty(), "No data should be found for an invalid block range");
+
+                // Test valid range with empty results
+                let result = $provider.$method(in_mem_range.end() + 10..=in_mem_range.end() + 20)?;
+                assert!(result.is_empty(), "No data should be found for an empty block range");
+            )*
+        }};
+    }
+
     #[test]
-    fn test_senders_by_tx_range() -> eyre::Result<()> {
+    fn test_methods_by_block_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
-            0,
+            TEST_BLOCKS_COUNT,
             BlockRangeParams {
                 tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                 ..Default::default()
             },
         )?;
 
-        // Define a valid transaction range within the database
-        let start_tx_num = 0;
-        let end_tx_num = 1;
-
-        // Retrieve the senders for this transaction number range
-        let result = provider.senders_by_tx_range(start_tx_num..=end_tx_num)?;
-
-        // Ensure the sender addresses match the expected addresses in the database
-        assert_eq!(result.len(), 2);
-        assert_eq!(
-            result[0],
-            database_blocks[0].senders().unwrap()[0],
-            "The sender address should match the expected sender address"
-        );
-        assert_eq!(
-            result[1],
-            database_blocks[0].senders().unwrap()[1],
-            "The sender address should match the expected sender address"
-        );
-
-        // Define an empty range that should return no sender addresses
-        let start_tx_num = u64::MAX;
-        let end_tx_num = u64::MAX;
-
-        // Retrieve the senders for this range
-        let result = provider.senders_by_tx_range(start_tx_num..end_tx_num)?;
-
-        // Ensure no sender addresses are returned
-        assert!(
-            result.is_empty(),
-            "No sender addresses should be found for an empty transaction range"
+        // todo(joshie) add canonical_hashes_range below after changing its interface into range
+        // instead start end
+        test_by_block_range!(
+            provider,
+            database_blocks,
+            in_memory_blocks,
+            [
+                (headers_range, |block: &SealedBlock| block.header().clone()),
+                (sealed_headers_range, |block: &SealedBlock| block.header.clone()),
+                (block_range, |block: &SealedBlock| block.clone().unseal()),
+                (block_with_senders_range, |block: &SealedBlock| block
+                    .clone()
+                    .unseal()
+                    .with_senders_unchecked(vec![])),
+                (sealed_block_with_senders_range, |block: &SealedBlock| block
+                    .clone()
+                    .with_senders_unchecked(vec![])),
+                (transactions_by_block_range, |block: &SealedBlock| block
+                    .body
+                    .transactions
+                    .clone()),
+            ]
         );
 
         Ok(())
@@ -4130,7 +3860,7 @@ mod tests {
 
         // In memory
         // Choose a random transaction from the in-memory block
-        let tx = &in_memory_blocks[0].body[0];
+        let tx = &in_memory_blocks[0].body.transactions[0];
 
         // Retrieve the transaction ID
         let tx_id = provider.transaction_id(tx.hash())?.unwrap();
@@ -4148,7 +3878,7 @@ mod tests {
 
         // Database
         // Choose a random transaction from the database block
-        let tx = &database_blocks[0].body[0];
+        let tx = &database_blocks[0].body.transactions[0];
 
         // Retrieve the transaction ID
         let tx_id = provider.transaction_id(tx.hash())?.unwrap();

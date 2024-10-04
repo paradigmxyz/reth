@@ -1,3 +1,4 @@
+use alloy_consensus::Transaction;
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
@@ -66,7 +67,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthTransactions<TransactionCompat: TransactionCompat>
+        > + EthTransactions
         + TraceExt
         + 'static,
 {
@@ -105,11 +106,10 @@ where
                         value: op.value,
                         r#type: match op.kind {
                             TransferKind::Call => OperationType::OpTransfer,
-                            TransferKind::Create | TransferKind::EofCreate => {
-                                OperationType::OpCreate
-                            }
+                            TransferKind::Create => OperationType::OpCreate,
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
+                            TransferKind::EofCreate => OperationType::OpEofCreate,
                         },
                     })
                     .collect::<Vec<_>>()

@@ -1,4 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
+use alloy_primitives::{BlockNumber, Sealable};
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
@@ -9,9 +10,7 @@ use reth_evm::{
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{
-    alloy_primitives::Sealable, BlockNumber, Header, SealedHeader, StaticFileSegment,
-};
+use reth_primitives::{Header, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -271,7 +270,7 @@ where
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.transactions.len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -294,7 +293,7 @@ where
                     target: "sync::stages::execution",
                     start = last_block,
                     end = block_number,
-                    throughput = format_gas_throughput((cumulative_gas - last_cumulative_gas) as u64, execution_duration - last_execution_duration),
+                    throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_execution_duration),
                     "Executed block range"
                 );
 
@@ -305,7 +304,7 @@ where
             }
 
             stage_progress = block_number;
-            stage_checkpoint.progress.processed += block.gas_used as u64;
+            stage_checkpoint.progress.processed += block.gas_used;
 
             // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
@@ -317,7 +316,7 @@ where
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
                 bundle_size_hint,
-                cumulative_gas as u64,
+                cumulative_gas,
                 batch_start.elapsed(),
             ) {
                 break
@@ -335,7 +334,7 @@ where
             target: "sync::stages::execution",
             start = start_block,
             end = stage_progress,
-            throughput = format_gas_throughput(cumulative_gas as u64, execution_duration),
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
             "Finished executing block range"
         );
 
@@ -351,12 +350,13 @@ where
 
             let previous_input =
                 self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
-            debug_assert!(
-                previous_input.is_none(),
-                "Previous post execute commit input wasn't processed"
-            );
-            if let Some(previous_input) = previous_input {
-                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+
+            if previous_input.is_some() {
+                // Not processing the previous post execute commit input is a critical error, as it
+                // means that we didn't send the notification to ExExes
+                return Err(StageError::PostExecuteCommit(
+                    "Previous post execute commit input wasn't processed",
+                ))
             }
         }
 
@@ -460,7 +460,7 @@ where
                 stage_checkpoint.progress.processed -= provider
                     .block_by_number(block_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .gas_used as u64;
+                    .gas_used;
             }
         }
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
@@ -573,7 +573,7 @@ fn calculate_gas_used_from_headers(
     let duration = start.elapsed();
     debug!(target: "sync::stages::execution", ?range, ?duration, "Finished calculating gas used from headers");
 
-    Ok(gas_total as u64)
+    Ok(gas_total)
 }
 
 /// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
@@ -659,16 +659,14 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::TestStageDB;
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
-    use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, Address, Bytecode, SealedBlock,
-        StorageEntry, B256, U256,
-    };
+    use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
         ReceiptProvider, StaticFileProviderFactory,
@@ -763,7 +761,7 @@ mod tests {
                 total
             }
         }) if processed == previous_stage_checkpoint.progress.processed &&
-            total == previous_stage_checkpoint.progress.total + block.gas_used as u64);
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
     }
 
     #[test]
@@ -804,7 +802,7 @@ mod tests {
                 total
             }
         }) if processed == previous_stage_checkpoint.progress.processed &&
-            total == previous_stage_checkpoint.progress.total + block.gas_used as u64);
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
     }
 
     #[test]
@@ -837,7 +835,7 @@ mod tests {
                 processed: 0,
                 total
             }
-        }) if total == block.gas_used as u64);
+        }) if total == block.gas_used);
     }
 
     #[tokio::test]
@@ -928,7 +926,7 @@ mod tests {
                     }))
                 },
                 done: true
-            } if processed == total && total == block.gas_used as u64);
+            } if processed == total && total == block.gas_used);
 
             let provider = factory.provider().unwrap();
 
@@ -1080,7 +1078,7 @@ mod tests {
                         }
                     }))
                 }
-            } if total == block.gas_used as u64);
+            } if total == block.gas_used);
 
             // assert unwind stage
             assert_eq!(

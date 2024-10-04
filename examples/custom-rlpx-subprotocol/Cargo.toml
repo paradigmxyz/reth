@@ -15,9 +15,9 @@ reth-network-api.workspace = true
 reth-node-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth.workspace = true
 tokio-stream.workspace = true
 eyre.workspace = true
 rand.workspace = true
 tracing.workspace = true
+alloy-primitives.workspace = true

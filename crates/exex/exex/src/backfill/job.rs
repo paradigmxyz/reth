@@ -64,6 +64,12 @@ where
     }
 
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
+        debug!(
+            target: "exex::backfill",
+            range = ?self.range,
+            "Executing block range"
+        );
+
         let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
             self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
         ));
@@ -95,7 +101,7 @@ where
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions.len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -103,14 +109,8 @@ where
             // Unseal the block for execution
             let (block, senders) = block.into_components();
             let (unsealed_header, hash) = block.header.split();
-            let block = Block {
-                header: unsealed_header,
-                body: block.body,
-                ommers: block.ommers,
-                withdrawals: block.withdrawals,
-                requests: block.requests,
-            }
-            .with_senders_unchecked(senders);
+            let block =
+                Block { header: unsealed_header, body: block.body }.with_senders_unchecked(senders);
 
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
@@ -125,7 +125,7 @@ where
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start(),
                 bundle_size_hint,
-                cumulative_gas as u64,
+                cumulative_gas,
                 batch_start.elapsed(),
             ) {
                 break
@@ -138,7 +138,7 @@ where
             range = ?*self.range.start()..=last_block_number,
             block_fetch = ?fetch_block_duration,
             execution = ?execution_duration,
-            throughput = format_gas_throughput(cumulative_gas as u64, execution_duration),
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
             "Finished executing block range"
         );
         self.range = last_block_number + 1..=*self.range.end();
@@ -204,7 +204,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.transactions.len(), "Executing block");
 
         let block_execution_output = executor.execute((&block_with_senders, td).into())?;
 

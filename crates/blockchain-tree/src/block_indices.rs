@@ -2,10 +2,11 @@
 
 use super::state::SidechainId;
 use crate::canonical_chain::CanonicalChain;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
 use linked_hash_set::LinkedHashSet;
 use reth_execution_types::Chain;
-use reth_primitives::{BlockNumHash, SealedBlockWithSenders};
+use reth_primitives::SealedBlockWithSenders;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
@@ -533,7 +534,7 @@ mod tests {
         block_indices.insert_non_fork_block(block_number_2, block_hash_3, chain_id_2);
 
         // Block number 1 should have two block hashes associated with it.
-        let mut expected_hashes_for_block_1 = HashSet::new();
+        let mut expected_hashes_for_block_1 = HashSet::default();
         expected_hashes_for_block_1.insert(block_hash_1);
         expected_hashes_for_block_1.insert(block_hash_2);
         assert_eq!(
@@ -601,11 +602,11 @@ mod tests {
         assert_eq!(block_indices.blocks_to_chain.get(&block_hash_2), Some(&chain_id));
 
         // Check that block numbers map to their respective hashes.
-        let mut expected_hashes_1 = HashSet::new();
+        let mut expected_hashes_1 = HashSet::default();
         expected_hashes_1.insert(block_hash_1);
         assert_eq!(block_indices.block_number_to_block_hashes.get(&1), Some(&expected_hashes_1));
 
-        let mut expected_hashes_2 = HashSet::new();
+        let mut expected_hashes_2 = HashSet::default();
         expected_hashes_2.insert(block_hash_2);
         assert_eq!(block_indices.block_number_to_block_hashes.get(&2), Some(&expected_hashes_2));
 

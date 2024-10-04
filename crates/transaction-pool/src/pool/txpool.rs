@@ -19,8 +19,12 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::constants::{
-    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
+use reth_primitives::{
+    constants::{
+        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
+    },
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -429,6 +433,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
+        self.update_transaction_type_metrics();
         self.metrics.performed_state_updates.increment(1);
 
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
@@ -446,6 +451,32 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.blob_pool_transactions.set(stats.blob as f64);
         self.metrics.blob_pool_size_bytes.set(stats.blob_size as f64);
         self.metrics.total_transactions.set(stats.total as f64);
+    }
+
+    /// Updates transaction type metrics for the entire pool.
+    pub(crate) fn update_transaction_type_metrics(&self) {
+        let mut legacy_count = 0;
+        let mut eip2930_count = 0;
+        let mut eip1559_count = 0;
+        let mut eip4844_count = 0;
+        let mut eip7702_count = 0;
+
+        for tx in self.all_transactions.transactions_iter() {
+            match tx.transaction.tx_type() {
+                LEGACY_TX_TYPE_ID => legacy_count += 1,
+                EIP2930_TX_TYPE_ID => eip2930_count += 1,
+                EIP1559_TX_TYPE_ID => eip1559_count += 1,
+                EIP4844_TX_TYPE_ID => eip4844_count += 1,
+                EIP7702_TX_TYPE_ID => eip7702_count += 1,
+                _ => {} // Ignore other types
+            }
+        }
+
+        self.metrics.total_legacy_transactions.set(legacy_count as f64);
+        self.metrics.total_eip2930_transactions.set(eip2930_count as f64);
+        self.metrics.total_eip1559_transactions.set(eip1559_count as f64);
+        self.metrics.total_eip4844_transactions.set(eip4844_count as f64);
+        self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
     }
 
     /// Adds the transaction into the pool.
@@ -2708,7 +2739,7 @@ mod tests {
 
         assert_eq!(pool.pending_pool.len(), 2);
 
-        let mut changed_senders = HashMap::new();
+        let mut changed_senders = HashMap::default();
         changed_senders.insert(
             id.sender,
             SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
@@ -2892,7 +2923,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::new();
+        let mut updated_accounts = HashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),
@@ -2967,7 +2998,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::new();
+        let mut updated_accounts = HashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),

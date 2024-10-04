@@ -3,17 +3,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
+use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
-    primitives::{
-        address,
-        revm_primitives::{Env, PrecompileResult},
-        Bytes,
-    },
+    primitives::revm_primitives::{Env, PrecompileResult},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
@@ -38,7 +35,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{
     revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
-    Address, Header, TransactionSigned, U256,
+    Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
@@ -229,7 +226,7 @@ async fn main() -> eyre::Result<()> {
                 .executor(MyExecutorBuilder::default())
                 .payload(MyPayloadBuilder::default()),
         )
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .launch()
         .await
         .unwrap();
