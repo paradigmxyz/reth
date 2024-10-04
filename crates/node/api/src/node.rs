@@ -114,21 +114,18 @@ const fn noop_builder(_: ()) {}
 
 /// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
 pub trait NodeTy {
-    /// The node's primitive types, defining basic operations and structures.
-    type Primitives;
-    /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: Send + Sync + Clone + Unpin;
-    /// The type used for configuration of the EVM.
-    type ChainSpec: Send + Sync;
+    /// Node's types with the database.
+    type Types;
+    /// The provider type used to interact with the node.
+    type Provider;
 }
 
 impl<T> NodeTy for T
 where
-    T: NodeTypesWithEngine + Clone,
+    T: FullNodeTypes,
 {
-    type Primitives = <T as NodeTypes>::Primitives;
-    type Engine = <T as NodeTypesWithEngine>::Engine;
-    type ChainSpec = <T as NodeTypes>::ChainSpec;
+    type Types = T::Types;
+    type Provider = T::Provider;
 }
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
@@ -152,9 +149,9 @@ impl<T> NodeCore for T
 where
     T: FullNodeComponents,
 {
-    type DB = <T as FullNodeTypes>::DB;
-    type Provider = <T as FullNodeTypes>::Provider;
-    type Pool = <T as FullNodeComponents>::Pool;
+    type DB = <T::Types as NodeTypesWithDB>::DB;
+    type Provider = T::Provider;
+    type Pool = T::Pool;
     type Network = <T as FullNodeComponents>::Network;
     type Evm = <T as FullNodeComponents>::Evm;
     type Executor = <T as FullNodeComponents>::Executor;
