@@ -10,13 +10,12 @@ use crate::{
     BlobTransaction, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
     TransactionSignedEcRecovered, EIP4844_TX_TYPE_ID,
 };
-use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
-use alloy_eips::eip2718::{Decodable2718, Eip2718Error};
-use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
+use alloy_primitives::{Address, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
@@ -309,83 +308,6 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Returns the length without an RLP header - this is used for eth/68 sizes.
-    pub fn length_without_header(&self) -> usize {
-        match self {
-            Self::Legacy { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&with_eip155_parity(
-                    signature,
-                    transaction.chain_id,
-                ))
-            }
-            Self::Eip2930 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(signature, false)
-            }
-            Self::Eip1559 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(signature, false)
-            }
-            Self::Eip7702 { transaction, signature, .. } => {
-                // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(signature, false)
-            }
-            Self::BlobTransaction(blob_tx) => {
-                // the encoding does not use a header, so we set `with_header` to false
-                blob_tx.payload_len_with_type(false)
-            }
-        }
-    }
-
-    /// Returns the enveloped encoded transactions.
-    ///
-    /// See also [`alloy_eips::eip2718::Encodable2718::encoded_2718`]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
-    }
-
-    /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
-    /// This format is also referred to as "binary" encoding.
-    ///
-    /// For legacy transactions, it encodes the RLP of the transaction into the buffer:
-    /// `rlp(tx-data)`
-    /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
-    /// transaction: `tx-type || rlp(tx-data)`
-    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
-        // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
-        // information on the exact format:
-        // - Legacy: TxLegacy::encode_with_signature
-        // - EIP-2930: TxEip2930::encode_with_signature
-        // - EIP-1559: TxEip1559::encode_with_signature
-        // - EIP-4844: BlobTransaction::encode_with_type_inner
-        // - EIP-7702: TxEip7702::encode_with_signature
-        match self {
-            Self::Legacy { transaction, signature, .. } => transaction
-                .encode_with_signature_fields(
-                    &with_eip155_parity(signature, transaction.chain_id),
-                    out,
-                ),
-            Self::Eip2930 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
-            }
-            Self::Eip1559 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
-            }
-            Self::Eip7702 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
-            }
-            Self::BlobTransaction(blob_tx) => {
-                // The inner encoding is used with `with_header` set to true, making the final
-                // encoding:
-                // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-                blob_tx.encode_with_type_inner(out, false);
-            }
-        }
-    }
-
     /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
     pub const fn is_eip4844(&self) -> bool {
@@ -481,73 +403,25 @@ impl PooledTransactionsElement {
 }
 
 impl Encodable for PooledTransactionsElement {
-    /// Encodes an enveloped post EIP-4844 [`PooledTransactionsElement`].
+    /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
-    /// For legacy transactions, this encodes the transaction as `rlp(tx-data)`.
+    /// For legacy transactions, it encodes the transaction data:
+    /// `rlp(tx-data)`
     ///
-    /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`,
-    /// ___including__ the RLP-header for the entire transaction.
+    /// For EIP-2718 typed transactions, it encodes the transaction type followed by the rlp of the
+    /// transaction:
+    /// `rlp(tx-type || rlp(tx-data))`
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
-        // information on the exact format:
-        // - Legacy: TxLegacy::encode_with_signature
-        // - EIP-2930: TxEip2930::encode_with_signature
-        // - EIP-1559: TxEip1559::encode_with_signature
-        // - EIP-4844: BlobTransaction::encode_with_type_inner
-        // - EIP-7702: TxEip7702::encode_with_signature
-        match self {
-            Self::Legacy { transaction, signature, .. } => transaction
-                .encode_with_signature_fields(
-                    &with_eip155_parity(signature, transaction.chain_id),
-                    out,
-                ),
-            Self::Eip2930 { transaction, signature, .. } => {
-                // encodes with string header
-                transaction.encode_with_signature(signature, out, true)
-            }
-            Self::Eip1559 { transaction, signature, .. } => {
-                // encodes with string header
-                transaction.encode_with_signature(signature, out, true)
-            }
-            Self::Eip7702 { transaction, signature, .. } => {
-                // encodes with string header
-                transaction.encode_with_signature(signature, out, true)
-            }
-            Self::BlobTransaction(blob_tx) => {
-                // The inner encoding is used with `with_header` set to true, making the final
-                // encoding:
-                // `rlp(tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-                blob_tx.encode_with_type_inner(out, true);
-            }
-        }
+        self.network_encode(out);
     }
 
     fn length(&self) -> usize {
-        match self {
-            Self::Legacy { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&with_eip155_parity(
-                    signature,
-                    transaction.chain_id,
-                ))
-            }
-            Self::Eip2930 { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(signature, true)
-            }
-            Self::Eip1559 { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(signature, true)
-            }
-            Self::Eip7702 { transaction, signature, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(signature, true)
-            }
-            Self::BlobTransaction(blob_tx) => {
-                // the encoding uses a header, so we set `with_header` to true
-                blob_tx.payload_len_with_type(true)
-            }
+        let mut payload_length = self.encode_2718_len();
+        if !self.is_legacy() {
+            payload_length += Header { list: false, payload_length }.length();
         }
+
+        payload_length
     }
 }
 
@@ -655,6 +529,78 @@ impl Decodable for PooledTransactionsElement {
                     #[cfg(feature = "optimism")]
                     Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
                 }
+            }
+        }
+    }
+}
+
+impl Encodable2718 for PooledTransactionsElement {
+    fn type_flag(&self) -> Option<u8> {
+        match self {
+            Self::Legacy { .. } => None,
+            Self::Eip2930 { .. } => Some(0x01),
+            Self::Eip1559 { .. } => Some(0x02),
+            Self::BlobTransaction { .. } => Some(0x03),
+            Self::Eip7702 { .. } => Some(0x04),
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        match self {
+            Self::Legacy { transaction, signature, .. } => {
+                // method computes the payload len with a RLP header
+                transaction.encoded_len_with_signature(&with_eip155_parity(
+                    signature,
+                    transaction.chain_id,
+                ))
+            }
+            Self::Eip2930 { transaction, signature, .. } => {
+                // method computes the payload len without a RLP header
+                transaction.encoded_len_with_signature(signature, false)
+            }
+            Self::Eip1559 { transaction, signature, .. } => {
+                // method computes the payload len without a RLP header
+                transaction.encoded_len_with_signature(signature, false)
+            }
+            Self::Eip7702 { transaction, signature, .. } => {
+                // method computes the payload len without a RLP header
+                transaction.encoded_len_with_signature(signature, false)
+            }
+            Self::BlobTransaction(blob_tx) => {
+                // the encoding does not use a header, so we set `with_header` to false
+                blob_tx.payload_len_with_type(false)
+            }
+        }
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
+        // information on the exact format:
+        // - Legacy: TxLegacy::encode_with_signature
+        // - EIP-2930: TxEip2930::encode_with_signature
+        // - EIP-1559: TxEip1559::encode_with_signature
+        // - EIP-4844: BlobTransaction::encode_with_type_inner
+        // - EIP-7702: TxEip7702::encode_with_signature
+        match self {
+            Self::Legacy { transaction, signature, .. } => transaction
+                .encode_with_signature_fields(
+                    &with_eip155_parity(signature, transaction.chain_id),
+                    out,
+                ),
+            Self::Eip2930 { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out, false)
+            }
+            Self::Eip1559 { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out, false)
+            }
+            Self::Eip7702 { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out, false)
+            }
+            Self::BlobTransaction(blob_tx) => {
+                // The inner encoding is used with `with_header` set to true, making the final
+                // encoding:
+                // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
+                blob_tx.encode_with_type_inner(out, false);
             }
         }
     }
@@ -773,6 +719,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, hex};
     use assert_matches::assert_matches;
+    use bytes::Bytes;
 
     #[test]
     fn invalid_legacy_pooled_decoding_input_too_short() {

@@ -283,7 +283,7 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
 mod tests {
     use super::*;
     use crate::{kzg::Blob, PooledTransactionsElement};
-    use alloy_eips::eip4844::Bytes48;
+    use alloy_eips::{eip2718::Encodable2718, eip4844::Bytes48};
     use alloy_primitives::hex;
     use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
@@ -442,8 +442,8 @@ mod tests {
                 .unwrap();
             // We want to test only EIP-4844 transactions
             assert!(tx.is_eip4844());
-            let encoded = tx.envelope_encoded();
-            assert_eq!(encoded.as_ref(), &raw[..], "{:?}", entry.path());
+            let encoded = tx.encoded_2718();
+            assert_eq!(encoded.as_slice(), &raw[..], "{:?}", entry.path());
         }
     }
 }
