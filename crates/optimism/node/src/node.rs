@@ -102,6 +102,10 @@ where
         let Self { args } = self;
         Self::components(args.clone())
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        OptimismAddOns::new(self.args.sequencer_http.clone())
+    }
 }
 
 impl NodeTypes for OptimismNode {
@@ -115,7 +119,21 @@ impl NodeTypesWithEngine for OptimismNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug, Clone)]
-pub struct OptimismAddOns;
+pub struct OptimismAddOns {
+    sequencer_http: Option<String>,
+}
+
+impl OptimismAddOns {
+    /// Create a new instance with the given `sequencer_http` URL.
+    pub const fn new(sequencer_http: Option<String>) -> Self {
+        Self { sequencer_http }
+    }
+
+    /// Returns the sequencer HTTP URL.
+    pub fn sequencer_http(&self) -> Option<&str> {
+        self.sequencer_http.as_deref()
+    }
+}
 
 impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
     type EthApi = OpEthApi<N>;

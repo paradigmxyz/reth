@@ -226,7 +226,7 @@ async fn main() -> eyre::Result<()> {
                 .executor(MyExecutorBuilder::default())
                 .payload(MyPayloadBuilder::default()),
         )
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .launch()
         .await
         .unwrap();
