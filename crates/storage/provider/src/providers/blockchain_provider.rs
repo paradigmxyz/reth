@@ -3792,10 +3792,14 @@ mod tests {
                 //         .collect::<Vec<_>>()
                 // );
 
-                // Test empty range
+                // Test invalid range
                 let start_block_num = u64::MAX;
                 let end_block_num = u64::MAX;
                 let result = $provider.$method(start_block_num..=end_block_num-1)?;
+                assert!(result.is_empty(), "No data should be found for an invalid block range");
+
+                // Test valid range with empty results
+                let result = $provider.$method(in_mem_range.end() + 10..=in_mem_range.end() + 20)?;
                 assert!(result.is_empty(), "No data should be found for an empty block range");
             )*
         }};
