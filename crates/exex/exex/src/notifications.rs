@@ -56,7 +56,7 @@ impl<P, E> ExExNotificationStream<P, E> {
     pub const fn exex_head(&self) -> Option<&ExExHead> {
         match self {
             Self::WithHead(notifications) => Some(&notifications.exex_head),
-            Self::Raw => None,
+            Self::Raw(_) => None,
             Self::Invalid => panic!("invalid stream state"),
         }
     }
