@@ -3769,7 +3769,7 @@ mod tests {
                     &in_memory_data[1..in_memory_data.len() - 1]
                 );
 
-               
+
                 // Test range that spans database and in-memory
                 assert_eq!(
                     $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
@@ -3814,8 +3814,8 @@ mod tests {
             },
         )?;
 
-
-        // todo(joshie) add canonical_hashes_range below after changing its interface into range instead start end
+        // todo(joshie) add canonical_hashes_range below after changing its interface into range
+        // instead start end
         test_by_block_range!(
             provider,
             database_blocks,
@@ -3824,9 +3824,17 @@ mod tests {
                 (headers_range, |block: &SealedBlock| block.header().clone()),
                 (sealed_headers_range, |block: &SealedBlock| block.header.clone()),
                 (block_range, |block: &SealedBlock| block.clone().unseal()),
-                (block_with_senders_range, |block: &SealedBlock| block.clone().unseal().with_senders_unchecked(vec![])),
-                (sealed_block_with_senders_range, |block: &SealedBlock| block.clone().with_senders_unchecked(vec![])),
-                (transactions_by_block_range, |block: &SealedBlock| block.body.transactions.clone()),
+                (block_with_senders_range, |block: &SealedBlock| block
+                    .clone()
+                    .unseal()
+                    .with_senders_unchecked(vec![])),
+                (sealed_block_with_senders_range, |block: &SealedBlock| block
+                    .clone()
+                    .with_senders_unchecked(vec![])),
+                (transactions_by_block_range, |block: &SealedBlock| block
+                    .body
+                    .transactions
+                    .clone()),
             ]
         );
 
