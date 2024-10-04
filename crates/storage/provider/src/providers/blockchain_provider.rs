@@ -3757,7 +3757,6 @@ mod tests {
         Ok(())
     }
 
-
     macro_rules! test_by_block_range {
         ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
             let db_block_count = $database_blocks.len() as u64;
