@@ -35,7 +35,7 @@ fn main() {
                     let handle = builder
                         .with_types_and_provider::<OptimismNode, BlockchainProvider2<_>>()
                         .with_components(OptimismNode::components(rollup_args))
-                        .with_add_ons::<OptimismAddOns>()
+                        .with_add_ons(OptimismAddOns::new(sequencer_http_arg.clone()))
                         .extend_rpc_modules(move |ctx| {
                             // register sequencer tx forwarder
                             if let Some(sequencer_http) = sequencer_http_arg {
