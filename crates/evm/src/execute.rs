@@ -540,7 +540,7 @@ mod tests {
         let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
-            execute_transactions_result: expected_execute_transactions_result.clone(),
+            execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
             finish_result: expected_finish_result.clone(),
