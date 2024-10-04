@@ -531,7 +531,10 @@ mod tests {
 
     #[test]
     fn test_strategy() {
-        let expected_execute_transactions_result = (vec![Receipt::default()], 1);
+        let expected_gas_used = 10;
+        let expected_receipts = vec![Receipt::default()];
+
+        let expected_execute_transactions_result = (expected_receipts.clone(), expected_gas_used);
         let expected_apply_post_execution_changes_result =
             vec![Request::DepositRequest(DepositRequest::default())];
         let expected_finish_result = BundleState::default();
@@ -551,8 +554,8 @@ mod tests {
 
         let block_execution_output = result.unwrap();
 
-        assert_eq!(block_execution_output.gas_used, expected_execute_transactions_result.1);
-        assert_eq!(block_execution_output.receipts, expected_execute_transactions_result.0);
+        assert_eq!(block_execution_output.gas_used, expected_gas_used);
+        assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
         assert_eq!(block_execution_output.state, expected_finish_result);
     }
