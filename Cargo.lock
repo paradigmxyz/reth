@@ -6508,13 +6508,11 @@ dependencies = [
  "auto_impl",
  "derive_more 1.0.0",
  "once_cell",
- "op-alloy-rpc-types",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-trie-common",
- "serde",
  "serde_json",
 ]
 
