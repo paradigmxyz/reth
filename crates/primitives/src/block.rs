@@ -756,7 +756,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::BlockBody> for BlockBody<'a> {
+    impl SerializeAs<super::BlockBody> for BlockBody<'_> {
         fn serialize_as<S>(source: &super::BlockBody, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -807,7 +807,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedBlock> for SealedBlock<'a> {
+    impl SerializeAs<super::SealedBlock> for SealedBlock<'_> {
         fn serialize_as<S>(source: &super::SealedBlock, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -858,7 +858,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
+    impl SerializeAs<super::SealedBlockWithSenders> for SealedBlockWithSenders<'_> {
         fn serialize_as<S>(
             source: &super::SealedBlockWithSenders,
             serializer: S,
