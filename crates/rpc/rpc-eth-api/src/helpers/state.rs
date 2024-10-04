@@ -280,23 +280,22 @@ pub trait LoadState: EthApiTypes {
 
             if block_id == Some(BlockId::pending()) {
                 // for pending tag we need to find the highest nonce in the pool
-                let address_txs = this.pool().get_transactions_by_sender(address);
-                if let Some(highest_pool_nonce) =
-                    address_txs.iter().map(|item| item.transaction.nonce()).max()
-                {
-                    // and the corresponding txcount is nonce + 1
-                    let next_nonce =
-                        nonce.max(highest_pool_nonce).checked_add(1).ok_or_else(|| {
-                            Self::Error::from(EthApiError::InvalidTransaction(
-                                RpcInvalidTransactionError::NonceMaxValue,
-                            ))
-                        })?;
+                let highest_tx = this.pool().get_highest_transaction_by_sender(address);
+                if let Some(highest_pool_tx) = highest_tx {
+                    {
+                        // and the corresponding txcount is nonce + 1
+                        let next_nonce =
+                            nonce.max(highest_pool_tx.nonce()).checked_add(1).ok_or_else(|| {
+                                Self::Error::from(EthApiError::InvalidTransaction(
+                                    RpcInvalidTransactionError::NonceMaxValue,
+                                ))
+                            })?;
 
-                    let tx_count = nonce.max(next_nonce);
-                    return Ok(U256::from(tx_count))
+                        let tx_count = nonce.max(next_nonce);
+                        return Ok(U256::from(tx_count));
+                    }
                 }
             }
-
             Ok(U256::from(nonce))
         })
     }
