@@ -4115,51 +4115,54 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_transactions_by_tx_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
+    macro_rules! test_by_tx_range {
+        ($provider:expr, $method:ident, $database_blocks:expr, $in_memory_blocks:expr, $data_extractor:expr) => {{
+            let db_tx_count =
+                $database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+            let in_mem_tx_count =
+                $in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
 
-        // Define a valid transaction range within the database
-        let start_tx_num = 0;
-        let end_tx_num = 1;
+            let db_range = 0..=(db_tx_count - 1);
+            let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
 
-        // Retrieve the transactions for this transaction number range
-        let result = provider.transactions_by_tx_range(start_tx_num..=end_tx_num)?;
+            // Retrieve the expected database data
+            let database_data =
+                $database_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
+            assert_eq!($provider.$method(db_range.clone())?, database_data);
 
-        // Ensure the transactions match the expected transactions in the database
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0], database_blocks[0].body.transactions[0].clone().into());
-        assert_eq!(result[1], database_blocks[0].body.transactions[1].clone().into());
+            // Retrieve the expected in-memory data
+            let in_memory_data =
+                $in_memory_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
+            assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
 
-        // Define an empty range that should return no transactions
-        let start_tx_num = u64::MAX;
-        let end_tx_num = u64::MAX;
+            // Test partial in-memory range
+            assert_eq!(
+                &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                &in_memory_data[1..in_memory_data.len() - 1]
+            );
 
-        // Retrieve the transactions for this range
-        let result = provider.transactions_by_tx_range(start_tx_num..end_tx_num)?;
+            // Test range that spans database and in-memory
+            assert_eq!(
+                $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                database_data[database_data.len() - 2..]
+                    .iter()
+                    .chain(&in_memory_data[..in_memory_data.len() - 1])
+                    .cloned()
+                    .collect::<Vec<_>>()
+            );
 
-        // Ensure no transactions are returned
-        assert!(
-            result.is_empty(),
-            "No transactions should be found for an empty transaction range"
-        );
-
-        Ok(())
+            // Test empty range
+            let start_tx_num = u64::MAX;
+            let end_tx_num = u64::MAX;
+            let result = $provider.$method(start_tx_num..end_tx_num)?;
+            assert!(result.is_empty(), "No data should be found for an empty transaction range");
+        }};
     }
 
     #[test]
-    fn test_senders_by_tx_range() -> eyre::Result<()> {
+    fn test_methods_by_tx_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
@@ -4169,51 +4172,33 @@ mod tests {
             },
         )?;
 
-        let db_tx_count =
-            database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
-        let in_mem_tx_count =
-            in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
-
-        let db_range = 0..=(db_tx_count - 1);
-        let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
-
-        // Retrieve the senders for the whole database range
-        let database_senders =
-            database_blocks.iter().flat_map(|b| b.senders().unwrap()).collect::<Vec<_>>();
-        assert_eq!(provider.senders_by_tx_range(db_range)?, database_senders);
-
-        // Retrieve the senders for the whole in-memory range
-        let in_memory_senders =
-            in_memory_blocks.iter().flat_map(|b| b.senders().unwrap()).collect::<Vec<_>>();
-        assert_eq!(provider.senders_by_tx_range(in_mem_range.clone())?, in_memory_senders);
-
-        // Retrieve the senders for a partial in-memory range
-        assert_eq!(
-            &provider.senders_by_tx_range(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
-            &in_memory_senders[1..in_memory_senders.len() - 1]
+        test_by_tx_range!(
+            provider,
+            senders_by_tx_range,
+            database_blocks,
+            in_memory_blocks,
+            |block: &SealedBlock| block.senders().unwrap()
         );
 
-        // Retrieve the senders for a range that spans database and in-memory
-        assert_eq!(
-            provider.senders_by_tx_range(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
-            database_senders[database_senders.len() - 2..]
+        test_by_tx_range!(
+            provider,
+            transactions_by_tx_range,
+            database_blocks,
+            in_memory_blocks,
+            |block: &SealedBlock| block
+                .body
+                .transactions
                 .iter()
-                .chain(&in_memory_senders[..in_memory_senders.len() - 1])
-                .copied()
+                .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
                 .collect::<Vec<_>>()
         );
 
-        // Define an empty range that should return no sender addresses
-        let start_tx_num = u64::MAX;
-        let end_tx_num = u64::MAX;
-
-        // Retrieve the senders for this range
-        let result = provider.senders_by_tx_range(start_tx_num..end_tx_num)?;
-
-        // Ensure no sender addresses are returned
-        assert!(
-            result.is_empty(),
-            "No sender addresses should be found for an empty transaction range"
+        test_by_tx_range!(
+            provider,
+            receipts_by_tx_range,
+            database_blocks,
+            in_memory_blocks,
+            |block: &SealedBlock| receipts[block.number as usize].clone()
         );
 
         Ok(())
