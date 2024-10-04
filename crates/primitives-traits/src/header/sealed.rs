@@ -1,5 +1,4 @@
 use super::Header;
-use alloc::vec::Vec;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable};
 #[cfg(any(test, feature = "test-utils"))]
