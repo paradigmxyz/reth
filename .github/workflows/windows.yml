@@ -11,7 +11,7 @@ on:
 
 jobs:
   check-reth:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     timeout-minutes: 60
 
     steps:
@@ -27,7 +27,7 @@ jobs:
         run: cargo check --target x86_64-pc-windows-gnu
 
   check-op-reth:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     timeout-minutes: 60
 
     steps:
