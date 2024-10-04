@@ -190,9 +190,6 @@ pub trait BlockExecutionStrategy<DB> {
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
-    /// Configures the environment before start applying any changes.
-    fn configure_environment(&mut self) -> Result<(), Self::Error>;
-
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
 
@@ -252,7 +249,6 @@ where
 
         let mut strategy = self.strategy_factory.create(block, total_difficulty)?;
 
-        strategy.configure_environment()?;
         strategy.apply_pre_execution_changes()?;
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
         let requests = strategy.apply_post_execution_changes()?;
@@ -273,7 +269,6 @@ where
 
         let mut strategy = self.strategy_factory.create(block, total_difficulty)?;
 
-        strategy.configure_environment()?;
         strategy.apply_pre_execution_changes()?;
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
         let requests = strategy.apply_post_execution_changes()?;
@@ -299,7 +294,6 @@ where
 
         strategy.set_state_hook(Some(state_hook));
 
-        strategy.configure_environment()?;
         strategy.apply_pre_execution_changes()?;
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
         let requests = strategy.apply_post_execution_changes()?;
