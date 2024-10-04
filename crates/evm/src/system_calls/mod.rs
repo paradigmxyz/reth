@@ -85,7 +85,7 @@ where
         .build()
 }
 
-impl<'a, EvmConfig, Chainspec, Hook> SystemCaller<'a, EvmConfig, Chainspec, Hook>
+impl<EvmConfig, Chainspec, Hook> SystemCaller<'_, EvmConfig, Chainspec, Hook>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Chainspec: EthereumHardforks,

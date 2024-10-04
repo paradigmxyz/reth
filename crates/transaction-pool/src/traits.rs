@@ -644,7 +644,7 @@ pub struct CanonicalStateUpdate<'a> {
     pub mined_transactions: Vec<B256>,
 }
 
-impl<'a> CanonicalStateUpdate<'a> {
+impl CanonicalStateUpdate<'_> {
     /// Returns the number of the tip block.
     pub fn number(&self) -> u64 {
         self.new_tip.number
