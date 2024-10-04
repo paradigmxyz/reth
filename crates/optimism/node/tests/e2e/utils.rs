@@ -72,5 +72,6 @@ pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuil
         transactions: vec![],
         no_tx_pool: false,
         gas_limit: Some(30_000_000),
+        eip_1559_params: B64::default(),
     }
 }

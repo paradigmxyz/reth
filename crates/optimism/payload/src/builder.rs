@@ -485,6 +485,16 @@ where
         blob_gas_used = Some(0);
     }
 
+    let nonce;
+    if chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Holocene,
+        attributes.payload_attributes.timestamp,
+    ) {
+        nonce = attributes.eip_1559_params;
+    } else {
+        nonce = BEACON_NONCE.into();
+    }
+
     let header = Header {
         parent_hash: parent_block.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -496,7 +506,7 @@ where
         logs_bloom,
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
-        nonce: BEACON_NONCE.into(),
+        nonce: nonce,
         base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
         gas_limit: block_gas_limit,
