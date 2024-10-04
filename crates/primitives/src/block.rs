@@ -1130,4 +1130,13 @@ mod tests {
             Some(SealedBlockWithSenders { block: sealed, senders: vec![sender] })
         );
     }
+
+    #[test]
+    fn test_default_seal() {
+        let block = SealedBlock::default();
+        let sealed = block.hash();
+        let block = block.unseal();
+        let block = block.seal_slow();
+        assert_eq!(sealed, block.hash());
+    }
 }
