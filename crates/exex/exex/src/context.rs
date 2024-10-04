@@ -6,7 +6,7 @@ use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotifications};
+use crate::{ExExEvent, ExExNotificationStream};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -30,7 +30,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     ///
     /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
     /// considered delivered by the node.
-    pub notifications: ExExNotifications<Node::Provider, Node::Executor>,
+    pub notifications: ExExNotificationStream<Node::Provider, Node::Executor>,
 
     /// node components
     pub components: Node,

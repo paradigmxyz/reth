@@ -14,6 +14,134 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
+#[derive(Debug)]
+#[allow(clippy::manual_non_exhaustive)] // false positive
+pub enum ExExNotificationStream<P, E> {
+    #[doc(hidden)]
+    /// The stream is in an invalid state. This is used internally by
+    /// [`Self::with_head`].
+    Invalid,
+    /// The stream will emit notifications for new heads as they come in, starting from the reth
+    /// node's head.
+    Raw(ExExNotifications<P, E>),
+    /// The stream will emit notifications for new heads as they come in,
+    /// starting from the given head, and running backfill jobs if needed.
+    WithHead(ExExNotificationsWithHead<P, E>),
+}
+
+impl<P, E> From<ExExNotifications<P, E>> for ExExNotificationStream<P, E> {
+    fn from(notifications: ExExNotifications<P, E>) -> Self {
+        Self::Raw(notifications)
+    }
+}
+
+impl<P, E> From<ExExNotificationsWithHead<P, E>> for ExExNotificationStream<P, E> {
+    fn from(notifications: ExExNotificationsWithHead<P, E>) -> Self {
+        Self::WithHead(notifications)
+    }
+}
+
+impl<P, E> ExExNotificationStream<P, E> {
+    /// True if the stream is raw.
+    pub const fn is_raw(&self) -> bool {
+        matches!(self, Self::Raw(_))
+    }
+
+    /// True if the stream has a head.
+    pub const fn is_with_head(&self) -> bool {
+        matches!(self, Self::WithHead(_))
+    }
+
+    /// Get a reference to the exex head, if the stream has a head
+    pub const fn exex_head(&self) -> Option<&ExExHead> {
+        match self {
+            Self::WithHead(notifications) => Some(&notifications.exex_head),
+            Self::Raw => None,
+            Self::Invalid => panic!("invalid stream state"),
+        }
+    }
+
+    /// Get a reference to the node head.
+    pub const fn node_head(&self) -> Head {
+        match self {
+            Self::Raw(notifications) => notifications.node_head,
+            Self::WithHead(notifications) => notifications.node_head,
+            _ => panic!("invalid stream state"),
+        }
+    }
+
+    /// Get a reference to the inner provider.
+    pub const fn provider(&self) -> &P {
+        match self {
+            Self::Raw(inner) => &inner.provider,
+            Self::WithHead(inner) => &inner.provider,
+            _ => panic!("invalid stream state"),
+        }
+    }
+
+    /// Get a reference to the inner executor.
+    pub const fn executor(&self) -> &E {
+        match self {
+            Self::Raw(inner) => &inner.executor,
+            Self::WithHead(inner) => &inner.executor,
+            _ => panic!("invalid stream state"),
+        }
+    }
+
+    /// Get a reference to the inner [`WalHandle`].
+    pub const fn wal_handle(&self) -> &WalHandle {
+        match self {
+            Self::Raw(inner) => &inner.wal_handle,
+            Self::WithHead(inner) => &inner.wal_handle,
+            _ => panic!("invalid stream state"),
+        }
+    }
+}
+
+impl<P, E> ExExNotificationStream<P, E>
+where
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Unpin + 'static,
+{
+    /// Subscribe to notifications with the given head. This head is the ExEx's
+    /// latest view of the host chain.
+    ///
+    /// Notifications will be sent starting from the head, not inclusive. For
+    /// example, if `head.number == 10`, then the first notification will be
+    /// with `block.number == 11`. A `head.number` of 10 indicates that the ExEx
+    /// has processed up to block 10, and is ready to process block 11.
+    pub fn with_head(&mut self, head: ExExHead) {
+        if !self.is_raw() {
+            return;
+        }
+
+        let Self::Raw(inner) = std::mem::replace(self, Self::Invalid) else {
+            unreachable!("checked by matches above")
+        };
+        *self = Self::WithHead(inner.with_head(head));
+    }
+}
+
+impl<P, E> Stream for ExExNotificationStream<P, E>
+where
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Unpin + 'static,
+{
+    type Item = eyre::Result<ExExNotification>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.get_mut() {
+            Self::Invalid => panic!("polled in invalid state"),
+            Self::Raw(inner) => {
+                let item = ready!(inner.poll_next_unpin(cx));
+                Poll::Ready(item.map(Ok))
+            }
+            Self::WithHead(inner) => inner.poll_next_unpin(cx),
+        }
+    }
+}
+
+/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 pub struct ExExNotifications<P, E> {
     node_head: Head,
     provider: P,

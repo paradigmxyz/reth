@@ -77,7 +77,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 reth_config: config_container.toml_config.clone(),
                 components: components.clone(),
                 events,
-                notifications,
+                notifications: notifications.into(),
             };
 
             let executor = components.task_executor().clone();
