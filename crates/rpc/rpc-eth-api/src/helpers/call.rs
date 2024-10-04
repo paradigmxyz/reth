@@ -301,13 +301,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                     let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
                     let env = this
-                        .prepare_call_env(
-                            cfg.clone(),
-                            block_env.clone(),
-                            tx,
-                            &mut db,
-                            overrides,
-                        )
+                        .prepare_call_env(cfg.clone(), block_env.clone(), tx, &mut db, overrides)
                         .map(Into::into)?;
                     let (res, _) = this.transact(&mut db, env)?;
 
@@ -557,13 +551,7 @@ pub trait Call: LoadState + SpawnBlocking {
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
-                let env = this.prepare_call_env(
-                    cfg,
-                    block_env,
-                    request,
-                    &mut db,
-                    overrides,
-                )?;
+                let env = this.prepare_call_env(cfg, block_env, request, &mut db, overrides)?;
 
                 f(StateCacheDbRefMutWrapper(&mut db), env)
             })
@@ -1103,17 +1091,12 @@ pub trait Call: LoadState + SpawnBlocking {
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
     {
-        // TODO(mattsse): cleanup, by not disabling gaslimit and instead use self.call_gas_limit
         if request.gas > Some(self.call_gas_limit()) {
             // configured gas exceeds limit
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
             )
         }
-
-        // we want to disable this in eth_call, since this is common practice used by other node
-        // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        // cfg.disable_block_gas_limit = true;
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
