@@ -323,7 +323,8 @@ pub async fn test_exex_context_with_chain_spec(
         components.components.executor.clone(),
         notifications_rx,
         wal.handle(),
-    );
+    )
+    .into();
 
     let ctx = ExExContext {
         head,
