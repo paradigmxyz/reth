@@ -30,18 +30,6 @@ pub trait SignedTransaction: Sized {
     /// only `true`.
     fn payload_len_inner(&self) -> usize;
 
-    /// Decodes an enveloped EIP-2718 typed transaction.
-    ///
-    /// This should _only_ be used internally in general transaction decoding methods,
-    /// which have already ensured that the input is a typed transaction with the following format:
-    /// `tx-type || rlp(tx-data)`
-    ///
-    /// Note that this format does not start with any RLP header, and instead starts with a single
-    /// byte indicating the transaction type.
-    ///
-    /// CAUTION: this expects that `data` is `tx-type || rlp(tx-data)`
-    fn decode_enveloped_typed_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self>;
-
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
     fn length_without_header(&self) -> usize;
 
