@@ -1496,8 +1496,8 @@ mod tests {
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
-        TransactionMeta, TransactionSignedNoHash, Withdrawals,
+        Receipt, SealedBlock, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
+        Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -3804,7 +3804,7 @@ mod tests {
     #[test]
     fn test_methods_by_block_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
