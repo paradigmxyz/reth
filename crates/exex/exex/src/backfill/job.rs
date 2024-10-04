@@ -64,6 +64,12 @@ where
     }
 
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
+        debug!(
+            target: "exex::backfill",
+            range = ?self.range,
+            "Executing block range"
+        );
+
         let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
             self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
         ));

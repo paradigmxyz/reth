@@ -15,6 +15,7 @@ use reth_primitives::{BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
+use reth_tracing::tracing::debug;
 use tokio::task::JoinHandle;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
@@ -118,6 +119,7 @@ where
             // If we have range bounds, then we can spawn a new task for that range
             if let Some((first, last)) = range_bounds {
                 let range = first..=last;
+                debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new backfill task");
                 let mut job = BackfillJob {
                     executor: this.executor.clone(),
                     provider: this.provider.clone(),
