@@ -1,5 +1,6 @@
 //! Traits for execution.
 
+use reth_chainspec::ChainSpec;
 // Re-export execution types
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
@@ -9,11 +10,12 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use alloc::vec::Vec;
 use alloy_primitives::BlockNumber;
-use core::{fmt::Display, marker::PhantomData};
+use core::fmt::Display;
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, State};
 use revm_primitives::{db::Database, U256};
+use std::sync::Arc;
 
 use crate::system_calls::OnStateHook;
 
@@ -165,16 +167,16 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 }
 
 /// A factory for creating block execution strategies.
-pub trait BlockExecutionStrategyFactory<DB>
-where
-    DB: Database,
-{
+pub trait BlockExecutionStrategyFactory {
+    /// The database type used by the strategy factory.
+    type DB: Database;
+
     /// The specific [`BlockExecutionStrategy`] type this factory produces.
-    type Strategy: BlockExecutionStrategy<DB>;
+    type Strategy: BlockExecutionStrategy<Self::DB>;
 
     /// The error type returned by this factory and its produced strategies.
     type Error: From<ProviderError>
-        + From<<Self::Strategy as BlockExecutionStrategy<DB>>::Error>
+        + From<<Self::Strategy as BlockExecutionStrategy<Self::DB>>::Error>
         + core::error::Error;
 
     /// Creates a new block execution strategy instance.
@@ -212,37 +214,69 @@ pub trait BlockExecutionStrategy<DB> {
     fn finish(self) -> BundleState;
 }
 
-/// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
-/// create and run block execution strategies.
-#[allow(missing_debug_implementations)]
-pub struct GenericBlockExecutor<F, DB>
-where
-    F: BlockExecutionStrategyFactory<DB>,
-    DB: Database,
-{
-    strategy_factory: F,
-    _phanttom: PhantomData<DB>,
+struct GenericExecutorProvider<S, EvmConfig> {
+    strategy_factory: S,
+    chain_spec: Arc<ChainSpec>,
+    evm_config: EvmConfig,
 }
 
-impl<F, DB> GenericBlockExecutor<F, DB>
+impl<S, EvmConfig> GenericExecutorProvider<S, EvmConfig>
 where
-    F: BlockExecutionStrategyFactory<DB>,
-    DB: Database,
+    S: BlockExecutionStrategyFactory + Clone,
+    EvmConfig: Clone,
 {
-    /// Creates a new `GenericBlockExecutor` with the given strategy factory.
-    pub const fn new(strategy_factory: F) -> Self {
-        Self { strategy_factory, _phanttom: PhantomData }
+    fn executor<DB>(&self, db: DB) -> GenericBlockExecutor<S, EvmConfig, DB>
+    where
+        DB: Database,
+    {
+        GenericBlockExecutor::new(
+            self.strategy_factory.clone(),
+            self.chain_spec.clone(),
+            self.evm_config.clone(),
+            State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
+        )
     }
 }
 
-impl<F, DB> Executor<DB> for GenericBlockExecutor<F, DB>
+/// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
+/// create and run block execution strategies.
+#[allow(missing_debug_implementations)]
+pub struct GenericBlockExecutor<S, EvmConfig, DB>
 where
-    F: BlockExecutionStrategyFactory<DB>,
+    S: BlockExecutionStrategyFactory,
+    DB: Database,
+{
+    strategy_factory: S,
+    chain_spec: Arc<ChainSpec>,
+    evm_config: EvmConfig,
+    state: State<DB>,
+}
+
+impl<S, EvmConfig, DB> GenericBlockExecutor<S, EvmConfig, DB>
+where
+    S: BlockExecutionStrategyFactory,
+    DB: Database,
+{
+    /// Creates a new `GenericBlockExecutor` with the given strategy factory,
+    /// chain spec and evm config.
+    pub const fn new(
+        strategy_factory: S,
+        chain_spec: Arc<ChainSpec>,
+        evm_config: EvmConfig,
+        state: State<DB>,
+    ) -> Self {
+        Self { strategy_factory, chain_spec, evm_config, state }
+    }
+}
+
+impl<S, EvmConfig, DB> Executor<DB> for GenericBlockExecutor<S, EvmConfig, DB>
+where
+    S: BlockExecutionStrategyFactory<DB = DB>,
     DB: Database,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
-    type Error = F::Error;
+    type Error = S::Error;
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
@@ -263,6 +297,7 @@ where
         mut witness: W,
     ) -> Result<Self::Output, Self::Error>
     where
+        DB: Database,
         W: FnMut(&State<DB>),
     {
         let BlockExecutionInput { block, total_difficulty } = input;
