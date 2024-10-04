@@ -4116,7 +4116,7 @@ mod tests {
     }
 
     macro_rules! test_by_tx_range {
-        ($provider:expr, $method:ident, $database_blocks:expr, $in_memory_blocks:expr, $data_extractor:expr) => {{
+        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
             let db_tx_count =
                 $database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
             let in_mem_tx_count =
@@ -4125,50 +4125,52 @@ mod tests {
             let db_range = 0..=(db_tx_count - 1);
             let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
 
-            // Retrieve the expected database data
-            let database_data =
-                $database_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
-            assert_eq!($provider.$method(db_range.clone())?, database_data);
+            $(
+                // Retrieve the expected database data
+                let database_data =
+                    $database_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!($provider.$method(db_range.clone())?, database_data);
 
-            // Retrieve the expected in-memory data
-            let in_memory_data =
-                $in_memory_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
-            assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
+                // Retrieve the expected in-memory data
+                let in_memory_data =
+                    $in_memory_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
 
-            // Test partial in-memory range
-            assert_eq!(
-                &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
-                &in_memory_data[1..in_memory_data.len() - 1]
-            );
+                // Test partial in-memory range
+                assert_eq!(
+                    &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                    &in_memory_data[1..in_memory_data.len() - 1]
+                );
 
-            // Test range in in-memory to unbounded end
-            assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
+                // Test range in in-memory to unbounded end
+                assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
 
-            // Test range that spans database and in-memory
-            assert_eq!(
-                $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
-                database_data[database_data.len() - 2..]
-                    .iter()
-                    .chain(&in_memory_data[..in_memory_data.len() - 1])
-                    .cloned()
-                    .collect::<Vec<_>>()
-            );
+                // Test range that spans database and in-memory
+                assert_eq!(
+                    $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                    database_data[database_data.len() - 2..]
+                        .iter()
+                        .chain(&in_memory_data[..in_memory_data.len() - 1])
+                        .cloned()
+                        .collect::<Vec<_>>()
+                );
 
-            // Test range that spans database and in-memory with unbounded end
-            assert_eq!(
-                $provider.$method(in_mem_range.start() - 2..)?,
-                database_data[database_data.len() - 2..]
-                    .iter()
-                    .chain(&in_memory_data[..])
-                    .cloned()
-                    .collect::<Vec<_>>()
-            );
+                // Test range that spans database and in-memory with unbounded end
+                assert_eq!(
+                    $provider.$method(in_mem_range.start() - 2..)?,
+                    database_data[database_data.len() - 2..]
+                        .iter()
+                        .chain(&in_memory_data[..])
+                        .cloned()
+                        .collect::<Vec<_>>()
+                );
 
-            // Test empty range
-            let start_tx_num = u64::MAX;
-            let end_tx_num = u64::MAX;
-            let result = $provider.$method(start_tx_num..end_tx_num)?;
-            assert!(result.is_empty(), "No data should be found for an empty transaction range");
+                // Test empty range
+                let start_tx_num = u64::MAX;
+                let end_tx_num = u64::MAX;
+                let result = $provider.$method(start_tx_num..end_tx_num)?;
+                assert!(result.is_empty(), "No data should be found for an empty transaction range");
+            )*
         }};
     }
 
@@ -4187,31 +4189,19 @@ mod tests {
 
         test_by_tx_range!(
             provider,
-            senders_by_tx_range,
             database_blocks,
             in_memory_blocks,
-            |block: &SealedBlock| block.senders().unwrap()
-        );
-
-        test_by_tx_range!(
-            provider,
-            transactions_by_tx_range,
-            database_blocks,
-            in_memory_blocks,
-            |block: &SealedBlock| block
-                .body
-                .transactions
-                .iter()
-                .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
-                .collect::<Vec<_>>()
-        );
-
-        test_by_tx_range!(
-            provider,
-            receipts_by_tx_range,
-            database_blocks,
-            in_memory_blocks,
-            |block: &SealedBlock| receipts[block.number as usize].clone()
+            [
+                (senders_by_tx_range, |block: &SealedBlock| block.senders().unwrap()),
+                (transactions_by_tx_range, |block: &SealedBlock| block
+                    .body
+                    .transactions
+                    .iter()
+                    .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
+                    .collect::<Vec<_>>()),
+                (receipts_by_tx_range, |block: &SealedBlock| receipts[block.number as usize]
+                    .clone())
+            ]
         );
 
         Ok(())
