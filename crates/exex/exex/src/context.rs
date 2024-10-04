@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
@@ -32,7 +33,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// considered delivered by the node.
     pub notifications: ExExNotifications<Node::Provider, Node::Executor>,
 
-    /// node components
+    /// Node components
     pub components: Node,
 }
 
@@ -91,5 +92,13 @@ impl<Node: FullNodeComponents> ExExContext<Node> {
     /// Returns the task executor.
     pub fn task_executor(&self) -> &TaskExecutor {
         self.components.task_executor()
+    }
+
+    pub fn with_notifications_without_head(self) -> Self {
+        Self { notifications: self.notifications.without_head(), ..self }
+    }
+
+    pub fn with_notifications_with_head(self, head: ExExHead) -> Self {
+        Self { notifications: self.notifications.with_head(head), ..self }
     }
 }
