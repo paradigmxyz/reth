@@ -1,7 +1,7 @@
 //! [`ExecutionDataProvider`] implementations used by the tree.
 
+use alloy_eips::ForkBlock;
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_primitives::ForkBlock;
 use reth_provider::{BlockExecutionForkProvider, ExecutionDataProvider, ExecutionOutcome};
 use std::collections::BTreeMap;
 

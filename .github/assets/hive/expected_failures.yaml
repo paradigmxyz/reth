@@ -20,7 +20,24 @@ rpc-compat:
   - eth_getBlockByNumber/get-latest (reth)
   - eth_getBlockByNumber/get-safe (reth)
 
-# https://github.com/paradigmxyz/reth/issues/8732
+  - eth_createAccessList/create-al-contract-eip1559 (reth)
+  - eth_createAccessList/create-al-contract (reth)
+  - eth_getProof/get-account-proof-blockhash (reth)
+  - eth_getProof/get-account-proof-latest (reth)
+  - eth_getProof/get-account-proof-with-storage (reth)
+  - eth_getTransactionByBlockHashAndIndex/get-block-n (reth)
+  - eth_getTransactionByBlockNumberAndIndex/get-block-n (reth)
+  - eth_getTransactionByHash/get-access-list (reth)
+  - eth_getTransactionByHash/get-blob-tx (reth)
+  - eth_getTransactionByHash/get-dynamic-fee (reth)
+  - eth_getTransactionByHash/get-legacy-create (reth)
+  - eth_getTransactionByHash/get-legacy-input (reth)
+  - eth_getTransactionByHash/get-legacy-tx (reth)
+  - eth_getTransactionReceipt/get-legacy-contract (reth)
+  - eth_getTransactionReceipt/get-legacy-input (reth)
+  - eth_getTransactionReceipt/get-legacy-receipt (reth)'
+
+  # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
   - Withdrawals Fork On Genesis (Paris) (reth)
   - Withdrawals Fork on Block 1 (Paris) (reth)

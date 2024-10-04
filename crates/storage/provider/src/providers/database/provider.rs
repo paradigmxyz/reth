@@ -630,7 +630,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                             // recover the sender from the transaction if not found
                             let sender = tx
                                 .recover_signer_unchecked()
-                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                .ok_or(ProviderError::SenderRecoveryError)?;
                             senders.push(sender);
                         }
                         Some(sender) => senders.push(*sender),
@@ -1356,7 +1356,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                 };
                 self.tx.put::<T>(
                     sharded_key_factory(partial_key, highest_block_number),
-                    BlockNumberList::new_pre_sorted(list),
+                    BlockNumberList::new_pre_sorted(list.iter().copied()),
                 )?;
             }
         }
@@ -1958,10 +1958,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
                                 index,
                                 block_hash,
                                 block_number,
-                                base_fee: header.base_fee_per_gas.map(|base_fee| base_fee as u64),
-                                excess_blob_gas: header
-                                    .excess_blob_gas
-                                    .map(|excess_blob| excess_blob as u64),
+                                base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                                 timestamp: header.timestamp,
                             };
 

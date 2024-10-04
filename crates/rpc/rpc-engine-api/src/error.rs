@@ -4,7 +4,6 @@ use jsonrpsee_types::error::{
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_primitives::{EngineObjectValidationError, PayloadBuilderError};
-use reth_rpc_types::ToRpcError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -85,22 +84,22 @@ pub enum EngineApiError {
     NewPayload(#[from] BeaconOnNewPayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
-    /// Any other error
+    /// Any other rpc error
     #[error("{0}")]
-    Other(Box<dyn ToRpcError>),
+    Other(jsonrpsee_types::ErrorObject<'static>),
 }
 
 impl EngineApiError {
     /// Crates a new [`EngineApiError::Other`] variant.
-    pub fn other<E: ToRpcError>(err: E) -> Self {
-        Self::Other(Box::new(err))
+    pub const fn other(err: jsonrpsee_types::ErrorObject<'static>) -> Self {
+        Self::Other(err)
     }
 }
 
@@ -187,7 +186,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
-            EngineApiError::Other(err) => err.to_rpc_error(),
+            EngineApiError::Other(err) => err,
         }
     }
 }

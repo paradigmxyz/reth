@@ -5,6 +5,7 @@ use crate::{
     state::{SidechainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
 };
+use alloy_eips::{BlockNumHash, ForkBlock};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -16,8 +17,8 @@ use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    BlockNumHash, EthereumHardfork, ForkBlock, GotExpected, Hardforks, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    EthereumHardfork, GotExpected, Hardforks, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
@@ -1567,7 +1568,7 @@ mod tests {
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
                     nonce,
-                    gas_limit: MIN_TRANSACTION_GAS as u128,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: Address::ZERO.into(),
                     max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                     ..Default::default()
@@ -1603,10 +1604,10 @@ mod tests {
             let sealed = Header {
                 number,
                 parent_hash: parent.unwrap_or_default(),
-                gas_used: (body.len() as u64 * MIN_TRANSACTION_GAS) as u128,
-                gas_limit: chain_spec.max_gas_limit.into(),
+                gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
+                gas_limit: chain_spec.max_gas_limit,
                 mix_hash: B256::random(),
-                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),
+                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                 transactions_root,
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(

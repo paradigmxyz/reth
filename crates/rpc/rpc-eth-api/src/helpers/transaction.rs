@@ -2,6 +2,7 @@
 //! network.
 
 use alloy_dyn_abi::TypedData;
+use alloy_eips::eip2718::Encodable2718;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types::{BlockNumberOrTag, TransactionInfo};
@@ -106,7 +107,7 @@ pub trait EthTransactions: LoadTransaction {
                 Ok(LoadTransaction::provider(this)
                     .transaction_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|tx| tx.envelope_encoded()))
+                    .map(|tx| tx.encoded_2718().into()))
             })
             .await
         }
@@ -305,7 +306,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
                 if let Some(tx) = block.transactions().nth(index) {
-                    return Ok(Some(tx.envelope_encoded()))
+                    return Ok(Some(tx.encoded_2718().into()))
                 }
             }
 
@@ -359,16 +360,16 @@ pub trait EthTransactions: LoadTransaction {
             if request.nonce.is_none() {
                 let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
                 // note: `.to()` can't panic because the nonce is constructed from a `u64`
-                request.nonce = Some(nonce.to::<u64>());
+                request.nonce = Some(nonce.to());
             }
 
             let chain_id = self.chain_id();
-            request.chain_id = Some(chain_id.to::<u64>());
+            request.chain_id = Some(chain_id.to());
 
             let estimated_gas =
                 self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
             let gas_limit = estimated_gas;
-            request.set_gas_limit(gas_limit.to::<u128>());
+            request.set_gas_limit(gas_limit.to());
 
             let signed_tx = self.sign_request(&from, request).await?;
 

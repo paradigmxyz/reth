@@ -194,8 +194,8 @@ impl std::fmt::Debug for InsertBlockErrorData {
     }
 }
 
-impl std::error::Error for InsertBlockErrorData {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for InsertBlockErrorData {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         Some(&self.kind)
     }
 }
@@ -240,8 +240,8 @@ impl std::fmt::Debug for InsertBlockErrorDataTwo {
     }
 }
 
-impl std::error::Error for InsertBlockErrorDataTwo {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for InsertBlockErrorDataTwo {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         Some(&self.kind)
     }
 }
@@ -335,7 +335,7 @@ pub enum InsertBlockErrorKindTwo {
     Provider(#[from] ProviderError),
     /// Other errors.
     #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
 }
 
 impl InsertBlockErrorKindTwo {
@@ -425,7 +425,7 @@ pub enum InsertBlockErrorKind {
     Provider(#[from] ProviderError),
     /// An internal error occurred, like interacting with the database.
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
     /// Canonical error.
     #[error(transparent)]
     Canonical(#[from] CanonicalError),

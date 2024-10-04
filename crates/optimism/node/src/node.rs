@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
-use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
@@ -18,6 +16,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
+use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::Header;
@@ -63,7 +62,7 @@ impl OptimismNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
         >,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
@@ -84,7 +83,7 @@ impl OptimismNode {
 impl<N> Node<N> for OptimismNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -103,11 +102,15 @@ where
         let Self { args } = self;
         Self::components(args.clone())
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        OptimismAddOns::new(self.args.sequencer_http.clone())
+    }
 }
 
 impl NodeTypes for OptimismNode {
     type Primitives = ();
-    type ChainSpec = ChainSpec;
+    type ChainSpec = OpChainSpec;
 }
 
 impl NodeTypesWithEngine for OptimismNode {
@@ -116,7 +119,21 @@ impl NodeTypesWithEngine for OptimismNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug, Clone)]
-pub struct OptimismAddOns;
+pub struct OptimismAddOns {
+    sequencer_http: Option<String>,
+}
+
+impl OptimismAddOns {
+    /// Create a new instance with the given `sequencer_http` URL.
+    pub const fn new(sequencer_http: Option<String>) -> Self {
+        Self { sequencer_http }
+    }
+
+    /// Returns the sequencer HTTP URL.
+    pub fn sequencer_http(&self) -> Option<&str> {
+        self.sequencer_http.as_deref()
+    }
+}
 
 impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
     type EthApi = OpEthApi<N>;
@@ -129,7 +146,7 @@ pub struct OptimismExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for OptimismExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type EVM = OptimismEvmConfig;
     type Executor = OpExecutorProvider<Self::EVM>;
@@ -138,10 +155,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
-        let evm_config =
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() }));
-        let executor = OpExecutorProvider::new(chain_spec, evm_config.clone());
+        let evm_config = OptimismEvmConfig::new(ctx.chain_spec());
+        let executor = OpExecutorProvider::new(ctx.chain_spec(), evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -157,7 +172,7 @@ pub struct OptimismPoolBuilder;
 
 impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -165,21 +180,19 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
-            .with_head_timestamp(ctx.head().timestamp)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(
-                ctx.provider().clone(),
-                ctx.task_executor().clone(),
-                blob_store.clone(),
-            )
-            .map(|validator| {
-                OpTransactionValidator::new(validator)
-                    // In --dev mode we can't require gas fees because we're unable to decode the L1
-                    // block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
-            });
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
+            ctx.chain_spec().inner.clone(),
+        ))
+        .with_head_timestamp(ctx.head().timestamp)
+        .kzg_settings(ctx.kzg_settings()?)
+        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+        .build_with_tasks(ctx.provider().clone(), ctx.task_executor().clone(), blob_store.clone())
+        .map(|validator| {
+            OpTransactionValidator::new(validator)
+                // In --dev mode we can't require gas fees because we're unable to decode
+                // the L1 block info
+                .require_l1_data_gas_fee(!ctx.config().dev.dev)
+        });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
             validator,
@@ -256,7 +269,7 @@ impl OptimismPayloadBuilder {
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>>
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
         >,
         Pool: TransactionPool + Unpin + 'static,
         Evm: ConfigureEvm<Header = Header>,
@@ -292,7 +305,7 @@ impl OptimismPayloadBuilder {
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
     >,
     Pool: TransactionPool + Unpin + 'static,
 {
@@ -301,11 +314,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        self.spawn(
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*ctx.chain_spec()).clone() })),
-            ctx,
-            pool,
-        )
+        self.spawn(OptimismEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 
@@ -320,7 +329,7 @@ pub struct OptimismNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn build_network(
@@ -377,7 +386,7 @@ pub struct OptimismConsensusBuilder;
 
 impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 
@@ -397,7 +406,7 @@ pub struct OptimismEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
     Node: FullNodeTypes<Types = Types>,
     OptimismEngineValidator: EngineValidator<Types::Engine>,
 {

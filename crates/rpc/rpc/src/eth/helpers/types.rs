@@ -58,7 +58,7 @@ where
                 max_fee_per_gas,
                 max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
                 signature: Some(signature),
-                gas: signed_tx.gas_limit() as u128,
+                gas: signed_tx.gas_limit(),
                 input: signed_tx.input().clone(),
                 chain_id,
                 access_list,

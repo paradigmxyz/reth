@@ -250,9 +250,9 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::BlockNumber;
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_primitives::{SealedBlock, B256};
+    use reth_primitives::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, DatabaseProviderFactory, StaticFileProviderFactory,
     };

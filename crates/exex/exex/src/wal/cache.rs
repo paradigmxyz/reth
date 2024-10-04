@@ -1,137 +1,144 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashSet},
+};
 
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{map::FbHashMap, BlockNumber, B256};
 use reth_exex_types::ExExNotification;
-use reth_primitives::BlockNumHash;
 
-/// The block cache of the WAL. Acts as a mapping of `File ID -> List of Blocks`.
-///
-/// For each notification written to the WAL, there will be an entry per block written to
-/// the cache with the same file ID. I.e. for each notification, there may be multiple blocks in the
-/// cache.
+/// The block cache of the WAL.
 ///
 /// This cache is needed to avoid walking the WAL directory every time we want to find a
-/// notification corresponding to a block.
-#[derive(Debug)]
-pub struct BlockCache(BTreeMap<u64, VecDeque<CachedBlock>>);
+/// notification corresponding to a block or a block corresponding to a hash.
+#[derive(Debug, Default)]
+pub struct BlockCache {
+    /// A min heap of `(Block Number, File ID)` tuples.
+    ///
+    /// Contains one highest block in notification. In a notification with both committed and
+    /// reverted chain, the highest block is chosen between both chains.
+    pub(super) notification_max_blocks: BinaryHeap<Reverse<(BlockNumber, u32)>>,
+    /// A mapping of committed blocks `Block Hash -> Block`.
+    ///
+    /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
+    /// block.
+    pub(super) committed_blocks: FbHashMap<32, (u32, CachedBlock)>,
+    /// Block height of the lowest committed block currently in the cache.
+    pub(super) lowest_committed_block_height: Option<BlockNumber>,
+    /// Block height of the highest committed block currently in the cache.
+    pub(super) highest_committed_block_height: Option<BlockNumber>,
+}
 
 impl BlockCache {
-    /// Creates a new instance of [`BlockCache`].
-    pub(super) const fn new() -> Self {
-        Self(BTreeMap::new())
-    }
-
     /// Returns `true` if the cache is empty.
     pub(super) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.notification_max_blocks.is_empty()
     }
 
-    /// Returns a front-to-back iterator.
-    pub(super) fn iter(&self) -> impl Iterator<Item = (u64, CachedBlock)> + '_ {
-        self.0.iter().flat_map(|(k, v)| v.iter().map(move |b| (*k, *b)))
-    }
+    /// Removes all files from the cache that has notifications with a tip block less than or equal
+    /// to the given block number.
+    ///
+    /// # Returns
+    ///
+    /// A set of file IDs that were removed.
+    pub(super) fn remove_before(&mut self, block_number: BlockNumber) -> HashSet<u32> {
+        let mut file_ids = HashSet::default();
 
-    /// Provides a reference to the first block from the cache, or `None` if the cache is
-    /// empty.
-    pub(super) fn front(&self) -> Option<(u64, CachedBlock)> {
-        self.0.first_key_value().and_then(|(k, v)| v.front().map(|b| (*k, *b)))
-    }
-
-    /// Provides a reference to the last block from the cache, or `None` if the cache is
-    /// empty.
-    pub(super) fn back(&self) -> Option<(u64, CachedBlock)> {
-        self.0.last_key_value().and_then(|(k, v)| v.back().map(|b| (*k, *b)))
-    }
-
-    /// Removes the notification with the given file ID.
-    pub(super) fn remove_notification(&mut self, key: u64) -> Option<VecDeque<CachedBlock>> {
-        self.0.remove(&key)
-    }
-
-    /// Pops the first block from the cache. If it resulted in the whole file entry being empty,
-    /// it will also remove the file entry.
-    pub(super) fn pop_front(&mut self) -> Option<(u64, CachedBlock)> {
-        let first_entry = self.0.first_entry()?;
-        let key = *first_entry.key();
-        let blocks = first_entry.into_mut();
-        let first_block = blocks.pop_front().unwrap();
-        if blocks.is_empty() {
-            self.0.remove(&key);
+        while let Some(block @ Reverse((max_block, file_id))) =
+            self.notification_max_blocks.peek().copied()
+        {
+            if max_block <= block_number {
+                let popped_block = self.notification_max_blocks.pop().unwrap();
+                debug_assert_eq!(popped_block, block);
+                file_ids.insert(file_id);
+            } else {
+                break
+            }
         }
 
-        Some((key, first_block))
+        let (mut lowest_committed_block_height, mut highest_committed_block_height) = (None, None);
+        self.committed_blocks.retain(|_, (file_id, block)| {
+            let retain = !file_ids.contains(file_id);
+
+            if retain {
+                lowest_committed_block_height = Some(
+                    lowest_committed_block_height
+                        .map_or(block.block.number, |lowest| block.block.number.min(lowest)),
+                );
+                highest_committed_block_height = Some(
+                    highest_committed_block_height
+                        .map_or(block.block.number, |highest| block.block.number.max(highest)),
+                );
+            }
+
+            retain
+        });
+        self.lowest_committed_block_height = lowest_committed_block_height;
+        self.highest_committed_block_height = highest_committed_block_height;
+
+        file_ids
     }
 
-    /// Pops the last block from the cache. If it resulted in the whole file entry being empty,
-    /// it will also remove the file entry.
-    pub(super) fn pop_back(&mut self) -> Option<(u64, CachedBlock)> {
-        let last_entry = self.0.last_entry()?;
-        let key = *last_entry.key();
-        let blocks = last_entry.into_mut();
-        let last_block = blocks.pop_back().unwrap();
-        if blocks.is_empty() {
-            self.0.remove(&key);
-        }
-
-        Some((key, last_block))
-    }
-
-    /// Appends a block to the back of the specified file entry.
-    pub(super) fn insert(&mut self, file_id: u64, block: CachedBlock) {
-        self.0.entry(file_id).or_default().push_back(block);
+    /// Returns the file ID for the notification containing the given committed block hash, if it
+    /// exists.
+    pub(super) fn get_file_id_by_committed_block_hash(&self, block_hash: &B256) -> Option<u32> {
+        self.committed_blocks.get(block_hash).map(|entry| entry.0)
     }
 
     /// Inserts the blocks from the notification into the cache with the given file ID.
-    ///
-    /// First, inserts the reverted blocks (if any), then the committed blocks (if any).
     pub(super) fn insert_notification_blocks_with_file_id(
         &mut self,
-        file_id: u64,
+        file_id: u32,
         notification: &ExExNotification,
     ) {
         let reverted_chain = notification.reverted_chain();
         let committed_chain = notification.committed_chain();
 
-        if let Some(reverted_chain) = reverted_chain {
-            for block in reverted_chain.blocks().values() {
-                self.insert(
-                    file_id,
-                    CachedBlock {
-                        action: CachedBlockAction::Revert,
-                        block: (block.number, block.hash()).into(),
-                    },
-                );
-            }
+        let max_block =
+            reverted_chain.iter().chain(&committed_chain).map(|chain| chain.tip().number).max();
+        if let Some(max_block) = max_block {
+            self.notification_max_blocks.push(Reverse((max_block, file_id)));
         }
 
-        if let Some(committed_chain) = committed_chain {
+        if let Some(committed_chain) = &committed_chain {
             for block in committed_chain.blocks().values() {
-                self.insert(
-                    file_id,
-                    CachedBlock {
-                        action: CachedBlockAction::Commit,
-                        block: (block.number, block.hash()).into(),
-                    },
-                );
+                let cached_block = CachedBlock {
+                    block: (block.number, block.hash()).into(),
+                    parent_hash: block.parent_hash,
+                };
+                self.committed_blocks.insert(block.hash(), (file_id, cached_block));
             }
+
+            self.highest_committed_block_height = Some(committed_chain.tip().number);
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn blocks_sorted(&self) -> Vec<(BlockNumber, u32)> {
+        self.notification_max_blocks
+            .clone()
+            .into_sorted_vec()
+            .into_iter()
+            .map(|entry| entry.0)
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(super) fn committed_blocks_sorted(&self) -> Vec<(B256, u32, CachedBlock)> {
+        use itertools::Itertools;
+
+        self.committed_blocks
+            .iter()
+            .map(|(hash, (file_id, block))| (*hash, *file_id, *block))
+            .sorted_by_key(|(_, _, block)| (block.block.number, block.block.hash))
+            .collect()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CachedBlock {
-    pub(super) action: CachedBlockAction,
     /// The block number and hash of the block.
     pub(super) block: BlockNumHash,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CachedBlockAction {
-    Commit,
-    Revert,
-}
-
-impl CachedBlockAction {
-    pub(super) const fn is_commit(&self) -> bool {
-        matches!(self, Self::Commit)
-    }
+    /// The hash of the parent block.
+    pub(super) parent_hash: B256,
 }

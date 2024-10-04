@@ -49,15 +49,13 @@ op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]
-optimism = [
-    "serde",
-    "dep:op-alloy-rpc-types",
-    "reth-optimism-forks",
+optimism = ["serde", "dep:op-alloy-rpc-types", "reth-optimism-forks"]
+std = [
+    "alloy-chains/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-trie/std",
 ]
-std = []
-arbitrary = [
-    "alloy-chains/arbitrary"
-]
+arbitrary = ["alloy-chains/arbitrary"]
 test-utils = []
-
-

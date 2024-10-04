@@ -5,11 +5,10 @@ use crate::{
     DatabaseError,
 };
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, Log, B256, U256};
+use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::{
-    Account, Bytecode, Header, Receipt, Requests, SealedHeader, StorageEntry,
-    TransactionSignedNoHash, TxType,
+    Account, Bytecode, Header, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxType,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -42,10 +41,10 @@ macro_rules! impl_uints {
             }
 
             impl Decode for $name {
-                fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, $crate::DatabaseError> {
+                fn decode(value: &[u8]) -> Result<Self, $crate::DatabaseError> {
                     Ok(
                         $name::from_be_bytes(
-                            value.as_ref().try_into().map_err(|_| $crate::DatabaseError::Decode)?
+                            value.try_into().map_err(|_| $crate::DatabaseError::Decode)?
                         )
                     )
                 }
@@ -65,8 +64,12 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(value.as_ref().to_vec())
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(value.to_vec())
+    }
+
+    fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Ok(value)
     }
 }
 
@@ -79,8 +82,8 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(Self::from_slice(value.as_ref()))
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_slice(value))
     }
 }
 
@@ -93,8 +96,8 @@ impl Encode for B256 {
 }
 
 impl Decode for B256 {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(Self::new(value.as_ref().try_into().map_err(|_| DatabaseError::Decode)?))
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
     }
 }
 
@@ -107,8 +110,12 @@ impl Encode for String {
 }
 
 impl Decode for String {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Self::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::Decode)
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Self::decode_owned(value.to_vec())
+    }
+
+    fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Self::from_utf8(value).map_err(|_| DatabaseError::Decode)
     }
 }
 
@@ -117,16 +124,15 @@ impl Encode for StoredNibbles {
 
     // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(self.0.len());
-        self.to_compact(&mut buf);
-        buf
+        // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
+        // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
+        self.0.into()
     }
 }
 
 impl Decode for StoredNibbles {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let buf = value.as_ref();
-        Ok(Self::from_compact(buf, buf.len()).0)
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
     }
 }
 
@@ -142,9 +148,8 @@ impl Encode for StoredNibblesSubKey {
 }
 
 impl Decode for StoredNibblesSubKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let buf = value.as_ref();
-        Ok(Self::from_compact(buf, buf.len()).0)
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
     }
 }
 
@@ -159,9 +164,8 @@ impl Encode for PruneSegment {
 }
 
 impl Decode for PruneSegment {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let buf = value.as_ref();
-        Ok(Self::from_compact(buf, buf.len()).0)
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
     }
 }
 
@@ -177,9 +181,8 @@ impl Encode for ClientVersion {
 }
 
 impl Decode for ClientVersion {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let buf = value.as_ref();
-        Ok(Self::from_compact(buf, buf.len()).0)
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
     }
 }
 
@@ -196,9 +199,8 @@ macro_rules! impl_compression_for_compact {
             }
 
             impl Decompress for $name {
-                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
-                    let value = value.as_ref();
-                    let (obj, _) = Compact::from_compact(&value, value.len());
+                fn decompress(value: &[u8]) -> Result<$name, $crate::DatabaseError> {
+                    let (obj, _) = Compact::from_compact(value, value.len());
                     Ok(obj)
                 }
             }
@@ -207,7 +209,7 @@ macro_rules! impl_compression_for_compact {
 }
 
 impl_compression_for_compact!(
-    SealedHeader,
+    Bytes,
     Header,
     Account,
     Log,
@@ -236,23 +238,20 @@ impl_compression_for_compact!(
 macro_rules! impl_compression_fixed_compact {
     ($($name:tt),+) => {
         $(
-            impl Compress for $name
-            {
+            impl Compress for $name {
                 type Compressed = Vec<u8>;
-
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _  = Compact::to_compact(&self, buf);
-                }
 
                 fn uncompressable_ref(&self) -> Option<&[u8]> {
                     Some(self.as_ref())
                 }
+
+                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+                    let _  = Compact::to_compact(&self, buf);
+                }
             }
 
-            impl Decompress for $name
-            {
-                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
-                    let value = value.as_ref();
+            impl Decompress for $name {
+                fn decompress(value: &[u8]) -> Result<$name, $crate::DatabaseError> {
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
                 }
@@ -315,7 +314,7 @@ mod tests {
     fn test_ensure_backwards_compatibility() {
         use super::*;
         use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
-        use reth_primitives::{Account, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
+        use reth_primitives::{Account, Receipt, ReceiptWithBloom, Withdrawals};
         use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
         use reth_stages_types::{
             AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,
@@ -337,7 +336,6 @@ mod tests {
         assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
         assert_eq!(Receipt::bitflag_encoded_bytes(), 1);
         assert_eq!(ReceiptWithBloom::bitflag_encoded_bytes(), 0);
-        assert_eq!(SealedHeader::bitflag_encoded_bytes(), 0);
         assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
@@ -361,7 +359,6 @@ mod tests {
         validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(Receipt, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(ReceiptWithBloom, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(SealedHeader, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);
