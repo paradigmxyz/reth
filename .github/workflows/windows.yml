@@ -40,4 +40,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: Check OP-Reth
-        run: cargo check -p op-reth --target x86_64-pc-windows-gnu
+        run: cargo check -p op-reth --features optimism --target x86_64-pc-windows-gnu
