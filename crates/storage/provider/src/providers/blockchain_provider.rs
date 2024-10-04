@@ -318,11 +318,17 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             let block_tx_count = block_state.block_ref().block().body.transactions.len();
             let remaining = (tx_range.end() - tx_range.start() + 1) as usize;
 
-            // This should only be more than 0 in the first iteration, in case of a partial range
+            // If the transaction range start is higher than this block last transaction, advance
+            if *tx_range.start() > in_memory_tx_num + block_tx_count as u64 - 1 {
+                in_memory_tx_num += block_tx_count as u64;
+                continue
+            }
+
+            // This should only be more than 0 once, in case of a partial range inside a block.
             let skip = (tx_range.start() - in_memory_tx_num) as usize;
 
             items.extend(fetch_from_block_state(
-                skip..=(remaining.min(block_tx_count) - 1),
+                skip..=skip + (remaining.min(block_tx_count - skip) - 1),
                 block_state,
             )?);
 
@@ -4145,6 +4151,9 @@ mod tests {
                 // Test range in in-memory to unbounded end
                 assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
 
+                // Test last element in-memory
+                assert_eq!($provider.$method(in_mem_range.end()..)?, &in_memory_data[in_memory_data.len() -1 ..]);
+
                 // Test range that spans database and in-memory
                 assert_eq!(
                     $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
@@ -4165,10 +4174,14 @@ mod tests {
                         .collect::<Vec<_>>()
                 );
 
-                // Test empty range
+                // Test invalid range
                 let start_tx_num = u64::MAX;
                 let end_tx_num = u64::MAX;
                 let result = $provider.$method(start_tx_num..end_tx_num)?;
+                assert!(result.is_empty(), "No data should be found for an invalid transaction range");
+
+                // Test empty range
+                let result = $provider.$method(in_mem_range.end()+10..in_mem_range.end()+20)?;
                 assert!(result.is_empty(), "No data should be found for an empty transaction range");
             )*
         }};
