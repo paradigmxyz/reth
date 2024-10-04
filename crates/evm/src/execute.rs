@@ -207,7 +207,7 @@ pub trait BlockExecutionStrategy<DB> {
     fn state_ref(&self) -> &State<DB>;
 
     /// Sets a hook to be called after each state change during execution.
-    fn set_state_hook<F: OnStateHook + 'static>(&mut self, hook: Option<F>);
+    fn with_state_hook(self, hook: Option<Box<dyn OnStateHook>>) -> Self;
 
     /// Consumes the strategy and returns the final bundle state.
     fn finish(self) -> BundleState;
@@ -339,9 +339,10 @@ where
     {
         let BlockExecutionInput { block, total_difficulty } = input;
 
-        let mut strategy = self.strategy_factory.create(block, total_difficulty)?;
-
-        strategy.set_state_hook(Some(state_hook));
+        let mut strategy = self
+            .strategy_factory
+            .create(block, total_difficulty)?
+            .with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
@@ -474,7 +475,9 @@ mod tests {
             &self.state
         }
 
-        fn set_state_hook<F: OnStateHook + 'static>(&mut self, _hook: Option<F>) {}
+        fn with_state_hook(self, _hook: Option<Box<dyn OnStateHook>>) -> Self {
+            self
+        }
 
         fn finish(self) -> BundleState {
             self.finish_result
