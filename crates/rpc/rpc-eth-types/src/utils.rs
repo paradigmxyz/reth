@@ -1,5 +1,6 @@
 //! Commonly used code snippets
 
+use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::Bytes;
 use reth_primitives::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use std::future::Future;
@@ -14,7 +15,7 @@ pub fn recover_raw_transaction(data: Bytes) -> EthResult<PooledTransactionsEleme
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
-    let transaction = PooledTransactionsElement::decode_enveloped(&mut data.as_ref())
+    let transaction = PooledTransactionsElement::decode_2718(&mut data.as_ref())
         .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
     transaction.try_into_ecrecovered().or(Err(EthApiError::InvalidTransactionSignature))

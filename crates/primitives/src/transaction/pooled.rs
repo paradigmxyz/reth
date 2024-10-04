@@ -14,9 +14,9 @@ use alloy_consensus::{
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };
-use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
+use alloy_eips::eip2718::{Decodable2718, Eip2718Result, Encodable2718};
 use alloy_primitives::{Address, TxHash, B256};
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use serde::{Deserialize, Serialize};
@@ -179,101 +179,6 @@ impl PooledTransactionsElement {
         match self.recover_signer() {
             None => Err(self),
             Some(signer) => Ok(PooledTransactionsElementEcRecovered { transaction: self, signer }),
-        }
-    }
-
-    /// Decodes the "raw" format of transaction (e.g. `eth_sendRawTransaction`).
-    ///
-    /// This should be used for `eth_sendRawTransaction`, for any transaction type. Blob
-    /// transactions **must** include the blob sidecar as part of the raw encoding.
-    ///
-    /// This method can not be used for decoding the `transactions` field of `engine_newPayload`,
-    /// because EIP-4844 transactions for that method do not include the blob sidecar. The blobs
-    /// are supplied in an argument separate from the payload.
-    ///
-    /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction, with a
-    /// special case for EIP-4844 transactions.
-    ///
-    /// For legacy transactions, the format is encoded as: `rlp(tx)`. This format will start with a
-    /// RLP list header.
-    ///
-    /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
-    /// followed by the rlp of the transaction: `type || rlp(tx)`.
-    ///
-    /// For EIP-4844 transactions, the format includes a blob sidecar (the blobs, commitments, and
-    /// proofs) after the transaction:
-    /// `type || rlp([tx_payload_body, blobs, commitments, proofs])`
-    ///
-    /// Where `tx_payload_body` is encoded as a RLP list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if data.is_empty() {
-            return Err(RlpError::InputTooShort)
-        }
-
-        // Check if the tx is a list - tx types are less than EMPTY_LIST_CODE (0xc0)
-        if data[0] >= EMPTY_LIST_CODE {
-            // decode as legacy transaction
-            let (transaction, hash, signature) =
-                TransactionSigned::decode_rlp_legacy_transaction_tuple(data)?;
-
-            Ok(Self::Legacy { transaction, signature, hash })
-        } else {
-            // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
-            let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
-
-            // First, we advance the buffer past the type byte
-            data.advance(1);
-
-            if tx_type == EIP4844_TX_TYPE_ID {
-                // Recall that the blob transaction response `TransactionPayload` is encoded like
-                // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
-                //
-                // Note that `tx_payload_body` is a list:
-                // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-                //
-                // This makes the full encoding:
-                // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
-
-                // Now, we decode the inner blob transaction:
-                // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
-                let blob_tx = BlobTransaction::decode_inner(data)?;
-                Ok(Self::BlobTransaction(blob_tx))
-            } else {
-                let typed_tx =
-                    TransactionSigned::typed_decode(tx_type, data).map_err(|err| match err {
-                        Eip2718Error::RlpError(err) => err,
-                        _ => RlpError::Custom("failed to decode EIP-2718 transaction"),
-                    })?;
-
-                // because we checked the tx type, we can be sure that the transaction is not a
-                // blob transaction or legacy
-                match typed_tx.transaction {
-                    Transaction::Legacy(_) => Err(RlpError::Custom(
-                        "legacy transactions should not be a result of EIP-2718 decoding",
-                    )),
-                    Transaction::Eip4844(_) => Err(RlpError::Custom(
-                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
-                    )),
-                    Transaction::Eip2930(tx) => Ok(Self::Eip2930 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
-                    Transaction::Eip1559(tx) => Ok(Self::Eip1559 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
-                    Transaction::Eip7702(tx) => {Ok(Self::Eip7702 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    })},
-                    #[cfg(feature = "optimism")]
-                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
-                }
-            }
         }
     }
 
@@ -455,81 +360,30 @@ impl Decodable for PooledTransactionsElement {
         // Check if the tx is a list
         if header.list {
             // decode as legacy transaction
-            let (transaction, hash, signature) =
-                TransactionSigned::decode_rlp_legacy_transaction_tuple(&mut original_encoding)?;
+            let tx = Self::fallback_decode(&mut original_encoding)?;
 
             // advance the buffer by however long the legacy transaction decoding advanced the
             // buffer
             *buf = original_encoding;
 
-            Ok(Self::Legacy { transaction, signature, hash })
+            Ok(tx)
         } else {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
             let tx_type = *buf.first().ok_or(RlpError::InputTooShort)?;
             let remaining_len = buf.len();
 
-            // Aadvance the buffer past the type byte
+            // Advance the buffer past the type byte
             buf.advance(1);
 
-            if tx_type == EIP4844_TX_TYPE_ID {
-                // Recall that the blob transaction response `TransactionPayload` is encoded like
-                // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
-                //
-                // Note that `tx_payload_body` is a list:
-                // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-                //
-                // This makes the full encoding:
-                // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+            let tx = Self::typed_decode(tx_type, buf).map_err(RlpError::from)?;
 
-                // Decode the inner blob transaction:
-                // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
-                let blob_tx = BlobTransaction::decode_inner(buf)?;
-
-                // check that the bytes consumed match the payload length
-                let bytes_consumed = remaining_len - buf.len();
-                if bytes_consumed != header.payload_length {
-                    return Err(RlpError::UnexpectedLength)
-                }
-
-                Ok(Self::BlobTransaction(blob_tx))
-            } else {
-                let typed_tx =
-                    TransactionSigned::typed_decode(tx_type, buf).map_err(RlpError::from)?;
-
-                // check that the bytes consumed match the payload length
-                let bytes_consumed = remaining_len - buf.len();
-                if bytes_consumed != header.payload_length {
-                    return Err(RlpError::UnexpectedLength)
-                }
-
-                // because we checked the tx type, we can be sure that the transaction is not a
-                // blob transaction or legacy
-                match typed_tx.transaction {
-                    Transaction::Legacy(_) => Err(RlpError::Custom(
-                        "legacy transactions should not be a result of EIP-2718 decoding",
-                    )),
-                    Transaction::Eip4844(_) => Err(RlpError::Custom(
-                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
-                    )),
-                    Transaction::Eip2930(tx) => Ok(Self::Eip2930 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
-                    Transaction::Eip1559(tx) => Ok(Self::Eip1559 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
-                    Transaction::Eip7702(tx) => Ok(Self::Eip7702 {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
-                    #[cfg(feature = "optimism")]
-                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
-                }
+            // check that the bytes consumed match the payload length
+            let bytes_consumed = remaining_len - buf.len();
+            if bytes_consumed != header.payload_length {
+                return Err(RlpError::UnexpectedLength)
             }
+
+            Ok(tx)
         }
     }
 }
@@ -603,6 +457,67 @@ impl Encodable2718 for PooledTransactionsElement {
                 blob_tx.encode_with_type_inner(out, false);
             }
         }
+    }
+}
+
+impl Decodable2718 for PooledTransactionsElement {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        match ty {
+            EIP4844_TX_TYPE_ID => {
+                // Recall that the blob transaction response `TransactionPayload` is encoded like
+                // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
+                //
+                // Note that `tx_payload_body` is a list:
+                // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
+                //
+                // This makes the full encoding:
+                // `tx_type (0x03) || rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+
+                // Now, we decode the inner blob transaction:
+                // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
+                let blob_tx = BlobTransaction::decode_inner(buf)?;
+                Ok(Self::BlobTransaction(blob_tx))
+            }
+            tx_type => {
+                let typed_tx = TransactionSigned::typed_decode(tx_type, buf)?;
+
+                match typed_tx.transaction {
+                    Transaction::Legacy(_) => Err(RlpError::Custom(
+                        "legacy transactions should not be a result of typed decoding",
+                    ).into()),
+                    // because we checked the tx type, we can be sure that the transaction is not a
+                    // blob transaction
+                    Transaction::Eip4844(_) => Err(RlpError::Custom(
+                        "EIP-4844 transactions can only be decoded with transaction type 0x03",
+                    ).into()),
+                    Transaction::Eip2930(tx) => Ok(Self::Eip2930 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                    Transaction::Eip1559(tx) => Ok(Self::Eip1559 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                    Transaction::Eip7702(tx) => Ok(Self::Eip7702 {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
+                    #[cfg(feature = "optimism")]
+                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement").into())
+                }
+            }
+        }
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        // decode as legacy transaction
+        let (transaction, hash, signature) =
+            TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
+
+        Ok(Self::Legacy { transaction, signature, hash })
     }
 }
 
@@ -751,7 +666,7 @@ mod tests {
 
             // this is a legacy tx so we can attempt the same test with decode_enveloped
             let input_rlp = &mut &hex_data[..];
-            let res = PooledTransactionsElement::decode_enveloped(input_rlp);
+            let res = PooledTransactionsElement::decode_2718(input_rlp);
 
             assert!(
                 res.is_err(),
@@ -767,7 +682,7 @@ mod tests {
         let data = hex!("02f903d382426882ba09832dc6c0848674742682ed9694714b6a4ea9b94a8a7d9fd362ed72630688c8898c80b90364492d24749189822d8512430d3f3ff7a2ede675ac08265c08e2c56ff6fdaa66dae1cdbe4a5d1d7809f3e99272d067364e597542ac0c369d69e22a6399c3e9bee5da4b07e3f3fdc34c32c3d88aa2268785f3e3f8086df0934b10ef92cfffc2e7f3d90f5e83302e31382e302d64657600000000000000000000000000000000000000000000569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd000000000000000000000000e1e210594771824dad216568b91c9cb4ceed361c00000000000000000000000000000000000000000000000000000000000546e00000000000000000000000000000000000000000000000000000000000e4e1c00000000000000000000000000000000000000000000000000000000065d6750c00000000000000000000000000000000000000000000000000000000000f288000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002cf600000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000f1628e56fa6d8c50e5b984a58c0df14de31c7b857ce7ba499945b99252976a93d06dcda6776fc42167fbe71cb59f978f5ef5b12577a90b132d14d9c6efa528076f0161d7bf03643cfc5490ec5084f4a041db7f06c50bd97efa08907ba79ddcac8b890f24d12d8db31abbaaf18985d54f400449ee0559a4452afe53de5853ce090000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000003e800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000c080a01428023fc54a27544abc421d5d017b9a7c5936ad501cbdecd0d9d12d04c1a033a0753104bbf1c87634d6ff3f0ffa0982710612306003eb022363b57994bdef445a"
 );
 
-        let res = PooledTransactionsElement::decode_enveloped(&mut &data[..]).unwrap();
+        let res = PooledTransactionsElement::decode_2718(&mut &data[..]).unwrap();
         assert_eq!(
             res.into_transaction().to(),
             Some(address!("714b6a4ea9b94a8a7d9fd362ed72630688c8898c"))
@@ -801,7 +716,7 @@ mod tests {
         assert!(input_rlp.is_empty());
 
         // we can also decode_enveloped
-        let res = PooledTransactionsElement::decode_enveloped(&mut &data[..]);
+        let res = PooledTransactionsElement::decode_2718(&mut &data[..]);
         assert_matches!(res, Ok(_tx));
     }
 }
