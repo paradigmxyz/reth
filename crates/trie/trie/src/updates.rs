@@ -455,7 +455,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::TrieUpdates> for TrieUpdates<'a> {
+    impl SerializeAs<super::TrieUpdates> for TrieUpdates<'_> {
         fn serialize_as<S>(source: &super::TrieUpdates, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -515,7 +515,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::StorageTrieUpdates> for StorageTrieUpdates<'a> {
+    impl SerializeAs<super::StorageTrieUpdates> for StorageTrieUpdates<'_> {
         fn serialize_as<S>(
             source: &super::StorageTrieUpdates,
             serializer: S,
