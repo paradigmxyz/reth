@@ -362,7 +362,7 @@ impl Serialize for ZstdDictionary<'_> {
 }
 
 #[cfg(test)]
-impl<'a> PartialEq for ZstdDictionary<'a> {
+impl PartialEq for ZstdDictionary<'_> {
     fn eq(&self, other: &Self) -> bool {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
             return a == b
