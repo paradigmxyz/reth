@@ -4142,11 +4142,8 @@ mod tests {
             );
 
             // Test range in in-memory to unbounded end
-            assert_eq!(
-                $provider.$method(in_mem_range.start() + 1..)?,
-                &in_memory_data[1..]
-            );
-            
+            assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
+
             // Test range that spans database and in-memory
             assert_eq!(
                 $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
