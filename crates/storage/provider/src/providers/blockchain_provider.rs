@@ -3783,7 +3783,6 @@ mod tests {
                     &in_memory_data[1..in_memory_data.len() - 1]
                 );
 
-
                 // Test range that spans database and in-memory
                 assert_eq!(
                     $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
@@ -3793,18 +3792,6 @@ mod tests {
                         .cloned()
                         .collect::<Vec<_>>()
                 );
-                // Test range in in-memory to unbounded end
-                // assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
-
-                // Test range that spans database and in-memory with unbounded end
-                // assert_eq!(
-                //     $provider.$method(in_mem_range.start() - 2..)?,
-                //     database_data[database_data.len() - 2..]
-                //         .iter()
-                //         .chain(&in_memory_data[..])
-                //         .cloned()
-                //         .collect::<Vec<_>>()
-                // );
 
                 // Test invalid range
                 let start_block_num = u64::MAX;
@@ -3858,7 +3845,7 @@ mod tests {
 
         Ok(())
     }
-    
+
     #[test]
     fn transaction_sender_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
