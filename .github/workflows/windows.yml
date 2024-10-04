@@ -10,7 +10,7 @@ on:
   merge_group:
 
 jobs:
-  build-reth:
+  check-reth:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -23,10 +23,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Build Reth
-        run: make build-x86_64-pc-windows-gnu
+      - name: Check Reth
+        run: cargo check --target x86_64-pc-windows-gnu
 
-  build-op-reth:
+  check-op-reth:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -39,5 +39,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Build OP-Reth
-        run: make op-build-x86_64-pc-windows-gnu
+      - name: Check OP-Reth
+        run: cargo check -p op-reth --target x86_64-pc-windows-gnu
