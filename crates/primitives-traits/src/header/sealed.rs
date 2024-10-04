@@ -7,7 +7,7 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
