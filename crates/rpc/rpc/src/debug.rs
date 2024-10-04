@@ -506,7 +506,6 @@ where
         let opts = opts.unwrap_or_default();
         let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
-        let gas_limit = self.inner.eth_api.call_gas_limit();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -570,7 +569,6 @@ where
                             cfg.clone(),
                             block_env.clone(),
                             tx,
-                            gas_limit,
                             &mut db,
                             overrides,
                         )?;
@@ -603,7 +601,6 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-        include_preimages: bool,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
@@ -621,10 +618,19 @@ where
 
                 let mut hashed_state = HashedPostState::default();
                 let mut keys = HashMap::default();
+                let mut codes = HashMap::default();
+
                 let _ = block_executor
                     .execute_with_state_witness(
                         (&block.clone().unseal(), block.difficulty).into(),
                         |statedb| {
+                            codes = statedb
+                                .cache
+                                .contracts
+                                .iter()
+                                .map(|(hash, code)| (*hash, code.bytes()))
+                                .collect();
+
                             for (address, account) in &statedb.cache.accounts {
                                 let hashed_address = keccak256(address);
                                 hashed_state.accounts.insert(
@@ -638,24 +644,14 @@ where
                                     );
 
                                 if let Some(account) = &account.account {
-                                    if include_preimages {
-                                        keys.insert(
-                                            hashed_address,
-                                            alloy_rlp::encode(address).into(),
-                                        );
-                                    }
+                                    keys.insert(hashed_address, address.to_vec().into());
 
                                     for (slot, value) in &account.storage {
                                         let slot = B256::from(*slot);
                                         let hashed_slot = keccak256(slot);
                                         storage.storage.insert(hashed_slot, *value);
 
-                                        if include_preimages {
-                                            keys.insert(
-                                                hashed_slot,
-                                                alloy_rlp::encode(slot).into(),
-                                            );
-                                        }
+                                        keys.insert(hashed_slot, slot.into());
                                     }
                                 }
                             }
@@ -667,8 +663,8 @@ where
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
                 Ok(ExecutionWitness {
                     state: HashMap::from_iter(state.into_iter()),
-                    codes: Default::default(),
-                    keys: include_preimages.then_some(keys),
+                    codes,
+                    keys: Some(keys),
                 })
             })
             .await
@@ -966,10 +962,9 @@ where
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
-        include_preimages: bool,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block, include_preimages).await.map_err(Into::into)
+        Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceCall`

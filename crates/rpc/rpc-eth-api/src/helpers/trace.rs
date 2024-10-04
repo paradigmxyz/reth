@@ -1,9 +1,11 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
+use crate::FromEvmError;
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_chainspec::ChainSpecProvider;
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::Header;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
@@ -13,8 +15,6 @@ use reth_rpc_eth_types::{
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
-
-use crate::FromEvmError;
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
@@ -190,11 +190,30 @@ pub trait Trace: LoadState {
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash;
+            let parent_beacon_block_root = block.parent_beacon_block_root;
             let block_txs = block.into_transactions_ecrecovered();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply relevant system calls
+                let mut system_caller = SystemCaller::new(
+                    Trace::evm_config(&this),
+                    LoadState::provider(&this).chain_spec(),
+                );
+                system_caller
+                    .pre_block_beacon_root_contract_call(
+                        &mut db,
+                        &cfg,
+                        &block_env,
+                        parent_beacon_block_root,
+                    )
+                    .map_err(|_| {
+                        EthApiError::EvmCustom(
+                            "failed to apply 4788 beacon root system call".to_string(),
+                        )
+                    })?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(
@@ -306,6 +325,27 @@ pub trait Trace: LoadState {
                 let block_number = block_env.number.saturating_to::<u64>();
                 let base_fee = block_env.basefee.saturating_to::<u128>();
 
+                // now get the state
+                let state = this.state_at_block_id(state_at.into())?;
+                let mut db =
+                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+
+                // apply relevant system calls
+                let mut system_caller = SystemCaller::new(
+                    Trace::evm_config(&this),
+                    LoadState::provider(&this).chain_spec(),
+                );
+                system_caller
+                    .pre_block_beacon_root_contract_call(
+                        &mut db,
+                        &cfg,
+                        &block_env,
+                        block.header().parent_beacon_block_root,
+                    )
+                    .map_err(|_| {
+                        EthApiError::EvmCustom("failed to apply 4788 system call".to_string())
+                    })?;
+
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
                 let max_transactions =
@@ -331,11 +371,6 @@ pub trait Trace: LoadState {
                         (tx_info, tx_env)
                     })
                     .peekable();
-
-                // now get the state
-                let state = this.state_at_block_id(state_at.into())?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
                 while let Some((tx_info, tx)) = transactions.next() {
                     let env =

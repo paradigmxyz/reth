@@ -24,6 +24,8 @@ pub(crate) struct EngineApiMetrics {
 pub(crate) struct EngineMetrics {
     /// How many executed blocks are currently stored.
     pub(crate) executed_blocks: Gauge,
+    /// How many already executed blocks were directly inserted into the tree.
+    pub(crate) inserted_already_executed_blocks: Counter,
     /// The number of times the pipeline was run.
     pub(crate) pipeline_runs: Counter,
     /// The total count of forkchoice updated messages received.
@@ -32,6 +34,14 @@ pub(crate) struct EngineMetrics {
     pub(crate) new_payload_messages: Counter,
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
+    /// Tracks the how often we failed to deliver a newPayload response.
+    ///
+    /// This effectively tracks how often the message sender dropped the channel and indicates a CL
+    /// request timeout (e.g. it took more than 8s to send the response and the CL terminated the
+    /// request which resulted in a closed channel).
+    pub(crate) failed_new_payload_response_deliveries: Counter,
+    /// Tracks the how often we failed to deliver a forkchoice update response.
+    pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     // TODO add latency metrics
 }
 

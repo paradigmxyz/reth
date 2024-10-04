@@ -600,14 +600,7 @@ impl NetworkManager {
             }
 
             NetworkHandleMessage::Shutdown(tx) => {
-                // Set connection status to `Shutdown`. Stops node to accept
-                // new incoming connections as well as sending connection requests to newly
-                // discovered nodes.
-                self.swarm.on_shutdown_requested();
-                // Disconnect all active connections
-                self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
-                // drop pending connections
-                self.swarm.sessions_mut().disconnect_all_pending();
+                self.perform_network_shutdown();
                 let _ = tx.send(());
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
@@ -966,9 +959,23 @@ impl NetworkManager {
             },
         }
 
+        self.perform_network_shutdown();
         let res = shutdown_hook(self);
         drop(graceful_guard);
         res
+    }
+
+    /// Performs a graceful network shutdown by stopping new connections from being accepted while
+    /// draining current and pending connections.
+    fn perform_network_shutdown(&mut self) {
+        // Set connection status to `Shutdown`. Stops node from accepting
+        // new incoming connections as well as sending connection requests to newly
+        // discovered nodes.
+        self.swarm.on_shutdown_requested();
+        // Disconnect all active connections
+        self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
+        // drop pending connections
+        self.swarm.sessions_mut().disconnect_all_pending();
     }
 }
 

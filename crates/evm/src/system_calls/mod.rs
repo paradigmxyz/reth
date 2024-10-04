@@ -49,22 +49,19 @@ pub struct SystemCaller<'a, EvmConfig, Chainspec, Hook = NoopHook> {
     hook: Option<Hook>,
 }
 
-impl<'a, EvmConfig, Chainspec> SystemCaller<'a, EvmConfig, Chainspec> {
+impl<'a, EvmConfig, Chainspec> SystemCaller<'a, EvmConfig, Chainspec, NoopHook> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
     pub const fn new(evm_config: &'a EvmConfig, chain_spec: Chainspec) -> Self {
         Self { evm_config, chain_spec, hook: None }
     }
-}
-
-impl<'a, EvmConfig, Chainspec, Hook> SystemCaller<'a, EvmConfig, Chainspec, Hook> {
     /// Installs a custom hook to be called after each state change.
     pub fn with_state_hook<H: OnStateHook>(
         self,
-        hook: H,
+        hook: Option<H>,
     ) -> SystemCaller<'a, EvmConfig, Chainspec, H> {
         let Self { evm_config, chain_spec, .. } = self;
-        SystemCaller { evm_config, chain_spec, hook: Some(hook) }
+        SystemCaller { evm_config, chain_spec, hook }
     }
     /// Convenience method to consume the type and drop borrowed fields
     pub fn finish(self) {}
@@ -320,5 +317,12 @@ where
         evm.context.evm.db.commit(result_and_state.state);
 
         eip7251::post_commit(result_and_state.result)
+    }
+
+    /// Delegate to stored `OnStateHook`, noop if hook is `None`.
+    pub fn on_state(&mut self, state: &ResultAndState) {
+        if let Some(ref mut hook) = &mut self.hook {
+            hook.on_state(state);
+        }
     }
 }

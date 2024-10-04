@@ -44,6 +44,9 @@ triehash = { version = "0.8", optional = true }
 # `serde` feature
 serde = { workspace = true, optional = true }
 
+# `serde-bincode-compat` feature
+serde_with = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
@@ -63,10 +66,12 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 serde_json.workspace = true
 criterion.workspace = true
+bincode.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = ["dep:serde"]
+serde-bincode-compat = ["serde_with"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
 
 [[bench]]

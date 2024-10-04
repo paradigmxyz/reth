@@ -40,4 +40,5 @@ tokio.workspace = true
 ## misc
 eyre.workspace = true
 rand.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true

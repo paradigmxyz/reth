@@ -8,7 +8,7 @@ use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockBody, BlockWithSenders, Receipt};
+use reth_primitives::{Block, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -103,16 +103,8 @@ where
             // Unseal the block for execution
             let (block, senders) = block.into_components();
             let (unsealed_header, hash) = block.header.split();
-            let block = Block {
-                header: unsealed_header,
-                body: BlockBody {
-                    transactions: block.body.transactions,
-                    ommers: block.body.ommers,
-                    withdrawals: block.body.withdrawals,
-                    requests: block.body.requests,
-                },
-            }
-            .with_senders_unchecked(senders);
+            let block =
+                Block { header: unsealed_header, body: block.body }.with_senders_unchecked(senders);
 
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();

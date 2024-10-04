@@ -1191,7 +1191,9 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
+                        debug!(target: "engine::tree", block=?block.block().num_hash(), "inserting already executed block");
                         self.state.tree_state.insert_executed(block);
+                        self.metrics.engine.inserted_already_executed_blocks.increment(1);
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -1217,6 +1219,10 @@ where
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
+                                    self.metrics
+                                        .engine
+                                        .failed_forkchoice_updated_response_deliveries
+                                        .increment(1);
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
@@ -1228,6 +1234,10 @@ where
                                     )
                                 })) {
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
                                 }
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
@@ -1524,19 +1534,13 @@ where
     /// Return sealed block from database or in-memory state by hash.
     fn sealed_header_by_hash(&self, hash: B256) -> ProviderResult<Option<SealedHeader>> {
         // check memory first
-        let block = self
-            .state
-            .tree_state
-            .block_by_hash(hash)
-            // TODO: clone for compatibility. should we return an Arc here?
-            .map(|block| block.as_ref().clone().header);
+        let block =
+            self.state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone().header);
 
         if block.is_some() {
             Ok(block)
-        } else if let Some(block_num) = self.provider.block_number(hash)? {
-            Ok(self.provider.sealed_header(block_num)?)
         } else {
-            Ok(None)
+            self.provider.sealed_header_by_hash(hash)
         }
     }
 

@@ -88,6 +88,7 @@ use reth_execution_types::ChangedAccount;
 
 use reth_primitives::{
     BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -318,13 +319,19 @@ where
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<PooledTransactionsElement>
+    where
+        <V as TransactionValidator>::Transaction:
+            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         let transactions = self.get_all(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
-            let tx = transaction.to_recovered_transaction().into_signed();
+            let recovered: TransactionSignedEcRecovered =
+                transaction.transaction.clone().into_consensus().into();
+            let tx = recovered.into_signed();
             let pooled = if tx.is_eip4844() {
                 // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
                 if let Some(blob) = self.get_blob_transaction(tx) {
@@ -360,9 +367,15 @@ where
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement> {
+    ) -> Option<PooledTransactionsElement>
+    where
+        <V as TransactionValidator>::Transaction:
+            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         self.get(&tx_hash).and_then(|transaction| {
-            let tx = transaction.to_recovered_transaction().into_signed();
+            let recovered: TransactionSignedEcRecovered =
+                transaction.transaction.clone().into_consensus().into();
+            let tx = recovered.into_signed();
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {
