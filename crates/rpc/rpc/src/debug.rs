@@ -506,7 +506,6 @@ where
         let opts = opts.unwrap_or_default();
         let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
-        let gas_limit = self.inner.eth_api.call_gas_limit();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -570,7 +569,6 @@ where
                             cfg.clone(),
                             block_env.clone(),
                             tx,
-                            gas_limit,
                             &mut db,
                             overrides,
                         )?;
