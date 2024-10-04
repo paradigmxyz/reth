@@ -17,12 +17,20 @@ reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
-reth-rpc-types.workspace = true
 reth-chain-state.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
+op-alloy-rpc-types-engine.workspace = true
+
 # async
+async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
+pin-project.workspace = true
 
 # misc
-thiserror.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

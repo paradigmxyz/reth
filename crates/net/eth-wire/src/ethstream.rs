@@ -4,12 +4,10 @@ use crate::{
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthVersion, ProtocolMessage, Status,
 };
+use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    ForkFilter, GotExpected,
-};
+use reth_primitives::{ForkFilter, GotExpected};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -353,11 +351,12 @@ mod tests {
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
         ProtocolVersion, Status,
     };
+    use alloy_primitives::{B256, U256};
     use futures::{SinkExt, StreamExt};
     use reth_chainspec::NamedChain;
     use reth_ecies::stream::ECIESStream;
     use reth_network_peers::pk2id;
-    use reth_primitives::{ForkFilter, Head, B256, U256};
+    use reth_primitives::{ForkFilter, Head};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};

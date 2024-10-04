@@ -1,30 +1,29 @@
-use alloy_network::Network;
-use alloy_primitives::Bytes;
+use alloy_consensus::Transaction;
+use alloy_network::{ReceiptResponse, TransactionResponse};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_rpc_types::{BlockTransactions, Header, TransactionReceipt};
+use alloy_rpc_types_trace::{
+    otterscan::{
+        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    },
+    parity::{Action, CreateAction, CreateOutput, TraceOutput},
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
+    FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use reth_rpc_types::{
-    trace::{
-        otterscan::{
-            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
-        },
-        parity::{Action, CreateAction, CreateOutput, TraceOutput},
-    },
-    AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
-};
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
-use revm_primitives::ExecutionResult;
+use revm_primitives::{ExecutionResult, SignedAuthorization};
 
 const API_LEVEL: u64 = 8;
 
@@ -43,23 +42,18 @@ impl<Eth> OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth>
 where
-    Eth: EthApiTypes<
-        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
-    >,
+    Eth: FullEthApiTypes,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
-        block: Option<RpcBlock<Eth::NetworkTypes>>,
-        receipts: Option<Vec<AnyTransactionReceipt>>,
+        block: RpcBlock<Eth::NetworkTypes>,
+        receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
     ) -> RpcResult<BlockDetails> {
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
-            .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
+            .map(|receipt| receipt.gas_used().saturating_mul(receipt.effective_gas_price()))
             .sum::<u128>();
 
         Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
@@ -67,18 +61,14 @@ where
 }
 
 #[async_trait]
-impl<Eth> OtterscanServer for OtterscanApi<Eth>
+impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>> for OtterscanApi<Eth>
 where
     Eth: EthApiServer<
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthApiTypes<
-            NetworkTypes: Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        > + TraceExt
-        + EthTransactions
+        > + EthTransactions
+        + TraceExt
         + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
@@ -87,10 +77,8 @@ where
     }
 
     /// Handler for `ots_hasCode`
-    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool> {
-        EthApiServer::get_code(&self.eth, address, block_number.map(Into::into))
-            .await
-            .map(|code| !code.is_empty())
+    async fn has_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<bool> {
+        EthApiServer::get_code(&self.eth, address, block_id).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -121,6 +109,7 @@ where
                             TransferKind::Create => OperationType::OpCreate,
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
+                            TransferKind::EofCreate => OperationType::OpEofCreate,
                         },
                     })
                     .collect::<Vec<_>>()
@@ -177,18 +166,27 @@ where
 
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
-        let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let block_id = block_number.into();
+        let block = self.eth.block_by_number(block_id, true);
+        let block_id = block_id.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(block, receipts)
+        self.block_details(
+            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
+            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
+        )
     }
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_hash(block_hash, true);
-        let receipts = self.eth.block_receipts(block_hash.into());
+        let block_id = block_hash.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(block, receipts)
+        self.block_details(
+            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
+            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
+        )
     }
 
     /// Handler for `getBlockTransactions`
@@ -197,14 +195,16 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
+    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>>> {
+        let block_id = block_number.into();
         // retrieve full block and its receipts
-        let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let block = self.eth.block_by_number(block_id, true);
+        let block_id = block_id.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
+        let mut block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let mut receipts = receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?;
 
         // check if the number of transactions matches the number of receipts
         let tx_len = block.transactions.len();
@@ -228,9 +228,9 @@ where
 
         // The input field returns only the 4 bytes method selector instead of the entire
         // calldata byte blob.
-        for tx in transactions {
-            if tx.input.len() > 4 {
-                tx.input = tx.input.slice(..4);
+        for tx in transactions.iter_mut() {
+            if tx.input().len() > 4 {
+                Eth::TransactionCompat::otterscan_api_truncate_input(tx);
             }
         }
 
@@ -238,19 +238,34 @@ where
         let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
-            .map(|receipt| {
-                let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
-                    status: receipt
-                        .inner
-                        .receipt
-                        .status
-                        .as_eip658()
-                        .expect("ETH API returned pre-EIP-658 status"),
-                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
+            .zip(transactions.iter().map(Eth::TransactionCompat::tx_type))
+            .map(|(receipt, tx_ty)| {
+                let inner = OtsReceipt {
+                    status: receipt.status(),
+                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
                     logs: None,
                     logs_bloom: None,
-                    r#type: receipt.r#type,
-                });
+                    r#type: tx_ty,
+                };
+
+                let receipt = TransactionReceipt {
+                    inner,
+                    transaction_hash: receipt.transaction_hash(),
+                    transaction_index: receipt.transaction_index(),
+                    block_hash: receipt.block_hash(),
+                    block_number: receipt.block_number(),
+                    gas_used: receipt.gas_used(),
+                    effective_gas_price: receipt.effective_gas_price(),
+                    blob_gas_used: receipt.blob_gas_used(),
+                    blob_gas_price: receipt.blob_gas_price(),
+                    from: receipt.from(),
+                    to: receipt.to(),
+                    contract_address: receipt.contract_address(),
+                    state_root: receipt.state_root(),
+                    authorization_list: receipt
+                        .authorization_list()
+                        .map(<[SignedAuthorization]>::to_vec),
+                };
 
                 OtsTransactionReceipt { receipt, timestamp }
             })
@@ -292,8 +307,8 @@ where
             .eth
             .get_transaction_by_sender_and_nonce(sender, nonce, false)
             .await
-            .map_err(|e| e.into())?
-            .map(|tx| tx.hash))
+            .map_err(Into::into)?
+            .map(|tx| tx.tx_hash()))
     }
 
     /// Handler for `getContractCreator`
@@ -342,7 +357,7 @@ where
                             ) if contract == address => Some(ContractCreator {
                                 hash: tx_trace
                                     .transaction_hash
-                                    .ok_or_else(|| EthApiError::TransactionNotFound)?,
+                                    .ok_or(EthApiError::TransactionNotFound)?,
                                 creator,
                             }),
                             _ => None,

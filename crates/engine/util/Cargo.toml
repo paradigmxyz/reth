@@ -15,7 +15,6 @@ workspace = true
 reth-primitives.workspace = true
 reth-errors.workspace = true
 reth-fs-util.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
 reth-beacon-consensus.workspace = true
@@ -26,6 +25,10 @@ reth-provider.workspace = true
 reth-ethereum-forks.workspace = true
 revm-primitives.workspace = true
 reth-trie.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false }
@@ -47,5 +50,4 @@ tracing.workspace = true
 [features]
 optimism = [
     "reth-beacon-consensus/optimism",
-    "reth-ethereum-forks/optimism"
 ]

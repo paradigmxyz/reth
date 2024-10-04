@@ -4,7 +4,7 @@
 //! [`ExecutorMetrics::metered`].
 use std::time::Instant;
 
-use metrics::{Counter, Gauge};
+use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionInput;
 use reth_metrics::Metrics;
 use reth_primitives::BlockWithSenders;
@@ -18,6 +18,10 @@ pub struct ExecutorMetrics {
     pub gas_processed_total: Counter,
     /// The instantaneous amount of gas processed per second.
     pub gas_per_second: Gauge,
+    /// The Histogram for amount of time taken to execute blocks.
+    pub execution_histogram: Histogram,
+    /// The total amount of time it took to execute the latest block.
+    pub execution_duration: Gauge,
 }
 
 impl ExecutorMetrics {
@@ -36,6 +40,8 @@ impl ExecutorMetrics {
         // Update gas metrics.
         self.gas_processed_total.increment(gas_used);
         self.gas_per_second.set(gas_used as f64 / execution_duration);
+        self.execution_histogram.record(execution_duration);
+        self.execution_duration.set(execution_duration);
 
         output
     }

@@ -1,9 +1,10 @@
+use alloy_primitives::{BlockNumber, TxNumber};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
 };
 use reth_errors::ProviderResult;
-use reth_primitives::{BlockNumber, Receipt, TxNumber};
+use reth_primitives::Receipt;
 use reth_storage_api::ReceiptWriter;
 
 pub(crate) struct DatabaseWriter<'a, W>(pub(crate) &'a mut W);

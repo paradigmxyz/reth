@@ -1,5 +1,6 @@
 use crate::{Consensus, ConsensusError, PostExecutionInput};
-use reth_primitives::{BlockWithSenders, Header, SealedBlock, SealedHeader, U256};
+use alloy_primitives::U256;
+use reth_primitives::{BlockWithSenders, Header, SealedBlock, SealedHeader};
 
 /// A Consensus implementation that does nothing.
 #[derive(Debug, Copy, Clone, Default)]

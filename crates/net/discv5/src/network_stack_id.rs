@@ -1,7 +1,7 @@
 //! Keys of ENR [`ForkId`](reth_ethereum_forks::ForkId) kv-pair. Identifies which network stack a
 //! node belongs to.
 
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 
 /// Identifies which Ethereum network stack a node belongs to, on the discovery network.
 #[derive(Debug)]
@@ -21,11 +21,11 @@ impl NetworkStackId {
     pub const OPSTACK: &'static [u8] = b"opstack";
 
     #[allow(clippy::missing_const_for_fn)]
-    /// Returns the [`NetworkStackId`] that matches the given [`ChainSpec`].
-    pub fn id(chain: &ChainSpec) -> Option<&'static [u8]> {
-        if chain.is_optimism() {
+    /// Returns the [`NetworkStackId`] that matches the given chain spec.
+    pub fn id(chain: impl EthChainSpec) -> Option<&'static [u8]> {
+        if chain.chain().is_optimism() {
             return Some(Self::OPEL)
-        } else if chain.is_eth() {
+        } else if chain.chain().is_ethereum() {
             return Some(Self::ETH)
         }
 

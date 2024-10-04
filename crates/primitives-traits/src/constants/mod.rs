@@ -32,8 +32,6 @@ pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
 pub const BEACON_NONCE: u64 = 0u64;
 
 /// The default Ethereum block gas limit.
-// TODO: This should be a chain spec parameter.
-/// See <https://github.com/paradigmxyz/reth/issues/3233>.
 pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
 /// The minimum tx fee below which the txpool will reject the transaction.
@@ -130,6 +128,9 @@ pub const EMPTY_ROOT_HASH: B256 =
 
 /// From address from Optimism system txs: `0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001`
 pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
+
+/// To address from Optimism system txs: `0x4200000000000000000000000000000000000015`
+pub const OP_SYSTEM_TX_TO_ADDR: Address = address!("4200000000000000000000000000000000000015");
 
 /// Transactions root of empty receipts set.
 pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;

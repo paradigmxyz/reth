@@ -6,7 +6,7 @@ use crate::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::B256;
+use alloy_primitives::B256;
 
 pub use futures::future::Either;
 

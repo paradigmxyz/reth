@@ -1,3 +1,4 @@
+use alloy_primitives::{keccak256, BlockNumber, B256};
 use derive_more::Deref;
 use reth_db::tables;
 use reth_db_api::{
@@ -6,7 +7,7 @@ use reth_db_api::{
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives::{keccak256, BlockNumber, StorageEntry, B256};
+use reth_primitives::StorageEntry;
 use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use reth_trie_common::Nibbles;
 use std::{

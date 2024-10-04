@@ -4,6 +4,8 @@ Unwinds a certain block range, deleting it from the database
 
 ```bash
 $ reth stage unwind --help
+```
+```txt
 Usage: reth stage unwind [OPTIONS] <COMMAND>
 
 Commands:
@@ -38,7 +40,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>
@@ -104,12 +106,12 @@ Networking:
       --discovery.v5.port <DISCOVERY_V5_PORT>
           The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discovery.v5.addr` is set
 
-          [default: 9000]
+          [default: 9200]
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
           The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set
 
-          [default: 9000]
+          [default: 9200]
 
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
@@ -230,6 +232,11 @@ Networking:
           Max capacity of cache of hashes for transactions pending fetch.
 
           [default: 25600]
+
+      --net-if.experimental <IF_NAME>
+          Name of network interface used to communicate with peers.
+
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound

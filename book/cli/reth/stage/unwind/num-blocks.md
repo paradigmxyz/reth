@@ -4,6 +4,8 @@ Unwinds the database from the latest block, until the given number of blocks hav
 
 ```bash
 $ reth stage unwind num-blocks --help
+```
+```txt
 Usage: reth stage unwind num-blocks [OPTIONS] <AMOUNT>
 
 Arguments:

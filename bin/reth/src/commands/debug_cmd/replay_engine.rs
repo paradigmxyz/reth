@@ -18,7 +18,8 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -53,11 +54,11 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network(
+    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -75,8 +76,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug replay-engine` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<
+        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
+    >(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
@@ -86,11 +93,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(
-            tree_externals,
-            BlockchainTreeConfig::default(),
-            PruneModes::none(),
-        )?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
@@ -110,21 +113,20 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .await?;
 
         // Set up payload builder
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
+        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),
             NoopTransactionPool::default(),
             ctx.task_executor.clone(),
             BasicPayloadJobGeneratorConfig::default(),
-            provider_factory.chain_spec(),
             payload_builder,
         );
 
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+        let (payload_service, payload_builder): (_, PayloadBuilderHandle<EthEngineTypes>) =
+            PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
@@ -132,7 +134,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let network_client = network.fetch_client().await?;
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::new(
             network_client,
-            Pipeline::builder().build(
+            Pipeline::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::builder().build(
                 provider_factory.clone(),
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
             ),

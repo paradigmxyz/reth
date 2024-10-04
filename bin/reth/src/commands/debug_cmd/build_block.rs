@@ -1,5 +1,9 @@
 //! Command for debugging block building.
+use alloy_consensus::TxEip4844;
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
+use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
@@ -14,26 +18,22 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
-use reth_db::DatabaseEnv;
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::PayloadBuilderAttributes;
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes};
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
-    BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, SealedBlock,
-    SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar,
+    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_prune::PruneModes;
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
-use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -83,9 +83,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(
+    fn lookup_best_block<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
-        factory: ProviderFactory<Arc<DatabaseEnv>>,
+        factory: ProviderFactory<N>,
     ) -> RethResult<Arc<SealedBlock>> {
         let provider = factory.provider()?;
 
@@ -108,7 +108,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
+                .wrap_err_with(|| {
+                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
+                })?;
             Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
         } else {
             Ok(EnvKzgSettings::Default)
@@ -116,8 +118,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
@@ -127,11 +132,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(
-            tree_externals,
-            BlockchainTreeConfig::default(),
-            PruneModes::none(),
-        )?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
@@ -200,7 +201,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                     encoded_length
                 }
-                _ => transaction.length_without_header(),
+                _ => transaction.encode_2718_len(),
             };
 
             debug!(target: "reth::cli", ?transaction, "Adding transaction to the pool");
@@ -227,7 +228,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 best_block.hash(),
                 payload_attrs,
             )?,
-            provider_factory.chain_spec(),
         );
 
         let args = BuildArguments::new(
@@ -239,7 +239,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             None,
         );
 
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
+        );
 
         match payload_builder.try_build(args)? {
             BuildOutcome::Better { payload, .. } => {

@@ -6,20 +6,19 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
+use alloy_eips::eip1559::calc_next_block_base_fee;
+use alloy_primitives::B256;
+use alloy_rpc_types::TxGasAndReward;
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
-use reth_primitives::{
-    basefee::calc_next_block_base_fee,
-    eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    Receipt, SealedBlock, TransactionSigned, B256,
-};
-use reth_rpc_types::TxGasAndReward;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_primitives::{Receipt, SealedBlock, TransactionSigned};
 use reth_storage_api::BlockReaderIdExt;
+use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
@@ -88,7 +87,7 @@ impl FeeHistoryCache {
                 &percentiles,
                 fee_history_entry.gas_used,
                 fee_history_entry.base_fee_per_gas,
-                &block.body,
+                &block.body.transactions,
                 &receipts,
             )
             .unwrap_or_default();
@@ -376,13 +375,13 @@ impl FeeHistoryEntry {
     }
 
     /// Returns the base fee for the next block according to the EIP-1559 spec.
-    pub fn next_block_base_fee(&self, chain_spec: &ChainSpec) -> u64 {
+    pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
         calc_next_block_base_fee(
-            self.gas_used as u128,
-            self.gas_limit as u128,
-            self.base_fee_per_gas as u128,
+            self.gas_used,
+            self.gas_limit,
+            self.base_fee_per_gas,
             chain_spec.base_fee_params_at_timestamp(self.timestamp),
-        ) as u64
+        )
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
@@ -398,6 +397,6 @@ impl FeeHistoryEntry {
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        Some(calculate_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+        Some(calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
     }
 }

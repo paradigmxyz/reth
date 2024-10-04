@@ -7,8 +7,8 @@ use crate::{
     version::ParseVersionError,
     Capability, EthMessage, EthMessageID, EthVersion,
 };
+use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
-use reth_primitives::bytes::Bytes;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -291,7 +291,7 @@ pub fn shared_capability_offsets(
         local_protocols.into_iter().map(Protocol::split).collect::<HashMap<_, _>>();
 
     // map of capability name to version
-    let mut shared_capabilities: HashMap<_, ProtoVersion> = HashMap::new();
+    let mut shared_capabilities: HashMap<_, ProtoVersion> = HashMap::default();
 
     // The `Ord` implementation for capability names should be equivalent to geth (and every other
     // client), since geth uses golang's default string comparison, which orders strings

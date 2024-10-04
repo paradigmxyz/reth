@@ -1,11 +1,12 @@
 use crate::{
-    BlockIdReader, BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_db_models::StoredBlockBodyIndices;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
+    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
@@ -160,7 +161,7 @@ pub trait BlockReader:
 /// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the block should be done using the type's `BlockReader` methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
+pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Returns the block with matching tag from the database
     ///
     /// Returns `None` if block is not found.
@@ -243,7 +244,14 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ) -> ProviderResult<Option<SealedHeader>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
-            .map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            .map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            )
     }
 
     /// Returns the sealed header with the matching `BlockId` from the database.

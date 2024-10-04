@@ -23,6 +23,7 @@ revm.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
+alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -43,11 +44,13 @@ triehash = { version = "0.8", optional = true }
 # `serde` feature
 serde = { workspace = true, optional = true }
 
+# `serde-bincode-compat` feature
+serde_with = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # trie
@@ -61,14 +64,14 @@ tokio = { workspace = true, default-features = false, features = [
     "rt",
     "macros",
 ] }
-tokio-stream.workspace = true
 serde_json.workspace = true
-similar-asserts.workspace = true
 criterion.workspace = true
+bincode.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = ["dep:serde"]
+serde-bincode-compat = ["serde_with"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
 
 [[bench]]

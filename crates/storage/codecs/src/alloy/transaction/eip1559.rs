@@ -2,8 +2,6 @@ use crate::Compact;
 use alloy_consensus::TxEip1559 as AlloyTxEip1559;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
-use serde::{Deserialize, Serialize};
-
 /// [EIP-1559 Transaction](https://eips.ethereum.org/EIPS/eip-1559)
 ///
 /// This is a helper type to use derive on it instead of manually managing `bitfield`.
@@ -11,9 +9,9 @@ use serde::{Deserialize, Serialize};
 /// By deriving `Compact` here, any future changes or enhancements to the `Compact` derive
 /// will automatically apply to this type.
 ///
-/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::transaction::TxEip1559`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default, Serialize, Deserialize)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip1559`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[cfg_attr(test, crate::add_arbitrary_tests(compact))]
 pub(crate) struct TxEip1559 {
     chain_id: ChainId,
@@ -35,7 +33,7 @@ impl Compact for AlloyTxEip1559 {
         let tx = TxEip1559 {
             chain_id: self.chain_id,
             nonce: self.nonce,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             max_fee_per_gas: self.max_fee_per_gas,
             max_priority_fee_per_gas: self.max_priority_fee_per_gas,
             to: self.to,
@@ -53,7 +51,7 @@ impl Compact for AlloyTxEip1559 {
         let alloy_tx = Self {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
-            gas_limit: tx.gas_limit.into(),
+            gas_limit: tx.gas_limit,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             to: tx.to,

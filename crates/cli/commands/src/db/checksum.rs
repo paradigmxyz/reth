@@ -1,9 +1,12 @@
 use crate::db::get::{maybe_json_value_parser, table_key};
 use ahash::RandomState;
 use clap::Parser;
+use reth_chainspec::EthereumHardforks;
 use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
-use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_provider::providers::ProviderNodeTypes;
 use std::{
     hash::{BuildHasher, Hasher},
     sync::Arc,
@@ -33,7 +36,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `db checksum` command
-    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
+    pub fn execute<N: NodeTypesWithEngine<ChainSpec: EthereumHardforks>>(
+        self,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    ) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
         self.table.view(&ChecksumViewer {
             tool,
@@ -45,20 +51,20 @@ impl Command {
     }
 }
 
-pub(crate) struct ChecksumViewer<'a, DB: Database> {
-    tool: &'a DbTool<DB>,
+pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
+    tool: &'a DbTool<N>,
     start_key: Option<String>,
     end_key: Option<String>,
     limit: Option<usize>,
 }
 
-impl<DB: Database> ChecksumViewer<'_, DB> {
-    pub(crate) const fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
+impl<N: NodeTypesWithDB> ChecksumViewer<'_, N> {
+    pub(crate) const fn new(tool: &'_ DbTool<N>) -> ChecksumViewer<'_, N> {
         ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
     }
 }
 
-impl<DB: Database> TableViewer<(u64, Duration)> for ChecksumViewer<'_, DB> {
+impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {

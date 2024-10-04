@@ -6,6 +6,7 @@ use std::{
     },
 };
 
+use alloy_primitives::B256;
 use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
@@ -23,7 +24,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
-use reth_primitives::{Head, TransactionSigned, B256};
+use reth_primitives::{Head, TransactionSigned};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use tokio::sync::{
@@ -212,8 +213,8 @@ impl PeersInfo for NetworkHandle {
     fn local_node_record(&self) -> NodeRecord {
         if let Some(discv4) = &self.inner.discv4 {
             discv4.node_record()
-        } else if let Some(discv5) = &self.inner.discv5 {
-            discv5.node_record()
+        } else if let Some(record) = self.inner.discv5.as_ref().and_then(|d| d.node_record()) {
+            record
         } else {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();

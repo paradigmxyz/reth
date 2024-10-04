@@ -1,13 +1,12 @@
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockHash, BlockNumber};
 use reth_blockchain_tree_api::{
     self,
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, ProviderError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader,
-};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions, FullExecutionDataProvider,

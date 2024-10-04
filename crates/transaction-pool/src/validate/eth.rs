@@ -3,7 +3,9 @@
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
     blobstore::BlobStore,
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
+    error::{
+        Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
+    },
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
@@ -15,7 +17,7 @@ use reth_primitives::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
@@ -48,7 +50,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     /// Validates a single transaction.
@@ -77,7 +79,7 @@ where
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
@@ -146,7 +148,7 @@ impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
 
 impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     /// Validates a single transaction.
@@ -274,6 +276,13 @@ where
                     InvalidTransactionError::TxTypeNotSupported.into(),
                 )
             }
+
+            if transaction.authorization_count() == 0 {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
+                )
+            }
         }
 
         if let Err(err) = ensure_intrinsic_gas(&transaction, &self.fork_tracker) {
@@ -326,20 +335,47 @@ where
             }
         };
 
-        // Signer account shouldn't have bytecode. Presence of bytecode means this is a
-        // smartcontract.
+        // Unless Prague is active, the signer account shouldn't have bytecode.
+        //
+        // If Prague is active, only EIP-7702 bytecode is allowed for the sender.
+        //
+        // Any other case means that the account is not an EOA, and should not be able to send
+        // transactions.
         if account.has_bytecode() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::SignerAccountHasBytecode.into(),
-            )
+            let is_eip7702 = if self.fork_tracker.is_prague_activated() {
+                match self
+                    .client
+                    .latest()
+                    .and_then(|state| state.bytecode_by_hash(account.get_bytecode_hash()))
+                {
+                    Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
+                    Err(err) => {
+                        return TransactionValidationOutcome::Error(
+                            *transaction.hash(),
+                            Box::new(err),
+                        )
+                    }
+                }
+            } else {
+                false
+            };
+
+            if !is_eip7702 {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::SignerAccountHasBytecode.into(),
+                )
+            }
         }
 
+        let tx_nonce = transaction.nonce();
+
         // Checks for nonce
-        if transaction.nonce() < account.nonce {
+        if tx_nonce < account.nonce {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::NonceNotConsistent.into(),
+                InvalidTransactionError::NonceNotConsistent { tx: tx_nonce, state: account.nonce }
+                    .into(),
             )
         }
 
@@ -797,8 +833,9 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, CoinbaseTipOrdering,
         EthPooledTransaction, Pool, TransactionPool,
     };
+    use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
-    use reth_primitives::{hex, PooledTransactionsElement, U256};
+    use reth_primitives::PooledTransactionsElement;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

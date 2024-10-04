@@ -141,7 +141,7 @@ fn load_field_from_segments(
         }
 
         if is_enum {
-            fields.push(FieldTypes::EnumUnnamedField((ftype.to_string(), use_alt_impl)));
+            fields.push(FieldTypes::EnumUnnamedField((ftype, use_alt_impl)));
         } else {
             let should_compact = is_flag_type(&ftype) ||
                 field.attrs.iter().any(|attr| {
@@ -162,8 +162,8 @@ fn load_field_from_segments(
 /// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<B256>`.
 ///
 /// If so, we use another impl to code/decode its data.
-fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
-    if *ftype == "Vec" || *ftype == "Option" {
+fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
+    if ftype == "Vec" || ftype == "Option" {
         if let syn::PathArguments::AngleBracketed(ref args) = segment.arguments {
             if let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() {
                 if let (Some(path), 1) =
@@ -245,6 +245,10 @@ mod tests {
                 pub const fn bitflag_encoded_bytes() -> usize {
                     2u8 as usize
                 }
+                #[doc = "Unused bits for new fields by [`TestStructFlags`]"]
+                pub const fn bitflag_unused_bits() -> usize {
+                    1u8 as usize
+                }
             }
 
             pub use TestStruct_flags::TestStructFlags;
@@ -287,6 +291,7 @@ mod tests {
                 assert_eq!(obj, same_obj);
             }
             #[test]
+            #[allow(missing_docs)]
             pub fn fuzz_test_struct() {
                 fuzz_test_test_struct(TestStruct::default())
             }

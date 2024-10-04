@@ -2,21 +2,24 @@
 
 use crate::{Nibbles, TrieAccount};
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::{encode_fixed_size, Decodable};
+use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
-    proof::{verify_proof, ProofVerificationError},
+    proof::{verify_proof, ProofNodes, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
+use itertools::Itertools;
 use reth_primitives_traits::{constants::KECCAK_EMPTY, Account};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
+/// Multiproof is effectively a state subtrie that only contains the nodes
+/// in the paths of target accounts.  
 #[derive(Clone, Default, Debug)]
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
-    pub account_subtree: BTreeMap<Nibbles, Bytes>,
+    pub account_subtree: ProofNodes,
     /// Storage trie multiproofs.
     pub storages: HashMap<B256, StorageMultiProof>,
 }
@@ -34,8 +37,8 @@ impl MultiProof {
         // Retrieve the account proof.
         let proof = self
             .account_subtree
-            .iter()
-            .filter(|(path, _)| nibbles.starts_with(path))
+            .matching_nodes_iter(&nibbles)
+            .sorted_by(|a, b| a.0.cmp(b.0))
             .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
@@ -80,16 +83,21 @@ pub struct StorageMultiProof {
     /// Storage trie root.
     pub root: B256,
     /// Storage multiproof for requested slots.
-    pub subtree: BTreeMap<Nibbles, Bytes>,
-}
-
-impl Default for StorageMultiProof {
-    fn default() -> Self {
-        Self { root: EMPTY_ROOT_HASH, subtree: BTreeMap::default() }
-    }
+    pub subtree: ProofNodes,
 }
 
 impl StorageMultiProof {
+    /// Create new storage multiproof for empty trie.
+    pub fn empty() -> Self {
+        Self {
+            root: EMPTY_ROOT_HASH,
+            subtree: ProofNodes::from_iter([(
+                Nibbles::default(),
+                Bytes::from([EMPTY_STRING_CODE]),
+            )]),
+        }
+    }
+
     /// Return storage proofs for the target storage slot (unhashed).
     pub fn storage_proof(&self, slot: B256) -> Result<StorageProof, alloy_rlp::Error> {
         let nibbles = Nibbles::unpack(keccak256(slot));
@@ -97,8 +105,8 @@ impl StorageMultiProof {
         // Retrieve the storage proof.
         let proof = self
             .subtree
-            .iter()
-            .filter(|(path, _)| nibbles.starts_with(path))
+            .matching_nodes_iter(&nibbles)
+            .sorted_by(|a, b| a.0.cmp(b.0))
             .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
@@ -204,6 +212,12 @@ impl StorageProof {
     /// Create new storage proof from the storage slot and its pre-hashed image.
     pub fn new_with_nibbles(key: B256, nibbles: Nibbles) -> Self {
         Self { key, nibbles, ..Default::default() }
+    }
+
+    /// Set proof nodes on storage proof.
+    pub fn with_proof(mut self, proof: Vec<Bytes>) -> Self {
+        self.proof = proof;
+        self
     }
 
     /// Verify the proof against the provided storage root.

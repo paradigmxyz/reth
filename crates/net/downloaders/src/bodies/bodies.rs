@@ -1,5 +1,6 @@
 use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
+use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
@@ -12,7 +13,7 @@ use reth_network_p2p::{
     },
     error::{DownloadError, DownloadResult},
 };
-use reth_primitives::{BlockNumber, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -601,12 +602,14 @@ mod tests {
         bodies::test_utils::{insert_headers, zip_blocks},
         test_utils::{generate_bodies, TestBodiesClient},
     };
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_chainspec::MAINNET;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{BlockBody, B256};
-    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+    use reth_provider::{
+        providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
+    };
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::collections::HashMap;
 
@@ -628,7 +631,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(
+            ProviderFactory::<MockNodeTypesWithDB>::new(
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -657,20 +660,8 @@ mod tests {
         );
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
-        let bodies = blocks
-            .into_iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body,
-                        ommers: block.ommers,
-                        withdrawals: None,
-                        requests: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+        let bodies =
+            blocks.into_iter().map(|block| (block.hash(), block.body)).collect::<HashMap<_, _>>();
 
         insert_headers(db.db(), &headers);
 
@@ -682,7 +673,7 @@ mod tests {
             BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(
+                ProviderFactory::<MockNodeTypesWithDB>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -716,7 +707,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(
+                ProviderFactory::<MockNodeTypesWithDB>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -752,7 +743,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(
+            ProviderFactory::<MockNodeTypesWithDB>::new(
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -798,7 +789,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(
+                ProviderFactory::<MockNodeTypesWithDB>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -835,7 +826,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(
+                ProviderFactory::<MockNodeTypesWithDB>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),

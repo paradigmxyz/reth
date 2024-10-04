@@ -1,18 +1,60 @@
-use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpec;
-use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, Header, Receipt, SealedBlock, Withdrawals, B256, U256,
-};
-use reth_rpc_types::{
+use crate::{PayloadBuilderError, PayloadEvents, PayloadTypes};
+use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
-    optimism::OptimismPayloadAttributes,
     Withdrawal,
 };
+use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
+use reth_chain_state::ExecutedBlock;
+use reth_primitives::{SealedBlock, Withdrawals};
+use std::{future::Future, pin::Pin};
+use tokio::sync::oneshot;
 
-use crate::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-};
+pub(crate) type PayloadFuture<P> =
+    Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
+/// A type that can request, subscribe to and resolve payloads.
+#[async_trait::async_trait]
+pub trait PayloadBuilder: Send + Unpin {
+    /// The Payload type for the builder.
+    type PayloadType: PayloadTypes;
+    /// The error type returned by the builder.
+    type Error;
+
+    /// Sends a message to the service to start building a new payload for the given payload
+    /// attributes and returns a future that resolves to the payload.
+    async fn send_and_resolve_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadFuture<<Self::PayloadType as PayloadTypes>::BuiltPayload>, Self::Error>;
+
+    /// Returns the best payload for the given identifier.
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
+
+    /// Sends a message to the service to start building a new payload for the given payload.
+    ///
+    /// This is the same as [`PayloadBuilder::new_payload`] but does not wait for the result
+    /// and returns the receiver instead
+    fn send_new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> oneshot::Receiver<Result<PayloadId, Self::Error>>;
+
+    /// Starts building a new payload for the given payload attributes.
+    ///
+    /// Returns the identifier of the payload.
+    async fn new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadId, Self::Error>;
+
+    /// Sends a message to the service to subscribe to payload events.
+    /// Returns a receiver that will receive them.
+    async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error>;
+}
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.
@@ -22,9 +64,6 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
-
-    /// Returns the Receipts
-    fn receipts(&self) -> &[Receipt];
 
     /// Returns the entire execution data for the built block, if available.
     fn executed_block(&self) -> Option<ExecutedBlock> {
@@ -41,7 +80,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: std::error::Error;
+    type Error: core::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
@@ -73,21 +112,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
-
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    ///
-    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
-    /// based on its timestamp.
-    ///
-    /// Block related settings are derived from the `parent` block and the configured attributes.
-    ///
-    /// NOTE: This is only intended for beacon consensus (after merge).
-    fn cfg_and_block_env(
-        &self,
-        chain_spec: &ChainSpec,
-        parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.
@@ -105,14 +129,6 @@ pub trait PayloadAttributes:
 
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
-
-    /// Ensures that the payload attributes are valid for the given [`ChainSpec`] and
-    /// [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -126,14 +142,6 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
-    }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())
     }
 }
 
@@ -149,20 +157,15 @@ impl PayloadAttributes for OptimismPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
     }
+}
 
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())?;
+/// A builder that can return the current payload attribute.
+pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
+    /// The payload attributes type returned by the builder.
+    type PayloadAttributes: PayloadAttributes;
+    /// The error type returned by [`PayloadAttributesBuilder::build`].
+    type Error: core::error::Error + Send + Sync;
 
-        if self.gas_limit.is_none() {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ))
-        }
-
-        Ok(())
-    }
+    /// Return a new payload attribute from the builder.
+    fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;
 }

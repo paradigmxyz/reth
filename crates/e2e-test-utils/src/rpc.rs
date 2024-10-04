@@ -1,5 +1,6 @@
 use alloy_consensus::TxEnvelope;
-use alloy_network::{eip2718::Decodable2718, Network};
+use alloy_network::eip2718::Decodable2718;
+use alloy_primitives::{Bytes, B256};
 use reth::{
     builder::{rpc::RpcRegistry, FullNodeComponents},
     rpc::api::{
@@ -7,9 +8,8 @@ use reth::{
         DebugApiServer,
     },
 };
-use reth_node_builder::EthApiTypes;
-use reth_primitives::{Bytes, B256};
-use reth_rpc_types::WithOtherFields;
+use reth_chainspec::EthereumHardforks;
+use reth_node_builder::{EthApiTypes, NodeTypes};
 
 #[allow(missing_debug_implementations)]
 pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
@@ -18,13 +18,8 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
-    Node: FullNodeComponents,
-    EthApi: EthApiSpec
-        + EthTransactions<
-            NetworkTypes: Network<
-                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
-            >,
-        > + TraceExt,
+    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    EthApi: EthApiSpec + EthTransactions + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
     pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {

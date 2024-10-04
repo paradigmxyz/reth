@@ -9,7 +9,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
-    HashingWriter,
+    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -86,7 +86,7 @@ impl Case for BlockchainTestCase {
                 let provider = create_test_provider_factory_with_chain_spec(Arc::new(
                     case.network.clone().into(),
                 ))
-                .provider_rw()
+                .database_provider_rw()
                 .unwrap();
 
                 // Insert initial test state into the provider.
@@ -102,10 +102,9 @@ impl Case for BlockchainTestCase {
 
                 // Initialize receipts static file with genesis
                 {
-                    let mut receipts_writer = provider
-                        .static_file_provider()
-                        .latest_writer(StaticFileSegment::Receipts)
-                        .unwrap();
+                    let static_file_provider = provider.static_file_provider();
+                    let mut receipts_writer =
+                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
                     receipts_writer.increment_block(0).unwrap();
                     receipts_writer.commit_without_sync_all().unwrap();
                 }

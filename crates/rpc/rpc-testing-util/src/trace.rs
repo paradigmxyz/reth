@@ -1,19 +1,18 @@
 //! Helpers for testing trace calls.
 
+use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
+use alloy_rpc_types::Index;
+use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_trace::{
+    filter::TraceFilter,
+    parity::{LocalizedTransactionTrace, TraceResults, TraceType},
+    tracerequest::TraceCallRequest,
+};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, Bytes, TxHash, B256};
+use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
-use reth_rpc_types::{
-    trace::{
-        filter::TraceFilter,
-        parity::{LocalizedTransactionTrace, TraceResults, TraceType},
-        tracerequest::TraceCallRequest,
-    },
-    Index, TransactionRequest,
-};
 use std::{
-    collections::HashSet,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -515,9 +514,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_trace::filter::TraceFilterMode;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
-    use reth_rpc_types::trace::filter::TraceFilterMode;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
 
@@ -540,12 +539,11 @@ mod tests {
             "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
         ];
 
-        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+        let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
 
         let mut stream = client.replay_transactions(transactions, trace_types);
         let mut successes = 0;
         let mut failures = 0;
-        let mut all_results = Vec::new();
 
         assert_is_stream(&stream);
 
@@ -554,12 +552,10 @@ mod tests {
                 Ok((trace_result, tx_hash)) => {
                     println!("Success for tx_hash {tx_hash:?}: {trace_result:?}");
                     successes += 1;
-                    all_results.push(Ok((trace_result, tx_hash)));
                 }
                 Err((error, tx_hash)) => {
                     println!("Error for tx_hash {tx_hash:?}: {error:?}");
                     failures += 1;
-                    all_results.push(Err((error, tx_hash)));
                 }
             }
         }
@@ -575,7 +571,7 @@ mod tests {
 
         let call_request_1 = TransactionRequest::default();
         let call_request_2 = TransactionRequest::default();
-        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+        let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
         let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
 
         let mut stream = client.trace_call_many_stream(calls, None);
@@ -656,7 +652,6 @@ mod tests {
         let mut stream = client.trace_call_stream(trace_call_request);
         let mut successes = 0;
         let mut failures = 0;
-        let mut all_results = Vec::new();
 
         assert_is_stream(&stream);
 
@@ -665,12 +660,10 @@ mod tests {
                 Ok(trace_result) => {
                     println!("Success: {trace_result:?}");
                     successes += 1;
-                    all_results.push(Ok(trace_result));
                 }
                 Err((error, request)) => {
                     println!("Error for request {request:?}: {error:?}");
                     failures += 1;
-                    all_results.push(Err((error, request)));
                 }
             }
         }

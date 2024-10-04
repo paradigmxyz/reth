@@ -13,21 +13,28 @@ workspace = true
 
 [dependencies]
 ## reth
+reth-chain-state.workspace = true
+reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
-reth-exex-types.workspace = true
+reth-exex-types = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-payload-builder.workspace = true
-reth-primitives-traits.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 ## async
 futures.workspace = true
@@ -36,20 +43,28 @@ tokio.workspace = true
 
 ## misc
 eyre.workspace = true
+itertools.workspace = true
 metrics.workspace = true
+parking_lot.workspace = true
+rmp-serde = "1.3"
+tracing.workspace = true
 
 [dev-dependencies]
 reth-blockchain-tree.workspace = true
-reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-evm-ethereum.workspace = true
 reth-node-api.workspace = true
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
-reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
+
+rand.workspace = true
 secp256k1.workspace = true
+tempfile.workspace = true
 
 [features]
 default = []

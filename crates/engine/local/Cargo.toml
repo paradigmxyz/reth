@@ -1,0 +1,51 @@
+[package]
+name = "reth-engine-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# reth
+reth-beacon-consensus.workspace = true
+reth-chain-state.workspace = true
+reth-engine-tree.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-node-types.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
+reth-transaction-pool.workspace = true
+reth-stages-api.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+# async
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+
+# misc
+eyre.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+reth-chainspec.workspace = true
+reth-chain-state.workspace = true
+reth-config.workspace = true
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-exex-test-utils.workspace = true
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
+
+[lints]
+workspace = true

@@ -3,7 +3,7 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 use std::collections::HashSet;
@@ -49,7 +49,6 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
 /// The cursor to iterate over account trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct InMemoryAccountTrieCursor<'a, C> {
     /// The database cursor.
     cursor: C,

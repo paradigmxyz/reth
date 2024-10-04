@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 mod auth;
 mod http;
 mod middleware;

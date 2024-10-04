@@ -1,16 +1,17 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
+use alloy_consensus::TxLegacy;
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
+use alloy_primitives::{Address, BlockNumber, Bytes, Parity, Sealable, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, Request,
-    Requests, SealedBlock, SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind,
-    TxLegacy, Withdrawal, Withdrawals, B256, U256,
+    proofs, sign_message, Account, BlockBody, Header, Log, Receipt, Request, Requests, SealedBlock,
+    SealedHeader, StorageEntry, Transaction, TransactionSigned, Withdrawal, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -36,7 +37,7 @@ pub struct BlockParams {
 }
 
 /// Used to pass arguments for random block generation function in tests
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockRangeParams {
     /// The parent hash of the block.
     pub parent: Option<B256>,
@@ -48,6 +49,17 @@ pub struct BlockRangeParams {
     pub requests_count: Option<Range<u8>>,
     /// The number of withdrawals in the block.
     pub withdrawals_count: Option<Range<u8>>,
+}
+
+impl Default for BlockRangeParams {
+    fn default() -> Self {
+        Self {
+            parent: None,
+            tx_count: 0..u8::MAX / 2,
+            requests_count: None,
+            withdrawals_count: None,
+        }
+    }
 }
 
 /// Returns a random number generator that can be seeded using the `SEED` environment variable.
@@ -96,7 +108,9 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    header.seal_slow()
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    SealedHeader::new(header, seal)
 }
 
 /// Generates a random legacy [Transaction].
@@ -136,8 +150,17 @@ pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> Tra
 
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
-    let signature =
+    let mut signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+
+    if matches!(tx, Transaction::Legacy(_)) {
+        signature = if let Some(chain_id) = tx.chain_id() {
+            signature.with_chain_id(chain_id)
+        } else {
+            signature.with_parity(Parity::NonEip155(signature.v().y_parity()))
+        }
+    }
+
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
@@ -195,24 +218,30 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     });
     let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
+    let sealed = Header {
+        parent_hash: block_params.parent.unwrap_or_default(),
+        number,
+        gas_used: total_gas,
+        gas_limit: total_gas,
+        transactions_root,
+        ommers_hash,
+        base_fee_per_gas: Some(rng.gen()),
+        requests_root,
+        withdrawals_root,
+        ..Default::default()
+    }
+    .seal_slow();
+
+    let (header, seal) = sealed.into_parts();
+
     SealedBlock {
-        header: Header {
-            parent_hash: block_params.parent.unwrap_or_default(),
-            number,
-            gas_used: total_gas,
-            gas_limit: total_gas,
-            transactions_root,
-            ommers_hash,
-            base_fee_per_gas: Some(rng.gen()),
-            requests_root,
-            withdrawals_root,
-            ..Default::default()
-        }
-        .seal_slow(),
-        body: transactions,
-        ommers,
-        withdrawals: withdrawals.map(Withdrawals::new),
-        requests: requests.map(Requests),
+        header: SealedHeader::new(header, seal),
+        body: BlockBody {
+            transactions,
+            ommers,
+            withdrawals: withdrawals.map(Withdrawals::new),
+            requests: requests.map(Requests),
+        },
     }
 }
 
@@ -469,7 +498,10 @@ pub fn random_request<R: Rng>(rng: &mut R) -> Request {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
+    use alloy_consensus::TxEip1559;
+    use alloy_eips::eip2930::AccessList;
+    use alloy_primitives::{hex, Parity};
+    use reth_primitives::{public_key_to_address, Signature};
     use std::str::FromStr;
 
     #[test]
@@ -533,17 +565,17 @@ mod tests {
                 .unwrap();
         let signature = sign_message(secret, hash).unwrap();
 
-        let expected = Signature {
-            r: U256::from_str(
+        let expected = Signature::new(
+            U256::from_str(
                 "18515461264373351373200002665853028612451056578545711640558177340181847433846",
             )
             .unwrap(),
-            s: U256::from_str(
+            U256::from_str(
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            odd_y_parity: false,
-        };
+            Parity::Parity(false),
+        );
         assert_eq!(expected, signature);
     }
 }

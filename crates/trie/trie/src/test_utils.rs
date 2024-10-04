@@ -1,5 +1,6 @@
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::encode_fixed_size;
-use reth_primitives::{Account, Address, B256, U256};
+use reth_primitives::Account;
 use reth_trie_common::{triehash::KeccakHasher, TrieAccount};
 
 /// Re-export of [triehash].

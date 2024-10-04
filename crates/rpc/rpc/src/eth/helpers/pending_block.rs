@@ -1,7 +1,8 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
+use reth_primitives::Header;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
 use reth_rpc_eth_types::PendingBlock;
@@ -15,17 +16,17 @@ where
     Self: SpawnBlocking,
     Provider: BlockReaderIdExt
         + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
     fn provider(
         &self,
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + ChainSpecProvider<ChainSpec: EthereumHardforks>
            + StateProviderFactory {
         self.inner.provider()
     }
@@ -41,7 +42,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
         self.inner.evm_config()
     }
 }

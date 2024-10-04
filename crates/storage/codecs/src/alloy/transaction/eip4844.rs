@@ -1,12 +1,9 @@
 use crate::{Compact, CompactPlaceholder};
-use alloy_consensus::transaction::TxEip4844 as AlloyTxEip4844;
+use alloc::vec::Vec;
+use alloy_consensus::TxEip4844 as AlloyTxEip4844;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
 use reth_codecs_derive::add_arbitrary_tests;
-use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
@@ -15,9 +12,9 @@ use alloc::vec::Vec;
 /// By deriving `Compact` here, any future changes or enhancements to the `Compact` derive
 /// will automatically apply to this type.
 ///
-/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::transaction::TxEip4844`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip4844`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxEip4844 {
     chain_id: ChainId,
@@ -45,7 +42,7 @@ impl Compact for AlloyTxEip4844 {
         let tx = TxEip4844 {
             chain_id: self.chain_id,
             nonce: self.nonce,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             max_fee_per_gas: self.max_fee_per_gas,
             max_priority_fee_per_gas: self.max_priority_fee_per_gas,
             placeholder: Some(()),
@@ -64,7 +61,7 @@ impl Compact for AlloyTxEip4844 {
         let alloy_tx = Self {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
-            gas_limit: tx.gas_limit as u128,
+            gas_limit: tx.gas_limit,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             to: tx.to,

@@ -1,15 +1,14 @@
+use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
-use reth_db_api::{
-    database::Database,
-    table::{Decompress, DupSort, Table},
-};
+use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
-use reth_primitives::{BlockHash, Header};
-use reth_provider::StaticFileProviderFactory;
+use reth_node_builder::NodeTypesWithDB;
+use reth_primitives::Header;
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
@@ -54,7 +53,7 @@ enum Subcommand {
 
 impl Command {
     /// Execute `db get` command
-    pub fn execute<DB: Database>(self, tool: &DbTool<DB>) -> eyre::Result<()> {
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, raw })?
@@ -89,14 +88,14 @@ impl Command {
                 match content {
                     Some(content) => {
                         if raw {
-                            println!("{content:?}");
+                            println!("{}", hex::encode_prefixed(&content[0]));
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
                                     let header = Header::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
-                                        "{}\n{}",
+                                        "Header\n{}\n\nBlockHash\n{}",
                                         serde_json::to_string_pretty(&header)?,
                                         serde_json::to_string_pretty(&block_hash)?
                                     );
@@ -138,14 +137,14 @@ fn table_subkey<T: DupSort>(subkey: &Option<String>) -> Result<T::SubKey, eyre::
         .map_err(|e| eyre::eyre!(e))
 }
 
-struct GetValueViewer<'a, DB: Database> {
-    tool: &'a DbTool<DB>,
+struct GetValueViewer<'a, N: NodeTypesWithDB> {
+    tool: &'a DbTool<N>,
     key: String,
     subkey: Option<String>,
     raw: bool,
 }
 
-impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
+impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
@@ -154,7 +153,7 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
         let content = if self.raw {
             self.tool
                 .get::<RawTable<T>>(RawKey::from(key))?
-                .map(|content| format!("{:?}", content.raw_value()))
+                .map(|content| hex::encode_prefixed(content.raw_value()))
         } else {
             self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
         };
@@ -202,10 +201,10 @@ pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, B256};
     use clap::{Args, Parser};
     use reth_db::{AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory};
     use reth_db_api::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
-    use reth_primitives::{Address, B256};
     use std::str::FromStr;
 
     /// A helper type to parse Args more easily

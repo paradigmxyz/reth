@@ -36,6 +36,10 @@ pub mod node_iter;
 mod state;
 pub use state::*;
 
+/// Input for trie computation.
+mod input;
+pub use input::TrieInput;
+
 /// Merkle proof generation.
 pub mod proof;
 
@@ -58,6 +62,17 @@ pub mod stats;
 
 // re-export for convenience
 pub use reth_trie_common::*;
+
+/// Bincode-compatible serde implementations for trie types.
+///
+/// `bincode` crate allows for more efficient serialization of trie types, because it allows
+/// non-string map keys.
+///
+/// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+pub mod serde_bincode_compat {
+    pub use super::updates::serde_bincode_compat as updates;
+}
 
 /// Trie calculation metrics.
 #[cfg(feature = "metrics")]

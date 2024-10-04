@@ -1,6 +1,7 @@
 //! Commonly used code snippets
 
-use reth_primitives::{Bytes, PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+use alloy_primitives::Bytes;
+use reth_primitives::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use std::future::Future;
 
 use super::{EthApiError, EthResult};

@@ -12,12 +12,12 @@ use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
@@ -55,11 +55,11 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network(
+    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -77,8 +77,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
         let provider = provider_factory.provider()?;
 
@@ -114,14 +118,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let header = (move || {
             get_single_header(client.clone(), BlockHashOrNumber::Number(target_block_number))
         })
-        .retry(&backoff)
+        .retry(backoff)
         .notify(|err, _| warn!(target: "reth::cli", "Error requesting header: {err}. Retrying..."))
         .await?;
 
         let client = fetch_client.clone();
         let chain = provider_factory.chain_spec();
         let block = (move || get_single_body(client.clone(), Arc::clone(&chain), header.clone()))
-            .retry(&backoff)
+            .retry(backoff)
             .notify(
                 |err, _| warn!(target: "reth::cli", "Error requesting body: {err}. Retrying..."),
             )
@@ -169,7 +173,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
+        let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw.0);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;

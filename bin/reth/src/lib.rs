@@ -18,9 +18,6 @@
 //!   calls to the logging component is made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
-//! - `optimism`: Enables [OP-Stack](https://stack.optimism.io/) support for the node. Note that
-//!   this breaks compatibility with the Ethereum mainnet as a new deposit transaction type is
-//!   introduced as well as gas cost changes.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -114,6 +111,11 @@ pub mod blockchain_tree {
     pub use reth_blockchain_tree::*;
 }
 
+/// Re-exported from `reth_consensus`.
+pub mod consensus {
+    pub use reth_consensus::*;
+}
+
 /// Re-exported from `reth_consensus_common`.
 pub mod consensus_common {
     pub use reth_consensus_common::*;
@@ -144,15 +146,14 @@ pub mod transaction_pool {
 
 /// Re-export of `reth_rpc_*` crates.
 pub mod rpc {
-
     /// Re-exported from `reth_rpc_builder`.
     pub mod builder {
         pub use reth_rpc_builder::*;
     }
 
-    /// Re-exported from `reth_rpc_types`.
+    /// Re-exported from `alloy_rpc_types`.
     pub mod types {
-        pub use reth_rpc_types::*;
+        pub use alloy_rpc_types::*;
     }
 
     /// Re-exported from `reth_rpc_server_types`.
@@ -187,9 +188,6 @@ pub mod rpc {
 // re-export for convenience
 #[doc(inline)]
 pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
-
-#[cfg(all(feature = "jemalloc", unix))]
-use tikv_jemallocator as _;
 
 // for rendering diagrams
 use aquamarine as _;

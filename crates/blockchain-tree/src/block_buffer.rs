@@ -1,6 +1,7 @@
 use crate::metrics::BlockBufferMetrics;
+use alloy_primitives::{BlockHash, BlockNumber};
 use reth_network::cache::LruCache;
-use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
+use reth_primitives::SealedBlockWithSenders;
 use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
@@ -182,7 +183,9 @@ impl BlockBuffer {
 #[cfg(test)]
 mod tests {
     use crate::BlockBuffer;
-    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
+    use alloy_eips::BlockNumHash;
+    use alloy_primitives::BlockHash;
+    use reth_primitives::SealedBlockWithSenders;
     use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 

@@ -13,12 +13,24 @@ workspace = true
 
 [dependencies]
 # reth
-reth-consensus-common.workspace = true
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
+reth-consensus-common.workspace = true
 reth-consensus.workspace = true
+reth-primitives.workspace = true
+reth-trie-common.workspace = true
+
+# op-reth
+reth-optimism-forks.workspace = true
+reth-optimism-chainspec.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 
 tracing.workspace = true
+
+[dev-dependencies]
+alloy-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism"]

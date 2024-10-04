@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use byteorder::{ByteOrder, LittleEndian};
 use reth_libmdbx::*;
 use tempfile::tempdir;

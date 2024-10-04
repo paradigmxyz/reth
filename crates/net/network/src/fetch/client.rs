@@ -5,6 +5,7 @@ use std::sync::{
     Arc,
 };
 
+use alloy_primitives::B256;
 use futures::{future, future::Either};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
@@ -16,7 +17,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{Header, B256};
+use reth_primitives::Header;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};

@@ -1,16 +1,18 @@
 //! Stream wrapper that simulates reorgs.
 
+use alloy_primitives::U256;
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
+};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{system_calls::apply_beacon_root_contract_call, ConfigureEvm};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, Header, Receipt, Receipts, U256,
-};
+use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -18,13 +20,11 @@ use reth_revm::{
     state_change::post_block_withdrawals_balance_increments,
     DatabaseCommit,
 };
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState, PayloadStatus},
-    ExecutionPayload,
-};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_trie::HashedPostState;
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg};
+use revm_primitives::{
+    calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
+};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -50,7 +50,7 @@ type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
+pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Spec> {
     /// Underlying stream
     #[pin]
     stream: S,
@@ -59,7 +59,7 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     /// Evm configuration.
     evm_config: Evm,
     /// Payload validator.
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<Spec>,
     /// The frequency of reorgs.
     frequency: usize,
     /// The depth of reorgs.
@@ -75,13 +75,13 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
-impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm> {
+impl<S, Engine: EngineTypes, Provider, Evm, Spec> EngineReorg<S, Engine, Provider, Evm, Spec> {
     /// Creates new [`EngineReorg`] stream wrapper.
     pub fn new(
         stream: S,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         frequency: usize,
         depth: usize,
     ) -> Self {
@@ -100,12 +100,13 @@ impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm
     }
 }
 
-impl<S, Engine, Provider, Evm> Stream for EngineReorg<S, Engine, Provider, Evm>
+impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider, Evm, Spec>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
+    Spec: EthereumHardforks,
 {
     type Item = S::Item;
 
@@ -227,17 +228,18 @@ where
     }
 }
 
-fn create_reorg_head<Provider, Evm>(
+fn create_reorg_head<Provider, Evm, Spec>(
     provider: &Provider,
     evm_config: &Evm,
-    payload_validator: &ExecutionPayloadValidator,
+    payload_validator: &ExecutionPayloadValidator<Spec>,
     mut depth: usize,
     next_payload: ExecutionPayload,
     next_cancun_fields: Option<CancunPayloadFields>,
 ) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
 where
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
+    Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
 
@@ -248,7 +250,7 @@ where
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash;
-    let mut candidate_transactions = next_block.body;
+    let mut candidate_transactions = next_block.body.transactions;
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
@@ -260,7 +262,7 @@ where
 
             depth -= 1;
             previous_hash = reorg_target.parent_hash;
-            candidate_transactions = reorg_target.body;
+            candidate_transactions = reorg_target.body.transactions;
         }
     };
     let reorg_target_parent = provider
@@ -279,20 +281,14 @@ where
     // Configure environments
     let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
     let mut block_env = BlockEnv::default();
-    evm_config.fill_cfg_and_block_env(
-        &mut cfg,
-        &mut block_env,
-        chain_spec,
-        &reorg_target.header,
-        U256::MAX,
-    );
+    evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, &reorg_target.header, U256::MAX);
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    apply_beacon_root_contract_call(
-        evm_config,
-        chain_spec,
+    let mut system_caller = SystemCaller::new(evm_config, chain_spec);
+
+    system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
         reorg_target.number,
         reorg_target.parent_beacon_block_root,
@@ -350,7 +346,7 @@ where
     }
     drop(evm);
 
-    if let Some(withdrawals) = &reorg_target.withdrawals {
+    if let Some(withdrawals) = &reorg_target.body.withdrawals {
         state.increment_balances(post_block_withdrawals_balance_increments(
             chain_spec,
             reorg_target.timestamp,
@@ -374,7 +370,7 @@ where
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
             (
                 Some(sum_blob_gas_used),
-                Some(calculate_excess_blob_gas(
+                Some(calc_excess_blob_gas(
                     reorg_target_parent.excess_blob_gas.unwrap_or_default(),
                     reorg_target_parent.blob_gas_used.unwrap_or_default(),
                 )),
@@ -406,14 +402,16 @@ where
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
             requests_root: None, // TODO(prague)
             gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas,
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: excess_blob_gas.map(Into::into),
             state_root: state_provider.state_root(hashed_state)?,
         },
-        body: transactions,
-        ommers: reorg_target.ommers,
-        withdrawals: reorg_target.withdrawals,
-        requests: None, // TODO(prague)
+        body: BlockBody {
+            transactions,
+            ommers: reorg_target.body.ommers,
+            withdrawals: reorg_target.body.withdrawals,
+            requests: None, // TODO(prague)
+        },
     }
     .seal_slow();
 

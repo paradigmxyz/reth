@@ -6,12 +6,13 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
 use reth_db_api::models::CompactU256;
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, Header, Receipt, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    Header, Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -118,7 +119,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         Ok(self
             .cursor()?
             .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-            .map(|(header, hash)| header.seal(hash)))
+            .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
     fn sealed_headers_while(
@@ -135,7 +136,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {
-                let sealed = header.seal(hash);
+                let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {
                     break
                 }

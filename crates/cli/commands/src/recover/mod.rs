@@ -1,9 +1,10 @@
 //! `reth recover` command.
 
 use clap::{Parser, Subcommand};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
+use reth_node_builder::NodeTypesWithEngine;
 
 mod storage_tries;
 
@@ -21,11 +22,14 @@ pub enum Subcommands<C: ChainSpecParser> {
     StorageTries(storage_tries::Command<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `recover` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
         match self.command {
-            Subcommands::StorageTries(command) => command.execute(ctx).await,
+            Subcommands::StorageTries(command) => command.execute::<N>(ctx).await,
         }
     }
 }

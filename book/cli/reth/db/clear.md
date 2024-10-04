@@ -4,6 +4,8 @@ Deletes all table entries
 
 ```bash
 $ reth db clear --help
+```
+```txt
 Usage: reth db clear [OPTIONS] <COMMAND>
 
 Commands:

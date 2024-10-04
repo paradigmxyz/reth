@@ -16,8 +16,8 @@ use reth_cli_commands::{
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::args::utils::DefaultChainSpecParser;
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_core::args::utils::EthereumChainSpecParser;
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -34,7 +34,8 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
+{
     /// The command to run
     #[command(subcommand)]
     command: Commands<C, Ext>,
@@ -45,7 +46,7 @@ pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fm
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = C::help_messge(),
+        long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser(),
         global = true,
@@ -116,14 +117,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
+    /// use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::<DefaultChainSpecParser, MyArgs>::parse()
+    /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
     ///     .run(|builder, my_args: MyArgs| async move {
     ///         // launch the node
     ///
@@ -133,7 +134,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// ````
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
@@ -148,22 +149,33 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
-            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute(EthExecutorProvider::ethereum))
+            Commands::Init(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
+            Commands::InitState(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
+                command.execute::<EthereumNode, _, _>(EthExecutorProvider::ethereum),
+            ),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner
-                .run_command_until_exit(|ctx| command.execute(ctx, EthExecutorProvider::ethereum)),
+            Commands::Db(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
+                command.execute::<EthereumNode, _, _>(ctx, EthExecutorProvider::ethereum)
+            }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
+            }
+            Commands::Recover(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
+            }
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
         }
     }
 
@@ -239,7 +251,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<DefaultChainSpecParser, NoArgs>::command();
+        let reth = Cli::<EthereumChainSpecParser, NoArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()

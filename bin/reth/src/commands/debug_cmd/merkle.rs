@@ -10,17 +10,19 @@ use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::{tables, DatabaseEnv};
+use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider,
+    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, ProviderFactory, StateWriter, StaticFileProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -54,11 +56,11 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network(
+    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -76,10 +78,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `merkle-debug` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
-        let provider_rw = provider_factory.provider_rw()?;
+        let provider_rw = provider_factory.database_provider_rw()?;
 
         // Configure and build network
         let network_secret_path =
@@ -107,7 +113,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let to_header = (move || {
             get_single_header(client.clone(), BlockHashOrNumber::Number(self.to))
         })
-        .retry(&backoff)
+        .retry(backoff)
         .notify(|err, _| warn!(target: "reth::cli", "Error requesting header: {err}. Retrying..."))
         .await?;
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");

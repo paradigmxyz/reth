@@ -13,6 +13,29 @@ rpc-compat:
   - eth_getTransactionReceipt/get-access-list (reth)
   - eth_getTransactionReceipt/get-blob-tx (reth)
   - eth_getTransactionReceipt/get-dynamic-fee (reth)
+  - eth_getBlockByHash/get-block-by-hash (reth)
+  - eth_getBlockByNumber/get-block-n (reth)
+  - eth_getBlockByNumber/get-finalized (reth)
+  - eth_getBlockByNumber/get-genesis (reth)
+  - eth_getBlockByNumber/get-latest (reth)
+  - eth_getBlockByNumber/get-safe (reth)
+
+  - eth_createAccessList/create-al-contract-eip1559 (reth)
+  - eth_createAccessList/create-al-contract (reth)
+  - eth_getProof/get-account-proof-blockhash (reth)
+  - eth_getProof/get-account-proof-latest (reth)
+  - eth_getProof/get-account-proof-with-storage (reth)
+  - eth_getTransactionByBlockHashAndIndex/get-block-n (reth)
+  - eth_getTransactionByBlockNumberAndIndex/get-block-n (reth)
+  - eth_getTransactionByHash/get-access-list (reth)
+  - eth_getTransactionByHash/get-blob-tx (reth)
+  - eth_getTransactionByHash/get-dynamic-fee (reth)
+  - eth_getTransactionByHash/get-legacy-create (reth)
+  - eth_getTransactionByHash/get-legacy-input (reth)
+  - eth_getTransactionByHash/get-legacy-tx (reth)
+  - eth_getTransactionReceipt/get-legacy-contract (reth)
+  - eth_getTransactionReceipt/get-legacy-input (reth)
+  - eth_getTransactionReceipt/get-legacy-receipt (reth)'
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
@@ -37,11 +60,7 @@ engine-withdrawals:
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
-engine-api:
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Paris) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P9 (Paris) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P10 (Paris) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P10 (Paris) (reth)
+engine-api: []
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
@@ -50,13 +69,11 @@ engine-api:
 engine-cancun:
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
-  - Invalid NewPayload, BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Blob Count on BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P9 (Cancun) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P10 (Cancun) (reth)
-  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P10 (Cancun) (reth)
+  - Invalid NewPayload, VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, VersionedHashes Version, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, Incomplete VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, Extra VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8579
 sync:

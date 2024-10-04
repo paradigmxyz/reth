@@ -1,13 +1,9 @@
 //!  [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930): Access List types
 
-/// Re-export from `alloy_eips`.
-#[doc(inline)]
-pub use alloy_eips::eip2930::{AccessList, AccessListItem, AccessListResult};
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{Address, B256};
+    use alloy_eips::eip2930::{AccessList, AccessListItem};
+    use alloy_primitives::{Address, B256};
     use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;

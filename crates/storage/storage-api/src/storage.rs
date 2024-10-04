@@ -1,4 +1,5 @@
-use reth_primitives::{Address, BlockNumber, StorageEntry, B256};
+use alloy_primitives::{Address, BlockNumber, B256};
+use reth_primitives::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, BTreeSet},

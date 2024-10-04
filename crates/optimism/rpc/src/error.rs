@@ -1,10 +1,12 @@
 //! RPC errors specific to OP.
 
+use alloy_rpc_types::error::EthRpcErrorCode;
+use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
+use reth_optimism_evm::OptimismBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use reth_rpc_types::error::EthRpcErrorCode;
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
@@ -12,6 +14,9 @@ pub enum OpEthApiError {
     /// L1 ethereum error.
     #[error(transparent)]
     Eth(#[from] EthApiError),
+    /// EVM error originating from invalid optimism data.
+    #[error(transparent)]
+    Evm(#[from] OptimismBlockExecutionError),
     /// Thrown when calculating L1 gas fee.
     #[error("failed to calculate l1 gas fee")]
     L1BlockFeeError,
@@ -20,7 +25,10 @@ pub enum OpEthApiError {
     L1BlockGasError,
     /// Wrapper for [`revm_primitives::InvalidTransaction`](InvalidTransaction).
     #[error(transparent)]
-    InvalidTransaction(OptimismInvalidTransactionError),
+    InvalidTransaction(#[from] OptimismInvalidTransactionError),
+    /// Sequencer client error.
+    #[error(transparent)]
+    Sequencer(#[from] SequencerClientError),
 }
 
 impl AsEthApiError for OpEthApiError {
@@ -36,10 +44,11 @@ impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: OpEthApiError) -> Self {
         match err {
             OpEthApiError::Eth(err) => err.into(),
-            OpEthApiError::L1BlockFeeError | OpEthApiError::L1BlockGasError => {
-                internal_rpc_err(err.to_string())
-            }
             OpEthApiError::InvalidTransaction(err) => err.into(),
+            OpEthApiError::Evm(_) |
+            OpEthApiError::L1BlockFeeError |
+            OpEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
+            OpEthApiError::Sequencer(err) => err.into(),
         }
     }
 }
@@ -81,5 +90,26 @@ impl TryFrom<InvalidTransaction> for OptimismInvalidTransactionError {
             },
             _ => Err(err),
         }
+    }
+}
+
+/// Error type when interacting with the Sequencer
+#[derive(Debug, thiserror::Error)]
+pub enum SequencerClientError {
+    /// Wrapper around an [`reqwest::Error`].
+    #[error(transparent)]
+    HttpError(#[from] reqwest::Error),
+    /// Thrown when serializing transaction to forward to sequencer
+    #[error("invalid sequencer transaction")]
+    InvalidSequencerTransaction,
+}
+
+impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: SequencerClientError) -> Self {
+        jsonrpsee_types::error::ErrorObject::owned(
+            INTERNAL_ERROR_CODE,
+            err.to_string(),
+            None::<String>,
+        )
     }
 }

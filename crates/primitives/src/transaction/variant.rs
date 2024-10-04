@@ -2,16 +2,16 @@
 //! `TransactionSignedEcRecovered`
 
 use crate::{
-    Address, Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    B256,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
 };
+use alloy_primitives::{Address, B256};
 use core::ops::Deref;
 
 /// Represents various different transaction formats used in reth.
 ///
 /// All variants are based on a the raw [Transaction] data and can contain additional information
 /// extracted (expensive) from that transaction, like the hash and the signer.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
 pub enum TransactionSignedVariant {
     /// A signed transaction without a hash.
     SignedNoHash(TransactionSignedNoHash),
@@ -127,24 +127,6 @@ impl TransactionSignedVariant {
             Self::Signed(tx) => tx.try_into_ecrecovered(),
             Self::SignedNoHash(tx) => tx.with_hash().try_into_ecrecovered(),
         }
-    }
-}
-
-impl From<TransactionSignedNoHash> for TransactionSignedVariant {
-    fn from(tx: TransactionSignedNoHash) -> Self {
-        Self::SignedNoHash(tx)
-    }
-}
-
-impl From<TransactionSigned> for TransactionSignedVariant {
-    fn from(tx: TransactionSigned) -> Self {
-        Self::Signed(tx)
-    }
-}
-
-impl From<TransactionSignedEcRecovered> for TransactionSignedVariant {
-    fn from(tx: TransactionSignedEcRecovered) -> Self {
-        Self::SignedEcRecovered(tx)
     }
 }
 

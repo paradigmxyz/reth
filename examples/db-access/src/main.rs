@@ -1,10 +1,13 @@
+use alloy_primitives::{Address, Sealable, B256};
+use alloy_rpc_types::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
-use reth_primitives::{Address, B256};
+use reth_node_ethereum::EthereumNode;
+use reth_node_types::NodeTypesWithDBAdapter;
+use reth_primitives::SealedHeader;
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
 };
-use reth_rpc_types::{Filter, FilteredParams};
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -21,12 +24,13 @@ fn main() -> eyre::Result<()> {
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new_with_database_path(
-        db_path,
-        spec.into(),
-        Default::default(),
-        StaticFileProvider::read_only(db_path.join("static_files"))?,
-    )?;
+    let factory =
+        ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, _>>::new_with_database_path(
+            db_path,
+            spec.into(),
+            Default::default(),
+            StaticFileProvider::read_only(db_path.join("static_files"), false)?,
+        )?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
@@ -59,7 +63,9 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
-    let sealed_header = header.seal_slow();
+    let sealed = header.seal_slow();
+    let (header, seal) = sealed.into_parts();
+    let sealed_header = SealedHeader::new(header, seal);
 
     // Can also query the header by hash!
     let header_by_hash =

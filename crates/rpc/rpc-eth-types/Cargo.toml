@@ -22,17 +22,22 @@ reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-storage-api.workspace = true
 reth-revm.workspace = true
 reth-rpc-server-types.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie.workspace = true
 
 # ethereum
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
+alloy-rpc-types-eth.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
+alloy-rpc-types.workspace = true
+alloy-serde.workspace = true
+alloy-eips.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true

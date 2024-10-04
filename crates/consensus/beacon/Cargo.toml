@@ -12,15 +12,12 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-primitives.workspace = true
 reth-stages-api.workspace = true
 reth-errors.workspace = true
-reth-db-api.workspace = true
 reth-provider.workspace = true
-reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
@@ -30,7 +27,11 @@ reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
+reth-node-types.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -47,6 +48,8 @@ thiserror.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
 
+reth-chainspec = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
@@ -55,6 +58,7 @@ reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
@@ -67,6 +71,7 @@ reth-config.workspace = true
 reth-testing-utils.workspace = true
 reth-exex-types.workspace = true
 reth-prune-types.workspace = true
+reth-chainspec.workspace = true
 alloy-genesis.workspace = true
 
 assert_matches.workspace = true
@@ -76,4 +81,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-chainspec"
 ]

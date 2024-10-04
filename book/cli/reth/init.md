@@ -4,6 +4,8 @@ Initialize the database from a genesis file
 
 ```bash
 $ reth init --help
+```
+```txt
 Usage: reth init [OPTIONS]
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

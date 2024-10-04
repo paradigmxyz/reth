@@ -5,7 +5,7 @@ BOOK_ROOT="$(dirname "$(dirname "$0")")"
 RETH=${1:-"$(dirname "$BOOK_ROOT")/target/debug/reth"}
 
 cmd=(
-  "$(dirname "$0")/help.py"
+  "$(dirname "$0")/help.rs"
   --root-dir "$BOOK_ROOT/"
   --root-indentation 2
   --root-summary

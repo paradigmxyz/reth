@@ -1,17 +1,17 @@
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, Bytes, TxHash, B256};
-use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
-        TransactionsWithReceipts,
-    },
-    Header, Transaction, WithOtherFields,
+use alloy_json_rpc::RpcObject;
+use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_rpc_types::Header;
+use alloy_rpc_types_trace::otterscan::{
+    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
+    TransactionsWithReceipts,
 };
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_primitives::BlockId;
 
 /// Otterscan rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "ots"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "ots"))]
-pub trait Otterscan {
+pub trait Otterscan<T: RpcObject> {
     /// Get the block header by block number, required by otterscan.
     /// Otterscan currently requires this endpoint, used as:
     ///
@@ -24,7 +24,7 @@ pub trait Otterscan {
 
     /// Check if a certain address contains a deployed code.
     #[method(name = "hasCode")]
-    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool>;
+    async fn has_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<bool>;
 
     /// Very simple API versioning scheme. Every time we add a new capability, the number is
     /// incremented. This allows for Otterscan to check if the node contains all API it
@@ -61,7 +61,7 @@ pub trait Otterscan {
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>>;
+    ) -> RpcResult<OtsBlockTransactions<T>>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsBefore")]

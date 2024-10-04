@@ -12,6 +12,27 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
+reth-engine-primitives.workspace = true
+reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
-reth-trie.workspace = true
+reth-revm = { workspace = true, features = ["serde"] }
+reth-rpc-api = { workspace = true, features = ["client"] }
+reth-tracing.workspace = true
+reth-trie = { workspace = true, features = ["serde"] }
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types-debug.workspace = true
+
+# async
+futures.workspace = true
+
+# misc
+eyre.workspace = true
+jsonrpsee.workspace = true
+pretty_assertions = "1.4"
+serde.workspace = true
+serde_json.workspace = true

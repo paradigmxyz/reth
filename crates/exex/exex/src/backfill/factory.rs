@@ -1,8 +1,8 @@
 use crate::BackfillJob;
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, time::Duration};
 
+use alloy_primitives::BlockNumber;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::BlockNumber;
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 
@@ -25,7 +25,15 @@ impl<E, P> BackfillJobFactory<E, P> {
             executor,
             provider,
             prune_modes: PruneModes::none(),
-            thresholds: ExecutionStageThresholds::default(),
+            thresholds: ExecutionStageThresholds {
+                // Default duration for a database transaction to be considered long-lived is
+                // 60 seconds, so we limit the backfill job to the half of it to be sure we finish
+                // before the warning is logged.
+                //
+                // See `reth_db::implementation::mdbx::tx::LONG_TRANSACTION_DURATION`.
+                max_duration: Some(Duration::from_secs(30)),
+                ..Default::default()
+            },
             stream_parallelism: DEFAULT_PARALLELISM,
         }
     }

@@ -9,18 +9,24 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardforks};
+use alloy_primitives::{B64, U256};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_block_pre_execution, validate_header_base_fee, validate_header_extradata,
-    validate_header_gas,
+    validate_against_parent_hash_number, validate_against_parent_timestamp, validate_cancun_gas,
+    validate_header_base_fee, validate_header_extradata, validate_header_gas,
+    validate_shanghai_withdrawals,
 };
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{
-    BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, GotExpected, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH,
 };
 use std::{sync::Arc, time::SystemTime};
+
+mod proof;
+pub use proof::calculate_receipt_root_no_memo_optimism;
 
 mod validation;
 pub use validation::validate_block_post_execution;
@@ -31,17 +37,12 @@ pub use validation::validate_block_post_execution;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismBeaconConsensus {
     /// Configuration
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
 }
 
 impl OptimismBeaconConsensus {
     /// Create a new instance of [`OptimismBeaconConsensus`]
-    ///
-    /// # Panics
-    ///
-    /// If given chain spec is not optimism [`ChainSpec::is_optimism`]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        assert!(chain_spec.is_optimism(), "optimism consensus only valid for optimism chains");
+    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
@@ -82,7 +83,7 @@ impl Consensus for OptimismBeaconConsensus {
         let is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
 
         if is_post_merge {
-            if header.nonce != 0 {
+            if header.nonce != B64::ZERO {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
@@ -120,7 +121,29 @@ impl Consensus for OptimismBeaconConsensus {
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validate_block_pre_execution(block, &self.chain_spec)
+        // Check ommers hash
+        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
+        if block.header.ommers_hash != ommers_hash {
+            return Err(ConsensusError::BodyOmmersHashDiff(
+                GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+            ))
+        }
+
+        // Check transaction root
+        if let Err(error) = block.ensure_transaction_root_valid() {
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        }
+
+        // EIP-4895: Beacon chain push withdrawals as operations
+        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
+            validate_shanghai_withdrawals(block)?;
+        }
+
+        if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
+            validate_cancun_gas(block)?;
+        }
+
+        Ok(())
     }
 
     fn validate_block_post_execution(

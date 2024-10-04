@@ -4,26 +4,30 @@ use std::{
     collections::HashMap,
     fmt,
     iter::StepBy,
+    marker::PhantomData,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use alloy_primitives::TxHash;
+use alloy_rpc_types::{
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    PendingTransactionFilterKind,
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
+use reth_node_api::EthApiTypes;
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
-use reth_rpc_eth_api::EthFilterApiServer;
+use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
     EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::ToRpcResult;
-use reth_rpc_types::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind, Transaction, WithOtherFields,
-};
+use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use tokio::{
@@ -36,15 +40,27 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool> {
+pub struct EthFilter<Provider, Pool, Eth: EthApiTypes> {
     /// All nested fields bundled together
-    inner: Arc<EthFilterInner<Provider, Pool>>,
+    inner: Arc<EthFilterInner<Provider, Pool, RpcTransaction<Eth::NetworkTypes>>>,
+    /// Assembles response data w.r.t. network.
+    _tx_resp_builder: PhantomData<Eth>,
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> Clone for EthFilter<Provider, Pool, Eth>
+where
+    Eth: EthApiTypes,
+{
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), _tx_resp_builder: PhantomData }
+    }
+}
+
+impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: Send + Sync + 'static,
     Pool: Send + Sync + 'static,
+    Eth: EthApiTypes + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -65,7 +81,7 @@ where
             config;
         let inner = EthFilterInner {
             provider,
-            active_filters: Default::default(),
+            active_filters: ActiveFilters::new(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             eth_cache,
@@ -77,7 +93,7 @@ where
             max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),
         };
 
-        let eth_filter = Self { inner: Arc::new(inner) };
+        let eth_filter = Self { inner: Arc::new(inner), _tx_resp_builder: PhantomData };
 
         let this = eth_filter.clone();
         eth_filter.inner.task_spawner.spawn_critical(
@@ -91,7 +107,7 @@ where
     }
 
     /// Returns all currently active filters
-    pub fn active_filters(&self) -> &ActiveFilters {
+    pub fn active_filters(&self) -> &ActiveFilters<RpcTransaction<Eth::NetworkTypes>> {
         &self.inner.active_filters
     }
 
@@ -125,17 +141,18 @@ where
     }
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
+    Eth: FullEthApiTypes,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(
         &self,
         id: FilterId,
-    ) -> Result<FilterChanges<WithOtherFields<Transaction>>, EthFilterError> {
+    ) -> Result<FilterChanges<RpcTransaction<Eth::NetworkTypes>>, EthFilterError> {
         let info = self.inner.provider.chain_info()?;
         let best_number = info.best_number;
 
@@ -166,11 +183,10 @@ where
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
                 let end_block = best_number + 1;
-                let block_hashes = self
-                    .inner
-                    .provider
-                    .canonical_hashes_range(start_block, end_block)
-                    .map_err(|_| EthApiError::UnknownBlockNumber)?;
+                let block_hashes =
+                    self.inner.provider.canonical_hashes_range(start_block, end_block).map_err(
+                        |_| EthApiError::HeaderRangeNotFound(start_block.into(), end_block.into()),
+                    )?;
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
@@ -225,21 +241,25 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool> EthFilterApiServer<WithOtherFields<Transaction>> for EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>
+    for EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
+    Eth: FullEthApiTypes + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newFilter");
-        self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
+        self.inner
+            .install_filter(FilterKind::<RpcTransaction<Eth::NetworkTypes>>::Log(Box::new(filter)))
+            .await
     }
 
     /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newBlockFilter");
-        self.inner.install_filter(FilterKind::Block).await
+        self.inner.install_filter(FilterKind::<RpcTransaction<Eth::NetworkTypes>>::Block).await
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
@@ -257,7 +277,8 @@ where
             }
             PendingTransactionFilterKind::Full => {
                 let stream = self.inner.pool.new_pending_pool_transactions_listener();
-                let full_txs_receiver = FullTransactionsReceiver::new(stream);
+                let full_txs_receiver =
+                    FullTransactionsReceiver::<_, Eth::TransactionCompat>::new(stream);
                 FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
                     full_txs_receiver,
                 )))
@@ -274,7 +295,7 @@ where
     async fn filter_changes(
         &self,
         id: FilterId,
-    ) -> RpcResult<FilterChanges<WithOtherFields<Transaction>>> {
+    ) -> RpcResult<FilterChanges<RpcTransaction<Eth::NetworkTypes>>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
         Ok(Self::filter_changes(self, id).await?)
     }
@@ -310,27 +331,24 @@ where
     }
 }
 
-impl<Provider, Pool> std::fmt::Debug for EthFilter<Provider, Pool> {
+impl<Provider, Pool, Eth> std::fmt::Debug for EthFilter<Provider, Pool, Eth>
+where
+    Eth: EthApiTypes,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
-    fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
-    }
-}
-
 /// Container type `EthFilter`
 #[derive(Debug)]
-struct EthFilterInner<Provider, Pool> {
+struct EthFilterInner<Provider, Pool, Tx> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
     provider: Provider,
     /// All currently installed filters.
-    active_filters: ActiveFilters,
+    active_filters: ActiveFilters<Tx>,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
     /// Maximum number of blocks that could be scanned per filter
@@ -347,7 +365,7 @@ struct EthFilterInner<Provider, Pool> {
     stale_filter_ttl: Duration,
 }
 
-impl<Provider, Pool> EthFilterInner<Provider, Pool>
+impl<Provider, Pool, Tx> EthFilterInner<Provider, Pool, Tx>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
@@ -361,7 +379,7 @@ where
                 let block = self
                     .provider
                     .header_by_hash_or_number(block_hash.into())?
-                    .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
 
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
@@ -369,7 +387,7 @@ where
                     .eth_cache
                     .get_receipts(block_hash)
                     .await?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
 
                 let mut all_logs = Vec::new();
                 let filter = FilteredParams::new(Some(filter));
@@ -408,7 +426,7 @@ where
     }
 
     /// Installs a new filter and returns the new identifier.
-    async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
+    async fn install_filter(&self, kind: FilterKind<Tx>) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
@@ -493,7 +511,7 @@ where
                         None => self
                             .provider
                             .block_hash(header.number)?
-                            .ok_or(ProviderError::HeaderNotFound(header.number.into()))?,
+                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
@@ -526,19 +544,26 @@ where
 
 /// All active filters
 #[derive(Debug, Clone, Default)]
-pub struct ActiveFilters {
-    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter>>>,
+pub struct ActiveFilters<T> {
+    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter<T>>>>,
+}
+
+impl<T> ActiveFilters<T> {
+    /// Returns an empty instance.
+    pub fn new() -> Self {
+        Self { inner: Arc::new(Mutex::new(HashMap::default())) }
+    }
 }
 
 /// An installed filter
 #[derive(Debug)]
-struct ActiveFilter {
+struct ActiveFilter<T> {
     /// At which block the filter was polled last.
     block: u64,
     /// Last time this filter was polled.
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
-    kind: FilterKind,
+    kind: FilterKind<T>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.
@@ -553,7 +578,7 @@ impl PendingTransactionsReceiver {
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>> {
+    async fn drain<T>(&self) -> FilterChanges<T> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_receiver.lock().await;
 
@@ -568,31 +593,31 @@ impl PendingTransactionsReceiver {
 
 /// A structure to manage and provide access to a stream of full transaction details.
 #[derive(Debug, Clone)]
-struct FullTransactionsReceiver<T: PoolTransaction> {
+struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
+    _tx_resp_builder: PhantomData<TxCompat>,
 }
 
-impl<T> FullTransactionsReceiver<T>
+impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
+    TxCompat: TransactionCompat,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)) }
+        Self { txs_stream: Arc::new(Mutex::new(stream)), _tx_resp_builder: PhantomData }
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>>
+    async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
     where
-        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
     {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(reth_rpc_types_compat::transaction::from_recovered(
-                tx.transaction.to_recovered_transaction(),
-            ))
+            pending_txs.push(from_recovered::<TxCompat>(tx.transaction.to_recovered_transaction()))
         }
         FilterChanges::Transactions(pending_txs)
     }
@@ -600,16 +625,18 @@ where
 
 /// Helper trait for [FullTransactionsReceiver] to erase the `Transaction` type.
 #[async_trait]
-trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
-    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>>;
+trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
+    async fn drain(&self) -> FilterChanges<T>;
 }
 
 #[async_trait]
-impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
+impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
+    for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>> + 'static,
+    TxCompat: TransactionCompat + 'static,
 {
-    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>> {
+    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         Self::drain(self).await
     }
 }
@@ -620,13 +647,13 @@ where
 /// - Just the transaction hashes.
 /// - Full transaction details.
 #[derive(Debug, Clone)]
-enum PendingTransactionKind {
+enum PendingTransactionKind<T> {
     Hashes(PendingTransactionsReceiver),
-    FullTransaction(Arc<dyn FullTransactionsFilter>),
+    FullTransaction(Arc<dyn FullTransactionsFilter<T>>),
 }
 
-impl PendingTransactionKind {
-    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>> {
+impl<T: 'static> PendingTransactionKind<T> {
+    async fn drain(&self) -> FilterChanges<T> {
         match self {
             Self::Hashes(receiver) => receiver.drain().await,
             Self::FullTransaction(receiver) => receiver.drain().await,
@@ -635,10 +662,10 @@ impl PendingTransactionKind {
 }
 
 #[derive(Clone, Debug)]
-enum FilterKind {
+enum FilterKind<T> {
     Log(Box<Filter>),
     Block,
-    PendingTransaction(PendingTransactionKind),
+    PendingTransaction(PendingTransactionKind<T>),
 }
 
 /// An iterator that yields _inclusive_ block ranges of a given step size
@@ -671,28 +698,28 @@ impl Iterator for BlockRangeInclusiveIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
+    use reth_testing_utils::generators;
 
     #[test]
     fn test_block_range_iter() {
-        for _ in 0..100 {
-            let mut rng = thread_rng();
-            let start = rng.gen::<u32>() as u64;
-            let end = start.saturating_add(rng.gen::<u32>() as u64);
-            let step = rng.gen::<u16>() as u64;
-            let range = start..=end;
-            let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
-            let (from, mut end) = iter.next().unwrap();
-            assert_eq!(from, start);
-            assert_eq!(end, (from + step).min(*range.end()));
+        let mut rng = generators::rng();
 
-            for (next_from, next_end) in iter {
-                // ensure range starts with previous end + 1
-                assert_eq!(next_from, end + 1);
-                end = next_end;
-            }
+        let start = rng.gen::<u32>() as u64;
+        let end = start.saturating_add(rng.gen::<u32>() as u64);
+        let step = rng.gen::<u16>() as u64;
+        let range = start..=end;
+        let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
+        let (from, mut end) = iter.next().unwrap();
+        assert_eq!(from, start);
+        assert_eq!(end, (from + step).min(*range.end()));
 
-            assert_eq!(end, *range.end());
+        for (next_from, next_end) in iter {
+            // ensure range starts with previous end + 1
+            assert_eq!(next_from, end + 1);
+            end = next_end;
         }
+
+        assert_eq!(end, *range.end());
     }
 }

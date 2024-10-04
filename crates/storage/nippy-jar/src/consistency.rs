@@ -46,7 +46,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
 
     fn handle_consistency(&mut self, mode: ConsistencyFailStrategy) -> Result<(), NippyJarError> {
         self.load_files(mode)?;
-        let reader = self.jar.open_data_reader()?;
+        let mut reader = self.jar.open_data_reader()?;
 
         // When an offset size is smaller than the initial (8), we are dealing with immutable
         // data.
@@ -71,7 +71,12 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                 // Happened during an appending job
                 // TODO: ideally we could truncate until the last offset of the last column of the
                 //  last row inserted
+
+                // Windows has locked the file with the mmap handle, so we need to drop it
+                drop(reader);
+
                 self.offsets_file().get_mut().set_len(expected_offsets_file_size)?;
+                reader = self.jar.open_data_reader()?;
             }
             Ordering::Greater => {
                 // Happened during a pruning job
@@ -99,6 +104,9 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
         // Offset list wasn't properly committed
         match last_offset.cmp(&data_file_len) {
             Ordering::Less => {
+                // Windows has locked the file with the mmap handle, so we need to drop it
+                drop(reader);
+
                 // Happened during an appending job, so we need to truncate the data, since there's
                 // no way to recover it.
                 self.data_file().get_mut().set_len(last_offset)?;
@@ -116,9 +124,11 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                             .metadata()?
                             .len()
                             .saturating_sub(OFFSET_SIZE_BYTES as u64 * (index as u64 + 1));
-                        self.offsets_file().get_mut().set_len(new_len)?;
 
+                        // Windows has locked the file with the mmap handle, so we need to drop it
                         drop(reader);
+
+                        self.offsets_file().get_mut().set_len(new_len)?;
 
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again
