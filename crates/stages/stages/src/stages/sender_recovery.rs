@@ -181,14 +181,14 @@ where
                                 .tx_ref()
                                 .get::<tables::TransactionBlocks>(err.tx)?
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
-                          
+
                             // fetch the sealed header so we can use it in the sender recovery
                             // unwind
                             let sealed_header =
                                 provider.sealed_header(block_number)?.ok_or_else(|| {
                                     ProviderError::HeaderNotFound(block_number.into())
                                 })?;
-                          
+
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
@@ -226,6 +226,9 @@ where
     Ok(())
 }
 
+/// Spawns a thread to handle the recovery of transaction senders for
+/// specified chunks of a given batch. It processes incoming ranges, fetching and recovering
+/// transactions in parallel using global rayon pool
 fn setup_range_recovery<Provider>(
     provider: &Provider,
 ) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
