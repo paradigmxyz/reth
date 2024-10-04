@@ -1,8 +1,8 @@
 //! Optimism payload builder implementation.
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
-use alloy_primitives::U256;
+use alloy_primitives::{U256, B64};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -13,7 +13,7 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::BEACON_NONCE,
+    constants::{BEACON_NONCE, EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER},
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
@@ -485,15 +485,9 @@ where
         blob_gas_used = Some(0);
     }
 
-    let nonce;
-    if chain_spec.is_fork_active_at_timestamp(
+    let is_holocene = chain_spec.is_fork_active_at_timestamp(
         OptimismHardfork::Holocene,
-        attributes.payload_attributes.timestamp,
-    ) {
-        nonce = attributes.eip_1559_params;
-    } else {
-        nonce = BEACON_NONCE.into();
-    }
+        attributes.payload_attributes.timestamp);
 
     let header = Header {
         parent_hash: parent_block.hash(),
@@ -506,7 +500,7 @@ where
         logs_bloom,
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
-        nonce: nonce,
+        nonce: get_nonce(is_holocene, &attributes),
         base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
         gas_limit: block_gas_limit,
@@ -551,3 +545,51 @@ where
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
+
+fn get_nonce(is_holocene: bool, attributes: &OptimismPayloadBuilderAttributes) -> B64 {
+    if is_holocene {
+        // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
+        if attributes.eip_1559_params != B64::ZERO {
+            attributes.eip_1559_params
+        } else {
+            let mut default_params = [0u8; 8];
+            default_params[..4].copy_from_slice(&(EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR as u32).to_be_bytes());
+            default_params[4..].copy_from_slice(&(EIP1559_DEFAULT_ELASTICITY_MULTIPLIER as u32).to_be_bytes());
+
+            B64::from_slice(default_params.as_ref())
+        }
+    } else {
+        BEACON_NONCE.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_nonce_pre_holocene() {
+        let attributes = OptimismPayloadBuilderAttributes::default();
+        let nonce = get_nonce(false, &attributes);
+        assert_eq!(nonce, B64::from(BEACON_NONCE.to_le_bytes()));
+    }
+
+    #[test]
+    fn test_get_nonce_post_holocene() {
+        let attributes = OptimismPayloadBuilderAttributes {
+            eip_1559_params: B64::from_str("0x1234567812345678").unwrap(),
+            ..Default::default()
+        };
+        let nonce = get_nonce(true, &attributes);
+        assert_eq!(nonce, B64::from_str("0x1234567812345678").unwrap());
+    }
+
+    #[test]
+    fn test_get_nonce_post_holocene_default() {
+        let attributes = OptimismPayloadBuilderAttributes::default();
+        let nonce = get_nonce(true, &attributes);
+        let default_params: [u8; 8] = [0, 0, 0, 8, 0, 0, 0, 2];
+        assert_eq!(nonce, B64::from_slice(&default_params));
+    }
+}
+    

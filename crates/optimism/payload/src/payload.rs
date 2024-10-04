@@ -116,6 +116,18 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     }
 }
 
+impl Default for OptimismPayloadBuilderAttributes {
+    fn default() -> Self {
+        Self {
+            payload_attributes: EthPayloadBuilderAttributes::default(),
+            no_tx_pool: false,
+            transactions: Vec::new(),
+            gas_limit: None,
+            eip_1559_params: B64::default(),
+        }
+    }
+}
+
 /// Contains the built payload.
 #[derive(Debug, Clone)]
 pub struct OptimismBuiltPayload {
