@@ -4141,12 +4141,28 @@ mod tests {
                 &in_memory_data[1..in_memory_data.len() - 1]
             );
 
+            // Test range in in-memory to unbounded end
+            assert_eq!(
+                $provider.$method(in_mem_range.start() + 1..)?,
+                &in_memory_data[1..]
+            );
+            
             // Test range that spans database and in-memory
             assert_eq!(
                 $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
                 database_data[database_data.len() - 2..]
                     .iter()
                     .chain(&in_memory_data[..in_memory_data.len() - 1])
+                    .cloned()
+                    .collect::<Vec<_>>()
+            );
+
+            // Test range that spans database and in-memory with unbounded end
+            assert_eq!(
+                $provider.$method(in_mem_range.start() - 2..)?,
+                database_data[database_data.len() - 2..]
+                    .iter()
+                    .chain(&in_memory_data[..])
                     .cloned()
                     .collect::<Vec<_>>()
             );
