@@ -24,28 +24,6 @@ pub struct SealedHeader<H = Header> {
     header: H,
 }
 
-impl<H: Compact> Compact for SealedHeader<H> {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut buffer = Vec::new();
-        self.hash.to_compact(&mut buffer);
-        self.header.to_compact(&mut buffer);
-        buf.put(&buffer[..]);
-        buffer.len()
-    }
-
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (hash, new_buf) = BlockHash::from_compact(buf, buf.len());
-        buf = new_buf;
-        let (header, new_buf) = H::from_compact(buf, buf.len());
-        buf = new_buf;
-        let sealed_header = Self { hash, header };
-        (sealed_header, buf)
-    }
-}
-
 impl<H> SealedHeader<H> {
     /// Creates the sealed header with the corresponding block hash.
     #[inline]
