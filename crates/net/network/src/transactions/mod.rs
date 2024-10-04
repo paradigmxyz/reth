@@ -1033,7 +1033,7 @@ where
                             has_bad_transactions = true;
                         } else {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
+                            let pool_transaction = Pool::Transaction::from_pooled(tx.into());
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1396,11 +1396,14 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
-        tx: Arc<ValidPoolTransaction<T>>,
-    ) -> Self {
+    fn new<T>(tx: Arc<ValidPoolTransaction<T>>) -> Self
+    where
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
+        let recovered: TransactionSignedEcRecovered =
+            tx.transaction.clone().into_consensus().into();
+        let transaction = Arc::new(recovered.into_signed());
         Self { size, transaction }
     }
 }
