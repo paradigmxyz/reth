@@ -60,7 +60,7 @@ pub trait Block:
     }
 
     /// Expensive operation that recovers transaction signer. See
-    /// [`SealedBlockWithSenders`](reth_primitives::SealedBlockWithSenders).
+    /// [`SealedBlockWithSenders`](crate::SealedBlockWithSenders).
     fn senders(&self) -> Option<Vec<Address>> {
         self.body().recover_signers()
     }
@@ -82,7 +82,7 @@ pub trait Block:
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    /// See also [`TransactionSigned::recover_signer_unchecked`](crate::TransactionSigned).
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]

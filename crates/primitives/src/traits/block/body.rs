@@ -37,7 +37,7 @@ pub trait BlockBody:
     /// Returns reference to uncle block headers.
     fn ommers(&self) -> &[Self::Header];
 
-    /// Returns [`Request`] in block, if any.
+    /// Returns [`Requests`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
 
     /// Create a [`Block`] from the body and its header.
