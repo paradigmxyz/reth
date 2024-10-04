@@ -8,14 +8,13 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, State};
 use revm_primitives::{db::Database, U256};
-use std::sync::Arc;
 
 use crate::system_calls::OnStateHook;
 
@@ -237,15 +236,15 @@ impl<S, EvmConfig> GenericExecutorProvider<S, EvmConfig> {
 #[allow(dead_code)]
 impl<S, EvmConfig> GenericExecutorProvider<S, EvmConfig>
 where
-    S: BlockExecutionStrategyFactory + Clone,
+    S: BlockExecutionStrategyFactory,
     EvmConfig: Clone,
 {
-    fn executor<DB>(&self, db: DB) -> GenericBlockExecutor<S, EvmConfig, DB>
+    fn executor<DB>(&self, db: DB) -> GenericBlockExecutor<'_, S, EvmConfig, DB>
     where
         DB: Database,
     {
         GenericBlockExecutor::new(
-            self.strategy_factory.clone(),
+            &self.strategy_factory,
             self.chain_spec.clone(),
             self.evm_config.clone(),
             State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
@@ -256,18 +255,18 @@ where
 /// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
 /// create and run block execution strategies.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct GenericBlockExecutor<S, EvmConfig, DB>
+pub struct GenericBlockExecutor<'a, S, EvmConfig, DB>
 where
     S: BlockExecutionStrategyFactory,
     DB: Database,
 {
-    strategy_factory: S,
+    strategy_factory: &'a S,
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
     state: State<DB>,
 }
 
-impl<S, EvmConfig, DB> GenericBlockExecutor<S, EvmConfig, DB>
+impl<'a, S, EvmConfig, DB> GenericBlockExecutor<'a, S, EvmConfig, DB>
 where
     S: BlockExecutionStrategyFactory,
     DB: Database,
@@ -275,7 +274,7 @@ where
     /// Creates a new `GenericBlockExecutor` with the given strategy factory,
     /// chain spec and evm config.
     pub const fn new(
-        strategy_factory: S,
+        strategy_factory: &'a S,
         chain_spec: Arc<ChainSpec>,
         evm_config: EvmConfig,
         state: State<DB>,
@@ -284,12 +283,12 @@ where
     }
 }
 
-impl<S, EvmConfig, DB> Executor<DB> for GenericBlockExecutor<S, EvmConfig, DB>
+impl<'a, S, EvmConfig, DB> Executor<DB> for GenericBlockExecutor<'a, S, EvmConfig, DB>
 where
     S: BlockExecutionStrategyFactory<DB = DB>,
     DB: Database,
 {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'b> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = S::Error;
 
@@ -446,6 +445,9 @@ mod tests {
 
     struct TestExecutorStrategy<T> {
         state: State<T>,
+        execute_transactions_result: (Vec<Receipt>, u64),
+        apply_post_execution_changes_result: Vec<Request>,
+        finish_result: BundleState,
     }
 
     impl BlockExecutionStrategy<CacheDB<EmptyDBTyped<ProviderError>>>
@@ -461,11 +463,11 @@ mod tests {
             &mut self,
             _block: &BlockWithSenders,
         ) -> Result<(Vec<Receipt>, u64), Self::Error> {
-            Ok((Vec::new(), 0))
+            Ok(self.execute_transactions_result.clone())
         }
 
         fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error> {
-            Ok(Vec::new())
+            Ok(self.apply_post_execution_changes_result.clone())
         }
 
         fn state_ref(&self) -> &State<CacheDB<EmptyDBTyped<ProviderError>>> {
@@ -475,12 +477,15 @@ mod tests {
         fn set_state_hook<F: OnStateHook + 'static>(&mut self, _hook: Option<F>) {}
 
         fn finish(self) -> BundleState {
-            BundleState::default()
+            self.finish_result
         }
     }
 
-    #[derive(Clone)]
-    struct TestExecutorStrategyFactory {}
+    struct TestExecutorStrategyFactory {
+        execute_transactions_result: (Vec<Receipt>, u64),
+        apply_post_execution_changes_result: Vec<Request>,
+        finish_result: BundleState,
+    }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
         type DB = CacheDB<EmptyDBTyped<ProviderError>>;
@@ -493,8 +498,19 @@ mod tests {
             _total_difficulty: U256,
         ) -> Result<Self::Strategy, Self::Error> {
             let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-            let state = State::builder().with_database(db).build();
-            Ok(TestExecutorStrategy { state })
+            let state = State::builder()
+                .with_database(db)
+                .with_bundle_update()
+                .without_state_clear()
+                .build();
+            Ok(TestExecutorStrategy {
+                state,
+                execute_transactions_result: self.execute_transactions_result.clone(),
+                apply_post_execution_changes_result: self
+                    .apply_post_execution_changes_result
+                    .clone(),
+                finish_result: self.finish_result.clone(),
+            })
         }
     }
 
@@ -511,12 +527,28 @@ mod tests {
 
     #[test]
     fn test_strategy() {
-        let strategy_factory = TestExecutorStrategyFactory {};
+        let expected_execute_transactions_result = (vec![], 1);
+        let expected_apply_post_execution_changes_result = vec![];
+        let expected_finish_result = BundleState::default();
+
+        let strategy_factory = TestExecutorStrategyFactory {
+            execute_transactions_result: expected_execute_transactions_result.clone(),
+            apply_post_execution_changes_result: expected_apply_post_execution_changes_result
+                .clone(),
+            finish_result: expected_finish_result.clone(),
+        };
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let provider =
             GenericExecutorProvider::new(strategy_factory, MAINNET.clone(), TestEvmConfig {});
         let executor = provider.executor(db);
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         assert!(result.is_ok());
+
+        let block_execution_output = result.unwrap();
+
+        assert_eq!(block_execution_output.gas_used, expected_execute_transactions_result.1);
+        assert_eq!(block_execution_output.receipts, expected_execute_transactions_result.0);
+        assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
+        assert_eq!(block_execution_output.state, expected_finish_result);
     }
 }
