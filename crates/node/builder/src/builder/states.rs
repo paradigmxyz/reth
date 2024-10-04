@@ -9,12 +9,10 @@ use std::{fmt, future::Future};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+    EthApiTypes, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB,
+    NodeTypesWithEngine,
 };
-use reth_node_core::{
-    node_config::NodeConfig,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
-};
+use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 
@@ -22,8 +20,8 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext, RpcHooks},
-    AddOns, FullNode, RpcAddOns,
+    rpc::{ExtendRpcModules, OnRpcStarted, RpcAddOns, RpcAddonsTrait},
+    AddOns, FullNode,
 };
 
 /// A node builder that also has the configured types.
@@ -54,12 +52,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             config,
             adapter,
             components_builder,
-            add_ons: AddOns {
-                hooks: NodeHooks::default(),
-                rpc: RpcAddOns { hooks: RpcHooks::default() },
-                exexs: Vec::new(),
-                addons: (),
-            },
+            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), addons: () },
         }
     }
 }
@@ -104,6 +97,8 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Evm = C::Evm;
     type Executor = C::Executor;
     type Network = C::Network;
+    type Consensus = C::Consensus;
+    type EngineValidator = C::EngineValidator;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -131,6 +126,14 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        self.components.consensus()
+    }
+
+    fn engine_validator(&self) -> &Self::EngineValidator {
+        self.components.engine_validator()
     }
 }
 
@@ -179,12 +182,7 @@ where
             config,
             adapter,
             components_builder,
-            add_ons: AddOns {
-                hooks: NodeHooks::default(),
-                rpc: RpcAddOns { hooks: RpcHooks::default() },
-                exexs: Vec::new(),
-                addons,
-            },
+            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), addons },
         }
     }
 }
@@ -212,31 +210,6 @@ where
             + 'static,
     {
         self.add_ons.hooks.set_on_node_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
-    where
-        F: FnOnce(
-                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
-                RethRpcServerHandles,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        self.add_ons.rpc.hooks.set_on_rpc_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
-    where
-        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        self.add_ons.rpc.hooks.set_extend_rpc_modules(hook);
         self
     }
 
@@ -271,16 +244,39 @@ where
     }
 }
 
+impl<T, CB, EthApi>
+    NodeBuilderWithComponents<T, CB, RpcAddOns<NodeAdapter<T, CB::Components>, EthApi>>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    EthApi: EthApiTypes,
+    RpcAddOns<NodeAdapter<T, CB::Components>, EthApi>:
+        RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
+{
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    where
+        F: OnRpcStarted<NodeAdapter<T, CB::Components>, EthApi> + 'static,
+    {
+        self.add_ons.addons.hooks.set_on_rpc_started(hook);
+        self
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    where
+        F: ExtendRpcModules<NodeAdapter<T, CB::Components>, EthApi> + 'static,
+    {
+        self.add_ons.addons.hooks.set_extend_rpc_modules(hook);
+        self
+    }
+}
+
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<
-        NodeAdapter<T, CB::Components>,
-        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
-    >,
+    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
 {
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>

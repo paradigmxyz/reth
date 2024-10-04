@@ -14,11 +14,7 @@ use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 
-use crate::{
-    components::NodeComponentsBuilder,
-    rpc::{RethRpcServerHandles, RpcRegistry},
-    NodeAdapter, NodeAddOns,
-};
+use crate::{components::NodeComponentsBuilder, rpc::RpcAddonsTrait, NodeAdapter, NodeAddOns};
 
 /// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///
@@ -117,14 +113,12 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub payload_builder: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
-    /// Handles to the node's rpc servers
-    pub rpc_server_handles: RethRpcServerHandles,
-    /// The configured rpc namespaces
-    pub rpc_registry: RpcRegistry<Node, AddOns::EthApi>,
     /// The initial node config.
     pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
+    /// The handle to launched add-ons
+    pub addons_handle: AddOns::Handle,
 }
 
 impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node, AddOns> {
@@ -137,10 +131,9 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
             provider: self.provider.clone(),
             payload_builder: self.payload_builder.clone(),
             task_executor: self.task_executor.clone(),
-            rpc_server_handles: self.rpc_server_handles.clone(),
-            rpc_registry: self.rpc_registry.clone(),
             config: self.config.clone(),
             data_dir: self.data_dir.clone(),
+            addons_handle: self.addons_handle.clone(),
         }
     }
 }
@@ -155,15 +148,22 @@ where
     pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
         self.provider.chain_spec()
     }
+}
 
+impl<Engine, Node, AddOns> FullNode<Node, AddOns>
+where
+    Engine: EngineTypes,
+    Node: FullNodeComponents<Types: NodeTypesWithEngine<Engine = Engine>>,
+    AddOns: RpcAddonsTrait<Node>,
+{
     /// Returns the [`RpcServerHandle`] to the started rpc server.
     pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
-        &self.rpc_server_handles.rpc
+        &self.addons_handle.rpc_server_handles.rpc
     }
 
     /// Returns the [`AuthServerHandle`] to the started authenticated engine API server.
     pub const fn auth_server_handle(&self) -> &AuthServerHandle {
-        &self.rpc_server_handles.auth
+        &self.addons_handle.rpc_server_handles.auth
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
