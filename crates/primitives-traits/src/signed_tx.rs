@@ -7,7 +7,7 @@ use alloy_consensus::{SignableTransaction, TxLegacy};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, TxHash, B256};
 
-use crate::transaction::decode_with_eip155_chain_id;
+use crate::Signature;
 
 /// A signed transaction.
 pub trait SignedTransaction:
@@ -29,7 +29,7 @@ pub trait SignedTransaction:
     type Transaction: SignableTransaction<Self::Signature>;
 
     /// Signature type that results from signing transaction.
-    type Signature;
+    type Signature: Signature;
 
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
@@ -108,7 +108,7 @@ pub trait SignedTransaction:
             input: alloy_rlp::Decodable::decode(data)?,
             chain_id: None,
         };
-        let (signature, extracted_id) = decode_with_eip155_chain_id(data)?;
+        let (signature, extracted_id) = Self::Signature::decode_with_eip155_chain_id(data)?;
         transaction.chain_id = extracted_id;
 
         // check the new length, compared to the original length and the header length

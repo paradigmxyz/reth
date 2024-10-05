@@ -65,3 +65,4 @@ arbitrary = [
     "dep:proptest-arbitrary-interop",
 ]
 serde-bincode-compat = ["serde_with", "alloy-consensus/serde-bincode-compat"]
+optimism = []
