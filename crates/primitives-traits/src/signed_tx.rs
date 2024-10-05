@@ -42,7 +42,7 @@ pub trait SignedTransaction:
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`](crate::transaction::recover_signer).
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also `reth_primitives::transaction::recover_signer`.
     ///
     /// Note:
     ///
@@ -55,7 +55,7 @@ pub trait SignedTransaction:
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`recover_signer_unchecked`](crate::transaction::recover_signer_unchecked).
+    /// `reth_primitives::transaction::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Option<Address>;
 
     /// Output the length of the `encode_inner(out`, true). Note to assume that `with_header` is
