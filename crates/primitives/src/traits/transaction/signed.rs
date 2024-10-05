@@ -31,6 +31,9 @@ pub trait SignedTransaction:
     /// Signature type that results from signing transaction.
     type Signature;
 
+    /// Returns reference to transaction hash.
+    fn tx_hash(&self) -> &TxHash;
+
     /// Returns reference to transaction.
     fn transaction(&self) -> &Self::Transaction;
 
