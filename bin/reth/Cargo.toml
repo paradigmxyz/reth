@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 # reth
 reth-cli.workspace = true
+reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-primitives.workspace = true
