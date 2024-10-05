@@ -19,6 +19,7 @@ use reth_node_core::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::EthApi;
+use reth_rpc_api::eth::helpers::AddDevSigners;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -392,7 +393,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes + EthApiBuilder<Node>> Defaul
 impl<N, EthApi> NodeAddOns<N> for RpcAddOns<N, EthApi>
 where
     N: FullNodeComponents<Types: ProviderNodeTypes>,
-    EthApi: EthApiTypes + FullEthApiServer + Unpin + 'static,
+    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
 {
     type Handle = RpcHandle<N, EthApi>;
 
@@ -432,6 +433,11 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .build_with_auth_server(module_config, engine_api, self.eth_api_builder);
+
+        // in dev mode we generate 20 random dev-signer accounts
+        if config.dev.dev {
+            registry.eth_api().with_dev_accounts();
+        }
 
         let mut registry = RpcRegistry { registry };
         let ctx = RpcContext {

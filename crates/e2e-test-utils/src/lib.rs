@@ -7,7 +7,6 @@ use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
-    rpc::api::eth::helpers::AddDevSigners,
     tasks::TaskManager,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -55,7 +54,7 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RpcAddonsTrait<Adapter<N>, EthApi: AddDevSigners>,
+    N::AddOns: RpcAddonsTrait<Adapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

@@ -29,7 +29,6 @@ use reth_node_api::{
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    rpc::eth::helpers::AddDevSigners,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::BlockchainProvider;
@@ -105,7 +104,7 @@ where
     Types: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec> + NodeTypesWithEngine,
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
-    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>, EthApi: AddDevSigners>,
+    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -339,11 +338,6 @@ where
 
         let RpcHandle { rpc_server_handles, rpc_registry } =
             add_ons.launch_add_ons(add_ons_ctx).await?;
-
-        // in dev mode we generate 20 random dev-signer accounts
-        if ctx.is_dev() {
-            rpc_registry.eth_api().with_dev_accounts();
-        }
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
