@@ -1,13 +1,30 @@
 //! API of a signed transaction, w.r.t. network stack.
 
+use alloc::fmt;
+use core::hash::Hash;
+
 use alloy_consensus::TxLegacy;
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
 
 use crate::{transaction::decode_with_eip155_chain_id, Transaction};
 
 /// A signed transaction.
-pub trait SignedTransaction: Sized {
+pub trait SignedTransaction:
+    fmt::Debug
+    + Clone
+    + PartialEq
+    + Eq
+    + Hash
+    + Send
+    + Sync
+    + serde::Serialize
+    + for<'a> serde::Deserialize<'a>
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
+    + Encodable2718
+    + Decodable2718
+{
     /// Recover signer from signature and hash.
     ///
     /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`](crate::transaction::recover_signer).

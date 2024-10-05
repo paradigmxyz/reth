@@ -16,9 +16,8 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
     0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
 ]);
 
-pub(crate) fn decode_with_eip155_chain_id(
-    buf: &mut &[u8],
-) -> alloy_rlp::Result<(Signature, Option<u64>)> {
+/// Decodes [`Signature`] w.r.t. chain ID.
+pub fn decode_with_eip155_chain_id(buf: &mut &[u8]) -> alloy_rlp::Result<(Signature, Option<u64>)> {
     let v: Parity = Decodable::decode(buf)?;
     let r: U256 = Decodable::decode(buf)?;
     let s: U256 = Decodable::decode(buf)?;
@@ -90,7 +89,7 @@ pub fn legacy_parity(signature: &Signature, chain_id: Option<u64>) -> Parity {
 }
 
 /// Returns a signature with the given chain ID applied to the `v` value.
-pub(crate) fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
+pub fn with_eip155_parity(signature: &Signature, chain_id: Option<u64>) -> Signature {
     Signature::new(signature.r(), signature.s(), legacy_parity(signature, chain_id))
 }
 
