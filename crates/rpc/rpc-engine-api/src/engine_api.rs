@@ -464,59 +464,59 @@ where
     }
 
     /// Called to retrieve execution payload bodies by hashes.
-    fn get_payload_bodies_by_hash_with<F, R>(
+    async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
         hashes: Vec<BlockHash>,
         f: F,
     ) -> EngineApiResult<Vec<Option<R>>>
     where
-        F: Fn(Block) -> R,
+        F: Fn(Block) -> R + Send + 'static,
+        R: Send + 'static,
     {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len })
+            return Err(EngineApiError::PayloadRequestTooLarge { len });
         }
-
+    
+        let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
-        let f = Arc::new(f);
-        let hashes_clone = hashes.clone();
-
-        let result = self
-            .inner
-            .task_spawner
-            .spawn_blocking(Box::pin(async move {
-                let mut result = Vec::with_capacity(hashes_clone.len());
-                for hash in hashes_clone {
-                    let block = inner
-                        .provider
-                        .block(BlockHashOrNumber::Hash(hash))
-                        .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-                    result.push(block.map(|b| (f)(b)));
+    
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let mut result = Vec::with_capacity(hashes.len());
+            for hash in hashes {
+                let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
+                match block_result {
+                    Ok(block) => {
+                        result.push(block.map(&f));
+                    }
+                    Err(err) => {
+                        let _ = tx.send(Err(EngineApiError::Internal(Box::new(err))));
+                        return;
+                    }
                 }
-                Ok(result)
-            }))
-            .await
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))??;
-
-        Ok(result)
+            }
+            tx.send(Ok(result)).ok();
+        }));
+    
+        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
     /// Called to retrieve execution payload bodies by hashes.
-    pub fn get_payload_bodies_by_hash_v1(
+    pub async fn get_payload_bodies_by_hash_v1(
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v1)
+        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v1).await
     }
 
     /// Called to retrieve execution payload bodies by hashes.
     ///
     /// Same as [`Self::get_payload_bodies_by_hash_v1`] but as [`ExecutionPayloadBodiesV2`].
-    pub fn get_payload_bodies_by_hash_v2(
+    pub async fn get_payload_bodies_by_hash_v2(
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v2)
+        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v2).await
     }
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
@@ -543,7 +543,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            })
+            });
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged();
@@ -553,7 +553,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            })
+            });
         }
 
         // Attempt to look up terminal block hash
@@ -618,9 +618,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
@@ -843,7 +843,7 @@ where
         let start = Instant::now();
         let res = Self::get_payload_bodies_by_hash_v1(self, block_hashes);
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
-        Ok(res?)
+        Ok(res.await?)
     }
 
     async fn get_payload_bodies_by_hash_v2(
@@ -854,7 +854,7 @@ where
         let start = Instant::now();
         let res = Self::get_payload_bodies_by_hash_v2(self, block_hashes);
         self.inner.metrics.latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
-        Ok(res?)
+        Ok(res.await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
@@ -935,7 +935,7 @@ where
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into());
         }
 
         Ok(self
@@ -1117,8 +1117,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -1147,8 +1147,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -1158,7 +1158,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             let hashes = blocks.iter().map(|b| b.hash()).collect();
-            let res = api.get_payload_bodies_by_hash_v1(hashes).unwrap();
+            let res = api.get_payload_bodies_by_hash_v1(hashes).await.unwrap();
             assert_eq!(res, expected);
         }
     }
@@ -1178,8 +1178,8 @@ mod tests {
                     .chain_spec
                     .fork(EthereumHardfork::Paris)
                     .ttd()
-                    .unwrap() +
-                    U256::from(1),
+                    .unwrap()
+                    + U256::from(1),
                 ..Default::default()
             };
 
