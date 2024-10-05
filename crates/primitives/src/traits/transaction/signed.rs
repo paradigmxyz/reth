@@ -3,11 +3,11 @@
 use alloc::fmt;
 use core::hash::Hash;
 
-use alloy_consensus::TxLegacy;
+use alloy_consensus::{SignableTransaction, TxLegacy};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
+use alloy_primitives::{keccak256, Address, TxHash, B256};
 
-use crate::{transaction::decode_with_eip155_chain_id, Transaction};
+use crate::transaction::decode_with_eip155_chain_id;
 
 /// A signed transaction.
 pub trait SignedTransaction:
@@ -25,6 +25,18 @@ pub trait SignedTransaction:
     + Encodable2718
     + Decodable2718
 {
+    /// Transaction type that is signed.
+    type Transaction: SignableTransaction<Self::Signature>;
+
+    /// Signature type that results from signing transaction.
+    type Signature;
+
+    /// Returns reference to transaction.
+    fn transaction(&self) -> &Self::Transaction;
+
+    /// Returns reference to signature.
+    fn signature(&self) -> &Self::Signature;
+
     /// Recover signer from signature and hash.
     ///
     /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`](crate::transaction::recover_signer).
@@ -71,7 +83,7 @@ pub trait SignedTransaction:
     /// format expected.
     fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
-    ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
+    ) -> alloy_rlp::Result<(TxLegacy, TxHash, Self::Signature)> {
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -110,7 +122,10 @@ pub trait SignedTransaction:
     /// Create a new signed transaction from a transaction and its signature.
     ///
     /// This will also calculate the transaction hash using its encoding.
-    fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self;
+    fn from_transaction_and_signature(
+        transaction: Self::Transaction,
+        signature: Self::Signature,
+    ) -> Self;
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
