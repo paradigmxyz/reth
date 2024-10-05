@@ -118,7 +118,7 @@ where
 }
 
 /// Event hook that is called once the rpc server is started.
-pub trait OnRpcStarted<Node: FullNodeComponents, EthApi: EthApiTypes>: Send + Sync {
+pub trait OnRpcStarted<Node: FullNodeComponents, EthApi: EthApiTypes>: Send {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
         self: Box<Self>,
@@ -129,10 +129,7 @@ pub trait OnRpcStarted<Node: FullNodeComponents, EthApi: EthApiTypes>: Send + Sy
 
 impl<Node, EthApi, F> OnRpcStarted<Node, EthApi> for F
 where
-    F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()>
-        + Clone
-        + Send
-        + Sync,
+    F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
     EthApi: EthApiTypes,
 {
@@ -160,14 +157,14 @@ where
 }
 
 /// Event hook that is called when the rpc server is started.
-pub trait ExtendRpcModules<Node: FullNodeComponents, EthApi: EthApiTypes>: Send + Sync {
+pub trait ExtendRpcModules<Node: FullNodeComponents, EthApi: EthApiTypes>: Send {
     /// The hook that is called once the rpc server is started.
     fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node, EthApi>) -> eyre::Result<()>;
 }
 
 impl<Node, EthApi, F> ExtendRpcModules<Node, EthApi> for F
 where
-    F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Clone + Send + Sync,
+    F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
     EthApi: EthApiTypes,
 {
@@ -363,7 +360,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcAddOns<Node, EthApi> {
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()>
-            + OnRpcStarted<Node, EthApi>
+            + Send
             + 'static,
     {
         self.hooks.set_on_rpc_started(hook);
@@ -373,9 +370,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcAddOns<Node, EthApi> {
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()>
-            + ExtendRpcModules<Node, EthApi>
-            + 'static,
+        F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send + 'static,
     {
         self.hooks.set_extend_rpc_modules(hook);
         self

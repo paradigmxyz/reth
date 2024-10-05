@@ -112,7 +112,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
 }
 
 /// Customizable node add-on types.
-pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + 'static {
+pub trait NodeAddOns<N: FullNodeComponents>: Send {
     /// Handle to add-ons.
     type Handle: Send + Sync + Clone;
 
