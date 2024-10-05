@@ -13,7 +13,17 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
-/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
+/// A stream of [`ExExNotification`]s. The stream will emit notifications for
+/// all blocks. If the stream is configured with a head via
+/// [`ExExNotificationStream::with_head`], it will run backfill
+/// jobs to catch up to the node head.
+///
+/// This stream produces `Result` types because the backfill job is fallible.
+/// If no specific backfill head is needed, this stream can be converted into a
+/// [`ExExNotifications`] stream via [`into_raw`] which will produce
+/// [`ExExNotification`] types directly.
+///
+/// [`into_raw`]: ExExNotificationStream::into_raw
 #[derive(Debug)]
 #[allow(clippy::manual_non_exhaustive)] // false positive
 pub enum ExExNotificationStream<P, E> {
@@ -45,6 +55,14 @@ impl<P, E> ExExNotificationStream<P, E> {
     /// True if the stream is raw.
     pub const fn is_raw(&self) -> bool {
         matches!(self, Self::Raw(_))
+    }
+
+    /// Convert the stream into a raw stream that emits [`ExExNotification`]s.
+    pub fn try_into_raw(self) -> Option<ExExNotifications<P, E>> {
+        match self {
+            Self::Raw(notifications) => Some(notifications),
+            _ => None,
+        }
     }
 
     /// True if the stream has a head.
@@ -103,8 +121,11 @@ where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
-    /// Subscribe to notifications with the given head. This head is the ExEx's
-    /// latest view of the host chain.
+    /// Subscribe to notifications with the given [`ExExHead`]. This head is
+    /// the ExEx's latest view of the host chain.
+    ///
+    /// If the stream has already been configured with a head, this method will
+    /// do nothing.
     ///
     /// Notifications will be sent starting from the head, not inclusive. For
     /// example, if `head.number == 10`, then the first notification will be
