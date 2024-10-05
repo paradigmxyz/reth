@@ -304,7 +304,7 @@ impl<'a> DebugTraceTransactionsStream<'a> {
     }
 }
 
-impl<'a> Stream for DebugTraceTransactionsStream<'a> {
+impl Stream for DebugTraceTransactionsStream<'_> {
     type Item = TraceTransactionResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -312,7 +312,7 @@ impl<'a> Stream for DebugTraceTransactionsStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for DebugTraceTransactionsStream<'a> {
+impl std::fmt::Debug for DebugTraceTransactionsStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugTraceTransactionsStream").finish_non_exhaustive()
     }
@@ -336,7 +336,7 @@ impl<'a> DebugTraceBlockStream<'a> {
     }
 }
 
-impl<'a> Stream for DebugTraceBlockStream<'a> {
+impl Stream for DebugTraceBlockStream<'_> {
     type Item = DebugTraceBlockResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -344,7 +344,7 @@ impl<'a> Stream for DebugTraceBlockStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for DebugTraceBlockStream<'a> {
+impl std::fmt::Debug for DebugTraceBlockStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugTraceBlockStream").finish_non_exhaustive()
     }
