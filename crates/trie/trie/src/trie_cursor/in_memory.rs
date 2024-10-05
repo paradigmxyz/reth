@@ -113,7 +113,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     }
 }
 
-impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
+impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
