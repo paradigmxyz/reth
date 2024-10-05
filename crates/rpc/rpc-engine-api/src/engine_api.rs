@@ -477,15 +477,26 @@ where
             return Err(EngineApiError::PayloadRequestTooLarge { len })
         }
 
-        let mut result = Vec::with_capacity(hashes.len());
-        for hash in hashes {
-            let block = self
-                .inner
-                .provider
-                .block(BlockHashOrNumber::Hash(hash))
-                .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(&f));
-        }
+        let inner = self.inner.clone();
+        let f = Arc::new(f);
+        let hashes_clone = hashes.clone();
+
+        let result = self
+            .inner
+            .task_spawner
+            .spawn_blocking(Box::pin(async move {
+                let mut result = Vec::with_capacity(hashes_clone.len());
+                for hash in hashes_clone {
+                    let block = inner
+                        .provider
+                        .block(BlockHashOrNumber::Hash(hash))
+                        .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+                    result.push(block.map(|b| (f)(b)));
+                }
+                Ok(result)
+            }))
+            .await
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))??;
 
         Ok(result)
     }
