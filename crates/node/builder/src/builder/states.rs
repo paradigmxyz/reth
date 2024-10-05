@@ -19,7 +19,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::RpcAddonsTrait,
+    rpc::RethRpcAddOns,
     AddOns, FullNode,
 };
 
@@ -256,7 +256,7 @@ impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>

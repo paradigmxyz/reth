@@ -12,8 +12,8 @@ use reth::{
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::NodeComponentsBuilder, rpc::RpcAddonsTrait, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, RethFullAdapter,
+    components::NodeComponentsBuilder, rpc::RethRpcAddOns, FullNodeTypesAdapter, Node, NodeAdapter,
+    NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -54,7 +54,7 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RpcAddonsTrait<Adapter<N>>,
+    N::AddOns: RethRpcAddOns<Adapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

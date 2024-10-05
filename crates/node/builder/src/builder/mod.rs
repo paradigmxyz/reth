@@ -38,7 +38,7 @@ use secp256k1::SecretKey;
 use tracing::{info, trace, warn};
 
 use crate::{
-    common::WithConfigs, components::NodeComponentsBuilder, node::FullNode, rpc::RpcAddonsTrait,
+    common::WithConfigs, components::NodeComponentsBuilder, node::FullNode, rpc::RethRpcAddOns,
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 
@@ -329,7 +329,7 @@ where
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
-        N::AddOns: RpcAddonsTrait<
+        N::AddOns: RethRpcAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
@@ -381,7 +381,7 @@ impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
@@ -463,7 +463,7 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypesWithEngine<ChainSpec: EthereumHardforks + EthChainSpec>,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: RpcAddonsTrait<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(

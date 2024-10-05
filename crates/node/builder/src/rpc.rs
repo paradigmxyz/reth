@@ -496,15 +496,16 @@ where
     }
 }
 
-/// Helper trait implemented for add-ons launching RPC servers.
-pub trait RpcAddonsTrait<N: FullNodeComponents>:
+/// Helper trait implemented for add-ons producing [`RpcHandle`]. Used by common node launcher
+/// implementations.
+pub trait RethRpcAddOns<N: FullNodeComponents>:
     NodeAddOns<N, Handle = RpcHandle<N, Self::EthApi>>
 {
     /// eth API implementation.
     type EthApi: EthApiTypes;
 }
 
-impl<N, EthApi, T> RpcAddonsTrait<N> for T
+impl<N, EthApi, T> RethRpcAddOns<N> for T
 where
     N: FullNodeComponents,
     EthApi: EthApiTypes,

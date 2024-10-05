@@ -43,7 +43,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     node::FullNode,
-    rpc::{RpcAddonsTrait, RpcHandle},
+    rpc::{RethRpcAddOns, RpcHandle},
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
@@ -104,7 +104,7 @@ where
     Types: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec> + NodeTypesWithEngine,
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
-    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

@@ -37,7 +37,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{RpcAddonsTrait, RpcHandle},
+    rpc::{RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
@@ -70,7 +70,7 @@ where
     Types: ProviderNodeTypes + NodeTypesWithEngine,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
-    AO: RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

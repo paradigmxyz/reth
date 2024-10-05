@@ -18,7 +18,7 @@ use reth::{
     },
 };
 use reth_chainspec::EthereumHardforks;
-use reth_node_builder::{rpc::RpcAddonsTrait, NodeTypesWithEngine};
+use reth_node_builder::{rpc::RethRpcAddOns, NodeTypesWithEngine};
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
 
@@ -32,7 +32,7 @@ use crate::{
 pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
-    AddOns: RpcAddonsTrait<Node>,
+    AddOns: RethRpcAddOns<Node>,
 {
     /// The core structure representing the full node.
     pub inner: FullNode<Node, AddOns>,
@@ -52,7 +52,7 @@ where
     Node: FullNodeComponents,
     Node::Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine = Engine>,
     Node::Network: PeersHandleProvider,
-    AddOns: RpcAddonsTrait<Node>,
+    AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
     pub async fn new(node: FullNode<Node, AddOns>) -> eyre::Result<Self> {

@@ -18,7 +18,7 @@ use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 
-use crate::{components::NodeComponentsBuilder, rpc::RpcAddonsTrait, NodeAdapter, NodeAddOns};
+use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
 
 /// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///
@@ -158,7 +158,7 @@ impl<Engine, Node, AddOns> FullNode<Node, AddOns>
 where
     Engine: EngineTypes,
     Node: FullNodeComponents<Types: NodeTypesWithEngine<Engine = Engine>>,
-    AddOns: RpcAddonsTrait<Node>,
+    AddOns: RethRpcAddOns<Node>,
 {
     /// Returns the [`RpcServerHandle`] to the started rpc server.
     pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
