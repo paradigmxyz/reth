@@ -22,8 +22,8 @@ fn test_basic_setup() {
         })
         .on_node_started(|_full_node| Ok(()))
         .map_add_ons(|mut add_ons| {
-            add_ons.rpc = add_ons
-                .rpc
+            add_ons.0 = add_ons
+                .0
                 .on_rpc_started(|_ctx, handles| {
                     let _client = handles.rpc.http_client();
                     Ok(())

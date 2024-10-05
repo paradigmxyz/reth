@@ -84,7 +84,7 @@ impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
     N: FullNodeTypes + Clone,
     C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
-    AO: NodeAddOns<NodeAdapter<N, C::Components>>,
+    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone,
 {
     type ComponentsBuilder = C;
     type AddOns = AO;

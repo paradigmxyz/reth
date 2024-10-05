@@ -112,7 +112,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
 }
 
 /// Customizable node add-on types.
-pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
+pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + 'static {
     /// Handle to add-ons.
     type Handle: Send + Sync + Clone;
 
@@ -130,23 +130,3 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
         Ok(())
     }
 }
-
-/// Returns the builder for type.
-pub trait BuilderProvider<N: FullNodeComponents>: Send {
-    /// Context required to build type.
-    type Ctx<'a>;
-
-    /// Returns builder for type.
-    #[allow(clippy::type_complexity)]
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
-}
-
-impl<N: FullNodeComponents> BuilderProvider<N> for () {
-    type Ctx<'a> = ();
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(noop_builder)
-    }
-}
-
-const fn noop_builder(_: ()) {}

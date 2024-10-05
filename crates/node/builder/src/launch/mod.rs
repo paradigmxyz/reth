@@ -49,14 +49,13 @@ use crate::{
 };
 
 /// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
-pub type EthApiBuilderCtx<N, Eth> = reth_rpc_eth_types::EthApiBuilderCtx<
+pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Evm,
     <N as FullNodeComponents>::Network,
     TaskExecutor,
     <N as FullNodeTypes>::Provider,
-    Eth,
 >;
 
 /// A general purpose trait that launches a new node of any kind.

@@ -19,7 +19,7 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
-use reth_optimism_rpc::{OpEthApi, SequencerClient};
+use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::Header;
 use reth_provider::CanonStateSubscriptions;
@@ -122,29 +122,19 @@ impl NodeTypesWithEngine for OptimismNode {
 }
 
 /// Add-ons w.r.t. optimism.
-#[derive(Debug, Clone)]
-pub struct OptimismAddOns<N: FullNodeComponents> {
-    /// Inner RPC context.
-    pub rpc: RpcAddOns<N, OpEthApi<N>>,
-    sequencer_http: Option<String>,
-}
+#[derive(Debug)]
+pub struct OptimismAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>>);
 
 impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
     fn default() -> Self {
-        Self { rpc: Default::default(), sequencer_http: None }
+        Self::new(None)
     }
 }
 
 impl<N: FullNodeComponents> OptimismAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
     pub fn new(sequencer_http: Option<String>) -> Self {
-        Self { sequencer_http, rpc: Default::default() }
-    }
-
-    /// Set the sequencer HTTP URL.
-    pub fn with_sequencer_http(mut self, sequencer_http: Option<String>) -> Self {
-        self.sequencer_http = sequencer_http;
-        self
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http)))
     }
 }
 
@@ -157,16 +147,7 @@ impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOn
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let handle = self.rpc.launch_add_ons(ctx).await?;
-        // register sequencer tx forwarder
-        if let Some(sequencer_http) = self.sequencer_http {
-            handle
-                .rpc_registry
-                .eth_api()
-                .set_sequencer_client(SequencerClient::new(sequencer_http))?;
-        }
-
-        Ok(handle)
+        self.0.launch_add_ons(ctx).await
     }
 }
 
