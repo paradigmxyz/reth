@@ -16,6 +16,7 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
     builder::NodeHandle,
+    chainspec::EthereumChainSpecParser,
     cli::Cli,
     primitives::BlockNumberOrTag,
     revm::{
@@ -26,7 +27,6 @@ use reth::{
     rpc::{api::eth::helpers::Call, compat::transaction::transaction_to_call_request},
     transaction_pool::TransactionPool,
 };
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {

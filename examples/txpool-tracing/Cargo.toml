@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
-reth-ethereum-cli.workspace = true
 reth-node-ethereum.workspace = true
 alloy-rpc-types-trace.workspace = true
 clap = { workspace = true, features = ["derive"] }

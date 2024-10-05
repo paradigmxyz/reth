@@ -2688,7 +2688,6 @@ dependencies = [
  "futures-util",
  "reqwest",
  "reth",
- "reth-ethereum-cli",
  "reth-node-ethereum",
  "serde",
  "serde_json",
@@ -2704,7 +2703,6 @@ dependencies = [
  "futures-util",
  "mev-share-sse",
  "reth",
- "reth-ethereum-cli",
  "reth-node-ethereum",
  "tokio",
  "tracing",
@@ -2794,7 +2792,6 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
- "reth-ethereum-cli",
  "reth-node-ethereum",
 ]
 
@@ -2910,7 +2907,6 @@ dependencies = [
  "clap",
  "jsonrpsee",
  "reth",
- "reth-ethereum-cli",
  "reth-node-ethereum",
  "reth-transaction-pool",
  "tokio",
@@ -2984,7 +2980,6 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
- "reth-ethereum-cli",
  "reth-node-ethereum",
 ]
 
