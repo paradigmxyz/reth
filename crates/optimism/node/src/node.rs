@@ -9,7 +9,7 @@ use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
-        NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, Node, PayloadBuilderConfig,
@@ -166,9 +166,11 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct OptimismPoolBuilder;
+#[derive(Debug, Default, Clone)]
+pub struct OptimismPoolBuilder {
+    /// Enforced overrides that are applied to the pool config.
+    pub pool_config_overrides: PoolBuilderConfigOverrides,
+}
 
 impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
@@ -177,6 +179,7 @@ where
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+        let Self { pool_config_overrides } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
@@ -198,7 +201,7 @@ where
             validator,
             CoinbaseTipOrdering::default(),
             blob_store,
-            ctx.pool_config(),
+            pool_config_overrides.apply(ctx.pool_config()),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
