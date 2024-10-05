@@ -15,6 +15,7 @@ use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::Signature as _;
 use serde::{Deserialize, Serialize};
 
 pub use error::{
@@ -30,8 +31,8 @@ pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use compat::FillTxEnv;
 pub use signature::{
-    decode_with_eip155_chain_id, extract_chain_id, legacy_parity, recover_signer,
-    recover_signer_unchecked, with_eip155_parity, Signature,
+    extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, with_eip155_parity,
+    Signature,
 };
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
@@ -1251,7 +1252,7 @@ impl TransactionSigned {
             input: Decodable::decode(data)?,
             chain_id: None,
         };
-        let (signature, extracted_id) = decode_with_eip155_chain_id(data)?;
+        let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
         transaction.chain_id = extracted_id;
 
         // check the new length, compared to the original length and the header length

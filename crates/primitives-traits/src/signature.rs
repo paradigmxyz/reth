@@ -28,6 +28,6 @@ impl Signature for alloy_primitives::Signature {
             return Ok((alloy_primitives::Signature::new(r, s, Parity::Parity(false)), None))
         }
 
-        Ok((alloy_primitives::Signature::new(r, s, v), v.chain_id()))
+        Ok((Self::new(r, s, v), v.chain_id()))
     }
 }

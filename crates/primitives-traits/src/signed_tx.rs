@@ -132,10 +132,7 @@ pub trait SignedTransaction:
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
-    fn recalculate_hash(&self) -> B256
-    where
-        Self: Encodable2718,
-    {
+    fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
 }
