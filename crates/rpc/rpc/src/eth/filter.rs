@@ -379,7 +379,7 @@ where
                 let block = self
                     .provider
                     .header_by_hash_or_number(block_hash.into())?
-                    .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
 
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
@@ -511,7 +511,7 @@ where
                         None => self
                             .provider
                             .block_hash(header.number)?
-                            .ok_or(ProviderError::HeaderNotFound(header.number.into()))?,
+                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
@@ -611,7 +611,7 @@ where
     /// Returns all new pending transactions received since the last poll.
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
     where
-        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
     {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
@@ -633,7 +633,7 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>> + 'static,
     TxCompat: TransactionCompat + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {

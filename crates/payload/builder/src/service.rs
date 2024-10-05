@@ -303,7 +303,7 @@ where
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
 
         if keep_alive == KeepPayloadJobAlive::No {
-            let (_, id) = self.payload_jobs.remove(job);
+            let (_, id) = self.payload_jobs.swap_remove(job);
             trace!(%id, "terminated resolved job");
         }
 

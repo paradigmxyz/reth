@@ -346,7 +346,7 @@ where
     let hash = provider_rw.block_hash(block)?.unwrap();
     let expected_state_root = provider_rw
         .header_by_number(block)?
-        .ok_or(ProviderError::HeaderNotFound(block.into()))?
+        .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
         .state_root;
 
     // first line can be state root

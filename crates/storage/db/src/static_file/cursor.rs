@@ -115,7 +115,7 @@ impl<'a> From<&'a B256> for KeyOrNumber<'a> {
     }
 }
 
-impl<'a> From<u64> for KeyOrNumber<'a> {
+impl From<u64> for KeyOrNumber<'_> {
     fn from(value: u64) -> Self {
         KeyOrNumber::Number(value)
     }

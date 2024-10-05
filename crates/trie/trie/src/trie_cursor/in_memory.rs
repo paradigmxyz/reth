@@ -188,7 +188,7 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
     }
 }
 
-impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
+impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
     fn seek_inner(
         &mut self,
         key: Nibbles,
@@ -237,7 +237,7 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
     }
 }
 
-impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
+impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
