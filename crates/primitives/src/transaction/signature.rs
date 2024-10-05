@@ -1,6 +1,6 @@
 use crate::transaction::util::secp256k1;
 use alloy_primitives::{Address, Parity, B256, U256};
-use alloy_rlp::{Decodable, Error as RlpError};
+use alloy_rlp::Error as RlpError;
 
 pub use alloy_primitives::Signature;
 

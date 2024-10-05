@@ -25,7 +25,7 @@ impl Signature for alloy_primitives::Signature {
         //
         // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
         if matches!(v, Parity::Parity(false)) && r.is_zero() && s.is_zero() {
-            return Ok((alloy_primitives::Signature::new(r, s, Parity::Parity(false)), None))
+            return Ok((Self::new(r, s, Parity::Parity(false)), None))
         }
 
         Ok((Self::new(r, s, v), v.chain_id()))
