@@ -40,9 +40,10 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
 
 /// Ethereum chain specification parser.
 #[derive(Debug, Clone, Default)]
-pub struct EthChainSpecParser;
+#[non_exhaustive]
+pub struct EthereumChainSpecParser;
 
-impl ChainSpecParser for EthChainSpecParser {
+impl ChainSpecParser for EthereumChainSpecParser {
     type ChainSpec = ChainSpec;
 
     const SUPPORTED_CHAINS: &'static [&'static str] = SUPPORTED_CHAINS;
@@ -59,8 +60,8 @@ mod tests {
 
     #[test]
     fn parse_known_chain_spec() {
-        for &chain in EthChainSpecParser::SUPPORTED_CHAINS {
-            assert!(<EthChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
+        for &chain in EthereumChainSpecParser::SUPPORTED_CHAINS {
+            assert!(<EthereumChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
         }
     }
 
@@ -111,7 +112,7 @@ mod tests {
   }
 }"#;
 
-        let spec = <EthChainSpecParser as ChainSpecParser>::parse(s).unwrap();
+        let spec = <EthereumChainSpecParser as ChainSpecParser>::parse(s).unwrap();
         assert!(spec.is_shanghai_active_at_timestamp(0));
         assert!(spec.is_cancun_active_at_timestamp(0));
         assert!(spec.is_prague_active_at_timestamp(0));

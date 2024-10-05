@@ -32,12 +32,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec>> DumpGenesisCommand<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_cli::chainspec::{EthChainSpecParser, SUPPORTED_CHAINS};
+    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
 
     #[test]
     fn parse_dump_genesis_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: DumpGenesisCommand<EthChainSpecParser> =
+            let args: DumpGenesisCommand<EthereumChainSpecParser> =
                 DumpGenesisCommand::parse_from(["reth", "--chain", chain]);
             assert_eq!(
                 Ok(args.chain.chain),

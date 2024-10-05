@@ -213,13 +213,13 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
-    use reth_ethereum_cli::chainspec::EthChainSpecParser;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     use super::*;
 
     #[test]
     fn parse_unwind() {
-        let cmd = Command::<EthChainSpecParser>::parse_from([
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--datadir",
             "dir",
@@ -228,7 +228,7 @@ mod tests {
         ]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
 
-        let cmd = Command::<EthChainSpecParser>::parse_from([
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--datadir",
             "dir",

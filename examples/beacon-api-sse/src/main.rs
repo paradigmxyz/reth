@@ -22,13 +22,13 @@ use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
 use reth::cli::Cli;
-use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_ethereum::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 
 fn main() {
-    Cli::<EthChainSpecParser, BeaconEventsConfig>::parse()
+    Cli::<EthereumChainSpecParser, BeaconEventsConfig>::parse()
         .run(|builder, args| async move {
             let handle = builder.node(EthereumNode::default()).launch().await?;
 

@@ -26,11 +26,11 @@ use reth::{
     rpc::{api::eth::helpers::Call, compat::transaction::transaction_to_call_request},
     transaction_pool::TransactionPool,
 };
-use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
-    Cli::<EthChainSpecParser, RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

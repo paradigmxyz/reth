@@ -15,7 +15,7 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_ethereum_cli::chainspec::EthChainSpecParser;
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_tracing::FileWorkerGuard;
@@ -34,7 +34,8 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
+{
     /// The command to run
     #[command(subcommand)]
     command: Commands<C, Ext>,
@@ -117,14 +118,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// ```no_run
     /// use clap::Parser;
     /// use reth::cli::Cli;
-    /// use reth_ethereum_cli::chainspec::EthChainSpecParser;
+    /// use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::<EthChainSpecParser, MyArgs>::parse()
+    /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
     ///     .run(|builder, my_args: MyArgs| async move {
     ///         // launch the node
     ///
@@ -251,7 +252,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<EthChainSpecParser, NoArgs>::command();
+        let reth = Cli::<EthereumChainSpecParser, NoArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()
