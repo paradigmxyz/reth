@@ -13,12 +13,13 @@ use reth_node_builder::{
         NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    BuilderContext, Node, PayloadBuilderConfig,
+    rpc::{RpcAddOns, RpcHandle},
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
-use reth_optimism_rpc::OpEthApi;
+use reth_optimism_rpc::{OpEthApi, SequencerClient};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::Header;
 use reth_provider::CanonStateSubscriptions;
@@ -97,7 +98,9 @@ where
         OptimismEngineValidatorBuilder,
     >;
 
-    type AddOns = OptimismAddOns;
+    type AddOns = OptimismAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
@@ -120,24 +123,51 @@ impl NodeTypesWithEngine for OptimismNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug, Clone)]
-pub struct OptimismAddOns {
+pub struct OptimismAddOns<N: FullNodeComponents> {
+    /// Inner RPC context.
+    pub rpc: RpcAddOns<N, OpEthApi<N>>,
     sequencer_http: Option<String>,
 }
 
-impl OptimismAddOns {
-    /// Create a new instance with the given `sequencer_http` URL.
-    pub const fn new(sequencer_http: Option<String>) -> Self {
-        Self { sequencer_http }
-    }
-
-    /// Returns the sequencer HTTP URL.
-    pub fn sequencer_http(&self) -> Option<&str> {
-        self.sequencer_http.as_deref()
+impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
+    fn default() -> Self {
+        Self { rpc: Default::default(), sequencer_http: None }
     }
 }
 
-impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
-    type EthApi = OpEthApi<N>;
+impl<N: FullNodeComponents> OptimismAddOns<N> {
+    /// Create a new instance with the given `sequencer_http` URL.
+    pub fn new(sequencer_http: Option<String>) -> Self {
+        Self { sequencer_http, rpc: Default::default() }
+    }
+
+    /// Set the sequencer HTTP URL.
+    pub fn with_sequencer_http(mut self, sequencer_http: Option<String>) -> Self {
+        self.sequencer_http = sequencer_http;
+        self
+    }
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOns<N>
+    for OptimismAddOns<N>
+{
+    type Handle = RpcHandle<N, OpEthApi<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        let handle = self.rpc.launch_add_ons(ctx).await?;
+        // register sequencer tx forwarder
+        if let Some(sequencer_http) = self.sequencer_http {
+            handle
+                .rpc_registry
+                .eth_api()
+                .set_sequencer_client(SequencerClient::new(sequencer_http))?;
+        }
+
+        Ok(handle)
+    }
 }
 
 /// A regular optimism evm and executor builder.

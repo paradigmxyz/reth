@@ -118,7 +118,7 @@ where
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: AddOns { hooks, exexs: installed_exex, addons },
+            add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
@@ -339,7 +339,7 @@ where
         };
 
         let RpcHandle { rpc_server_handles, rpc_registry } =
-            addons.launch_add_ons(add_ons_ctx).await?;
+            add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // in dev mode we generate 20 random dev-signer accounts
         if ctx.is_dev() {
@@ -406,10 +406,10 @@ where
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
-            addons_handle: RpcHandle { rpc_server_handles, rpc_registry },
+            add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry },
         };
         // Notify on node started
-        on_node_started.on_event(full_node.clone())?;
+        on_node_started.on_event(FullNode::clone(&full_node))?;
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(

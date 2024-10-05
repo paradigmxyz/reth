@@ -23,22 +23,24 @@ fn main() {
         .run(|builder, args| async move {
             let handle = builder
                 .node(EthereumNode::default())
-                .extend_rpc_modules(move |ctx| {
-                    if !args.enable_ext {
-                        return Ok(())
-                    }
+                .map_add_ons(move |add_ons| {
+                    add_ons.extend_rpc_modules(move |ctx| {
+                        if !args.enable_ext {
+                            return Ok(())
+                        }
 
-                    // here we get the configured pool.
-                    let pool = ctx.pool().clone();
+                        // here we get the configured pool.
+                        let pool = ctx.pool().clone();
 
-                    let ext = TxpoolExt { pool };
+                        let ext = TxpoolExt { pool };
 
-                    // now we merge our extension namespace into all configured transports
-                    ctx.modules.merge_configured(ext.into_rpc())?;
+                        // now we merge our extension namespace into all configured transports
+                        ctx.modules.merge_configured(ext.into_rpc())?;
 
-                    println!("txpool extension enabled");
+                        println!("txpool extension enabled");
 
-                    Ok(())
+                        Ok(())
+                    })
                 })
                 .launch()
                 .await?;

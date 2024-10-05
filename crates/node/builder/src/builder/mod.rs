@@ -21,8 +21,8 @@ use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 use reth_node_api::{
-    EthApiTypes, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -39,10 +39,7 @@ use secp256k1::SecretKey;
 use tracing::{info, trace, warn};
 
 use crate::{
-    common::WithConfigs,
-    components::NodeComponentsBuilder,
-    node::FullNode,
-    rpc::{ExtendRpcModules, OnRpcStarted, RpcAddOns, RpcAddonsTrait},
+    common::WithConfigs, components::NodeComponentsBuilder, node::FullNode, rpc::RpcAddonsTrait,
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 
@@ -431,6 +428,14 @@ where
         }
     }
 
+    /// Modifies the addons with the given closure.
+    pub fn map_add_ons<F>(self, f: F) -> Self
+    where
+        F: FnOnce(AO) -> AO,
+    {
+        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
+    }
+
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
@@ -452,34 +457,6 @@ where
     /// This is useful when writing tests to ensure that the builder is configured correctly.
     pub const fn check_launch(self) -> Self {
         self
-    }
-}
-
-impl<T, CB, EthApi>
-    WithLaunchContext<
-        NodeBuilderWithComponents<T, CB, RpcAddOns<NodeAdapter<T, CB::Components>, EthApi>>,
-    >
-where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    EthApi: EthApiTypes,
-    RpcAddOns<NodeAdapter<T, CB::Components>, EthApi>:
-        RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
-{
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
-    where
-        F: OnRpcStarted<NodeAdapter<T, CB::Components>, EthApi> + 'static,
-    {
-        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
-    where
-        F: ExtendRpcModules<NodeAdapter<T, CB::Components>, EthApi> + 'static,
-    {
-        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 }
 

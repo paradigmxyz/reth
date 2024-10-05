@@ -13,5 +13,5 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The `ExExs` (execution extensions) of the node.
     pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     /// Additional captured addons.
-    pub addons: AddOns,
+    pub add_ons: AddOns,
 }

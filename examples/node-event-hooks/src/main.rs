@@ -23,9 +23,11 @@ fn main() {
                     println!("Node started");
                     Ok(())
                 })
-                .on_rpc_started(|_ctx, _handles| {
-                    println!("RPC started");
-                    Ok(())
+                .map_add_ons(|add_ons| {
+                    add_ons.on_rpc_started(|_ctx, _handles| {
+                        println!("RPC started");
+                        Ok(())
+                    })
                 })
                 .on_component_initialized(|_ctx| {
                     println!("All components initialized");

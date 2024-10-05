@@ -29,15 +29,18 @@ fn test_basic_setup() {
             Ok(())
         })
         .on_node_started(|_full_node| Ok(()))
-        .on_rpc_started(|_ctx, handles| {
-            let _client = handles.rpc.http_client();
-            Ok(())
-        })
-        .extend_rpc_modules(|ctx| {
-            let _ = ctx.config();
-            let _ = ctx.node().provider();
+        .map_add_ons(|add_ons| {
+            add_ons
+                .on_rpc_started(|_ctx, handles| {
+                    let _client = handles.rpc.http_client();
+                    Ok(())
+                })
+                .extend_rpc_modules(|ctx| {
+                    let _ = ctx.config();
+                    let _ = ctx.node().provider();
 
-            Ok(())
+                    Ok(())
+                })
         })
         .check_launch();
 }

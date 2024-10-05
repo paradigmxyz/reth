@@ -307,14 +307,6 @@ where
     }
 }
 
-/// Node add-ons containing RPC server configuration, with customizable eth API handler.
-#[derive(Debug, Clone)]
-pub struct RpcAddOns<Node: FullNodeComponents, EthApi: EthApiTypes> {
-    /// Additional RPC add-ons.
-    pub hooks: RpcHooks<Node, EthApi>,
-    _pd: PhantomData<(Node, EthApi)>,
-}
-
 /// Handle to the launched RPC servers.
 #[derive(Clone)]
 pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
@@ -333,6 +325,44 @@ where
             .field("rpc_server_handles", &self.rpc_server_handles)
             .field("rpc_registry", &self.rpc_registry)
             .finish()
+    }
+}
+
+/// Node add-ons containing RPC server configuration, with customizable eth API handler.
+#[derive(Debug, Clone)]
+pub struct RpcAddOns<Node: FullNodeComponents, EthApi: EthApiTypes> {
+    /// Additional RPC add-ons.
+    pub hooks: RpcHooks<Node, EthApi>,
+    _pd: PhantomData<(Node, EthApi)>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Default for RpcAddOns<Node, EthApi> {
+    fn default() -> Self {
+        Self { hooks: RpcHooks::default(), _pd: PhantomData }
+    }
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcAddOns<Node, EthApi> {
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()>
+            + OnRpcStarted<Node, EthApi>
+            + 'static,
+    {
+        self.hooks.set_on_rpc_started(hook);
+        self
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()>
+            + ExtendRpcModules<Node, EthApi>
+            + 'static,
+    {
+        self.hooks.set_extend_rpc_modules(hook);
+        self
     }
 }
 

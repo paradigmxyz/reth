@@ -1,7 +1,11 @@
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use reth_node_api::{EngineTypes, FullNodeComponents};
 use reth_node_core::{
@@ -118,7 +122,7 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
     /// The handle to launched add-ons
-    pub addons_handle: AddOns::Handle,
+    pub add_ons_handle: AddOns::Handle,
 }
 
 impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node, AddOns> {
@@ -133,7 +137,7 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
             task_executor: self.task_executor.clone(),
             config: self.config.clone(),
             data_dir: self.data_dir.clone(),
-            addons_handle: self.addons_handle.clone(),
+            add_ons_handle: self.add_ons_handle.clone(),
         }
     }
 }
@@ -158,12 +162,12 @@ where
 {
     /// Returns the [`RpcServerHandle`] to the started rpc server.
     pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
-        &self.addons_handle.rpc_server_handles.rpc
+        &self.add_ons_handle.rpc_server_handles.rpc
     }
 
     /// Returns the [`AuthServerHandle`] to the started authenticated engine API server.
     pub const fn auth_server_handle(&self) -> &AuthServerHandle {
-        &self.addons_handle.rpc_server_handles.auth
+        &self.add_ons_handle.rpc_server_handles.auth
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
@@ -186,5 +190,19 @@ where
     #[cfg(unix)]
     pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Engine>> {
         self.auth_server_handle().ipc_client().await
+    }
+}
+
+impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Deref for FullNode<Node, AddOns> {
+    type Target = AddOns::Handle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.add_ons_handle
+    }
+}
+
+impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> DerefMut for FullNode<Node, AddOns> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.add_ons_handle
     }
 }

@@ -1,11 +1,11 @@
 use alloy_primitives::{Address, B256};
 use reth::rpc::types::engine::PayloadAttributes;
-use reth_e2e_test_utils::NodeHelperType;
+use reth_e2e_test_utils::{Adapter, NodeHelperType};
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 
 /// Ethereum Node Helper type
-pub(crate) type EthNode = NodeHelperType<EthereumNode, EthereumAddOns>;
+pub(crate) type EthNode = NodeHelperType<EthereumNode, EthereumAddOns<Adapter<EthereumNode>>>;
 
 /// Helper function to create a new eth payload attributes
 pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {

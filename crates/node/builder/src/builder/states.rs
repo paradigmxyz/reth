@@ -9,8 +9,7 @@ use std::{fmt, future::Future};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
-    EthApiTypes, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB,
-    NodeTypesWithEngine,
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -20,7 +19,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::{ExtendRpcModules, OnRpcStarted, RpcAddOns, RpcAddonsTrait},
+    rpc::RpcAddonsTrait,
     AddOns, FullNode,
 };
 
@@ -52,7 +51,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             config,
             adapter,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), addons: () },
+            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
         }
     }
 }
@@ -76,8 +75,8 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
     }
 }
 
-/// Container for the node's types and the components and other internals that can be used by addons
-/// of the node.
+/// Container for the node's types and the components and other internals that can be used by
+/// addons of the node.
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     /// The components of the node.
     pub components: C,
@@ -172,7 +171,7 @@ where
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
-    pub fn with_add_ons<AO>(self, addons: AO) -> NodeBuilderWithComponents<T, CB, AO>
+    pub fn with_add_ons<AO>(self, add_ons: AO) -> NodeBuilderWithComponents<T, CB, AO>
     where
         AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
@@ -182,7 +181,7 @@ where
             config,
             adapter,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), addons },
+            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
         }
     }
 }
@@ -242,32 +241,13 @@ where
     pub const fn check_launch(self) -> Self {
         self
     }
-}
 
-impl<T, CB, EthApi>
-    NodeBuilderWithComponents<T, CB, RpcAddOns<NodeAdapter<T, CB::Components>, EthApi>>
-where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    EthApi: EthApiTypes,
-    RpcAddOns<NodeAdapter<T, CB::Components>, EthApi>:
-        RpcAddonsTrait<NodeAdapter<T, CB::Components>>,
-{
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    /// Modifies the addons with the given closure.
+    pub fn map_add_ons<F>(mut self, f: F) -> Self
     where
-        F: OnRpcStarted<NodeAdapter<T, CB::Components>, EthApi> + 'static,
+        F: FnOnce(AO) -> AO,
     {
-        self.add_ons.addons.hooks.set_on_rpc_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
-    where
-        F: ExtendRpcModules<NodeAdapter<T, CB::Components>, EthApi> + 'static,
-    {
-        self.add_ons.addons.hooks.set_extend_rpc_modules(hook);
+        self.add_ons.add_ons = f(self.add_ons.add_ons);
         self
     }
 }
