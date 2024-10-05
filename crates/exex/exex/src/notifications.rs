@@ -20,10 +20,10 @@ use tokio::sync::mpsc::Receiver;
 ///
 /// This stream produces `Result` types because the backfill job is fallible.
 /// If no specific backfill head is needed, this stream can be converted into a
-/// [`ExExNotifications`] stream via [`into_raw`] which will produce
+/// [`ExExNotifications`] stream via [`try_into_raw`] which will produce
 /// [`ExExNotification`] types directly.
 ///
-/// [`into_raw`]: ExExNotificationStream::into_raw
+/// [`try_into_raw`]: ExExNotificationStream::try_into_raw
 #[derive(Debug)]
 #[allow(clippy::manual_non_exhaustive)] // false positive
 pub enum ExExNotificationStream<P, E> {
