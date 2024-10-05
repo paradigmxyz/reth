@@ -15,7 +15,7 @@ use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    args::utils::EthereumChainSpecParser, builder::NodeHandle, cli::Cli,
+    builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
     rpc::compat::transaction::transaction_to_call_request, transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;

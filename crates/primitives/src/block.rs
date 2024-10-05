@@ -778,7 +778,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::BlockBody> for BlockBody<'a> {
+    impl SerializeAs<super::BlockBody> for BlockBody<'_> {
         fn serialize_as<S>(source: &super::BlockBody, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -829,7 +829,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedBlock> for SealedBlock<'a> {
+    impl SerializeAs<super::SealedBlock> for SealedBlock<'_> {
         fn serialize_as<S>(source: &super::SealedBlock, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -880,7 +880,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedBlockWithSenders> for SealedBlockWithSenders<'a> {
+    impl SerializeAs<super::SealedBlockWithSenders> for SealedBlockWithSenders<'_> {
         fn serialize_as<S>(
             source: &super::SealedBlockWithSenders,
             serializer: S,
@@ -1151,5 +1151,14 @@ mod tests {
             SealedBlockWithSenders::new(sealed.clone(), vec![sender]),
             Some(SealedBlockWithSenders { block: sealed, senders: vec![sender] })
         );
+    }
+
+    #[test]
+    fn test_default_seal() {
+        let block = SealedBlock::<Header, BlockBody>::default();
+        let sealed = block.hash();
+        let block = block.unseal();
+        let block = block.seal_slow();
+        assert_eq!(sealed, block.hash());
     }
 }

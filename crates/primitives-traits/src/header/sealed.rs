@@ -1,5 +1,4 @@
 use super::Header;
-use alloc::vec::Vec;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash, Sealable};
 #[cfg(any(test, feature = "test-utils"))]
@@ -8,7 +7,7 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
@@ -22,28 +21,6 @@ pub struct SealedHeader<H = Header> {
     #[as_ref]
     #[deref]
     header: H,
-}
-
-impl<H: Compact> Compact for SealedHeader<H> {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut buffer = Vec::new();
-        self.hash.to_compact(&mut buffer);
-        self.header.to_compact(&mut buffer);
-        buf.put(&buffer[..]);
-        buffer.len()
-    }
-
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (hash, new_buf) = BlockHash::from_compact(buf, buf.len());
-        buf = new_buf;
-        let (header, new_buf) = H::from_compact(buf, buf.len());
-        buf = new_buf;
-        let sealed_header = Self { hash, header };
-        (sealed_header, buf)
-    }
 }
 
 impl<H> SealedHeader<H> {
@@ -210,7 +187,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedHeader> for SealedHeader<'a> {
+    impl SerializeAs<super::SealedHeader> for SealedHeader<'_> {
         fn serialize_as<S>(source: &super::SealedHeader, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,

@@ -81,7 +81,7 @@ fn main() {
                 .with_components(
                     EthereumNode::components().payload(CustomPayloadBuilder::default()),
                 )
-                .with_add_ons::<EthereumAddOns>()
+                .with_add_ons(EthereumAddOns::default())
                 .launch()
                 .await?;
 

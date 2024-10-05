@@ -5257,8 +5257,14 @@ dependencies = [
  "clap",
  "reth-cli-util",
  "reth-node-builder",
+ "reth-optimism-chainspec",
  "reth-optimism-cli",
+ "reth-optimism-consensus",
+ "reth-optimism-evm",
+ "reth-optimism-forks",
  "reth-optimism-node",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-provider",
  "tracing",
@@ -6237,6 +6243,7 @@ dependencies = [
  "reth-downloaders",
  "reth-engine-util",
  "reth-errors",
+ "reth-ethereum-cli",
  "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-execution-types",
@@ -6508,13 +6515,11 @@ dependencies = [
  "auto_impl",
  "derive_more 1.0.0",
  "once_cell",
- "op-alloy-rpc-types",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-trie-common",
- "serde",
  "serde_json",
 ]
 
@@ -6522,9 +6527,12 @@ dependencies = [
 name = "reth-cli"
 version = "1.0.8"
 dependencies = [
+ "alloy-genesis",
  "clap",
  "eyre",
  "reth-cli-runner",
+ "serde_json",
+ "shellexpand",
 ]
 
 [[package]]
@@ -6561,6 +6569,7 @@ dependencies = [
  "reth-downloaders",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-ethereum-cli",
  "reth-evm",
  "reth-exex",
  "reth-fs-util",
@@ -7225,14 +7234,11 @@ dependencies = [
 name = "reth-ethereum-cli"
 version = "1.0.8"
 dependencies = [
- "alloy-genesis",
  "clap",
  "eyre",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
- "serde_json",
- "shellexpand",
 ]
 
 [[package]]
@@ -7839,7 +7845,6 @@ dependencies = [
 name = "reth-node-core"
 version = "1.0.8"
 dependencies = [
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
@@ -7852,19 +7857,16 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-chainspec",
- "reth-cli",
  "reth-cli-util",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
  "reth-discv5",
- "reth-fs-util",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
- "reth-optimism-chainspec",
  "reth-primitives",
  "reth-prune-types",
  "reth-rpc-api",
@@ -7879,7 +7881,6 @@ dependencies = [
  "reth-transaction-pool",
  "secp256k1",
  "serde",
- "serde_json",
  "shellexpand",
  "strum",
  "tempfile",
