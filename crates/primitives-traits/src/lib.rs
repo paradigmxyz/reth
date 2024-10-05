@@ -20,6 +20,11 @@ pub use constants::gas_units::{format_gas, format_gas_throughput};
 pub mod account;
 pub use account::{Account, Bytecode};
 
+pub mod signed_tx;
+pub use signed_tx::SignedTransaction;
+
+pub mod signature;
+
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
