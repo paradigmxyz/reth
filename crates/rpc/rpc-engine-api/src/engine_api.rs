@@ -477,10 +477,10 @@ where
         if len > MAX_PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len });
         }
-    
+
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
-    
+
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             let mut result = Vec::with_capacity(hashes.len());
             for hash in hashes {
@@ -497,7 +497,7 @@ where
             }
             tx.send(Ok(result)).ok();
         }));
-    
+
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
