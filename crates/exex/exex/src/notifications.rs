@@ -70,10 +70,19 @@ impl<P, E> ExExNotificationStream<P, E> {
         matches!(self, Self::WithHead(_))
     }
 
-    /// Get a reference to the exex head, if the stream has a head
-    pub const fn exex_head(&self) -> Option<&ExExHead> {
+    /// Convert the stream into a stream with a head that emits
+    /// `Result<ExExNotification>`.
+    pub fn try_into_with_head(self) -> Option<ExExNotificationsWithHead<P, E>> {
         match self {
-            Self::WithHead(notifications) => Some(&notifications.exex_head),
+            Self::WithHead(notifications) => Some(notifications),
+            _ => None,
+        }
+    }
+
+    /// Get a reference to the exex head, if the stream has a head
+    pub const fn exex_head(&self) -> Option<ExExHead> {
+        match self {
+            Self::WithHead(notifications) => Some(notifications.exex_head),
             Self::Raw(_) => None,
             Self::Invalid => panic!("invalid stream state"),
         }
