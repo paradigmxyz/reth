@@ -15,13 +15,6 @@ workspace = true
 reth-cli.workspace = true
 reth-chainspec.workspace = true
 
-# ethereum
-alloy-genesis.workspace = true
-
-# io
-shellexpand.workspace = true
-serde_json.workspace = true
-
 # misc
 eyre.workspace = true
 
