@@ -33,6 +33,9 @@ pub enum EthFilterError {
     /// Error thrown when a spawned task failed to deliver a response.
     #[error("internal filter error")]
     InternalError,
+    /// Reorg detected.
+    #[error("reorg detected {0}")]
+    ReorgDetected(u64),
 }
 
 // convert the error
@@ -48,9 +51,11 @@ impl From<EthFilterError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
+            EthFilterError::ReorgDetected(_) |
             EthFilterError::QueryExceedsMaxResults(_)) => {
                 rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, err.to_string())
             }
+            
         }
     }
 }
@@ -108,6 +113,14 @@ pub fn append_matching_block_logs(
     removed: bool,
     block_timestamp: u64,
 ) -> Result<(), EthFilterError> {
+
+    // Verify block hash hasn't changed
+    let current_block_hash = provider.block_hash(block_num_hash.number)?.ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
+
+    if current_block_hash != block_num_hash.hash {
+        return Err(EthFilterError::ReorgDetected(block_num_hash.number));
+    }
+
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
