@@ -1,9 +1,5 @@
 {
   inputs = {
-    fenix = {
-      url = "github:nix-community/fenix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -40,7 +36,7 @@
           linuxPackages
           cargoDeps
           (rust-bin.stable.latest.default.override {
-            extensions = [ "rust-src" ];
+            extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
           })
         ];
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
