@@ -99,6 +99,18 @@ This list may be non-exhaustive.
 - `network.total_outgoing_connections`: Total number of outgoing connections established
 - `network.invalid_messages_received`: Number of invalid/malformed messages received from peers
 - `network.propagated_transactions`: Total number of propagated transactions
+- `network.incoming_eth_handshake_peer_error_total`: Total number of errors related to incoming incorrect peer behaviour such as invalid message code, size, encoding, etc.
+- `network.outgoing_eth_handshake_peer_error_total`: Total number of errors related to outgoing incorrect peer behaviour such as invalid message code, size, encoding, etc.
+- `network.incoming_eth_handshake_timeout_total`: Total number of incoming timeout errors
+- `network.outgoing_eth_handshake_timeout_total`: Total number of outgoing timeout errors
+- `network.incoming_eth_handshake_network_error_total`: Total number of incoming network id mismatch errors
+- `network.outgoing_eth_handshake_network_error_total`: Total number of outgoing network id mismatch errors
+- `network.incoming_eth_handshake_version_error_total`: Total number of incoming protocol version mismatch errors
+- `network.outgoing_eth_handshake_version_error_total`: Total number of outgoing protocol version mismatch errors
+- `network.incoming_eth_handshake_genesis_error_total`: Total number of incoming genesis block mismatch errors
+- `network.outgoing_eth_handshake_genesis_error_total`: Total number of outgoing genesis block mismatch errors
+- `network.incoming_eth_handshake_forkid_error_total`: Total number of incoming fork id mismatch errors
+- `network.outgoing_eth_handshake_forkid_error_total`: Total number of outgoing fork id mismatch errors
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html

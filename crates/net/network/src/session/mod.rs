@@ -26,7 +26,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, multiplex::RlpxProtocolMultiplexer,
+    capability::CapabilityMessage,
+    errors::{EthHandshakeError, EthStreamError},
+    multiplex::RlpxProtocolMultiplexer,
     Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, Status,
     UnauthedEthStream, UnauthedP2PStream,
 };
@@ -552,12 +554,72 @@ impl SessionManager {
                 self.remove_pending_session(&session_id);
                 match direction {
                     Direction::Incoming => {
+                        match error.as_ref().and_then(|e| e.as_eth_stream()) {
+                            Some(EthStreamError::StreamTimeout) => {
+                                self.metrics.incoming_eth_handshake_timeout_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::InvalidFork(_),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_forkid_error_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedChain(_),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_network_error_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedProtocolVersion(_),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_version_error_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedGenesis(_),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_genesis_error_total.increment(1)
+                            }
+                            // Do nothing if not an EthStreamError
+                            None => (),
+                            // For all other errors we increment peer errors
+                            // TODO: Determine a more granular approach for peer errors
+                            _ => self.metrics.incoming_eth_handshake_peer_error_total.increment(1),
+                        }
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
                             error,
                         })
                     }
                     Direction::Outgoing(peer_id) => {
+                        match error.as_ref().and_then(|e| e.as_eth_stream()) {
+                            Some(EthStreamError::StreamTimeout) => {
+                                self.metrics.outgoing_eth_handshake_timeout_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::InvalidFork(_),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_forkid_error_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedChain(_),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_network_error_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedProtocolVersion(_),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_version_error_total.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedGenesis(_),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_genesis_error_total.increment(1)
+                            }
+                            // Do nothing if not an EthStreamError
+                            None => (),
+                            // For all other errors we increment peer errors
+                            // TODO: Determine a more granular approach for peer errors
+                            _ => self.metrics.outgoing_eth_handshake_peer_error_total.increment(1),
+                        }
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
@@ -736,6 +798,14 @@ impl PendingSessionHandshakeError {
     pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
             Self::Eth(eth_err) => eth_err.as_disconnected(),
+            _ => None,
+        }
+    }
+
+    /// Returns the `EthStreamError` if the error is an eth stream error
+    pub const fn as_eth_stream(&self) -> Option<&EthStreamError> {
+        match self {
+            Self::Eth(eth_err) => Some(eth_err),
             _ => None,
         }
     }
