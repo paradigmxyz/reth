@@ -13,7 +13,11 @@
   outputs = { self, nixpkgs, utils, ... }@inputs: utils.lib.eachDefaultSystem (system:
     let
       macPackages = pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [ Security CoreFoundation CoreServices ]);
-      #pkgs = nixpkgs.legacyPackages.${system};
+      linuxPackages = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
+        libclang.lib
+        llvmPackages.libcxxClang
+        clang
+      ]);
       overlays = [ (import inputs.rust-overlay) ];
       pkgs = import nixpkgs {
         inherit system overlays;
@@ -33,11 +37,13 @@
       devShell = pkgs.mkShell {
         buildInputs = with pkgs; [
           macPackages
+          linuxPackages
           cargoDeps
           (rust-bin.stable.latest.default.override {
             extensions = [ "rust-src" ];
           })
         ];
+        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
       #defaultPackage = pkgs.rustPlatform.buildRustPackage {
 
@@ -48,6 +54,7 @@
           lockFile = ./Cargo.lock;
         };
         #buildInputs = with pkgs; [ llvmPackages.bintools  ( pkgs.darwin.apple_sdk.frameworks.Security ) ];
+        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
         buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [ Security CoreFoundation CoreServices ]);
         src = ./.;
       };
