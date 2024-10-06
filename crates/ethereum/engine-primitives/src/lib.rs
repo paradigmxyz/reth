@@ -26,19 +26,23 @@ use reth_payload_primitives::{
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct EthEngineTypes;
+pub struct EthEngineTypes<T:PayloadTypes = EthPayloadTypes> {
+    _marker: std::marker::PhantomData<T>,
+}
 
-impl PayloadTypes for EthEngineTypes {
+impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
+    type BuiltPayload = T::BuiltPayload;
+    type PayloadAttributes = T::PayloadAttributes;
+    type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
+}
+
+/// A default payload type for EthEngineTypes.
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+pub struct EthPayloadTypes;
+impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
     type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
-}
-
-impl EngineTypes for EthEngineTypes {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
 }
 
 /// Validator for the ethereum engine API.
