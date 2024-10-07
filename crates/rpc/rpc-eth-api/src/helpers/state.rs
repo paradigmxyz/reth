@@ -129,12 +129,25 @@ pub trait EthState: LoadState + SpawnBlocking {
         &self,
         address: Address,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send
+    where
+        Self: EthApiSpec,
+    {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
-
             let account = state.basic_account(address).map_err(Self::Error::from_eth_err)?;
             let Some(account) = account else { return Ok(None) };
+
+            // Check whether the distance to the block exceeds the maximum configured proof window.
+            let chain_info = this.chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_number = LoadState::provider(&this)
+                .block_number_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let max_window = this.max_proof_window();
+            if chain_info.best_number.saturating_sub(block_number) > max_window {
+                return Err(EthApiError::ExceedsMaxProofWindow.into())
+            }
 
             let balance = account.balance;
             let nonce = account.nonce;
