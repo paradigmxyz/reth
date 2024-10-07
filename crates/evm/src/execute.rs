@@ -1,6 +1,5 @@
 //! Traits for execution.
 
-use reth_chainspec::ChainSpec;
 // Re-export execution types
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
@@ -8,7 +7,7 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_primitives::{BlockWithSenders, Receipt, Request};
@@ -215,38 +214,29 @@ pub trait BlockExecutionStrategy<DB> {
 
 /// Provider for `GenericBlockExecutor`.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct GenericExecutorProvider<S, EvmConfig> {
+pub struct GenericExecutorProvider<S> {
     strategy_factory: S,
-    chain_spec: Arc<ChainSpec>,
-    evm_config: EvmConfig,
 }
 
-impl<S, EvmConfig> GenericExecutorProvider<S, EvmConfig> {
+impl<S> GenericExecutorProvider<S> {
     /// Creates a new `GenericExecutorProvider` with the given strategy factory,
     /// chain spec and EVM config.
-    pub const fn new(
-        strategy_factory: S,
-        chain_spec: Arc<ChainSpec>,
-        evm_config: EvmConfig,
-    ) -> Self {
-        Self { strategy_factory, chain_spec, evm_config }
+    pub const fn new(strategy_factory: S) -> Self {
+        Self { strategy_factory }
     }
 }
 
 #[allow(dead_code)]
-impl<S, EvmConfig> GenericExecutorProvider<S, EvmConfig>
+impl<S> GenericExecutorProvider<S>
 where
     S: BlockExecutionStrategyFactory,
-    EvmConfig: Clone,
 {
-    fn executor<DB>(&self, db: DB) -> GenericBlockExecutor<'_, S, EvmConfig, DB>
+    fn executor<DB>(&self, db: DB) -> GenericBlockExecutor<'_, S, DB>
     where
         DB: Database,
     {
         GenericBlockExecutor::new(
             &self.strategy_factory,
-            self.chain_spec.clone(),
-            self.evm_config.clone(),
             State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
         )
     }
@@ -255,35 +245,27 @@ where
 /// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
 /// create and run block execution strategies.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct GenericBlockExecutor<'a, S, EvmConfig, DB>
+pub struct GenericBlockExecutor<'a, S, DB>
 where
     S: BlockExecutionStrategyFactory,
     DB: Database,
 {
     strategy_factory: &'a S,
-    chain_spec: Arc<ChainSpec>,
-    evm_config: EvmConfig,
     state: State<DB>,
 }
 
-impl<'a, S, EvmConfig, DB> GenericBlockExecutor<'a, S, EvmConfig, DB>
+impl<'a, S, DB> GenericBlockExecutor<'a, S, DB>
 where
     S: BlockExecutionStrategyFactory,
     DB: Database,
 {
-    /// Creates a new `GenericBlockExecutor` with the given strategy factory,
-    /// chain spec and evm config.
-    pub const fn new(
-        strategy_factory: &'a S,
-        chain_spec: Arc<ChainSpec>,
-        evm_config: EvmConfig,
-        state: State<DB>,
-    ) -> Self {
-        Self { strategy_factory, chain_spec, evm_config, state }
+    /// Creates a new `GenericBlockExecutor` with the given strategy factory.
+    pub const fn new(strategy_factory: &'a S, state: State<DB>) -> Self {
+        Self { strategy_factory, state }
     }
 }
 
-impl<'a, S, EvmConfig, DB> Executor<DB> for GenericBlockExecutor<'a, S, EvmConfig, DB>
+impl<'a, S, DB> Executor<DB> for GenericBlockExecutor<'a, S, DB>
 where
     S: BlockExecutionStrategyFactory<DB = DB>,
     DB: Database,
@@ -359,9 +341,9 @@ mod tests {
     use super::*;
     use alloy_eips::eip6110::DepositRequest;
     use alloy_primitives::U256;
-    use reth_chainspec::MAINNET;
+    use reth_chainspec::{ChainSpec, MAINNET};
     use revm::db::{CacheDB, EmptyDBTyped};
-    use std::marker::PhantomData;
+    use std::{marker::PhantomData, sync::Arc};
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
@@ -485,13 +467,17 @@ mod tests {
         }
     }
 
-    struct TestExecutorStrategyFactory {
+    struct TestExecutorStrategyFactory<EvmConfig> {
+        // chain spec and evm config here only to illustrate how the strategy
+        // factory can use them in a real use case.
+        _chain_spec: Arc<ChainSpec>,
+        _evm_config: EvmConfig,
         execute_transactions_result: (Vec<Receipt>, u64),
         apply_post_execution_changes_result: Vec<Request>,
         finish_result: BundleState,
     }
 
-    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory<TestEvmConfig> {
         type DB = CacheDB<EmptyDBTyped<ProviderError>>;
         type Error = BlockExecutionError;
         type Strategy = TestExecutorStrategy<Self::DB>;
@@ -540,14 +526,15 @@ mod tests {
         let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
+            _chain_spec: MAINNET.clone(),
+            _evm_config: TestEvmConfig {},
             execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
             finish_result: expected_finish_result.clone(),
         };
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let provider =
-            GenericExecutorProvider::new(strategy_factory, MAINNET.clone(), TestEvmConfig {});
+        let provider = GenericExecutorProvider::new(strategy_factory);
         let executor = provider.executor(db);
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         assert!(result.is_ok());
