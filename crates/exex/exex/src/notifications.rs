@@ -15,15 +15,16 @@ use tokio::sync::mpsc::Receiver;
 
 /// A stream of [`ExExNotification`]s.
 #[derive(Debug)]
-pub enum ExExNotifications<P, E> {
-    /// Emits notifications for all blocks.
+pub struct ExExNotifications<P, E>(Option<ExExNotificationsInner<P, E>>);
+
+#[derive(Debug)]
+enum ExExNotificationsInner<P, E> {
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
-    /// Only emits notifications for blocks that are committed or reverted after the given head.
     WithHead(ExExNotificationsWithHead<P, E>),
 }
 
 impl<P, E> ExExNotifications<P, E> {
-    /// Creates a new [`ExExNotifications::WithoutHead`].
+    /// Creates a new stream of [`ExExNotifications`] without a head.
     pub const fn new_without_head(
         node_head: Head,
         provider: P,
@@ -31,38 +32,91 @@ impl<P, E> ExExNotifications<P, E> {
         notifications: Receiver<ExExNotification>,
         wal_handle: WalHandle,
     ) -> Self {
-        Self::WithoutHead(ExExNotificationsWithoutHead::new(
+        Self(Some(ExExNotificationsInner::WithoutHead(ExExNotificationsWithoutHead::new(
             node_head,
             provider,
             executor,
             notifications,
             wal_handle,
-        ))
+        ))))
     }
 
-    /// Converts the [`ExExNotifications`] into [`ExExNotifications::WithoutHead`].
+    /// Returns the inner value of the [`ExExNotifications`].
     ///
-    /// It's a no-op if the variant is already [`ExExNotifications::WithoutHead`].
+    /// # Panics
+    ///
+    /// Panics if the inner value is [`None`].
+    fn inner(self) -> ExExNotificationsInner<P, E> {
+        self.0.unwrap()
+    }
+
+    /// Returns a mutable reference to the inner value of the [`ExExNotifications`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inner value is [`None`].
+    fn inner_mut(&mut self) -> &mut ExExNotificationsInner<P, E> {
+        self.0.as_mut().unwrap()
+    }
+
+    /// Replaces the inner value of the [`ExExNotifications`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inner value is [`None`].
+    fn replace_inner(
+        &mut self,
+        f: impl FnOnce(ExExNotificationsInner<P, E>) -> ExExNotificationsInner<P, E>,
+    ) {
+        self.0 = Some(f(self.0.take().unwrap()));
+    }
+
+    /// Converts the [`ExExNotifications`] into a stream of [`ExExNotification`]s without a head.
+    ///
+    /// It's a no-op if the stream has already been configured without a head.
     pub(super) fn without_head(self) -> Self {
-        Self::WithoutHead(match self {
-            Self::WithoutHead(notifications) => notifications,
-            Self::WithHead(notifications) => ExExNotificationsWithoutHead::new(
+        Self(Some(ExExNotificationsInner::WithoutHead(match self.inner() {
+            ExExNotificationsInner::WithoutHead(notifications) => notifications,
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithoutHead::new(
                 notifications.node_head,
                 notifications.provider,
                 notifications.executor,
                 notifications.notifications,
                 notifications.wal_handle,
             ),
-        })
+        })))
     }
 
-    /// Converts the [`ExExNotifications`] into [`ExExNotifications::WithHead`].
+    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s without a head.
     ///
-    /// It's a no-op if the variant is already [`ExExNotifications::WithHead`].
+    /// It's a no-op if the stream has already been configured without a head.
+    pub(super) fn set_without_head(&mut self) {
+        self.replace_inner(|inner| {
+            ExExNotificationsInner::WithoutHead(match inner {
+                ExExNotificationsInner::WithoutHead(notifications) => notifications,
+                ExExNotificationsInner::WithHead(notifications) => {
+                    ExExNotificationsWithoutHead::new(
+                        notifications.node_head,
+                        notifications.provider,
+                        notifications.executor,
+                        notifications.notifications,
+                        notifications.wal_handle,
+                    )
+                }
+            })
+        });
+    }
+
+    /// Converts the [`ExExNotifications`] into a stream of [`ExExNotification`]s with the provided
+    /// head.
+    ///
+    /// It's a no-op if the stream has already been configured with a head.
     pub(super) fn with_head(self, exex_head: ExExHead) -> Self {
-        Self::WithHead(match self {
-            Self::WithoutHead(notifications) => notifications.with_head(exex_head),
-            Self::WithHead(notifications) => ExExNotificationsWithHead::new(
+        Self(Some(ExExNotificationsInner::WithHead(match self.inner() {
+            ExExNotificationsInner::WithoutHead(notifications) => {
+                notifications.with_head(exex_head)
+            }
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithHead::new(
                 notifications.node_head,
                 notifications.provider,
                 notifications.executor,
@@ -70,7 +124,21 @@ impl<P, E> ExExNotifications<P, E> {
                 notifications.wal_handle,
                 exex_head,
             ),
-        })
+        })))
+    }
+
+    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s with the provided head.
+    ///
+    /// It's a no-op if the stream has already been configured with a head.
+    pub(super) fn set_with_head(&mut self, exex_head: ExExHead) {
+        self.replace_inner(|inner| {
+            ExExNotificationsInner::WithHead(match inner {
+                ExExNotificationsInner::WithoutHead(notifications) => {
+                    notifications.with_head(exex_head)
+                }
+                ExExNotificationsInner::WithHead(notifications) => notifications,
+            })
+        });
     }
 }
 
@@ -85,11 +153,11 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        match self.get_mut() {
-            Self::WithoutHead(notifications) => {
+        match self.get_mut().inner_mut() {
+            ExExNotificationsInner::WithoutHead(notifications) => {
                 notifications.poll_next_unpin(cx).map(|result| result.map(Ok))
             }
-            Self::WithHead(notifications) => notifications.poll_next_unpin(cx),
+            ExExNotificationsInner::WithHead(notifications) => notifications.poll_next_unpin(cx),
         }
     }
 }
