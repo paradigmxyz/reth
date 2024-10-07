@@ -24,10 +24,7 @@ use revm::db::BundleState;
 ///
 /// A chain of blocks should not be empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(
-    all(feature = "serde", not(feature = "serde-bincode-compat")),
-    derive(serde::Serialize, serde::Deserialize)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Chain {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
@@ -519,8 +516,8 @@ pub(super) mod serde_bincode_compat {
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
     use reth_trie::serde_bincode_compat::updates::TrieUpdates;
-    use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
-    use serde_with::DeserializeAs;
+    use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
     use crate::ExecutionOutcome;
 
@@ -529,59 +526,84 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_execution_types::{serde_bincode_compat, Chain};
-    /// use serde::Deserialize;
+    /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
-    /// #[derive(Deserialize)]
+    /// #[derive(Serialize, Deserialize)]
     /// struct Data {
     ///     #[serde_as(as = "serde_bincode_compat::Chain")]
     ///     chain: Chain,
     /// }
     /// ```
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct Chain<'a> {
-        blocks: BTreeMap<BlockNumber, SealedBlockWithSenders<'a>>,
+        blocks: SealedBlocksWithSenders<'a>,
         execution_outcome: Cow<'a, ExecutionOutcome>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
-    impl Serialize for super::Chain {
+    #[derive(Debug)]
+    struct SealedBlocksWithSenders<'a>(
+        Cow<'a, BTreeMap<BlockNumber, reth_primitives::SealedBlockWithSenders>>,
+    );
+
+    impl Serialize for SealedBlocksWithSenders<'_> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
-            let mut state = serializer.serialize_struct("Chain", 3)?;
+            let mut state = serializer.serialize_map(Some(self.0.len()))?;
 
-            state.serialize_field(
-                "blocks",
-                &self
-                    .blocks
-                    .iter()
-                    .map(|(n, b)| (n, Into::<SealedBlockWithSenders<'_>>::into(b)))
-                    .collect::<BTreeMap<_, _>>(),
-            )?;
-            state.serialize_field("execution_outcome", &self.execution_outcome)?;
-            state.serialize_field(
-                "trie_updates",
-                &self.trie_updates.as_ref().map(Into::<TrieUpdates<'_>>::into),
-            )?;
+            for (block_number, block) in self.0.iter() {
+                state.serialize_entry(
+                    block_number,
+                    &Into::<SealedBlockWithSenders<'_>>::into(block),
+                )?;
+            }
 
             state.end()
+        }
+    }
+
+    impl<'de: 'a, 'a> Deserialize<'de> for SealedBlocksWithSenders<'a> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Ok(Self(Cow::Owned(
+                BTreeMap::<BlockNumber, SealedBlockWithSenders<'a>>::deserialize(deserializer)
+                    .map(|blocks| blocks.into_iter().map(|(n, b)| (n, b.into())).collect())?,
+            )))
+        }
+    }
+
+    impl<'a> From<&'a super::Chain> for Chain<'a> {
+        fn from(value: &'a super::Chain) -> Self {
+            Self {
+                blocks: SealedBlocksWithSenders(Cow::Borrowed(&value.blocks)),
+                execution_outcome: Cow::Borrowed(&value.execution_outcome),
+                trie_updates: value.trie_updates.as_ref().map(Into::into),
+            }
         }
     }
 
     impl<'a> From<Chain<'a>> for super::Chain {
         fn from(value: Chain<'a>) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .into_iter()
-                    .map(|(block_number, block)| (block_number, block.into()))
-                    .collect(),
+                blocks: value.blocks.0.into_owned(),
                 execution_outcome: value.execution_outcome.into_owned(),
                 trie_updates: value.trie_updates.map(Into::into),
             }
+        }
+    }
+
+    impl SerializeAs<super::Chain> for Chain<'_> {
+        fn serialize_as<S>(source: &super::Chain, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Chain::from(source).serialize(serializer)
         }
     }
 
@@ -599,7 +621,7 @@ pub(super) mod serde_bincode_compat {
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_primitives::SealedBlockWithSenders;
-        use serde::Deserialize;
+        use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
         use super::super::{serde_bincode_compat, Chain};
@@ -607,7 +629,7 @@ pub(super) mod serde_bincode_compat {
         #[test]
         fn test_chain_bincode_roundtrip() {
             #[serde_as]
-            #[derive(Deserialize)]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::Chain")]
                 chain: Chain,
@@ -615,17 +637,20 @@ pub(super) mod serde_bincode_compat {
 
             let mut bytes = [0u8; 1024];
             rand::thread_rng().fill(bytes.as_mut_slice());
-
-            let chain = Chain::new(
-                vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+            let data = Data {
+                chain: Chain::new(
+                    vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
+                        &bytes,
+                    ))
                     .unwrap()],
-                Default::default(),
-                None,
-            );
+                    Default::default(),
+                    None,
+                ),
+            };
 
-            let encoded = bincode::serialize(&chain).unwrap();
+            let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
-            assert_eq!(decoded.chain, chain);
+            assert_eq!(decoded, data);
         }
     }
 }
