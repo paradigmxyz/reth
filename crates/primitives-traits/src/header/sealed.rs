@@ -66,9 +66,12 @@ impl SealedHeader {
     }
 }
 
-impl Default for SealedHeader {
+impl<H> Default for SealedHeader<H>
+where
+    H: Default + Sealable,
+{
     fn default() -> Self {
-        let sealed = Header::default().seal_slow();
+        let sealed = H::default().seal_slow();
         let (header, hash) = sealed.into_parts();
         Self { header, hash }
     }

@@ -310,13 +310,14 @@ pub struct SealedBlock<H = Header, B = BlockBody> {
 
 impl<H, B> Default for SealedBlock<H, B>
 where
-    H: Default,
+    H: Default + Sealable,
     B: Default,
 {
     fn default() -> Self {
-        Self { header: SealedHeader::<H>::new(H::default(), B256::ZERO), body: Default::default() }
+        Self { header: SealedHeader::<H>::default(), body: Default::default() }
     }
 }
+
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
