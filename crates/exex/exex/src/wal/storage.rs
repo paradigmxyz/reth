@@ -153,7 +153,10 @@ impl Storage {
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
-        // Serialize using the bincode- and msgpack-compatible serde implementation
+        // Serialize using the bincode- and msgpack-compatible serde wrapper
+        let notification =
+            reth_exex_types::serde_bincode_compat::ExExNotification::from(notification);
+
         reth_fs_util::atomic_write_file(&file_path, |file| {
             rmp_serde::encode::write(file, &notification)
         })?;

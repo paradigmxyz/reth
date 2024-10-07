@@ -5,10 +5,7 @@ use reth_execution_types::Chain;
 
 /// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    all(feature = "serde", not(feature = "serde-bincode-compat")),
-    derive(serde::Serialize, serde::Deserialize)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExExNotification {
     /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
@@ -78,30 +75,49 @@ pub(super) mod serde_bincode_compat {
     use std::sync::Arc;
 
     use reth_execution_types::serde_bincode_compat::Chain;
-    use serde::{ser::SerializeStructVariant, Deserialize, Deserializer, Serialize, Serializer};
-    use serde_with::DeserializeAs;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::ExExNotification`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_exex_types::{serde_bincode_compat, ExExNotification};
-    /// use serde::Deserialize;
+    /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
-    /// #[derive(Deserialize)]
+    /// #[derive(Serialize, Deserialize)]
     /// struct Data {
     ///     #[serde_as(as = "serde_bincode_compat::ExExNotification")]
     ///     notification: ExExNotification,
     /// }
     /// ```
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     #[allow(missing_docs)]
     pub enum ExExNotification<'a> {
         ChainCommitted { new: Chain<'a> },
         ChainReorged { old: Chain<'a>, new: Chain<'a> },
         ChainReverted { old: Chain<'a> },
+    }
+
+    impl<'a> From<&'a super::ExExNotification> for ExExNotification<'a> {
+        fn from(value: &'a super::ExExNotification) -> Self {
+            match value {
+                super::ExExNotification::ChainCommitted { new } => {
+                    ExExNotification::ChainCommitted { new: Chain::from(new.as_ref()) }
+                }
+                super::ExExNotification::ChainReorged { old, new } => {
+                    ExExNotification::ChainReorged {
+                        old: Chain::from(old.as_ref()),
+                        new: Chain::from(new.as_ref()),
+                    }
+                }
+                super::ExExNotification::ChainReverted { old } => {
+                    ExExNotification::ChainReverted { old: Chain::from(old.as_ref()) }
+                }
+            }
+        }
     }
 
     impl<'a> From<ExExNotification<'a>> for super::ExExNotification {
@@ -120,44 +136,15 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl Serialize for super::ExExNotification {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    impl SerializeAs<super::ExExNotification> for ExExNotification<'_> {
+        fn serialize_as<S>(
+            source: &super::ExExNotification,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
-            match self {
-                Self::ChainCommitted { new } => {
-                    let mut state = serializer.serialize_struct_variant(
-                        "ExExNotification",
-                        0,
-                        "ChainCommitted",
-                        1,
-                    )?;
-                    state.serialize_field("new", &new)?;
-                    state.end()
-                }
-                Self::ChainReorged { old, new } => {
-                    let mut state = serializer.serialize_struct_variant(
-                        "ExExNotification",
-                        1,
-                        "ChainReorged",
-                        2,
-                    )?;
-                    state.serialize_field("old", &old)?;
-                    state.serialize_field("new", &new)?;
-                    state.end()
-                }
-                Self::ChainReverted { old } => {
-                    let mut state = serializer.serialize_struct_variant(
-                        "ExExNotification",
-                        2,
-                        "ChainReverted",
-                        1,
-                    )?;
-                    state.serialize_field("old", &old)?;
-                    state.end()
-                }
-            }
+            ExExNotification::from(source).serialize(serializer)
         }
     }
 
@@ -178,7 +165,7 @@ pub(super) mod serde_bincode_compat {
         use rand::Rng;
         use reth_execution_types::Chain;
         use reth_primitives::SealedBlockWithSenders;
-        use serde::Deserialize;
+        use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
         use super::super::{serde_bincode_compat, ExExNotification};
@@ -186,7 +173,7 @@ pub(super) mod serde_bincode_compat {
         #[test]
         fn test_exex_notification_bincode_roundtrip() {
             #[serde_as]
-            #[derive(Deserialize)]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::ExExNotification")]
                 notification: ExExNotification,
@@ -194,28 +181,30 @@ pub(super) mod serde_bincode_compat {
 
             let mut bytes = [0u8; 1024];
             rand::thread_rng().fill(bytes.as_mut_slice());
-            let notification = ExExNotification::ChainReorged {
-                old: Arc::new(Chain::new(
-                    vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
-                        &bytes,
-                    ))
-                    .unwrap()],
-                    Default::default(),
-                    None,
-                )),
-                new: Arc::new(Chain::new(
-                    vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
-                        &bytes,
-                    ))
-                    .unwrap()],
-                    Default::default(),
-                    None,
-                )),
+            let data = Data {
+                notification: ExExNotification::ChainReorged {
+                    old: Arc::new(Chain::new(
+                        vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
+                            &bytes,
+                        ))
+                        .unwrap()],
+                        Default::default(),
+                        None,
+                    )),
+                    new: Arc::new(Chain::new(
+                        vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
+                            &bytes,
+                        ))
+                        .unwrap()],
+                        Default::default(),
+                        None,
+                    )),
+                },
             };
 
-            let encoded = bincode::serialize(&notification).unwrap();
+            let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
-            assert_eq!(decoded.notification, notification);
+            assert_eq!(decoded, data);
         }
     }
 }
