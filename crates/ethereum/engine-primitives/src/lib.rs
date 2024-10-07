@@ -22,7 +22,6 @@ use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes, PayloadTypes,
 };
-use serde::{de::DeserializeOwned, Serialize};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -39,7 +38,6 @@ impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
 
 impl<T: PayloadTypes> EngineTypes for EthEngineTypes<T>
 where
-    T: DeserializeOwned + Serialize,
     T::BuiltPayload: TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<ExecutionPayloadEnvelopeV3>
@@ -51,7 +49,7 @@ where
     type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
 }
 
-/// A default payload type for EthEngineTypes.
+/// A default payload type for [`EthEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct EthPayloadTypes;
