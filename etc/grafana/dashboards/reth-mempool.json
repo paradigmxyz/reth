@@ -2684,7 +2684,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Number of all transactions of all sub-pools",
+      "description": "Number of all transactions of all sub-pools by type",
       "fieldConfig": {
         "defaults": {
           "color": {
