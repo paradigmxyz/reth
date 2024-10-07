@@ -6,7 +6,7 @@ use alloy_rpc_types::{Header, Index};
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_types::{EthApiError, EthStateCache};
+use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
@@ -47,13 +47,20 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
-            let total_difficulty = EthBlocks::provider(self)
+            let mut total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+                .map_err(Self::Error::from_eth_err)?;
+            if total_difficulty.is_none() {
+                // if we failed to find td after we successfully loaded the block, try again using
+                // the hash this only matters if the chain is currently transitioning the merge block and there's a reorg: <https://github.com/paradigmxyz/reth/issues/10941>
+                total_difficulty = EthBlocks::provider(self)
+                    .header_td(&block.hash())
+                    .map_err(Self::Error::from_eth_err)?;
+            }
+
             let block = from_block::<Self::TransactionCompat>(
                 block.unseal(),
-                total_difficulty,
+                total_difficulty.unwrap_or_default(),
                 full.into(),
                 Some(block_hash),
             )
