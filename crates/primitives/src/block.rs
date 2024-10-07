@@ -540,7 +540,7 @@ where
     B: Default,
 {
     fn default() -> Self {
-        Self { block: SealedBlock::<H, B>::default(), senders: vec![] }
+        Self { block: SealedBlock::<H, B>::default(), senders: Vec::new() }
     }
 }
 
