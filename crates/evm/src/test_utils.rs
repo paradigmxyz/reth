@@ -12,7 +12,10 @@ use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
 
-use crate::execute::{BatchExecutor, BlockExecutionInput, BlockExecutorProvider, Executor};
+use crate::{
+    execute::{BatchExecutor, BlockExecutionInput, BlockExecutorProvider, Executor},
+    system_calls::OnStateHook,
+};
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -70,6 +73,17 @@ impl<DB> Executor<DB> for MockExecutorProvider {
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
+    {
+        unimplemented!()
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        _: Self::Input<'_>,
+        _: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
     {
         unimplemented!()
     }

@@ -9,7 +9,7 @@ use reth_evm::{
         BatchExecutor, BlockExecOutput, BlockExecutionError, BlockExecutionInput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::SystemCaller,
+    system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -112,18 +112,23 @@ where
     ///
     /// This applies the pre-execution changes, and executes the transactions.
     ///
+    /// The optional `state_hook` will be executed with the state changes if present.
+    ///
     /// # Note
     ///
     /// It does __not__ apply post-execution changes.
-    fn execute_pre_and_transactions<Ext, DB>(
+    fn execute_pre_and_transactions<Ext, DB, F>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        state_hook: Option<F>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
+        F: OnStateHook,
     {
-        let mut system_caller = SystemCaller::new(&self.evm_config, &self.chain_spec);
+        let mut system_caller =
+            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
 
         // apply pre execution changes
         system_caller.apply_beacon_root_contract_call(
@@ -182,7 +187,7 @@ where
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+            let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
@@ -196,7 +201,8 @@ where
                 ?transaction,
                 "Executed transaction"
             );
-
+            system_caller.on_state(&result_and_state);
+            let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
             // append gas used
@@ -282,16 +288,30 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
-    /// Execute a single block and apply the state changes to the internal state.
-    ///
-    /// Returns the receipts of the transactions in the block and the total gas used.
-    ///
-    /// Returns an error if execution fails.
+    /// Convenience method to invoke `execute_without_verification_with_state_hook` setting the
+    /// state hook as `None`.
     fn execute_without_verification(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        self.execute_without_verification_with_state_hook(block, total_difficulty, None::<NoopHook>)
+    }
+
+    /// Execute a single block and apply the state changes to the internal state.
+    ///
+    /// Returns the receipts of the transactions in the block and the total gas used.
+    ///
+    /// Returns an error if execution fails.
+    fn execute_without_verification_with_state_hook<F>(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+        state_hook: Option<F>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
+    where
+        F: OnStateHook,
+    {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -300,7 +320,7 @@ where
 
         let (receipts, gas_used) = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_pre_and_transactions(block, evm)
+            self.executor.execute_pre_and_transactions(block, evm, state_hook)
         }?;
 
         // 3. apply post execution changes
@@ -389,6 +409,32 @@ where
             gas_used,
             chain_sepc: self.chain_spec().clone(),
             timestamp: block.timestamp,
+        })
+    }
+
+    fn execute_with_state_hook<F>(
+        mut self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+        let (receipts, gas_used) = self.execute_without_verification_with_state_hook(
+            block,
+            total_difficulty,
+            Some(state_hook),
+        )?;
+
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
+
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests: vec![],
+            gas_used,
         })
     }
 }
@@ -529,10 +575,8 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
-    use reth_optimism_chainspec::optimism_deposit_tx_signature;
-    use reth_primitives::{
-        Account, Block, BlockBody, Signature, Transaction, TransactionSigned, BASE_MAINNET,
-    };
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
+    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -607,7 +651,7 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -691,7 +735,7 @@ mod tests {
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
-            Transaction::Deposit(reth_primitives::TxDeposit {
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,

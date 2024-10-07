@@ -7,29 +7,31 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize, Compact)]
-#[add_arbitrary_tests(rlp, compact)]
-pub struct SealedHeader {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
+#[add_arbitrary_tests(rlp)]
+pub struct SealedHeader<H = Header> {
     /// Locked Header hash.
     hash: BlockHash,
     /// Locked Header fields.
     #[as_ref]
     #[deref]
-    header: Header,
+    header: H,
+}
+
+impl<H> SealedHeader<H> {
+    /// Creates the sealed header with the corresponding block hash.
+    #[inline]
+    pub const fn new(header: H, hash: BlockHash) -> Self {
+        Self { header, hash }
+    }
 }
 
 impl SealedHeader {
-    /// Creates the sealed header with the corresponding block hash.
-    #[inline]
-    pub const fn new(header: Header, hash: BlockHash) -> Self {
-        Self { header, hash }
-    }
-
     /// Returns the sealed Header fields.
     #[inline]
     pub const fn header(&self) -> &Header {
@@ -182,7 +184,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedHeader> for SealedHeader<'a> {
+    impl SerializeAs<super::SealedHeader> for SealedHeader<'_> {
         fn serialize_as<S>(source: &super::SealedHeader, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,

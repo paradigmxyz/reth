@@ -126,7 +126,7 @@ where
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: AddOns { hooks, rpc, exexs: installed_exex },
+            add_ons: AddOns { hooks, rpc, exexs: installed_exex, .. },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;

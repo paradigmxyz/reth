@@ -67,14 +67,14 @@ pub struct StaticFileProviderRWRefMut<'a>(
     pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
 );
 
-impl<'a> std::ops::DerefMut for StaticFileProviderRWRefMut<'a> {
+impl std::ops::DerefMut for StaticFileProviderRWRefMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
         self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
-impl<'a> std::ops::Deref for StaticFileProviderRWRefMut<'a> {
+impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
     type Target = StaticFileProviderRW;
 
     fn deref(&self) -> &Self::Target {

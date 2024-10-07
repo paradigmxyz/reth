@@ -16,7 +16,6 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types::ToRpcError;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -24,7 +23,8 @@ use revm::{db::CacheDB, Database};
 use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper, EthApiError, RevertError, RpcInvalidTransactionError,
+    cache::db::StateProviderTraitObjWrapper, error::ToRpcError, EthApiError, RevertError,
+    RpcInvalidTransactionError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.

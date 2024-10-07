@@ -10,7 +10,6 @@ use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
-use reth_rpc_types::ToRpcError;
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
@@ -18,6 +17,18 @@ use reth_transaction_pool::error::{
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, OutOfGasError};
 use revm_inspectors::tracing::MuxError;
 use tracing::error;
+
+/// A trait to convert an error to an RPC error.
+pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
+    /// Converts the error to a JSON-RPC error object.
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static>;
+}
+
+impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+        self.clone()
+    }
+}
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -354,7 +365,7 @@ pub enum RpcInvalidTransactionError {
     PrecompileOutOfGas(u64),
     /// An operand to an opcode was invalid or out of range.
     /// Contains the gas limit.
-    #[error("out of gas: invalid operand to an opcode; {0}")]
+    #[error("out of gas: invalid operand to an opcode: {0}")]
     InvalidOperandOutOfGas(u64),
     /// Thrown if executing a transaction failed during estimate/call
     #[error(transparent)]
@@ -477,8 +488,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock |
-            InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
+            InvalidTransaction::CallerGasLimitMoreThanBlock => {
+                // tx.gas > block.gas_limit
+                Self::GasTooHigh
+            }
+            InvalidTransaction::CallGasCostMoreThanGasLimit => {
+                // tx.gas < cost
+                Self::GasTooLow
+            }
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
                 Self::InsufficientFunds { cost: *fee, balance: *balance }
