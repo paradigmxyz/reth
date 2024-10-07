@@ -1494,7 +1494,11 @@ mod tests {
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
-    use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_db::{
+        models::{AccountBeforeTx, StoredBlockBodyIndices},
+        tables,
+    };
+    use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
@@ -1582,9 +1586,27 @@ mod tests {
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let provider_rw = factory.database_provider_rw()?;
+        let static_file_provider = factory.static_file_provider();
+
+        // Write transactions to static files with the right `tx_num``
+        let mut bodies_cursor = provider_rw.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+        let mut tx_num = bodies_cursor
+            .seek_exact(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
+            .map(|(_, indices)| indices.next_tx_num())
+            .unwrap_or_default();
 
         // Insert blocks into the database
         for block in &database_blocks {
+            // TODO: this should be moved inside `insert_historical_block`
+            let mut transactions_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
+            transactions_writer.increment_block(block.number)?;
+            for tx in block.body.transactions() {
+                let tx: TransactionSignedNoHash = tx.clone().into();
+                transactions_writer.append_transaction(tx_num, &tx)?;
+                tx_num += 1;
+            }
+
             provider_rw.insert_historical_block(
                 block.clone().seal_with_senders().expect("failed to seal block with senders"),
             )?;
@@ -4344,9 +4366,7 @@ mod tests {
             |hash: B256,
              canonical_in_memory_state: CanonicalInMemoryState,
              factory: ProviderFactory<MockNodeTypesWithDB>| {
-                if let Some(tx) = factory.transaction_by_hash(hash)? {
-                    panic!("should not be in database");
-                }
+                assert!(factory.transaction_by_hash(hash)?.is_none(), "should not be in database");
                 Ok::<_, ProviderError>(canonical_in_memory_state.transaction_by_hash(hash))
             };
 
