@@ -1597,7 +1597,7 @@ mod tests {
 
         // Insert blocks into the database
         for block in &database_blocks {
-            // TODO: this should be moved inside `insert_historical_block`
+            // TODO: this should be moved inside `insert_historical_block`: <https://github.com/paradigmxyz/reth/issues/11524>
             let mut transactions_writer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             transactions_writer.increment_block(block.number)?;
