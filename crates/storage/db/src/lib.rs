@@ -121,13 +121,13 @@ pub mod test_utils {
             self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
 
-        /// Sets [`TempDatabse`] new pre transaction creation hook.
+        /// Sets [`TempDatabase`] new pre transaction creation hook.
         pub fn set_pre_transaction_hook(&self, hook: Box<dyn Fn() + Send + Sync>) {
             let mut db_hook = self.pre_tx_hook.write();
             *db_hook = hook;
         }
 
-        /// Sets [`TempDatabse`] new post transaction creation hook.
+        /// Sets [`TempDatabase`] new post transaction creation hook.
         pub fn set_post_transaction_hook(&self, hook: Box<dyn Fn() + Send + Sync>) {
             let mut db_hook = self.post_tx_hook.write();
             *db_hook = hook;
