@@ -3,63 +3,11 @@
 //! Log parsing for building filter.
 
 use alloy_primitives::TxHash;
-use alloy_rpc_types::{FilterId, FilteredParams, Log};
+use alloy_rpc_types::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
 use reth_primitives::{BlockNumHash, Receipt};
-use reth_rpc_server_types::result::rpc_error_with_code;
 use reth_storage_api::BlockReader;
-
-use crate::EthApiError;
-
-/// Errors that can occur in the handler implementation
-#[derive(Debug, thiserror::Error)]
-pub enum EthFilterError {
-    /// Filter not found.
-    #[error("filter not found")]
-    FilterNotFound(FilterId),
-    /// Invalid block range.
-    #[error("invalid block range params")]
-    InvalidBlockRangeParams,
-    /// Query scope is too broad.
-    #[error("query exceeds max block range {0}")]
-    QueryExceedsMaxBlocks(u64),
-    /// Query result is too large.
-    #[error("query exceeds max results {0}")]
-    QueryExceedsMaxResults(usize),
-    /// Error serving request in `eth_` namespace.
-    #[error(transparent)]
-    EthAPIError(#[from] EthApiError),
-    /// Error thrown when a spawned task failed to deliver a response.
-    #[error("internal filter error")]
-    InternalError,
-}
-
-// convert the error
-impl From<EthFilterError> for jsonrpsee_types::error::ErrorObject<'static> {
-    fn from(err: EthFilterError) -> Self {
-        match err {
-            EthFilterError::FilterNotFound(_) => {
-                rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, "filter not found")
-            }
-            err @ EthFilterError::InternalError => {
-                rpc_error_with_code(jsonrpsee_types::error::INTERNAL_ERROR_CODE, err.to_string())
-            }
-            EthFilterError::EthAPIError(err) => err.into(),
-            err @ (EthFilterError::InvalidBlockRangeParams |
-            EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults(_)) => {
-                rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, err.to_string())
-            }
-        }
-    }
-}
-
-impl From<ProviderError> for EthFilterError {
-    fn from(err: ProviderError) -> Self {
-        Self::EthAPIError(err.into())
-    }
-}
 
 /// Returns all matching of a block's receipts when the transaction hashes are known.
 pub fn matching_block_logs_with_tx_hashes<'a, I>(
@@ -107,7 +55,7 @@ pub fn append_matching_block_logs(
     receipts: &[Receipt],
     removed: bool,
     block_timestamp: u64,
-) -> Result<(), EthFilterError> {
+) -> Result<(), ProviderError> {
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
