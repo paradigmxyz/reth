@@ -132,7 +132,7 @@ where
     }
 }
 
-impl<'a, C> HashedCursor for HashedPostStateAccountCursor<'a, C>
+impl<C> HashedCursor for HashedPostStateAccountCursor<'_, C>
 where
     C: HashedCursor<Value = Account>,
 {
@@ -276,7 +276,7 @@ where
     }
 }
 
-impl<'a, C> HashedCursor for HashedPostStateStorageCursor<'a, C>
+impl<C> HashedCursor for HashedPostStateStorageCursor<'_, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -304,7 +304,7 @@ where
     }
 }
 
-impl<'a, C> HashedStorageCursor for HashedPostStateStorageCursor<'a, C>
+impl<C> HashedStorageCursor for HashedPostStateStorageCursor<'_, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {

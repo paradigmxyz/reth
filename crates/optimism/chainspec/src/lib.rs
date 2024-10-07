@@ -26,7 +26,6 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
-use crate::constants::MAINNET_DEPOSIT_CONTRACT;
 use derive_more::{Constructor, Deref, Into};
 use once_cell::sync::OnceCell;
 use reth_chainspec::{
@@ -209,14 +208,6 @@ impl From<Genesis> for OpChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut block_hardforks);
 
-        // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
-        // have the deployment block in the genesis file, so we use block zero. We use the same
-        // deposit topic as the mainnet contract if we have the deposit contract address in the
-        // genesis json.
-        let deposit_contract = genesis.config.deposit_contract_address.map(|address| {
-            DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
-        });
-
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
@@ -224,7 +215,6 @@ impl From<Genesis> for OpChainSpec {
                 genesis_hash: OnceCell::new(),
                 hardforks: ChainHardforks::new(ordered_hardforks),
                 paris_block_and_final_difficulty,
-                deposit_contract,
                 base_fee_params: optimism_genesis_info.base_fee_params,
                 ..Default::default()
             },
