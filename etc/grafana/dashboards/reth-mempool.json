@@ -15,7 +15,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "11.1.3"
+      "version": "11.1.0"
     },
     {
       "type": "panel",
@@ -131,7 +131,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.1.0",
       "targets": [
         {
           "datasource": {
@@ -201,7 +201,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.1.0",
       "targets": [
         {
           "datasource": {
@@ -271,7 +271,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.1.0",
       "targets": [
         {
           "datasource": {
@@ -341,7 +341,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.1.0",
       "targets": [
         {
           "datasource": {
@@ -411,7 +411,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.1.0",
       "targets": [
         {
           "datasource": {
@@ -481,7 +481,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.1.0",
       "targets": [
         {
           "datasource": {
@@ -2682,7 +2682,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "${DS_PROMETHEUS}"
       },
       "description": "Number of all transactions of all sub-pools",
       "fieldConfig": {
@@ -2766,8 +2766,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "code",
-          "expr": "reth_transaction_pool_total_legacy_transactions{instance=\"$instance\"}",
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_total_legacy_transaction{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
