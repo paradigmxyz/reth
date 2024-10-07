@@ -1282,7 +1282,7 @@ mod tests {
     fn test_sync_target_update() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let genesis = SealedHeader::default();
+        let genesis = SealedHeader::<Header>::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
@@ -1310,7 +1310,7 @@ mod tests {
     fn test_head_update() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let header = SealedHeader::default();
+        let header = SealedHeader::<Header>::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
@@ -1348,7 +1348,7 @@ mod tests {
     fn test_next_request() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let genesis = SealedHeader::default();
+        let genesis = SealedHeader::<Header>::default();
 
         let batch_size = 99;
         let start = 1000;
@@ -1396,7 +1396,7 @@ mod tests {
 
         let client = Arc::new(TestHeadersClient::default());
 
-        let p3 = SealedHeader::default();
+        let p3 = SealedHeader::<Header>::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
@@ -1427,7 +1427,7 @@ mod tests {
     #[tokio::test]
     async fn download_one_by_one() {
         reth_tracing::init_test_tracing();
-        let p3 = SealedHeader::default();
+        let p3 = SealedHeader::<Header>::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
@@ -1470,7 +1470,7 @@ mod tests {
     #[tokio::test]
     async fn download_one_by_one_larger_request_limit() {
         reth_tracing::init_test_tracing();
-        let p3 = SealedHeader::default();
+        let p3 = SealedHeader::<Header>::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
