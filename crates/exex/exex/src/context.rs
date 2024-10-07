@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use reth_node_api::{FullNodeComponents, NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
@@ -81,10 +81,7 @@ impl<Node: FullNodeComponents> ExExContext<Node> {
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder(
-        &self,
-    ) -> &reth_payload_builder::PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>
-    {
+    pub fn payload_builder(&self) -> &Node::PayloadBuilder {
         self.components.payload_builder()
     }
 

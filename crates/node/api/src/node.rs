@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_types::{NodeTypesWithDB, NodeTypesWithEngine};
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::Header;
 use reth_provider::FullProvider;
 use reth_rpc_eth_api::EthApiTypes;
@@ -57,6 +57,9 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Network API.
     type Network: FullNetwork;
 
+    /// Builds new blocks.
+    type PayloadBuilder: PayloadBuilder;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -73,9 +76,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns handle to runtime.
     fn task_executor(&self) -> &TaskExecutor;

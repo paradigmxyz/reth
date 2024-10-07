@@ -14,7 +14,6 @@ use reth_node_core::{
         eth::{EthApiTypes, FullEthApiServer},
     },
 };
-use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -285,9 +284,7 @@ where
     }
 
     /// Returns the handle to the payload builder service
-    pub fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    pub fn payload_builder(&self) -> &Node::PayloadBuilder {
         self.node.payload_builder()
     }
 }
