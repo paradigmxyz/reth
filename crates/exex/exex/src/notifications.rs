@@ -184,13 +184,7 @@ impl<P, E> ExExNotificationsWithoutHead<P, E> {
         Self { node_head, provider, executor, notifications, wal_handle }
     }
 
-    /// Subscribe to notifications with the given head. This head is the ExEx's
-    /// latest view of the host chain.
-    ///
-    /// Notifications will be sent starting from the head, not inclusive. For
-    /// example, if `head.number == 10`, then the first notification will be
-    /// with `block.number == 11`. A `head.number` of 10 indicates that the ExEx
-    /// has processed up to block 10, and is ready to process block 11.
+    /// Subscribe to notifications with the given head.
     fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
         ExExNotificationsWithHead::new(
             self.node_head,
@@ -212,7 +206,13 @@ impl<P: Unpin, E: Unpin> Stream for ExExNotificationsWithoutHead<P, E> {
 }
 
 /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
-/// committed or reverted after the given head.
+/// committed or reverted after the given head. The head is the ExEx's latest view of the host
+/// chain.
+///
+/// Notifications will be sent starting from the head, not inclusive. For example, if
+/// `exex_head.number == 10`, then the first notification will be with `block.number == 11`. An
+/// `exex_head.number` of 10 indicates that the ExEx has processed up to block 10, and is ready to
+/// process block 11.
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<P, E> {
     node_head: Head,
