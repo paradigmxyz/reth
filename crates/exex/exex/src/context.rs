@@ -94,27 +94,14 @@ impl<Node: FullNodeComponents> ExExContext<Node> {
         self.components.task_executor()
     }
 
-    /// Replaces notifications stream with a stream of notifications without a head.
-    ///
-    /// Consumes the type and returns a new instance of [`ExExContext`].
-    pub fn with_notifications_without_head(self) -> Self {
-        Self { notifications: self.notifications.without_head(), ..self }
-    }
-
-    /// Replaces notifications stream with a stream of notifications with a head using the
-    /// provided head.
-    ///
-    /// Consumes the type and returns a new instance of [`ExExContext`].
-    pub fn with_notifications_with_head(self, head: ExExHead) -> Self {
-        Self { notifications: self.notifications.with_head(head), ..self }
-    }
-
-    /// Sets notifications stream to a stream of notifications without a head.
+    /// Sets notifications stream to [`crate::ExExNotificationsWithoutHead`], a stream of
+    /// notifications without a head.
     pub fn set_notifications_without_head(&mut self) {
         self.notifications.set_without_head();
     }
 
-    /// Sets notifications stream to a stream of notifications with a head using the provided head.
+    /// Sets notifications stream to [`crate::ExExNotificationsWithHead`], a stream of notifications
+    /// with the provided head.
     pub fn set_notifications_with_head(&mut self, head: ExExHead) {
         self.notifications.set_with_head(head);
     }
