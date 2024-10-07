@@ -49,7 +49,10 @@
         cargoLock = {
           lockFile = ./Cargo.lock;
         };
-        #buildInputs = with pkgs; [ llvmPackages.bintools  ( pkgs.darwin.apple_sdk.frameworks.Security ) ];
+        checkFlags = [
+          #this test breaks Read Only FS sandbox
+          "--skip=cli::tests::parse_env_filter_directives"
+        ];
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
         buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [ Security CoreFoundation CoreServices ]);
         src = ./.;
