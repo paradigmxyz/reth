@@ -543,7 +543,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            });
+            })
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged();
@@ -553,7 +553,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            });
+            })
         }
 
         // Attempt to look up terminal block hash
@@ -618,9 +618,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res);
+                    return Ok(fcu_res)
                 }
-                return Err(err.into());
+                return Err(err.into())
             }
         }
 
@@ -935,7 +935,7 @@ where
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into());
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
         }
 
         Ok(self
