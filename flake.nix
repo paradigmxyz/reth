@@ -8,6 +8,11 @@
   };
   outputs = { self, nixpkgs, utils, ... }@inputs: utils.lib.eachDefaultSystem (system:
     let
+      # toml info
+      cargoTOML = (builtins.fromTOML (builtins.readFile ./Cargo.toml));
+      packageVersion = cargoTOML.workspace.package.version;
+      rustVersion = cargoTOML.workspace.package.rust-version;
+      # platform packages
       macPackages = pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [ Security CoreFoundation CoreServices ]);
       linuxPackages = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
         libclang.lib
@@ -23,8 +28,8 @@
         lockFile = ./Cargo.lock;
       };
       rustPlatform = pkgs.makeRustPlatform {
-        rustc = pkgs.rust-bin.stable."1.81.0".default;
-        cargo = pkgs.rust-bin.stable."1.81.0".default;
+        rustc = pkgs.rust-bin.stable."${rustVersion}".default;
+        cargo = pkgs.rust-bin.stable."${rustVersion}".default;
       };
     in
     {
@@ -33,7 +38,7 @@
           macPackages
           linuxPackages
           cargoDeps
-          (rust-bin.stable."1.81.0".default.override {
+          (rust-bin.stable."${rustVersion}".default.override {
             extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
           })
         ];
@@ -44,7 +49,7 @@
 
       defaultPackage = rustPlatform.buildRustPackage {
         pname = "reth";
-        version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+        version = packageVersion;
         cargoLock = {
           lockFile = ./Cargo.lock;
         };
