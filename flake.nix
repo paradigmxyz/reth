@@ -22,9 +22,6 @@
       cargoDeps = pkgs.rustPlatform.importCargoLock {
         lockFile = ./Cargo.lock;
       };
-      rust = pkgs.makeRustPlatform {
-        inherit (inputs.fenix.packages.${system}.minimal) cargo rustc;
-      };
       rustPlatform = pkgs.makeRustPlatform {
         rustc = pkgs.rust-bin.stable."1.81.0".default;
         cargo = pkgs.rust-bin.stable."1.81.0".default;
@@ -36,10 +33,11 @@
           macPackages
           linuxPackages
           cargoDeps
-          (rust-bin.stable.latest.default.override {
+          (rust-bin.stable."1.81.0".default.override {
             extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
           })
         ];
+        RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
       #defaultPackage = pkgs.rustPlatform.buildRustPackage {
@@ -55,7 +53,9 @@
           "--skip=cli::tests::parse_env_filter_directives"
         ];
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-        nativeBuildInputs = (with pkgs;[  ]) ++ macPackages ++ linuxPackages;
+        nativeBuildInputs = (with pkgs;[
+          # common packages
+        ]) ++ macPackages ++ linuxPackages;
         src = ./.;
       };
     }
