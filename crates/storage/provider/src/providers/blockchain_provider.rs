@@ -1480,20 +1480,22 @@ mod tests {
             MockNodeTypesWithDB,
         },
         writer::UnifiedStorageWriter,
-        BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
+        BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
+        StaticFileWriter,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::B256;
+    use alloy_primitives::{BlockNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
-        ExecutedBlock, NewCanonicalChain,
+        CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
         BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
@@ -1662,6 +1664,42 @@ mod tests {
             in_memory_blocks,
             block_range_params,
         )
+    }
+
+    /// This will persist the last block in-memory and delete it from
+    /// `canonical_in_memory_state` right after a database read transaction is created.
+    ///
+    /// This simulates a RPC method having a different view than when its database transaction was
+    /// created.
+    fn persist_block_on_db_tx_creation(
+        provider: Arc<BlockchainProvider2<MockNodeTypesWithDB>>,
+        block_number: BlockNumber,
+    ) {
+        let hook_provider = provider.clone();
+        provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
+            if let Some(state) = hook_provider.canonical_in_memory_state.head_state() {
+                if state.anchor().number + 1 == block_number {
+                    let mut lowest_memory_block =
+                        state.parent_state_chain().last().expect("qed").block();
+                    let num_hash = lowest_memory_block.block().num_hash();
+
+                    let mut execution_output = (*lowest_memory_block.execution_output).clone();
+                    execution_output.first_block = lowest_memory_block.block().number;
+                    lowest_memory_block.execution_output = Arc::new(execution_output);
+
+                    // Push to disk
+                    let provider_rw = hook_provider.database_provider_rw().unwrap();
+                    UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
+                        .save_blocks(&[lowest_memory_block])
+                        .unwrap();
+                    UnifiedStorageWriter::commit(provider_rw, hook_provider.static_file_provider())
+                        .unwrap();
+
+                    // Remove from memory
+                    hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
+                }
+            }
+        }));
     }
 
     #[test]
@@ -4281,6 +4319,85 @@ mod tests {
             result.is_none(),
             "No sender address should be found for an invalid transaction ID"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_race() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT - 1,
+            TEST_BLOCKS_COUNT + 1,
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
+        )?;
+
+        let provider = Arc::new(provider);
+
+        // Old implementation was querying the database first. This is problematic, if there are
+        // changes AFTER the database transaction is created.
+        let old_transaction_hash_fn =
+            |hash: B256,
+             canonical_in_memory_state: CanonicalInMemoryState,
+             factory: ProviderFactory<MockNodeTypesWithDB>| {
+                if let Some(tx) = factory.transaction_by_hash(hash)? {
+                    assert!(false, "should not be in database");
+                    return Ok::<_, ProviderError>(Some(tx))
+                }
+                Ok(canonical_in_memory_state.transaction_by_hash(hash))
+            };
+
+        // Correct implementation queries in-memory first
+        let correct_transaction_hash_fn =
+            |hash: B256,
+             canonical_in_memory_state: CanonicalInMemoryState,
+             factory: ProviderFactory<MockNodeTypesWithDB>| {
+                if let Some(tx) = canonical_in_memory_state.transaction_by_hash(hash) {
+                    return Ok::<_, ProviderError>(Some(tx))
+                }
+                assert!(false, "should not be in database");
+                factory.transaction_by_hash(hash)
+            };
+
+        // OLD BEHAVIOUR
+        {
+            // This will persist block 1 AFTER a database is created. Moving it from memory to
+            // storage.
+            persist_block_on_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+            let to_be_persisted_tx = in_memory_blocks[0].body.transactions[0].clone();
+
+            // Even though the block exists, given the order of provider queries done in the method
+            // above, we do not see it.
+            assert_eq!(
+                old_transaction_hash_fn(
+                    to_be_persisted_tx.hash(),
+                    provider.canonical_in_memory_state(),
+                    provider.database.clone()
+                ),
+                Ok(None)
+            );
+        }
+
+        // CORRECT BEHAVIOUR
+        {
+            // This will persist block 1 AFTER a database is created. Moving it from memory to
+            // storage.
+            persist_block_on_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
+            let to_be_persisted_tx = in_memory_blocks[1].body.transactions[0].clone();
+
+            assert_eq!(
+                correct_transaction_hash_fn(
+                    to_be_persisted_tx.hash(),
+                    provider.canonical_in_memory_state(),
+                    provider.database.clone()
+                ),
+                Ok(Some(to_be_persisted_tx.into()))
+            );
+        }
 
         Ok(())
     }
