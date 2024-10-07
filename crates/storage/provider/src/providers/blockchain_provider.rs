@@ -19,7 +19,7 @@ use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::{BlockBody, NodeTypesWithDB};
 use reth_primitives::{
     Account, Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
