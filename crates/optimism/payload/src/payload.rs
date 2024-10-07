@@ -83,7 +83,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
             transactions,
             gas_limit: attributes.gas_limit,
-            eip_1559_params: attributes.eip_1559_params.unwrap_or_default(),
+            eip_1559_params: attributes.eip_1559_params,
         })
     }
 
@@ -123,7 +123,7 @@ impl Default for OptimismPayloadBuilderAttributes {
             no_tx_pool: false,
             transactions: Vec::new(),
             gas_limit: None,
-            eip_1559_params: B64::default(),
+            eip_1559_params: Some(B64::default()),
         }
     }
 }

@@ -19,7 +19,7 @@ mod op_sepolia;
 use std::{fmt::Display, str::FromStr};
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{Parity, Signature, B256, B64, U256};
+use alloy_primitives::{b64, Parity, Signature, B256, B64, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use dev::OP_DEV;
@@ -35,8 +35,9 @@ use reth_network_peers::NodeRecord;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives_traits::Header;
 
-const DENOMINATOR_MASK: u64 = 0xFFFFFFFF00000000;
-const ELASTICITY_MASK: u64 = 0x00000000FFFFFFFF;
+/// These are the masks for the base fee denominator and elasticity in the nonce, post Holocene
+const DENOMINATOR_MASK: B64 = b64!("FFFFFFFF00000000");
+const ELASTICITY_MASK: B64 = b64!("00000000FFFFFFFF");
 
 /// OP stack chain spec type.
 #[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
@@ -61,11 +62,15 @@ impl Fee for OpChainSpec {
     fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
         let is_holocene =
             self.inner.is_fork_active_at_timestamp(OptimismHardfork::Holocene, timestamp);
-        if is_holocene {
+        let not_first =
+            self.inner.is_fork_active_at_timestamp(OptimismHardfork::Holocene, parent.timestamp);
+        // If we are in the Holocene, we need to use the base fee params from the parent block's
+        // nonce Else, use the base fee params from chainspec
+        if is_holocene && not_first {
             // First 4 bytes of the nonce are the base fee denominator, the last 4 bytes are the
             // elasticity
-            let denominator = parent.nonce & B64::from_str(&DENOMINATOR_MASK.to_string()).unwrap();
-            let elasticity = parent.nonce & B64::from_str(&ELASTICITY_MASK.to_string()).unwrap();
+            let denominator = parent.nonce & DENOMINATOR_MASK;
+            let elasticity = parent.nonce & ELASTICITY_MASK;
             let base_fee_params =
                 BaseFeeParams::new(u64::from(denominator) as u128, u64::from(elasticity) as u128);
             U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
@@ -603,7 +608,24 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene() {
+    fn test_get_base_fee_holocene_first_block() {
+        let op_chain_spec = &BASE_SEPOLIA;
+        let mut parent = Header::default();
+        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
+
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
+        assert_eq!(
+            base_fee,
+            U256::from(
+                parent
+                    .next_block_base_fee(BaseFeeParams::new(0x12345678, 0x12345678))
+                    .unwrap_or_default()
+            )
+        );
+    }
+
+    #[test]
+    fn test_get_base_fee_holocene_not_first_block() {
         let op_chain_spec = &BASE_SEPOLIA;
         let mut parent = Header::default();
         parent.nonce = B64::from_str("0x1234567812345678").unwrap();

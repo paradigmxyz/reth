@@ -189,9 +189,7 @@ where
     );
 
     if is_holocene && attributes.eip_1559_params.is_none() {
-        return Err(PayloadBuilderError::other(
-            OptimismPayloadBuilderError::MissingEip1559Params,
-        ))
+        return Err(PayloadBuilderError::other(OptimismPayloadBuilderError::MissingEip1559Params))
     }
 
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
@@ -507,6 +505,7 @@ where
         logs_bloom,
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
+        // Post holocene, adding eip 1559 params to the nonce field
         nonce: get_nonce(
             is_holocene,
             &attributes,
