@@ -37,6 +37,11 @@ impl<Eth> EthBundle<Eth> {
     pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
         Self { inner: Arc::new(EthBundleInner { eth_api, blocking_task_guard }) }
     }
+
+    /// Access the underlying `Eth` API.
+    pub fn eth_api(&self) -> &Eth {
+        &self.inner.eth_api
+    }
 }
 
 impl<Eth> EthBundle<Eth>
@@ -103,7 +108,7 @@ where
 
         let block_id: alloy_rpc_types::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
-        let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
+        let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
@@ -125,12 +130,12 @@ where
         } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
             let parent_block = block_env.number.saturating_to::<u64>();
             // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
-            let parent = LoadPendingBlock::provider(&self.inner.eth_api)
+            let parent = LoadPendingBlock::provider(self.eth_api())
                 .header_by_number(parent_block)
                 .map_err(Eth::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
             if let Some(base_fee) = parent.next_block_base_fee(
-                LoadPendingBlock::provider(&self.inner.eth_api)
+                LoadPendingBlock::provider(self.eth_api())
                     .chain_spec()
                     .base_fee_params_at_block(parent_block),
             ) {
@@ -142,10 +147,9 @@ where
         // use the block number of the request
         block_env.number = U256::from(block_number);
 
-        let eth_api = self.inner.eth_api.clone();
+        let eth_api = self.eth_api().clone();
 
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
