@@ -3,7 +3,7 @@
 //! Optimism builder support
 
 use alloy_eips::eip2718::Decodable2718;
-use alloy_primitives::{Address, B256, U256, B64};
+use alloy_primitives::{Address, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
 /// Re-export for use in downstream arguments.

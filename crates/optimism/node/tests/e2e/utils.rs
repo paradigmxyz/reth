@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, B64};
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
 use reth_chainspec::ChainSpecBuilder;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};

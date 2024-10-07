@@ -16,10 +16,10 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{Parity, Signature, B256, U256};
+use alloy_primitives::{Parity, Signature, B256, B64, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use dev::OP_DEV;
@@ -32,7 +32,11 @@ use reth_chainspec::{
     Hardforks, Head,
 };
 use reth_network_peers::NodeRecord;
+use reth_optimism_forks::OptimismHardfork;
 use reth_primitives_traits::Header;
+
+const DENOMINATOR_MASK: u64 = 0xFFFFFFFF00000000;
+const ELASTICITY_MASK: u64 = 0x00000000FFFFFFFF;
 
 /// OP stack chain spec type.
 #[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
@@ -41,10 +45,38 @@ pub struct OpChainSpec {
     pub inner: ChainSpec,
 }
 
+/// Fee trait for OP chain specs.
+pub trait Fee {
+    /// Read from parent to determine the base fee for the next block
+    fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256;
+}
+
 /// Returns the signature for the optimism deposit transactions, which don't include a
 /// signature.
 pub fn optimism_deposit_tx_signature() -> Signature {
     Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
+}
+
+impl Fee for OpChainSpec {
+    fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
+        let is_holocene =
+            self.inner.is_fork_active_at_timestamp(OptimismHardfork::Holocene, timestamp);
+        if is_holocene {
+            // First 4 bytes of the nonce are the base fee denominator, the last 4 bytes are the
+            // elasticity
+            let denominator = parent.nonce & B64::from_str(&DENOMINATOR_MASK.to_string()).unwrap();
+            let elasticity = parent.nonce & B64::from_str(&ELASTICITY_MASK.to_string()).unwrap();
+            let base_fee_params =
+                BaseFeeParams::new(u64::from(denominator) as u128, u64::from(elasticity) as u128);
+            U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
+        } else {
+            U256::from(
+                parent
+                    .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
+                    .unwrap_or_default(),
+            )
+        }
+    }
 }
 
 impl EthChainSpec for OpChainSpec {
@@ -551,5 +583,39 @@ mod tests {
         assert!(chainspec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
 
         assert!(chainspec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
+    }
+
+    #[test]
+    fn test_get_base_fee_pre_holocene() {
+        let op_chain_spec = &BASE_SEPOLIA;
+        let mut parent = Header::default();
+        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
+
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
+        assert_eq!(
+            base_fee,
+            U256::from(
+                parent
+                    .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
+                    .unwrap_or_default()
+            )
+        );
+    }
+
+    #[test]
+    fn test_get_base_fee_holocene() {
+        let op_chain_spec = &BASE_SEPOLIA;
+        let mut parent = Header::default();
+        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
+
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
+        assert_eq!(
+            base_fee,
+            U256::from(
+                parent
+                    .next_block_base_fee(BaseFeeParams::new(0x12345678, 0x12345678))
+                    .unwrap_or_default()
+            )
+        );
     }
 }

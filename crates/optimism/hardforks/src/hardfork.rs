@@ -158,7 +158,7 @@ impl OptimismHardfork {
                 Self::Ecotone => Some(1708534800),
                 Self::Fjord => Some(1716998400),
                 Self::Granite => Some(1723478400),
-                Self::Holocene => None // TODO: update when Holocene is defined
+                Self::Holocene => None, // TODO: update when Holocene is defined
             },
         )
     }

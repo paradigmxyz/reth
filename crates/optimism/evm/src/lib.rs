@@ -9,10 +9,9 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use alloy_eips::eip1559::BaseFeeParams;
-use alloy_primitives::{Address, U256, B64};
+use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{Fee, OpChainSpec};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
@@ -161,7 +160,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: get_base_fee(spec_id, parent, self.chain_spec.clone(), attributes.timestamp),
+            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
@@ -175,18 +174,6 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         }
 
         (cfg_with_handler_cfg, block_env)
-    }
-}
-
-fn get_base_fee(spec_id: SpecId, parent: &Header, chain_spec: Arc<OpChainSpec>, timestamp: u64) -> U256 {
-    let is_holocene = spec_id.is_enabled_in(SpecId::HOLOCENE);
-    if is_holocene {
-        let denominator = parent.nonce & B64::from_str("0xFFFFFFFF00000000").unwrap();
-        let elasticity = parent.nonce & B64::from_str("0x00000000FFFFFFFF").unwrap();
-        let base_fee_params = BaseFeeParams::new(u64::from(denominator) as u128, u64::from(elasticity) as u128);
-        U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
-    } else {
-        U256::from(parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp)).unwrap_or_default())
     }
 }
 
@@ -552,28 +539,5 @@ mod tests {
 
         // Optimism in handler
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::ECOTONE, is_optimism: true });
-    }
-
-    #[test]
-    fn test_get_base_fee() {
-        let evm_config: OptimismEvmConfig = test_evm_config();
-
-        let mut parent = Header::default();
-        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
-
-        let base_fee = get_base_fee(SpecId::BEDROCK, &parent, evm_config.chain_spec, 0);
-        assert_eq!(base_fee, U256::from(parent.next_block_base_fee(BaseFeeParams::new(0, 0)).unwrap_or_default()));
-    }
-
-    #[test]
-    fn test_get_base_fee_holocene() {
-        let evm_config: OptimismEvmConfig = test_evm_config();
-
-        let mut parent = Header::default();
-        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
-
-        let base_fee = get_base_fee(SpecId::HOLOCENE, &parent, evm_config.chain_spec, 0);
-        assert_eq!(base_fee, U256::from(parent.next_block_base_fee(BaseFeeParams::new(0x12345678, 0x12345678)).unwrap_or_default()));
-
     }
 }
