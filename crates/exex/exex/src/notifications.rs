@@ -54,7 +54,9 @@ impl<P, E> ExExNotifications<P, E> {
     /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s without a head.
     ///
     /// It's a no-op if the stream has already been configured without a head.
-    pub(super) fn set_without_head(&mut self) {
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    pub fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithoutHead(match current {
             ExExNotificationsInner::Invalid => unreachable!(),
@@ -69,10 +71,30 @@ impl<P, E> ExExNotifications<P, E> {
         });
     }
 
+    /// Returns a new [`ExExNotifications`] without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    pub fn without_head(mut self) -> Self {
+        self.inner = ExExNotificationsInner::WithoutHead(match self.inner {
+            ExExNotificationsInner::Invalid => unreachable!(),
+            ExExNotificationsInner::WithoutHead(notifications) => notifications,
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithoutHead::new(
+                notifications.node_head,
+                notifications.provider,
+                notifications.executor,
+                notifications.notifications,
+                notifications.wal_handle,
+            ),
+        });
+        self
+    }
+
     /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s with the provided head.
     ///
     /// It's a no-op if the stream has already been configured with a head.
-    pub(super) fn set_with_head(&mut self, exex_head: ExExHead) {
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    pub fn set_with_head(&mut self, exex_head: ExExHead) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithHead(match current {
             ExExNotificationsInner::Invalid => unreachable!(),
@@ -81,6 +103,32 @@ impl<P, E> ExExNotifications<P, E> {
             }
             ExExNotificationsInner::WithHead(notifications) => notifications,
         });
+    }
+
+    /// Returns a new [`ExExNotifications`] with the provided head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    pub fn with_head(mut self, exex_head: ExExHead) -> Self {
+        self.inner = ExExNotificationsInner::WithHead(match self.inner {
+            ExExNotificationsInner::Invalid => unreachable!(),
+            ExExNotificationsInner::WithoutHead(notifications) => ExExNotificationsWithHead::new(
+                notifications.node_head,
+                notifications.provider,
+                notifications.executor,
+                notifications.notifications,
+                notifications.wal_handle,
+                exex_head,
+            ),
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithHead::new(
+                notifications.node_head,
+                notifications.provider,
+                notifications.executor,
+                notifications.notifications,
+                notifications.wal_handle,
+                exex_head,
+            ),
+        });
+        self
     }
 }
 
