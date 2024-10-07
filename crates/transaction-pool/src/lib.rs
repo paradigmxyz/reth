@@ -196,6 +196,8 @@ pub mod identifier;
 mod ordering;
 mod traits;
 
+type SharedBlobTransactionSidecar = Arc<BlobTransactionSidecar>;
+
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking a pool
 pub mod test_utils;
