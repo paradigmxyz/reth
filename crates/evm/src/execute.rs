@@ -166,23 +166,22 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 
 /// A factory for creating block execution strategies.
 pub trait BlockExecutionStrategyFactory {
-    /// The database type used by the strategy factory.
-    type DB: Database;
-
     /// The specific [`BlockExecutionStrategy`] type this factory produces.
-    type Strategy: BlockExecutionStrategy<Self::DB>;
+    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<DB>;
 
     /// The error type returned by this factory and its produced strategies.
-    type Error: From<ProviderError>
-        + From<<Self::Strategy as BlockExecutionStrategy<Self::DB>>::Error>
+    type Error<DB: Database<Error: Into<ProviderError> + Display>>: From<ProviderError>
+        + From<<Self::Strategy<DB> as BlockExecutionStrategy<DB>>::Error>
         + core::error::Error;
 
     /// Creates a new block execution strategy instance.
-    fn create(
+    fn create<DB>(
         &self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<Self::Strategy, Self::Error>;
+    ) -> Result<Self::Strategy<DB>, Self::Error<DB>>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>;
 }
 
 /// Defines the strategy for executing a single block.
@@ -233,7 +232,7 @@ where
 {
     fn executor<DB>(&self, db: DB) -> GenericBlockExecutor<'_, S, DB>
     where
-        DB: Database,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         GenericBlockExecutor::new(
             &self.strategy_factory,
@@ -248,7 +247,7 @@ where
 pub struct GenericBlockExecutor<'a, S, DB>
 where
     S: BlockExecutionStrategyFactory,
-    DB: Database,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     strategy_factory: &'a S,
     state: State<DB>,
@@ -257,7 +256,7 @@ where
 impl<'a, S, DB> GenericBlockExecutor<'a, S, DB>
 where
     S: BlockExecutionStrategyFactory,
-    DB: Database,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     /// Creates a new `GenericBlockExecutor` with the given strategy factory.
     pub const fn new(strategy_factory: &'a S, state: State<DB>) -> Self {
@@ -267,12 +266,12 @@ where
 
 impl<'a, S, DB> Executor<DB> for GenericBlockExecutor<'a, S, DB>
 where
-    S: BlockExecutionStrategyFactory<DB = DB>,
-    DB: Database,
+    S: BlockExecutionStrategyFactory,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'b> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
-    type Error = S::Error;
+    type Error = S::Error<DB>;
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
@@ -427,16 +426,14 @@ mod tests {
         }
     }
 
-    struct TestExecutorStrategy<T> {
-        state: State<T>,
+    struct TestExecutorStrategy<DB> {
+        state: State<DB>,
         execute_transactions_result: (Vec<Receipt>, u64),
         apply_post_execution_changes_result: Vec<Request>,
         finish_result: BundleState,
     }
 
-    impl BlockExecutionStrategy<CacheDB<EmptyDBTyped<ProviderError>>>
-        for TestExecutorStrategy<CacheDB<EmptyDBTyped<ProviderError>>>
-    {
+    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB> {
         type Error = BlockExecutionError;
 
         fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
@@ -454,7 +451,7 @@ mod tests {
             Ok(self.apply_post_execution_changes_result.clone())
         }
 
-        fn state_ref(&self) -> &State<CacheDB<EmptyDBTyped<ProviderError>>> {
+        fn state_ref(&self) -> &State<DB> {
             &self.state
         }
 
@@ -478,15 +475,18 @@ mod tests {
     }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory<TestEvmConfig> {
-        type DB = CacheDB<EmptyDBTyped<ProviderError>>;
-        type Error = BlockExecutionError;
-        type Strategy = TestExecutorStrategy<Self::DB>;
+        type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+            TestExecutorStrategy<DB>;
+        type Error<DB: Database<Error: Into<ProviderError> + Display>> = BlockExecutionError;
 
-        fn create(
+        fn create<DB>(
             &self,
             _block: &BlockWithSenders,
             _total_difficulty: U256,
-        ) -> Result<Self::Strategy, Self::Error> {
+        ) -> Result<Self::Strategy<DB>, Self::Error<DB>>
+        where
+            DB: Database<Error: Into<ProviderError> + Display>,
+        {
             let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
             let state = State::builder()
                 .with_database(db)
