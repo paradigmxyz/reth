@@ -183,7 +183,7 @@ impl BuiltPayload for OptimismBuiltPayload {
     }
 }
 
-impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
+impl BuiltPayload for &OptimismBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }

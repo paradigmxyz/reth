@@ -20,7 +20,7 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 #[allow(missing_debug_implementations)]
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
-impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
     fn state_root(
         &self,
         hashed_state: reth_trie::HashedPostState,
@@ -50,7 +50,7 @@ impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a
     }
 }
 
-impl<'a> reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<'_> {
     fn storage_root(
         &self,
         address: Address,
@@ -60,7 +60,7 @@ impl<'a> reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<
     }
 }
 
-impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
     fn proof(
         &self,
         input: reth_trie::TrieInput,
@@ -88,7 +88,7 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
     }
 }
 
-impl<'a> reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'_> {
     fn basic_account(
         &self,
         address: revm_primitives::Address,
@@ -97,7 +97,7 @@ impl<'a> reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'a> {
     }
 }
 
-impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
     fn block_hash(
         &self,
         block_number: alloy_primitives::BlockNumber,
@@ -121,7 +121,7 @@ impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> 
     }
 }
 
-impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
+impl StateProvider for StateProviderTraitObjWrapper<'_> {
     fn account_balance(
         &self,
         addr: revm_primitives::Address,
@@ -164,7 +164,7 @@ impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
 #[allow(missing_debug_implementations)]
 pub struct StateCacheDbRefMutWrapper<'a, 'b>(pub &'b mut StateCacheDb<'a>);
 
-impl<'a, 'b> Database for StateCacheDbRefMutWrapper<'a, 'b> {
+impl<'a> Database for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
     fn basic(
         &mut self,
@@ -190,7 +190,7 @@ impl<'a, 'b> Database for StateCacheDbRefMutWrapper<'a, 'b> {
     }
 }
 
-impl<'a, 'b> DatabaseRef for StateCacheDbRefMutWrapper<'a, 'b> {
+impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
 
     fn basic_ref(

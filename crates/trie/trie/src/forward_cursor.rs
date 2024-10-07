@@ -21,7 +21,7 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
     }
 }
 
-impl<'a, K, V> ForwardInMemoryCursor<'a, K, V>
+impl<K, V> ForwardInMemoryCursor<'_, K, V>
 where
     K: PartialOrd + Clone,
     V: Clone,

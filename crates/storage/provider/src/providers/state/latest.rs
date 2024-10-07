@@ -36,14 +36,14 @@ impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> AccountReader for LatestStateProviderRef<'b, TX> {
+impl<TX: DbTx> AccountReader for LatestStateProviderRef<'_, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.tx.get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 }
 
-impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
+impl<TX: DbTx> BlockHashReader for LatestStateProviderRef<'_, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
@@ -79,7 +79,7 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
+impl<TX: DbTx> StateRootProvider for LatestStateProviderRef<'_, TX> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.tx, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -107,7 +107,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> StorageRootProvider for LatestStateProviderRef<'b, TX> {
+impl<TX: DbTx> StorageRootProvider for LatestStateProviderRef<'_, TX> {
     fn storage_root(
         &self,
         address: Address,
@@ -118,7 +118,7 @@ impl<'b, TX: DbTx> StorageRootProvider for LatestStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
+impl<TX: DbTx> StateProofProvider for LatestStateProviderRef<'_, TX> {
     fn proof(
         &self,
         input: TrieInput,
@@ -146,7 +146,7 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
     }
 }
 
-impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
+impl<TX: DbTx> StateProvider for LatestStateProviderRef<'_, TX> {
     /// Get storage.
     fn storage(
         &self,

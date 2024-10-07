@@ -1023,7 +1023,14 @@ pub trait Call: LoadState + SpawnBlocking {
                 block_env.get_blob_gasprice().map(U256::from),
             )?;
 
-        let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
+        let gas_limit = gas.unwrap_or_else(|| {
+            // Use maximum allowed gas limit. The reason for this
+            // is that both Erigon and Geth use pre-configured gas cap even if
+            // it's possible to derive the gas limit from the block:
+            // <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
+            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
+            block_env.gas_limit.saturating_to()
+        });
 
         #[allow(clippy::needless_update)]
         let env = TxEnv {
@@ -1065,7 +1072,7 @@ pub trait Call: LoadState + SpawnBlocking {
         Ok(EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx))
     }
 
-    /// Prepares the [`EnvWithHandlerCfg`] for execution.
+    /// Prepares the [`EnvWithHandlerCfg`] for execution of calls.
     ///
     /// Does not commit any changes to the underlying database.
     ///
@@ -1076,9 +1083,6 @@ pub trait Call: LoadState + SpawnBlocking {
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
     ///  - `nonce` is set to `None`
-    ///
-    /// Additionally, the block gas limit so that higher tx gas limits can be used in `eth_call`.
-    ///  - `disable_block_gas_limit` is set to `true`
     fn prepare_call_env<DB>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
@@ -1125,15 +1129,9 @@ pub trait Call: LoadState + SpawnBlocking {
             if env.tx.gas_price > U256::ZERO {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap with caller allowance");
-                cap_tx_gas_limit_with_caller_allowance(db, &mut env.tx)?;
-            } else {
-                // If no gas price is specified, use maximum allowed gas limit. The reason for this
-                // is that both Erigon and Geth use pre-configured gas cap even if
-                // it's possible to derive the gas limit from the block:
-                // <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
-                // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
-                trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap as the maximum gas limit");
-                env.tx.gas_limit = self.call_gas_limit();
+                let cap = caller_gas_allowance(db, &env.tx)?;
+                // ensure we cap gas_limit to the block's
+                env.tx.gas_limit = cap.min(env.block.gas_limit).saturating_to();
             }
         }
 

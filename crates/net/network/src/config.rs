@@ -106,6 +106,14 @@ impl<C> NetworkConfig<C> {
         NetworkConfig::builder(secret_key).build(client)
     }
 
+    /// Apply a function to the config.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
     /// Sets the config to use for the discovery v4 protocol.
     pub fn set_discovery_v4(mut self, discovery_config: Discv4Config) -> Self {
         self.discovery_v4_config = Some(discovery_config);
