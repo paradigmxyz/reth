@@ -9,13 +9,12 @@ use std::{fmt, future::Future};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, PayloadBuilder,
 };
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
-use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 
 use crate::{
@@ -99,11 +98,15 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
     type Provider = T::Provider;
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C>
+where
+    C::PayloadBuilder: PayloadBuilder,
+{
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;
     type Network = C::Network;
+    type PayloadBuilder = C::PayloadBuilder;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -125,7 +128,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.network()
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine> {
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
         self.components.payload_builder()
     }
 

@@ -55,6 +55,9 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     /// Network API.
     type Network: FullNetwork;
 
+    /// Builds new blocks.
+    type PayloadBuilder;
+
     /// Validator for the engine API.
     type EngineValidator: EngineValidator<<T::Types as NodeTypesWithEngine>::Engine>;
 
@@ -74,7 +77,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns the engine validator.
     fn engine_validator(&self) -> &Self::EngineValidator;
@@ -117,6 +120,7 @@ where
     type Consensus = Cons;
     type Network = NetworkHandle;
     type EngineValidator = Val;
+    type PayloadBuilder = PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>;
 
     fn pool(&self) -> &Self::Pool {
         &self.transaction_pool
@@ -138,9 +142,7 @@ where
         &self.network
     }
 
-    fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
         &self.payload_builder
     }
 
