@@ -51,6 +51,10 @@ use reth_optimism_node::OptimismNode;
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
+// This allows us to manually enable node metrics features, required for proper jemalloc metric
+// reporting
+use reth_node_metrics as _;
+
 /// The main op-reth cli interface.
 ///
 /// This is the entrypoint to the executable.
