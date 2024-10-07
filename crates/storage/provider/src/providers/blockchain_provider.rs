@@ -4345,22 +4345,21 @@ mod tests {
              canonical_in_memory_state: CanonicalInMemoryState,
              factory: ProviderFactory<MockNodeTypesWithDB>| {
                 if let Some(tx) = factory.transaction_by_hash(hash)? {
-                    assert!(false, "should not be in database");
-                    return Ok::<_, ProviderError>(Some(tx))
+                    panic!("should not be in database");
                 }
-                Ok(canonical_in_memory_state.transaction_by_hash(hash))
+                Ok::<_, ProviderError>(canonical_in_memory_state.transaction_by_hash(hash))
             };
 
         // Correct implementation queries in-memory first
         let correct_transaction_hash_fn =
             |hash: B256,
              canonical_in_memory_state: CanonicalInMemoryState,
-             factory: ProviderFactory<MockNodeTypesWithDB>| {
+             _factory: ProviderFactory<MockNodeTypesWithDB>| {
                 if let Some(tx) = canonical_in_memory_state.transaction_by_hash(hash) {
                     return Ok::<_, ProviderError>(Some(tx))
                 }
-                assert!(false, "should not be in database");
-                factory.transaction_by_hash(hash)
+                panic!("should not be in database");
+                // _factory.transaction_by_hash(hash)
             };
 
         // OLD BEHAVIOUR
