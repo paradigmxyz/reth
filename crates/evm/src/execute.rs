@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 // Re-export execution types
-pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+pub use reth_execution_errors::{BlockExecutionError, BlockValidationError, InternalBlockExecutionError};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
