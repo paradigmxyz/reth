@@ -20,7 +20,6 @@ reth-primitives.workspace = true
 # ethereum
 alloy-chains = { workspace = true, features = ["rlp"] }
 alloy-eips.workspace = true
-alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 
@@ -36,6 +35,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+alloy-genesis.workspace = true
 alloy-chains = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
