@@ -13,7 +13,9 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
-/// A stream of [`ExExNotification`]s.
+/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks. If the
+/// stream is configured with a head via [`ExExNotifications::set_with_head`] or
+/// [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
 #[derive(Debug)]
 pub struct ExExNotifications<P, E> {
     inner: ExExNotificationsInner<P, E>,
