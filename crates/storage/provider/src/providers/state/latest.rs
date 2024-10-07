@@ -15,10 +15,15 @@ use reth_primitives::{Account, Bytecode, StaticFileSegment};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
+    proof::{Proof, StorageProof},
+    updates::TrieUpdates,
+    witness::TrieWitness,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
+use reth_trie_db::{
+    DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
+    DatabaseTrieWitness,
+};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -115,6 +120,16 @@ impl<TX: DbTx> StorageRootProvider for LatestStateProviderRef<'_, TX> {
     ) -> ProviderResult<B256> {
         StorageRoot::overlay_root(self.tx, address, hashed_storage)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        StorageProof::overlay_storage_proof(self.tx, address, slot, hashed_storage)
+            .map_err(Into::<ProviderError>::into)
     }
 }
 

@@ -178,7 +178,7 @@ where
                     hashed_address,
                 )
                 .with_prefix_set_mut(storage_prefix_set)
-                .storage_proof(HashSet::from_iter([target_key]))?;
+                .storage_multiproof(HashSet::from_iter([target_key]))?;
 
                 // The subtree only contains the proof for a single target.
                 let node =
