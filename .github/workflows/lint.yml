@@ -47,7 +47,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+      - name: Run clippy
+        run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+        env:
+          RUSTFLAGS: -D warnings
+      - name: Run clippy on book sources
+        run: cargo clippy --manifest-path book/sources/Cargo.toml --workspace --lib --examples --tests --benches --all-features
         env:
           RUSTFLAGS: -D warnings
 
@@ -128,7 +133,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      - name: Run fmt
+        run: cargo fmt --all --check
+      - name: Run fmt on book sources
+        run: cargo fmt --manifest-path book/sources/Cargo.toml --all --check
 
   udeps:
     name: udeps
