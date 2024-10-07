@@ -75,9 +75,9 @@ pub mod test_utils {
         db: Option<DB>,
         path: PathBuf,
         /// Executed right before a database transaction is created.
-        pre_tx_hook: RwLock<Box<dyn Fn() -> () + Send + Sync>>,
+        pre_tx_hook: RwLock<Box<dyn Fn() + Send + Sync>>,
         /// Executed right after a database transaction is created.
-        post_tx_hook: RwLock<Box<dyn Fn() -> () + Send + Sync>>,
+        post_tx_hook: RwLock<Box<dyn Fn() + Send + Sync>>,
     }
 
     impl<DB: std::fmt::Debug> std::fmt::Debug for TempDatabase<DB> {
@@ -122,13 +122,13 @@ pub mod test_utils {
         }
 
         /// Sets [`TempDatabse`] new pre transaction creation hook.
-        pub fn set_pre_transaction_hook(&self, hook: Box<dyn Fn() -> () + Send + Sync>) {
+        pub fn set_pre_transaction_hook(&self, hook: Box<dyn Fn() + Send + Sync>) {
             let mut db_hook = self.pre_tx_hook.write();
             *db_hook = hook;
         }
 
         /// Sets [`TempDatabse`] new post transaction creation hook.
-        pub fn set_post_transaction_hook(&self, hook: Box<dyn Fn() -> () + Send + Sync>) {
+        pub fn set_post_transaction_hook(&self, hook: Box<dyn Fn() + Send + Sync>) {
             let mut db_hook = self.post_tx_hook.write();
             *db_hook = hook;
         }

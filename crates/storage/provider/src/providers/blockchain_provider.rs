@@ -4395,7 +4395,7 @@ mod tests {
                     provider.canonical_in_memory_state(),
                     provider.database.clone()
                 ),
-                Ok(Some(to_be_persisted_tx.into()))
+                Ok(Some(to_be_persisted_tx))
             );
         }
 
