@@ -1512,10 +1512,15 @@ where
             return Ok(None)
         };
 
+        // we need to read the execution outcome from disk
+
         let SealedBlockWithSenders { block, senders } = self
             .provider
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
+
+        self.metrics.tree.get_state_call_block_numbers.record(block.number as f64);
+
         let execution_output = self
             .provider
             .get_state(block.number)?
