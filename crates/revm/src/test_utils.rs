@@ -106,9 +106,9 @@ impl StorageRootProvider for StateProviderTest {
 
     fn storage_proof(
         &self,
-        address: Address,
-        slot: B256,
-        hashed_storage: HashedStorage,
+        _address: Address,
+        _slot: B256,
+        _hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
         unimplemented!("proof generation is not supported")
     }
