@@ -38,7 +38,7 @@ pub struct OptimismPayloadBuilderAttributes {
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
     /// EIP-1559 parameters for the generated payload
-    pub eip_1559_params: B64,
+    pub eip_1559_params: Option<B64>,
 }
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {

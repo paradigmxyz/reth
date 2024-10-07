@@ -183,6 +183,17 @@ where
     });
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
+    let is_holocene = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Holocene,
+        attributes.payload_attributes.timestamp,
+    );
+
+    if is_holocene && attributes.eip_1559_params.is_none() {
+        return Err(PayloadBuilderError::other(
+            OptimismPayloadBuilderError::MissingEip1559Params,
+        ))
+    }
+
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
     let mut executed_senders = Vec::with_capacity(attributes.transactions.len());
 
@@ -485,11 +496,6 @@ where
         blob_gas_used = Some(0);
     }
 
-    let is_holocene = chain_spec.is_fork_active_at_timestamp(
-        OptimismHardfork::Holocene,
-        attributes.payload_attributes.timestamp,
-    );
-
     let header = Header {
         parent_hash: parent_block.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -558,8 +564,9 @@ fn get_nonce(
 ) -> B64 {
     if is_holocene {
         // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
-        if attributes.eip_1559_params != B64::ZERO {
-            attributes.eip_1559_params
+        // The eip 1559 params should exist here since there was a check previously
+        if attributes.eip_1559_params.unwrap() != B64::ZERO {
+            attributes.eip_1559_params.unwrap()
         } else {
             let mut default_params = [0u8; 8];
             default_params[..4].copy_from_slice(
@@ -589,7 +596,7 @@ mod tests {
     #[test]
     fn test_get_nonce_post_holocene() {
         let attributes = OptimismPayloadBuilderAttributes {
-            eip_1559_params: B64::from_str("0x1234567812345678").unwrap(),
+            eip_1559_params: Some(B64::from_str("0x1234567812345678").unwrap()),
             ..Default::default()
         };
         let nonce = get_nonce(true, &attributes, BaseFeeParams::new(80, 60));
