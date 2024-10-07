@@ -6892,6 +6892,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.0.8"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -7039,6 +7040,7 @@ dependencies = [
 name = "reth-engine-service"
 version = "1.0.8"
 dependencies = [
+ "alloy-consensus",
  "futures",
  "pin-project",
  "reth-beacon-consensus",

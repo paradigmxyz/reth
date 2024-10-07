@@ -138,6 +138,7 @@ pub struct EngineServiceError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
@@ -174,9 +175,11 @@ mod tests {
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
-        let blockchain_db =
-            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
-                .unwrap();
+        let blockchain_db = BlockchainProvider2::with_latest(
+            provider_factory.clone(),
+            SealedHeader::<Header>::default(),
+        )
+        .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
