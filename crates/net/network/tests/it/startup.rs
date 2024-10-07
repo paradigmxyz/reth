@@ -113,7 +113,7 @@ async fn test_node_record_address_with_nat() {
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discv4_discovery()
         .disable_dns_discovery()
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
 
     let network = NetworkManager::new(config).await.unwrap();
     let record = network.handle().local_node_record();
@@ -127,7 +127,7 @@ async fn test_node_record_address_with_nat_disable_discovery() {
     let config = NetworkConfigBuilder::new(secret_key)
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discovery()
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
 
     let network = NetworkManager::new(config).await.unwrap();
     let record = network.handle().local_node_record();
