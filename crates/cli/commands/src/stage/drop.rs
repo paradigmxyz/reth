@@ -4,7 +4,7 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{static_file::iter_static_files, tables};
+use reth_db::{mdbx::{tx::{self, Tx}, TransactionKind}, static_file::iter_static_files, table::Table, tables, DatabaseError};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
@@ -13,7 +13,7 @@ use reth_db_common::{
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
 use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
-use reth_prune::PruneSegment;
+use reth_prune::{PruneCheckpoint, PruneSegment};
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
 
@@ -81,12 +81,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 if let Some(mut prune_checkpoint) =
                     tx.get::<tables::PruneCheckpoints>(PruneSegment::Transactions)?
                 {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::Transactions,
-                        prune_checkpoint,
-                    )?;
+                    set_prune_state(tx,&mut prune_checkpoint,PruneSegment::Transactions)?;
                 }
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers>()?;
@@ -104,12 +99,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 if let Some(mut prune_checkpoint) =
                     tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?
                 {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::SenderRecovery,
-                        prune_checkpoint,
-                    )?;
+                    set_prune_state(tx, &mut prune_checkpoint, PruneSegment::SenderRecovery)?;
                 }
                 tx.put::<tables::StageCheckpoints>(
                     StageId::SenderRecovery.to_string(),
@@ -126,12 +116,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 if let Some(mut prune_checkpoint) =
                     tx.get::<tables::PruneCheckpoints>(PruneSegment::Receipts)?
                 {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::Receipts,
-                        prune_checkpoint,
-                    )?;
+                    set_prune_state(tx, &mut prune_checkpoint, PruneSegment::Receipts)?;
                 }
                 tx.put::<tables::StageCheckpoints>(
                     StageId::Execution.to_string(),
@@ -203,12 +188,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 if let Some(mut prune_checkpoint) =
                     tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?
                 {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::TransactionLookup,
-                        prune_checkpoint,
-                    )?;
+                    set_prune_state(tx, &mut prune_checkpoint, PruneSegment::TransactionLookup)?;
                 }
 
                 tx.put::<tables::StageCheckpoints>(
@@ -225,4 +205,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         Ok(())
     }
+
+}
+
+fn set_prune_state(tx:&Tx<reth_db::mdbx::RW>, prune_checkpoint:&mut PruneCheckpoint, prune_segment_key: PruneSegment) ->Result<(),DatabaseError> {
+
+    prune_checkpoint.block_number = None;
+    prune_checkpoint.tx_number = None;
+    tx.put::<tables::PruneCheckpoints>(
+        prune_segment_key,
+        *prune_checkpoint,
+    )?;
+
+    Ok(())
 }
