@@ -524,7 +524,7 @@ where
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders<H = Header, B = BlockBody> {
     /// Sealed block
     #[deref]
@@ -532,6 +532,16 @@ pub struct SealedBlockWithSenders<H = Header, B = BlockBody> {
     pub block: SealedBlock<H, B>,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
+}
+
+impl<H, B> Default for SealedBlockWithSenders<H, B>
+where
+    H: Default + Sealable,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { block: SealedBlock::<H, B>::default(), senders: vec![] }
+    }
 }
 
 impl SealedBlockWithSenders {
