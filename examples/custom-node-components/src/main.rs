@@ -25,7 +25,7 @@ fn main() {
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
                 .with_components(EthereumNode::components().pool(CustomPoolBuilder::default()))
-                .with_add_ons::<EthereumAddOns>()
+                .with_add_ons(EthereumAddOns::default())
                 .launch()
                 .await?;
 

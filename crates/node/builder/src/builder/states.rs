@@ -58,6 +58,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
                 hooks: NodeHooks::default(),
                 rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
+                addons: (),
             },
         }
     }
@@ -168,7 +169,7 @@ where
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
-    pub fn with_add_ons<AO>(self) -> NodeBuilderWithComponents<T, CB, AO>
+    pub fn with_add_ons<AO>(self, addons: AO) -> NodeBuilderWithComponents<T, CB, AO>
     where
         AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
@@ -182,6 +183,7 @@ where
                 hooks: NodeHooks::default(),
                 rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
+                addons,
             },
         }
     }

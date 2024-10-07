@@ -13,7 +13,7 @@ use reth_provider::{
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{EthApiTypes, FromEthApiError};
@@ -92,25 +92,26 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
-        let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
-        let block_id = block_id.unwrap_or_default();
-
-        // Check whether the distance to the block exceeds the maximum configured window.
-        let block_number = LoadState::provider(self)
-            .block_number_for_id(block_id)
-            .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
-        let max_window = self.max_proof_window();
-        if chain_info.best_number.saturating_sub(block_number) > max_window {
-            return Err(EthApiError::ExceedsMaxProofWindow.into())
-        }
-
         Ok(async move {
             let _permit = self
                 .acquire_owned()
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
+
+            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_id = block_id.unwrap_or_default();
+
+            // Check whether the distance to the block exceeds the maximum configured window.
+            let block_number = LoadState::provider(self)
+                .block_number_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let max_window = self.max_proof_window();
+            if chain_info.best_number.saturating_sub(block_number) > max_window {
+                return Err(EthApiError::ExceedsMaxProofWindow.into())
+            }
+
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
@@ -280,23 +281,23 @@ pub trait LoadState: EthApiTypes {
 
             if block_id == Some(BlockId::pending()) {
                 // for pending tag we need to find the highest nonce in the pool
-                let address_txs = this.pool().get_transactions_by_sender(address);
-                if let Some(highest_pool_nonce) =
-                    address_txs.iter().map(|item| item.transaction.nonce()).max()
+                if let Some(highest_pool_tx) =
+                    this.pool().get_highest_transaction_by_sender(address)
                 {
-                    // and the corresponding txcount is nonce + 1
-                    let next_nonce =
-                        nonce.max(highest_pool_nonce).checked_add(1).ok_or_else(|| {
-                            Self::Error::from(EthApiError::InvalidTransaction(
-                                RpcInvalidTransactionError::NonceMaxValue,
-                            ))
-                        })?;
+                    {
+                        // and the corresponding txcount is nonce + 1
+                        let next_nonce =
+                            nonce.max(highest_pool_tx.nonce()).checked_add(1).ok_or_else(|| {
+                                Self::Error::from(EthApiError::InvalidTransaction(
+                                    RpcInvalidTransactionError::NonceMaxValue,
+                                ))
+                            })?;
 
-                    let tx_count = nonce.max(next_nonce);
-                    return Ok(U256::from(tx_count))
+                        let tx_count = nonce.max(next_nonce);
+                        return Ok(U256::from(tx_count));
+                    }
                 }
             }
-
             Ok(U256::from(nonce))
         })
     }

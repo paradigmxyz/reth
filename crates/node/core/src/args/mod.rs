@@ -56,7 +56,5 @@ pub use datadir_args::DatadirArgs;
 mod benchmark_args;
 pub use benchmark_args::BenchmarkArgs;
 
-pub mod utils;
-
 mod error;
 pub mod types;

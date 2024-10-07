@@ -7,10 +7,7 @@ use crate::{
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{
-    BlobTransactionSidecar, PooledTransactionsElementEcRecovered, SealedBlock,
-    TransactionSignedEcRecovered,
-};
+use reth_primitives::{BlobTransactionSidecar, SealedBlock, TransactionSignedEcRecovered};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -154,10 +151,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 /// Provides support for validating transaction at any given state of the chain
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
-    type Transaction: PoolTransaction<
-        Pooled = PooledTransactionsElementEcRecovered,
-        Consensus = TransactionSignedEcRecovered,
-    >;
+    type Transaction: PoolTransaction;
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
@@ -380,12 +374,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> ValidPoolTransaction<T> {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus()
+        self.transaction.clone().into_consensus().into()
     }
 }
 

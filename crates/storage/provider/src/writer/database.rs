@@ -9,7 +9,7 @@ use reth_storage_api::ReceiptWriter;
 
 pub(crate) struct DatabaseWriter<'a, W>(pub(crate) &'a mut W);
 
-impl<'a, W> ReceiptWriter for DatabaseWriter<'a, W>
+impl<W> ReceiptWriter for DatabaseWriter<'_, W>
 where
     W: DbCursorRO<tables::Receipts> + DbCursorRW<tables::Receipts>,
 {
