@@ -46,7 +46,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
+use reth_storage_api::{StorageChangeSetReader, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -1411,6 +1411,21 @@ impl<TX: DbTx, Spec: Send + Sync> AccountExtReader for DatabaseProvider<TX, Spec
         )?;
 
         Ok(account_transitions)
+    }
+}
+
+impl<TX: DbTx, Spec: Send + Sync> StorageChangeSetReader for DatabaseProvider<TX, Spec> {
+    fn storage_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let range = block_number..=block_number;
+        let storage_range = BlockNumberAddress::range(range);
+        self.tx
+            .cursor_dup_read::<tables::StorageChangeSets>()?
+            .walk_range(storage_range)?
+            .map(|result| -> ProviderResult<_> { Ok(result?) })
+            .collect()
     }
 }
 
