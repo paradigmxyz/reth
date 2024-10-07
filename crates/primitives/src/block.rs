@@ -702,7 +702,7 @@ impl BlockBody {
         self.blob_versioned_hashes_iter().collect()
     }
 
-    /// See abstraction [`BlockBody`](traits::BlockBody).
+    /// Returns an iterator over all transactions and their sender.
     #[inline]
     pub fn transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.transactions.iter()
