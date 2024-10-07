@@ -7297,14 +7297,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-ethereum-primitives"
-version = "1.0.8"
-dependencies = [
- "derive_more 1.0.0",
- "reth-primitives",
-]
-
-[[package]]
 name = "reth-etl"
 version = "1.0.8"
 dependencies = [
@@ -7900,7 +7892,6 @@ dependencies = [
  "reth-e2e-test-utils",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
- "reth-ethereum-primitives",
  "reth-evm-ethereum",
  "reth-exex",
  "reth-network",

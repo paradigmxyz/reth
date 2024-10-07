@@ -9,7 +9,6 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
 };
-use reth_ethereum_primitives::EthBlock;
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_node_api::{
@@ -24,7 +23,7 @@ use reth_node_builder::{
     BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -40,7 +39,7 @@ use crate::{EthEngineTypes, EthEvmConfig};
 pub struct EthPrimitives;
 
 impl NodePrimitives for EthPrimitives {
-    type Block = EthBlock;
+    type Block = Block;
 }
 
 /// Type configuration for a regular Ethereum node.
