@@ -8172,7 +8172,6 @@ name = "reth-optimism-primitives"
 version = "1.0.8"
 dependencies = [
  "alloy-primitives",
- "derive_more 1.0.0",
  "reth-primitives",
  "reth-primitives-traits",
 ]

@@ -10,6 +10,3 @@
 #![cfg(feature = "optimism")]
 
 pub mod bedrock;
-pub mod block;
-
-pub use block::OpBlock;

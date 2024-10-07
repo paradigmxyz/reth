@@ -18,10 +18,9 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
-use reth_optimism_primitives::OpBlock;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -41,7 +40,7 @@ use crate::{
 pub struct OpPrimitives;
 
 impl NodePrimitives for OpPrimitives {
-    type Block = OpBlock;
+    type Block = Block;
 }
 
 /// Type configuration for a regular Optimism node.

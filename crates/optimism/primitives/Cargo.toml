@@ -19,9 +19,6 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 
-# misc
-derive_more = { workspace = true, features = ["deref"] }
-
 [features]
 optimism = [
     "reth-primitives/optimism",
