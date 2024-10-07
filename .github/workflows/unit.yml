@@ -45,7 +45,7 @@ jobs:
       - name: Run tests on book sources
         run: |
           cargo nextest run \
-            --mainfest-path book/sources/Cargo.toml --workspace \
+            --manifest-path book/sources/Cargo.toml --workspace \
             -E "!kind(test)"
 
   state:
