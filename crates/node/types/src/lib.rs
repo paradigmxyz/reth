@@ -16,7 +16,6 @@ use reth_db_api::{
     Database,
 };
 use reth_engine_primitives::EngineTypes;
-use reth_payload_primitives::PayloadTypes;
 
 /// Configures all the primitive types of the node.
 // TODO(mattsse): this is currently a placeholder
@@ -40,7 +39,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 /// The type that configures an Ethereum-like node with an engine for consensus.
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes<PayloadAttributes = <Self::Engine as PayloadTypes>::PayloadAttributes>;
+    type Engine: EngineTypes;
     // type Engine: EngineTypes;
 }
 

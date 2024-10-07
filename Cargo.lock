@@ -7982,7 +7982,6 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
- "reth-payload-primitives",
 ]
 
 [[package]]

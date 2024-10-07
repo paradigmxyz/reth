@@ -15,4 +15,3 @@ workspace = true
 reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-engine-primitives.workspace = true
-reth-payload-primitives.workspace = true

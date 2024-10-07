@@ -22,11 +22,12 @@ use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes, PayloadTypes,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct EthEngineTypes<T:PayloadTypes = EthPayloadTypes> {
+pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -36,9 +37,25 @@ impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 }
 
+impl<T: PayloadTypes> EngineTypes for EthEngineTypes<T>
+where
+    T: DeserializeOwned + Serialize,
+    T::BuiltPayload: TryInto<ExecutionPayloadV1>
+        + TryInto<ExecutionPayloadEnvelopeV2>
+        + TryInto<ExecutionPayloadEnvelopeV3>
+        + TryInto<ExecutionPayloadEnvelopeV4>,
+{
+    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
+}
+
 /// A default payload type for EthEngineTypes.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
 pub struct EthPayloadTypes;
+
 impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
