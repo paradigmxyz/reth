@@ -1699,7 +1699,7 @@ mod tests {
     ///
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
-    fn persist_block_on_db_tx_creation(
+    fn persist_block_after_db_tx_creation(
         provider: Arc<BlockchainProvider2<MockNodeTypesWithDB>>,
         block_number: BlockNumber,
     ) {
@@ -4012,7 +4012,7 @@ mod tests {
         {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
-            persist_block_on_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+            persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
             let to_be_persisted_tx = in_memory_blocks[0].body.transactions[0].clone();
 
             // Even though the block exists, given the order of provider queries done in the method
@@ -4031,7 +4031,7 @@ mod tests {
         {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
-            persist_block_on_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
+            persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
             let to_be_persisted_tx = in_memory_blocks[1].body.transactions[0].clone();
 
             assert_eq!(
