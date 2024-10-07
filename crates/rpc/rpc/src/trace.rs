@@ -120,7 +120,7 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let tx = recover_raw_transaction(tx)?;
 
-        let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
+        let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
@@ -130,8 +130,7 @@ where
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_trace_at_with_state(env, config, at, move |inspector, res, db| {
                 inspector
                     .into_parity_builder()
@@ -151,7 +150,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or(BlockId::pending());
-        let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
+        let (cfg, block_env, at) = self.eth_api().evm_env_at(at).await?;
 
         let this = self.clone();
         // execute all transactions on top of each other and record the traces
@@ -202,8 +201,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> Result<TraceResults, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
                 let trace_res = inspector
                     .into_parity_builder()
@@ -285,7 +283,7 @@ where
         let mut block_traces = Vec::with_capacity(blocks.len());
         for block in &blocks {
             let matcher = matcher.clone();
-            let traces = self.inner.eth_api.trace_block_until(
+            let traces = self.eth_api().trace_block_until(
                 block.number.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
@@ -345,8 +343,7 @@ where
         &self,
         hash: B256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
@@ -364,7 +361,7 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
-        let traces = self.inner.eth_api.trace_block_with(
+        let traces = self.eth_api().trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
             |tx_info, inspector, _, _, _| {
@@ -374,7 +371,7 @@ where
             },
         );
 
-        let block = self.inner.eth_api.block(block_id);
+        let block = self.eth_api().block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -399,8 +396,7 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>, Eth::Error> {
-        self.inner
-            .eth_api
+        self.eth_api()
             .trace_block_with(
                 block_id,
                 TracingInspectorConfig::from_parity_config(&trace_types),
@@ -431,8 +427,7 @@ where
         &self,
         tx_hash: B256,
     ) -> Result<Option<TransactionOpcodeGas>, Eth::Error> {
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 OpcodeGasInspector::default(),
@@ -456,8 +451,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
         let res = self
-            .inner
-            .eth_api
+            .eth_api()
             .trace_block_inspector(
                 block_id,
                 OpcodeGasInspector::default,
@@ -473,7 +467,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.inner.eth_api.block(block_id).await? else { return Ok(None) };
+        let Some(block) = self.eth_api().block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
