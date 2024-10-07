@@ -1730,7 +1730,6 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_node_types::BlockBody as _;
     use reth_primitives::{
         Receipt, SealedBlock, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
         Withdrawals,
