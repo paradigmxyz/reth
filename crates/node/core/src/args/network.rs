@@ -4,11 +4,10 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
-    sync::Arc,
 };
 
 use clap::Args;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -153,7 +152,6 @@ pub struct NetworkArgs {
     /// Name of network interface used to communicate with peers.
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
-    #[cfg(not(target_os = "windows"))]
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
 }
@@ -161,7 +159,6 @@ pub struct NetworkArgs {
 impl NetworkArgs {
     /// Returns the resolved IP address.
     pub fn resolved_addr(&self) -> IpAddr {
-        #[cfg(not(target_os = "windows"))]
         if let Some(ref if_name) = self.net_if {
             let if_name = if if_name.is_empty() { DEFAULT_NET_IF_NAME } else { if_name };
             return match reth_net_nat::net_if::resolve_net_if_ip(if_name) {
@@ -188,8 +185,8 @@ impl NetworkArgs {
         })
     }
 
-    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
-    /// values in this option struct.
+    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
+    /// the values in this option struct.
     ///
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
@@ -202,7 +199,7 @@ impl NetworkArgs {
     pub fn network_config(
         &self,
         config: &Config,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
@@ -242,7 +239,6 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
             .apply(|builder| {

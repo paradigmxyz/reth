@@ -1,8 +1,7 @@
 use crate::{BlockNumReader, BlockReader};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
-use reth_primitives::{
-    BlockHashOrNumber, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-};
+use reth_primitives::{TransactionMeta, TransactionSigned, TransactionSignedNoHash};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::ops::{Range, RangeBounds, RangeInclusive};
 
@@ -90,12 +89,12 @@ pub trait TransactionsProviderExt: BlockReader + Send + Sync {
     ) -> ProviderResult<RangeInclusive<TxNumber>> {
         let from = self
             .block_body_indices(*block_range.start())?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.start()))?
+            .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(*block_range.start()))?
             .first_tx_num();
 
         let to = self
             .block_body_indices(*block_range.end())?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.end()))?
+            .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(*block_range.end()))?
             .last_tx_num();
 
         Ok(from..=to)

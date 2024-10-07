@@ -1,5 +1,6 @@
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
-use reth_primitives::{BlockHashOrNumber, Header, SealedHeader};
+use reth_primitives::{Header, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
@@ -13,6 +14,11 @@ pub trait HeaderProvider: Send + Sync {
 
     /// Get header by block hash
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>>;
+
+    /// Retrieves the header sealed by the given block hash.
+    fn sealed_header_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<SealedHeader>> {
+        Ok(self.header(&block_hash)?.map(|header| SealedHeader::new(header, block_hash)))
+    }
 
     /// Get header by block number
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Header>>;

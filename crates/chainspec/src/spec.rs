@@ -1,16 +1,15 @@
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
+pub use alloy_eips::eip1559::BaseFeeParams;
+
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_chains::{Chain, ChainKind, NamedChain};
+use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::{Lazy, OnceCell};
-#[cfg(feature = "optimism")]
-use reth_ethereum_forks::OptimismHardfork;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
+    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
@@ -25,7 +24,7 @@ use reth_primitives_traits::{
 };
 use reth_trie_common::root::state_root_ref_unhashed;
 
-pub use alloy_eips::eip1559::BaseFeeParams;
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -236,27 +235,16 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
-    pub const fn is_eth(&self) -> bool {
-        matches!(
-            self.chain.kind(),
-            ChainKind::Named(
-                NamedChain::Mainnet |
-                    NamedChain::Morden |
-                    NamedChain::Ropsten |
-                    NamedChain::Rinkeby |
-                    NamedChain::Goerli |
-                    NamedChain::Kovan |
-                    NamedChain::Holesky |
-                    NamedChain::Sepolia
-            )
-        )
+    pub const fn is_ethereum(&self) -> bool {
+        self.chain.is_ethereum()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
     #[inline]
     #[cfg(feature = "optimism")]
     pub fn is_optimism(&self) -> bool {
-        self.chain.is_optimism() || self.hardforks.get(OptimismHardfork::Bedrock).is_some()
+        self.chain.is_optimism() ||
+            self.hardforks.get(reth_optimism_forks::OptimismHardfork::Bedrock).is_some()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -316,19 +304,19 @@ impl ChainSpec {
         };
 
         Header {
-            gas_limit: self.genesis.gas_limit as u64,
+            gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce,
+            nonce: self.genesis.nonce.into(),
             extra_data: self.genesis.extra_data.clone(),
             state_root: state_root_ref_unhashed(&self.genesis.alloc),
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            base_fee_per_gas,
+            base_fee_per_gas: base_fee_per_gas.map(Into::into),
             withdrawals_root,
             parent_beacon_block_root,
-            blob_gas_used,
-            excess_blob_gas,
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: excess_blob_gas.map(Into::into),
             requests_root,
             ..Default::default()
         }
@@ -423,10 +411,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(
-            &self.hardforks,
-            self.paris_block_and_final_difficulty.map(|(block, _)| block),
-        )
+        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
     }
 
     /// Get the fork id for the given hardfork.
@@ -605,12 +590,6 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
-        #[cfg(feature = "optimism")]
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
-        #[cfg(feature = "optimism")]
-        let genesis_info =
-            optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
-
         // Block-based hardforks
         let hardfork_opts = [
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
@@ -626,8 +605,6 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::London.boxed(), genesis.config.london_block),
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .into_iter()
@@ -655,35 +632,19 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
         ];
 
-        let time_hardforks = time_hardfork_opts
+        let mut time_hardforks = time_hardfork_opts
             .into_iter()
             .filter_map(|(hardfork, opt)| {
                 opt.map(|time| (hardfork, ForkCondition::Timestamp(time)))
             })
             .collect::<Vec<_>>();
 
-        hardforks.extend(time_hardforks);
+        hardforks.append(&mut time_hardforks);
 
-        // Uses ethereum or optimism main chains to find proper order
-        #[cfg(not(feature = "optimism"))]
+        // Ordered Hardforks
         let mainnet_hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
-        #[cfg(not(feature = "optimism"))]
-        let mainnet_order = mainnet_hardforks.forks_iter();
-        #[cfg(feature = "optimism")]
-        let mainnet_hardforks = OptimismHardfork::op_mainnet();
-        #[cfg(feature = "optimism")]
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
@@ -694,7 +655,7 @@ impl From<Genesis> for ChainSpec {
         }
 
         // append the remaining unknown hardforks to ensure we don't filter any out
-        ordered_hardforks.extend(hardforks);
+        ordered_hardforks.append(&mut hardforks);
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
@@ -711,20 +672,53 @@ impl From<Genesis> for ChainSpec {
             hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
-            #[cfg(feature = "optimism")]
-            base_fee_params: optimism_genesis_info.base_fee_params,
             ..Default::default()
         }
     }
 }
 
-/// A trait for reading the current [`ChainSpec`].
+impl Hardforks for ChainSpec {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
+        self.hardforks.fork(fork)
+    }
+
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
+        self.hardforks.forks_iter()
+    }
+
+    fn fork_id(&self, head: &Head) -> ForkId {
+        self.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> ForkId {
+        self.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: Head) -> ForkFilter {
+        self.fork_filter(head)
+    }
+}
+
+impl EthereumHardforks for ChainSpec {
+    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.get_final_paris_total_difficulty()
+    }
+
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.final_paris_total_difficulty(block_number)
+    }
+}
+
+#[cfg(feature = "optimism")]
+impl reth_optimism_forks::OptimismHardforks for ChainSpec {}
+
+/// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
     /// The chain spec type.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec + 'static;
 
-    /// Get an [`Arc`] to the [`ChainSpec`].
+    /// Get an [`Arc`] to the chainspec.
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 }
 
@@ -886,7 +880,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
         self = self.paris_activated();
-        self.hardforks.insert(OptimismHardfork::Bedrock, ForkCondition::Block(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
@@ -894,7 +889,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.hardforks.insert(OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -904,7 +900,8 @@ impl ChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.hardforks.insert(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.hardforks.insert(OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -913,7 +910,8 @@ impl ChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.hardforks.insert(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.hardforks.insert(OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -921,7 +919,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.hardforks.insert(OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -929,7 +928,8 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.hardforks.insert(OptimismHardfork::Granite, ForkCondition::Timestamp(0));
+        self.hardforks
+            .insert(reth_optimism_forks::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
@@ -986,59 +986,6 @@ impl DepositContract {
     /// Creates a new [`DepositContract`].
     pub const fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         Self { address, block, topic }
-    }
-}
-
-/// Genesis info for Optimism.
-#[cfg(feature = "optimism")]
-#[derive(Default, Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OptimismGenesisInfo {
-    optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo,
-    #[serde(skip)]
-    base_fee_params: BaseFeeParamsKind,
-}
-
-#[cfg(feature = "optimism")]
-impl OptimismGenesisInfo {
-    fn extract_from(genesis: &Genesis) -> Self {
-        let mut info = Self {
-            optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
-                &genesis.config.extra_fields,
-            )
-            .unwrap_or_default(),
-            ..Default::default()
-        };
-        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info {
-            if let (Some(elasticity), Some(denominator)) = (
-                optimism_base_fee_info.eip1559_elasticity,
-                optimism_base_fee_info.eip1559_denominator,
-            ) {
-                let base_fee_params = if let Some(canyon_denominator) =
-                    optimism_base_fee_info.eip1559_denominator_canyon
-                {
-                    BaseFeeParamsKind::Variable(
-                        vec![
-                            (
-                                EthereumHardfork::London.boxed(),
-                                BaseFeeParams::new(denominator as u128, elasticity as u128),
-                            ),
-                            (
-                                OptimismHardfork::Canyon.boxed(),
-                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                            ),
-                        ]
-                        .into(),
-                    )
-                } else {
-                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-                };
-
-                info.base_fee_params = base_fee_params;
-            }
-        }
-
-        info
     }
 }
 
@@ -1418,7 +1365,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn mainnet_forkids() {
+    fn mainnet_fork_ids() {
         test_fork_ids(
             &MAINNET,
             &[
@@ -1494,7 +1441,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn holesky_forkids() {
+    fn holesky_fork_ids() {
         test_fork_ids(
             &HOLESKY,
             &[
@@ -1532,7 +1479,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn sepolia_forkids() {
+    fn sepolia_fork_ids() {
         test_fork_ids(
             &SEPOLIA,
             &[
@@ -1572,7 +1519,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn dev_forkids() {
+    fn dev_fork_ids() {
         test_fork_ids(
             &DEV,
             &[(
@@ -2223,7 +2170,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn test_paris_block_and_total_difficulty() {
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let paris_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
@@ -2235,7 +2182,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
-        let genesis = Genesis { gas_limit: 0x2fefd8u128, ..Default::default() };
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
@@ -2361,5 +2308,63 @@ Post-merge hard forks (timestamp based):
             ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
             MAINNET.latest_fork_id()
         )
+    }
+
+    #[test]
+    fn test_fork_order_ethereum_mainnet() {
+        let genesis = Genesis {
+            config: ChainConfig {
+                chain_id: 0,
+                homestead_block: Some(0),
+                dao_fork_block: Some(0),
+                dao_fork_support: false,
+                eip150_block: Some(0),
+                eip155_block: Some(0),
+                eip158_block: Some(0),
+                byzantium_block: Some(0),
+                constantinople_block: Some(0),
+                petersburg_block: Some(0),
+                istanbul_block: Some(0),
+                muir_glacier_block: Some(0),
+                berlin_block: Some(0),
+                london_block: Some(0),
+                arrow_glacier_block: Some(0),
+                gray_glacier_block: Some(0),
+                merge_netsplit_block: Some(0),
+                shanghai_time: Some(0),
+                cancun_time: Some(0),
+                terminal_total_difficulty: Some(U256::ZERO),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let chain_spec: ChainSpec = genesis.into();
+
+        let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
+        let expected_hardforks = vec![
+            EthereumHardfork::Homestead.boxed(),
+            EthereumHardfork::Dao.boxed(),
+            EthereumHardfork::Tangerine.boxed(),
+            EthereumHardfork::SpuriousDragon.boxed(),
+            EthereumHardfork::Byzantium.boxed(),
+            EthereumHardfork::Constantinople.boxed(),
+            EthereumHardfork::Petersburg.boxed(),
+            EthereumHardfork::Istanbul.boxed(),
+            EthereumHardfork::MuirGlacier.boxed(),
+            EthereumHardfork::Berlin.boxed(),
+            EthereumHardfork::London.boxed(),
+            EthereumHardfork::ArrowGlacier.boxed(),
+            EthereumHardfork::GrayGlacier.boxed(),
+            EthereumHardfork::Paris.boxed(),
+            EthereumHardfork::Shanghai.boxed(),
+            EthereumHardfork::Cancun.boxed(),
+        ];
+
+        assert!(expected_hardforks
+            .iter()
+            .zip(hardforks.iter())
+            .all(|(expected, actual)| &**expected == *actual));
+        assert_eq!(expected_hardforks.len(), hardforks.len());
     }
 }

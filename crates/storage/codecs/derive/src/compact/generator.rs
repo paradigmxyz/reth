@@ -60,6 +60,7 @@ pub fn generate_from_to(
             }
 
             #[test]
+            #[allow(missing_docs)]
             pub fn #test() {
                 #fuzz(#ident::default())
             }

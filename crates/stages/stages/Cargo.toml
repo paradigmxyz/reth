@@ -24,7 +24,7 @@ reth-evm.workspace = true
 reth-exex.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["serde-bincode-compat"] }
 reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-prune.workspace = true
@@ -36,6 +36,8 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
 reth-testing-utils = { workspace = true, optional = true }
+
+alloy-primitives.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -50,6 +52,7 @@ itertools.workspace = true
 rayon.workspace = true
 num-traits = "0.2.15"
 tempfile = { workspace = true, optional = true }
+bincode.workspace = true
 
 [dev-dependencies]
 # reth

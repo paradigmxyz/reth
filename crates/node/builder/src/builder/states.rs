@@ -5,11 +5,11 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
-use std::{fmt, future::Future, marker::PhantomData};
+use std::{fmt, future::Future};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB, NodeTypesWithEngine,
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -29,14 +29,17 @@ use crate::{
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
     /// All settings for how the node should be configured.
-    config: NodeConfig,
+    config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// The configured database for the node.
     adapter: NodeTypesAdapter<T>,
 }
 
 impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
-    pub const fn new(config: NodeConfig, database: <T::Types as NodeTypesWithDB>::DB) -> Self {
+    pub const fn new(
+        config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
+        database: <T::Types as NodeTypesWithDB>::DB,
+    ) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
 
@@ -53,8 +56,9 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             components_builder,
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcAddOns { _eth_api: PhantomData::<()>, hooks: RpcHooks::default() },
+                rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
+                addons: (),
             },
         }
     }
@@ -149,7 +153,7 @@ pub struct NodeBuilderWithComponents<
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
 > {
     /// All settings for how the node should be configured.
-    pub config: NodeConfig,
+    pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// Adapter for the underlying node types and database
     pub adapter: NodeTypesAdapter<T>,
     /// container for type specific components
@@ -165,7 +169,7 @@ where
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
-    pub fn with_add_ons<AO>(self) -> NodeBuilderWithComponents<T, CB, AO>
+    pub fn with_add_ons<AO>(self, addons: AO) -> NodeBuilderWithComponents<T, CB, AO>
     where
         AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
@@ -177,8 +181,9 @@ where
             components_builder,
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcAddOns { _eth_api: PhantomData::<AO::EthApi>, hooks: RpcHooks::default() },
+                rpc: RpcAddOns { hooks: RpcHooks::default() },
                 exexs: Vec::new(),
+                addons,
             },
         }
     }

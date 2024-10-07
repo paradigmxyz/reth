@@ -1,9 +1,9 @@
+use alloy_primitives::BlockNumber;
 use futures::Stream;
 use reth_network_p2p::{
     bodies::{downloader::BodyDownloader, response::BlockResponse},
     error::{DownloadError, DownloadResult},
 };
-use reth_primitives::BlockNumber;
 use std::ops::RangeInclusive;
 
 /// A [`BodyDownloader`] implementation that does nothing.

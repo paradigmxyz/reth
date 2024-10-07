@@ -4,9 +4,8 @@
 use futures::Future;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_rpc_eth_types::EthStateCache;
-use reth_rpc_types::AnyTransactionReceipt;
 
-use crate::EthApiTypes;
+use crate::{EthApiTypes, RpcReceipt};
 
 /// Assembles transaction receipt data w.r.t to network.
 ///
@@ -23,5 +22,5 @@ pub trait LoadReceipt: EthApiTypes + Send + Sync {
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> impl Future<Output = Result<AnyTransactionReceipt, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send;
 }

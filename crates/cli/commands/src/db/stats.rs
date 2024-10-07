@@ -4,15 +4,15 @@ use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables};
 use reth_db_api::database::Database;
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::providers::StaticFileProvider;
-use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
+use reth_provider::providers::{ProviderNodeTypes, StaticFileProvider};
+use reth_static_file_types::SegmentRangeInclusive;
 use std::{sync::Arc, time::Duration};
 
 #[derive(Parser, Debug)]
@@ -38,7 +38,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db stats` command
-    pub fn execute<N: NodeTypesWithEngine<ChainSpec = ChainSpec>>(
+    pub fn execute<N: NodeTypesWithEngine<ChainSpec: EthereumHardforks>>(
         self,
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
@@ -191,7 +191,7 @@ impl Command {
             ) = (0, 0, 0, 0, 0, 0);
 
             for (block_range, tx_range) in &ranges {
-                let fixed_block_range = find_fixed_range(block_range.start());
+                let fixed_block_range = static_file_provider.find_fixed_range(block_range.start());
                 let jar_provider = static_file_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {
@@ -263,10 +263,18 @@ impl Command {
 
                 let block_range =
                     SegmentRangeInclusive::new(first_ranges.0.start(), last_ranges.0.end());
-                let tx_range = first_ranges
-                    .1
-                    .zip(last_ranges.1)
-                    .map(|(first, last)| SegmentRangeInclusive::new(first.start(), last.end()));
+
+                // Transaction ranges can be empty, so we need to find the first and last which are
+                // not.
+                let tx_range = {
+                    let start = ranges
+                        .iter()
+                        .find_map(|(_, tx_range)| tx_range.map(|r| r.start()))
+                        .unwrap_or_default();
+                    let end =
+                        ranges.iter().rev().find_map(|(_, tx_range)| tx_range.map(|r| r.end()));
+                    end.map(|end| SegmentRangeInclusive::new(start, end))
+                };
 
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
@@ -317,10 +325,7 @@ impl Command {
         Ok(table)
     }
 
-    fn checksum_report<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-        &self,
-        tool: &DbTool<N>,
-    ) -> eyre::Result<ComfyTable> {
+    fn checksum_report<N: ProviderNodeTypes>(&self, tool: &DbTool<N>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);

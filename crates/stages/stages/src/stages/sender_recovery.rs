@@ -1,15 +1,16 @@
+use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
 use reth_db_api::{
     cursor::DbCursorRW,
-    database::Database,
     transaction::{DbTx, DbTxMut},
+    DbTxUnwindExt,
 };
-use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
+use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StatsReader,
+    BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -51,7 +52,14 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for SenderRecoveryStage {
+impl<Provider> Stage<Provider> for SenderRecoveryStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + BlockReader
+        + StaticFileProviderFactory
+        + StatsReader
+        + PruneCheckpointReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::SenderRecovery
@@ -61,11 +69,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -110,7 +114,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -120,7 +124,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .last_tx_num();
-        provider.unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -129,13 +133,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
-fn recover_range<DB, CURSOR>(
+fn recover_range<Provider, CURSOR>(
     tx_range: Range<u64>,
-    provider: &DatabaseProviderRW<DB>,
+    provider: &Provider,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    DB: Database,
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
@@ -152,7 +156,7 @@ where
         })
         .unzip();
 
-    let static_file_provider = provider.static_file_provider().clone();
+    let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
     // there will be a timeout grace period in which Tokio does not allow spawning
@@ -191,8 +195,6 @@ where
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for (number, tx) in chunk {
-                    rlp_buf.clear();
-
                     let res = tx
                         .value()
                         .map_err(|err| Box::new(SenderRecoveryStageError::StageError(err.into())))
@@ -229,9 +231,10 @@ where
 
                             // fetch the sealed header so we can use it in the sender recovery
                             // unwind
-                            let sealed_header = provider
-                                .sealed_header(block_number)?
-                                .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
+                            let sealed_header =
+                                provider.sealed_header(block_number)?.ok_or_else(|| {
+                                    ProviderError::HeaderNotFound(block_number.into())
+                                })?;
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
@@ -287,9 +290,10 @@ fn recover_sender(
     Ok((tx_id, sender))
 }
 
-fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, StageError> {
+fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
+where
+    Provider: StatsReader + StaticFileProviderFactory + PruneCheckpointReader,
+{
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
@@ -314,7 +318,7 @@ enum SenderRecoveryStageError {
     FailedRecovery(#[from] FailedSenderRecoveryError),
 
     /// Number of recovered senders does not match
-    #[error("failed to recover all senders from the batch: {_0}")]
+    #[error("mismatched sender count during recovery: {_0}")]
     RecoveredSendersMismatch(GotExpected<u64>),
 
     /// A different type of stage error occurred
@@ -331,12 +335,13 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
+    use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_provider::{
-        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
-        TransactionsProvider,
+        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
+        StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
@@ -442,7 +447,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body.len();
+                tx_count += x.body.transactions.len();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -501,7 +506,7 @@ mod tests {
         let mut tx_senders = Vec::new();
         let mut tx_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body {
+            for transaction in &block.body.transactions {
                 if block.number > max_pruned_block {
                     tx_senders
                         .push((tx_number, transaction.recover_signer().expect("recover signer")));
@@ -520,7 +525,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.len() as u64)
+                            .map(|block| block.body.transactions.len() as u64)
                             .sum::<u64>(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -529,15 +534,15 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.len() as u64)
+                    .map(|block| block.body.transactions.len() as u64)
                     .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.len() as u64).sum::<u64>()
+                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
             }
         );
     }

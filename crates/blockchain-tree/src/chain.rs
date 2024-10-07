@@ -5,6 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use alloy_eips::ForkBlock;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, InsertBlockErrorKind},
@@ -14,13 +15,13 @@ use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::{ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
     FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -224,13 +225,9 @@ impl AppendableChain {
                 let mut execution_outcome =
                     provider.block_execution_data_provider.execution_outcome().clone();
                 execution_outcome.extend(initial_execution_outcome.clone());
-                let hashed_state = execution_outcome.hash_state_slow();
-                let prefix_sets = hashed_state.construct_prefix_sets().freeze();
                 ParallelStateRoot::new(
                     consistent_view,
-                    Default::default(),
-                    hashed_state,
-                    prefix_sets,
+                    TrieInput::from_state(execution_outcome.hash_state_slow()),
                 )
                 .incremental_root_with_updates()
                 .map(|(root, updates)| (root, Some(updates)))

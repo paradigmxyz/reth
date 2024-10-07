@@ -1,14 +1,13 @@
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use alloy_primitives::{Bloom, B256};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
-};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt, Request};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution(
+pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
@@ -102,7 +101,7 @@ fn compare_receipts_root_and_logs_bloom(
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::hex;
+    use alloy_primitives::hex;
 
     use super::*;
 

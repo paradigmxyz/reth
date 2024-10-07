@@ -1,11 +1,11 @@
 use super::TestStageDB;
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_provider::ProviderError;
+use reth_chainspec::ChainSpec;
+use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
+use reth_provider::{DatabaseProvider, ProviderError};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::db::DatabaseError;
-use std::sync::Arc;
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
@@ -13,14 +13,15 @@ pub(crate) enum TestRunnerError {
     #[error(transparent)]
     Database(#[from] DatabaseError),
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error>),
+    Internal(#[from] Box<dyn core::error::Error>),
     #[error(transparent)]
     Provider(#[from] ProviderError),
 }
 
 /// A generic test runner for stages.
 pub(crate) trait StageTestRunner {
-    type S: Stage<Arc<TempDatabase<DatabaseEnv>>> + 'static;
+    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>
+        + 'static;
 
     /// Return a reference to the database.
     fn db(&self) -> &TestStageDB;

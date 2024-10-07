@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, U256};
 use reth_primitives::{BlobTransactionValidationError, InvalidTransactionError};
 
 /// Transaction pool result type.
@@ -10,7 +10,7 @@ pub type PoolResult<T> = Result<T, PoolError>;
 ///
 /// For example during validation
 /// [`TransactionValidator::validate_transaction`](crate::validate::TransactionValidator::validate_transaction)
-pub trait PoolTransactionError: std::error::Error + Send + Sync {
+pub trait PoolTransactionError: core::error::Error + Send + Sync {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
@@ -19,8 +19,8 @@ pub trait PoolTransactionError: std::error::Error + Send + Sync {
 }
 
 // Needed for `#[error(transparent)]`
-impl std::error::Error for Box<dyn PoolTransactionError> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for Box<dyn PoolTransactionError> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         (**self).source()
     }
 }
@@ -63,7 +63,7 @@ pub enum PoolErrorKind {
     /// Any other error that occurred while inserting/validating a transaction. e.g. IO database
     /// error
     #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 // === impl PoolError ===
@@ -75,7 +75,10 @@ impl PoolError {
     }
 
     /// Creates a new pool error with the `Other` kind.
-    pub fn other(hash: TxHash, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+    pub fn other(
+        hash: TxHash,
+        error: impl Into<Box<dyn core::error::Error + Send + Sync>>,
+    ) -> Self {
         Self { hash, kind: PoolErrorKind::Other(error.into()) }
     }
 
@@ -203,8 +206,13 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction underpriced")]
     Underpriced,
     /// Thrown if the transaction's would require an account to be overdrawn
-    #[error("transaction overdraws from account")]
-    Overdraft,
+    #[error("transaction overdraws from account, balance: {balance}, cost: {cost}")]
+    Overdraft {
+        /// Cost transaction is allowed to consume. See `reth_transaction_pool::PoolTransaction`.
+        cost: U256,
+        /// Balance of account.
+        balance: U256,
+    },
     /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -274,7 +282,7 @@ impl InvalidPoolTransactionError {
                 false
             }
             Self::IntrinsicGasTooLow => true,
-            Self::Overdraft => false,
+            Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {

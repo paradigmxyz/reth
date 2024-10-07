@@ -8,8 +8,7 @@ use alloy_primitives::BlockNumber;
 use futures::FutureExt;
 use metrics::Counter;
 use reth_errors::{RethError, RethResult};
-use reth_node_types::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -21,15 +20,18 @@ use tokio::sync::oneshot;
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub struct PruneHook<N: NodeTypesWithDB> {
+pub struct PruneHook<PF: DatabaseProviderFactory> {
     /// The current state of the pruner.
-    pruner_state: PrunerState<N>,
+    pruner_state: PrunerState<PF>,
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
     metrics: Metrics,
 }
 
-impl<N: NodeTypesWithDB> fmt::Debug for PruneHook<N> {
+impl<PF> fmt::Debug for PruneHook<PF>
+where
+    PF: DatabaseProviderFactory<ProviderRW: fmt::Debug> + fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PruneHook")
             .field("pruner_state", &self.pruner_state)
@@ -38,10 +40,10 @@ impl<N: NodeTypesWithDB> fmt::Debug for PruneHook<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> PruneHook<N> {
+impl<PF: DatabaseProviderFactory> PruneHook<PF> {
     /// Create a new instance
     pub fn new(
-        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        pruner: Pruner<PF::ProviderRW, PF>,
         pruner_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self {
@@ -79,7 +81,13 @@ impl<N: ProviderNodeTypes> PruneHook<N> {
 
         Poll::Ready(Ok(event))
     }
+}
 
+impl<PF> PruneHook<PF>
+where
+    PF: DatabaseProviderFactory<ProviderRW: PruneCheckpointReader + PruneCheckpointWriter>
+        + 'static,
+{
     /// This will try to spawn the pruner if it is idle:
     /// 1. Check if pruning is needed through [`Pruner::is_pruning_needed`].
     ///
@@ -117,7 +125,11 @@ impl<N: ProviderNodeTypes> PruneHook<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EngineHook for PruneHook<N> {
+impl<PF> EngineHook for PruneHook<PF>
+where
+    PF: DatabaseProviderFactory<ProviderRW: PruneCheckpointReader + PruneCheckpointWriter>
+        + 'static,
+{
     fn name(&self) -> &'static str {
         "Prune"
     }
@@ -152,16 +164,16 @@ impl<N: ProviderNodeTypes> EngineHook for PruneHook<N> {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PrunerState<N: NodeTypesWithDB> {
+enum PrunerState<PF: DatabaseProviderFactory> {
     /// Pruner is idle.
-    Idle(Option<Pruner<N::DB, ProviderFactory<N>>>),
+    Idle(Option<Pruner<PF::ProviderRW, PF>>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult<N::DB, ProviderFactory<N>>>),
+    Running(oneshot::Receiver<PrunerWithResult<PF::ProviderRW, PF>>),
 }
 
-impl<N> fmt::Debug for PrunerState<N>
+impl<PF> fmt::Debug for PrunerState<PF>
 where
-    N: NodeTypesWithDB<DB: Debug, ChainSpec: Debug>,
+    PF: DatabaseProviderFactory<ProviderRW: Debug> + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

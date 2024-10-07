@@ -1,6 +1,5 @@
-use alloy_primitives::BlockHash;
+use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
 use reth_db::{
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
@@ -9,7 +8,7 @@ use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
 use reth_primitives::Header;
-use reth_provider::StaticFileProviderFactory;
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
@@ -54,10 +53,7 @@ enum Subcommand {
 
 impl Command {
     /// Execute `db get` command
-    pub fn execute<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-        self,
-        tool: &DbTool<N>,
-    ) -> eyre::Result<()> {
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, raw })?
@@ -92,14 +88,14 @@ impl Command {
                 match content {
                     Some(content) => {
                         if raw {
-                            println!("{content:?}");
+                            println!("{}", hex::encode_prefixed(&content[0]));
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
                                     let header = Header::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
-                                        "{}\n{}",
+                                        "Header\n{}\n\nBlockHash\n{}",
                                         serde_json::to_string_pretty(&header)?,
                                         serde_json::to_string_pretty(&block_hash)?
                                     );
@@ -148,7 +144,7 @@ struct GetValueViewer<'a, N: NodeTypesWithDB> {
     raw: bool,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TableViewer<()> for GetValueViewer<'_, N> {
+impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
@@ -157,7 +153,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TableViewer<()> for GetValueView
         let content = if self.raw {
             self.tool
                 .get::<RawTable<T>>(RawKey::from(key))?
-                .map(|content| format!("{:?}", content.raw_value()))
+                .map(|content| hex::encode_prefixed(content.raw_value()))
         } else {
             self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
         };

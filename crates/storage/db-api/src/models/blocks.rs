@@ -1,7 +1,8 @@
 //! Block related models and types.
 
+use alloy_primitives::B256;
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{Header, B256};
+use reth_primitives::Header;
 use serde::{Deserialize, Serialize};
 
 /// The storage representation of a block's ommers.
@@ -28,9 +29,6 @@ mod tests {
         let mut ommer = StoredBlockOmmers::default();
         ommer.ommers.push(Header::default());
         ommer.ommers.push(Header::default());
-        assert_eq!(
-            ommer.clone(),
-            StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress()).unwrap()
-        );
+        assert_eq!(ommer.clone(), StoredBlockOmmers::decompress(&ommer.compress()).unwrap());
     }
 }

@@ -10,3 +10,8 @@ description = "OP primitive types"
 
 [lints]
 workspace = true
+
+[dependencies]
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+alloy-primitives.workspace = true

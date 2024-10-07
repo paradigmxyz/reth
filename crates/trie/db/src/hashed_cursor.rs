@@ -1,16 +1,17 @@
+use alloy_primitives::{B256, U256};
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_primitives::{Account, B256, U256};
+use reth_primitives::Account;
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug)]
 pub struct DatabaseHashedCursorFactory<'a, TX>(&'a TX);
 
-impl<'a, TX> Clone for DatabaseHashedCursorFactory<'a, TX> {
+impl<TX> Clone for DatabaseHashedCursorFactory<'_, TX> {
     fn clone(&self) -> Self {
         Self(self.0)
     }
@@ -23,7 +24,7 @@ impl<'a, TX> DatabaseHashedCursorFactory<'a, TX> {
     }
 }
 
-impl<'a, TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'a, TX> {
+impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'_, TX> {
     type AccountCursor = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
     type StorageCursor =
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;

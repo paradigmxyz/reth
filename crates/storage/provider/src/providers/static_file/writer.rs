@@ -2,14 +2,14 @@ use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
+use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
-    BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
-    U256,
+    static_file::{SegmentHeader, SegmentRangeInclusive},
+    Header, Receipt, StaticFileSegment, TransactionSignedNoHash,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -67,14 +67,14 @@ pub struct StaticFileProviderRWRefMut<'a>(
     pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
 );
 
-impl<'a> std::ops::DerefMut for StaticFileProviderRWRefMut<'a> {
+impl std::ops::DerefMut for StaticFileProviderRWRefMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
         self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
-impl<'a> std::ops::Deref for StaticFileProviderRWRefMut<'a> {
+impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
     type Target = StaticFileProviderRW;
 
     fn deref(&self) -> &Self::Target {
@@ -139,7 +139,7 @@ impl StaticFileProviderRW {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let block_range = find_fixed_range(block);
+        let block_range = static_file_provider.find_fixed_range(block);
         let (jar, path) = match static_file_provider.get_segment_provider_from_block(
             segment,
             block_range.start(),
@@ -328,8 +328,12 @@ impl StaticFileProviderRW {
                 self.writer = writer;
                 self.data_path = data_path;
 
-                *self.writer.user_header_mut() =
-                    SegmentHeader::new(find_fixed_range(last_block + 1), None, None, segment);
+                *self.writer.user_header_mut() = SegmentHeader::new(
+                    self.reader().find_fixed_range(last_block + 1),
+                    None,
+                    None,
+                    segment,
+                );
             }
         }
 
@@ -377,8 +381,9 @@ impl StaticFileProviderRW {
     /// Commits to the configuration file at the end.
     fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
         let mut remaining_rows = num_rows;
+        let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
-            let len = match self.writer.user_header().segment() {
+            let len = match segment {
                 StaticFileSegment::Headers => {
                     self.writer.user_header().block_len().unwrap_or_default()
                 }
@@ -392,7 +397,14 @@ impl StaticFileProviderRW {
                 // delete the whole file and go to the next static file
                 let block_start = self.writer.user_header().expected_block_start();
 
-                if block_start != 0 {
+                // We only delete the file if it's NOT the first static file AND:
+                // * it's a Header segment  OR
+                // * it's a tx-based segment AND `last_block` is lower than the first block of this
+                //   file's block range. Otherwise, having no rows simply means that this block
+                //   range has no transactions, but the file should remain.
+                if block_start != 0 &&
+                    (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
+                {
                     self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`
@@ -449,6 +461,7 @@ impl StaticFileProviderRW {
             self.metrics.clone(),
         )?;
         self.writer = previous_writer;
+        self.writer.set_dirty();
         self.data_path = data_path;
         NippyJar::<SegmentHeader>::load(&current_path)
             .map_err(|e| ProviderError::NippyJar(e.to_string()))?

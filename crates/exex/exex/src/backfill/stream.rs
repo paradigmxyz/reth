@@ -5,15 +5,17 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use alloy_primitives::BlockNumber;
 use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
+use reth_tracing::tracing::debug;
 use tokio::task::JoinHandle;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
@@ -39,6 +41,7 @@ pub struct StreamBackfillJob<E, P, T> {
     tasks: BackfillTasks<T>,
     parallelism: usize,
     batch_size: usize,
+    thresholds: ExecutionStageThresholds,
 }
 
 impl<E, P, T> StreamBackfillJob<E, P, T> {
@@ -114,17 +117,15 @@ where
             let start = range.next();
             let range_bounds = start.zip(range.last().or(start));
 
-            // Advance the range by `batch_size` blocks
-            this.range.nth(this.batch_size);
-
             // If we have range bounds, then we can spawn a new task for that range
             if let Some((first, last)) = range_bounds {
                 let range = first..=last;
+                debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new backfill task");
                 let mut job = BackfillJob {
                     executor: this.executor.clone(),
                     provider: this.provider.clone(),
                     prune_modes: this.prune_modes.clone(),
-                    thresholds: ExecutionStageThresholds::default(),
+                    thresholds: this.thresholds.clone(),
                     range,
                     stream_parallelism: this.parallelism,
                 };
@@ -150,12 +151,14 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
             batch_size: 1,
+            thresholds: ExecutionStageThresholds { max_blocks: Some(1), ..Default::default() },
         }
     }
 }
 
 impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem> {
     fn from(job: BackfillJob<E, P>) -> Self {
+        let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
         Self {
             executor: job.executor,
             provider: job.provider,
@@ -163,7 +166,11 @@ impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamI
             range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
-            batch_size: job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize),
+            batch_size,
+            thresholds: ExecutionStageThresholds {
+                max_blocks: Some(batch_size as u64),
+                ..job.thresholds
+            },
         }
     }
 }

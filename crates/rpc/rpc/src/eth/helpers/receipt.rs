@@ -1,9 +1,8 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError};
+use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::AnyTransactionReceipt;
 
 use crate::EthApi;
 
@@ -21,7 +20,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> Result<AnyTransactionReceipt, Self::Error> {
+    ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let hash = meta.block_hash;
         // get all receipts for the block
         let all_receipts = self

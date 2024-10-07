@@ -1,8 +1,12 @@
 use crate::engine::forkchoice::ForkchoiceStatus;
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_primitives::{SealedBlock, SealedHeader};
-use reth_rpc_types::engine::ForkchoiceState;
-use std::{sync::Arc, time::Duration};
+use std::{
+    fmt::{Display, Formatter, Result},
+    sync::Arc,
+    time::Duration,
+};
 
 /// Events emitted by [`crate::BeaconConsensusEngine`].
 #[derive(Clone, Debug)]
@@ -26,6 +30,28 @@ impl BeaconConsensusEngineEvent {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
             _ => None,
+        }
+    }
+}
+
+impl Display for BeaconConsensusEngineEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            Self::ForkchoiceUpdated(state, status) => {
+                write!(f, "ForkchoiceUpdated({state:?}, {status:?})")
+            }
+            Self::ForkBlockAdded(block, duration) => {
+                write!(f, "ForkBlockAdded({:?}, {duration:?})", block.num_hash())
+            }
+            Self::CanonicalBlockAdded(block, duration) => {
+                write!(f, "CanonicalBlockAdded({:?}, {duration:?})", block.num_hash())
+            }
+            Self::CanonicalChainCommitted(block, duration) => {
+                write!(f, "CanonicalChainCommitted({:?}, {duration:?})", block.num_hash())
+            }
+            Self::LiveSyncProgress(progress) => {
+                write!(f, "LiveSyncProgress({progress:?})")
+            }
         }
     }
 }

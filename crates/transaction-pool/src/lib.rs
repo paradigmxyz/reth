@@ -151,12 +151,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
+use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
-use reth_rpc_types::BlobAndProofV1;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -324,6 +324,7 @@ where
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
@@ -488,6 +489,13 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_highest_transaction_by_sender(sender)
+    }
+
     fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
@@ -503,6 +511,14 @@ where
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_origin(origin)
+    }
+
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transactions_by_origin(origin)
     }
 
     fn unique_senders(&self) -> HashSet<Address> {
@@ -533,19 +549,12 @@ where
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
     }
-
-    /// Returns all pending transactions filtered by [`TransactionOrigin`]
-    fn get_pending_transactions_by_origin(
-        &self,
-        origin: TransactionOrigin,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_pending_transactions_by_origin(origin)
-    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {

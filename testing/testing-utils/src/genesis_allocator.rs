@@ -18,7 +18,7 @@ use std::{
 ///
 /// # Example
 /// ```
-/// # use reth_primitives::{Address, U256, hex, Bytes};
+/// # use alloy_primitives::{Address, U256, hex, Bytes};
 /// # use reth_testing_utils::GenesisAllocator;
 /// # use std::str::FromStr;
 /// let mut allocator = GenesisAllocator::default();

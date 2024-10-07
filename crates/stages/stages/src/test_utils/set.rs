@@ -1,6 +1,5 @@
 use super::TEST_STAGE_ID;
 use crate::{StageSet, StageSetBuilder};
-use reth_db_api::database::Database;
 use reth_stages_api::{test_utils::TestStage, ExecOutput, StageError, UnwindOutput};
 use std::collections::VecDeque;
 
@@ -19,8 +18,8 @@ impl TestStages {
     }
 }
 
-impl<DB: Database> StageSet<DB> for TestStages {
-    fn builder(self) -> StageSetBuilder<DB> {
+impl<Provider> StageSet<Provider> for TestStages {
+    fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default().add_stage(
             TestStage::new(TEST_STAGE_ID)
                 .with_exec(self.exec_outputs)

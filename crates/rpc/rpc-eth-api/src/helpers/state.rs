@@ -2,18 +2,19 @@
 //! RPC methods.
 
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use futures::Future;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{BlockId, Header, KECCAK_EMPTY};
 use reth_provider::{
-    BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{EthApiTypes, FromEthApiError};
@@ -92,25 +93,26 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
-        let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
-        let block_id = block_id.unwrap_or_default();
-
-        // Check whether the distance to the block exceeds the maximum configured window.
-        let block_number = LoadState::provider(self)
-            .block_number_for_id(block_id)
-            .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
-        let max_window = self.max_proof_window();
-        if chain_info.best_number.saturating_sub(block_number) > max_window {
-            return Err(EthApiError::ExceedsMaxProofWindow.into())
-        }
-
         Ok(async move {
             let _permit = self
                 .acquire_owned()
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
+
+            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_id = block_id.unwrap_or_default();
+
+            // Check whether the distance to the block exceeds the maximum configured window.
+            let block_number = LoadState::provider(self)
+                .block_number_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let max_window = self.max_proof_window();
+            if chain_info.best_number.saturating_sub(block_number) > max_window {
+                return Err(EthApiError::ExceedsMaxProofWindow.into())
+            }
+
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
@@ -131,9 +133,20 @@ pub trait EthState: LoadState + SpawnBlocking {
     ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
-
             let account = state.basic_account(address).map_err(Self::Error::from_eth_err)?;
             let Some(account) = account else { return Ok(None) };
+
+            // Check whether the distance to the block exceeds the maximum configured proof window.
+            let chain_info =
+                LoadState::provider(&this).chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_number = LoadState::provider(&this)
+                .block_number_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let max_window = this.max_proof_window();
+            if chain_info.best_number.saturating_sub(block_number) > max_window {
+                return Err(EthApiError::ExceedsMaxProofWindow.into())
+            }
 
             let balance = account.balance;
             let nonce = account.nonce;
@@ -157,7 +170,9 @@ pub trait LoadState: EthApiTypes {
     /// Returns a handle for reading state from database.
     ///
     /// Data access in default trait method implementations.
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>;
+    fn provider(
+        &self,
+    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>;
 
     /// Returns a handle for reading data from memory.
     ///
@@ -269,25 +284,33 @@ pub trait LoadState: EthApiTypes {
         Self: SpawnBlocking,
     {
         self.spawn_blocking_io(move |this| {
+            // first fetch the on chain nonce
+            let nonce = this
+                .state_at_block_id_or_latest(block_id)?
+                .account_nonce(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
             if block_id == Some(BlockId::pending()) {
-                let address_txs = this.pool().get_transactions_by_sender(address);
-                if let Some(highest_nonce) =
-                    address_txs.iter().map(|item| item.transaction.nonce()).max()
+                // for pending tag we need to find the highest nonce in the pool
+                if let Some(highest_pool_tx) =
+                    this.pool().get_highest_transaction_by_sender(address)
                 {
-                    let tx_count = highest_nonce.checked_add(1).ok_or(Self::Error::from(
-                        EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
-                    ))?;
-                    return Ok(U256::from(tx_count))
+                    {
+                        // and the corresponding txcount is nonce + 1
+                        let next_nonce =
+                            nonce.max(highest_pool_tx.nonce()).checked_add(1).ok_or_else(|| {
+                                Self::Error::from(EthApiError::InvalidTransaction(
+                                    RpcInvalidTransactionError::NonceMaxValue,
+                                ))
+                            })?;
+
+                        let tx_count = nonce.max(next_nonce);
+                        return Ok(U256::from(tx_count));
+                    }
                 }
             }
-
-            let state = this.state_at_block_id_or_latest(block_id)?;
-            Ok(U256::from(
-                state
-                    .account_nonce(address)
-                    .map_err(Self::Error::from_eth_err)?
-                    .unwrap_or_default(),
-            ))
+            Ok(U256::from(nonce))
         })
     }
 

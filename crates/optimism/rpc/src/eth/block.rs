@@ -1,25 +1,28 @@
 //! Loads and formats OP block RPC response.
 
-use reth_chainspec::ChainSpec;
+use alloy_rpc_types::BlockId;
+use op_alloy_network::Network;
+use op_alloy_rpc_types::OpTransactionReceipt;
+use reth_chainspec::ChainSpecProvider;
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
-    helpers::{
-        EthApiSpec, EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, LoadTransaction,
-        SpawnBlocking,
-    },
-    FromEthApiError,
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
+    RpcReceipt,
 };
-use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, BlockId};
+use reth_rpc_eth_types::EthStateCache;
 
-use crate::{OpEthApi, OpEthApiError};
+use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
 impl<N> EthBlocks for OpEthApi<N>
 where
-    Self: EthApiSpec + LoadBlock<Error = OpEthApiError> + LoadTransaction,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Self: LoadBlock<
+        Error = OpEthApiError,
+        NetworkTypes: Network<ReceiptResponse = OpTransactionReceipt>,
+    >,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl HeaderProvider {
@@ -29,7 +32,7 @@ where
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>
+    ) -> Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>
     where
         Self: LoadReceipt,
     {
@@ -42,10 +45,11 @@ where
             let block = block.unseal();
 
             let l1_block_info =
-                reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+                reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
-            let receipts = block
+            return block
                 .body
+                .transactions
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()
@@ -60,16 +64,18 @@ where
                         timestamp,
                     };
 
-                    let op_tx_meta =
-                        self.build_op_receipt_meta(tx, l1_block_info.clone(), receipt)?;
-
-                    Ok(ReceiptBuilder::new(tx, meta, receipt, &receipts)
-                        .map_err(Self::Error::from_eth_err)?
-                        .add_other_fields(op_tx_meta.into())
-                        .build())
+                    Ok(OpReceiptBuilder::new(
+                        &self.inner.provider().chain_spec(),
+                        tx,
+                        meta,
+                        receipt,
+                        &receipts,
+                        l1_block_info.clone(),
+                    )?
+                    .build())
                 })
-                .collect::<Result<Vec<_>, Self::Error>>();
-            return receipts.map(Some)
+                .collect::<Result<Vec<_>, Self::Error>>()
+                .map(Some)
         }
 
         Ok(None)

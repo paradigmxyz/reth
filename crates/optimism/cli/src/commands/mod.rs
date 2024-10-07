@@ -2,10 +2,9 @@ use crate::chainspec::OpChainSpecParser;
 use clap::Subcommand;
 use import::ImportOpCommand;
 use import_receipts::ImportReceiptsOpCommand;
-use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, init_cmd, init_state,
+    config_cmd, db, dump_genesis, init_cmd,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -15,13 +14,12 @@ use std::fmt;
 mod build_pipeline;
 pub mod import;
 pub mod import_receipts;
+pub mod init_state;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<
-    Spec: ChainSpecParser<ChainSpec = ChainSpec> = OpChainSpecParser,
-    Ext: clap::Args + fmt::Debug = NoArgs,
-> {
+pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
+{
     /// Start the node
     #[command(name = "node")]
     Node(Box<node::NodeCommand<Spec, Ext>>),
@@ -30,7 +28,7 @@ pub enum Commands<
     Init(init_cmd::InitCommand<Spec>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand<Spec>),
+    InitState(init_state::InitStateCommandOp<Spec>),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[command(name = "import-op")]
     ImportOp(ImportOpCommand<Spec>),

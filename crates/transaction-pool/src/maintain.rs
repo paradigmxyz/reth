@@ -7,18 +7,18 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    BlockNumberOrTag, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    TransactionSigned,
+    BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -74,12 +74,7 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone
-        + Send
-        + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -100,12 +95,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    Client: StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Clone
-        + Send
-        + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -114,9 +104,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let latest = latest.seal_slow();
+        let sealed = latest.seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let latest = SealedHeader::new(header, seal);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
+            block_gas_limit: latest.gas_limit,
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
@@ -135,7 +128,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         FinalizedBlockTracker::new(client.finalized_block_number().ok().flatten());
 
     // keeps track of any dirty accounts that we know of are out of sync with the pool
-    let mut dirty_addresses = HashSet::new();
+    let mut dirty_addresses = HashSet::default();
 
     // keeps track of the state of the pool wrt to blocks
     let mut maintained_state = MaintainedPoolState::InSync;
@@ -342,11 +335,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     .ok()
                                 })
                                 .map(|tx| {
-                                    <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled(tx)
+                                    <P as TransactionPool>::Transaction::from_pooled(tx.into())
                                 })
                         } else {
-
-                            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+                            <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -403,6 +395,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
+                        block_gas_limit: tip.gas_limit,
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee,
@@ -590,7 +583,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
         })
         .collect::<Vec<_>>();
 
@@ -613,7 +606,11 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.to_recovered_transaction().into_signed())
+        .map(|tx| {
+            let recovered: TransactionSignedEcRecovered =
+                tx.transaction.clone().into_consensus().into();
+            recovered.into_signed()
+        })
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();

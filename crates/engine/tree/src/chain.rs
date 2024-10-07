@@ -2,6 +2,7 @@ use crate::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use futures::Stream;
 use reth_stages_api::{ControlFlow, PipelineTarget};
 use std::{
+    fmt::{Display, Formatter, Result},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -164,6 +165,25 @@ pub enum ChainEvent<T> {
     FatalError,
     /// Event emitted by the handler
     Handler(T),
+}
+
+impl<T: Display> Display for ChainEvent<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            Self::BackfillSyncStarted => {
+                write!(f, "BackfillSyncStarted")
+            }
+            Self::BackfillSyncFinished => {
+                write!(f, "BackfillSyncFinished")
+            }
+            Self::FatalError => {
+                write!(f, "FatalError")
+            }
+            Self::Handler(event) => {
+                write!(f, "Handler({event})")
+            }
+        }
+    }
 }
 
 /// A trait that advances the chain by handling actions.

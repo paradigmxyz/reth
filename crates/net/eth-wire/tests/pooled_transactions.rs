@@ -1,8 +1,9 @@
 //! Decoding tests for [`PooledTransactions`]
 
+use alloy_primitives::hex;
 use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
-use reth_primitives::{hex, PooledTransactionsElement};
+use reth_primitives::PooledTransactionsElement;
 use std::{fs, path::PathBuf};
 use test_fuzz::test_fuzz;
 

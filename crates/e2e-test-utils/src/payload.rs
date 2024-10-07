@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use reth::api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
-use reth_payload_builder::{Events, PayloadBuilderHandle, PayloadId};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
+use reth_payload_primitives::{Events, PayloadBuilder};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
@@ -49,7 +50,7 @@ impl<E: EngineTypes> PayloadTestContext<E> {
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
         loop {
             let payload = self.payload_builder.best_payload(payload_id).await.unwrap().unwrap();
-            if payload.block().body.is_empty() {
+            if payload.block().body.transactions.is_empty() {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 continue
             }

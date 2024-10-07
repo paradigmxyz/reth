@@ -7,18 +7,19 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
-    U256,
+    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -129,7 +130,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
     /// data.
     #[track_caller]
-    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB>> {
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N::ChainSpec>> {
         Ok(DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
@@ -143,7 +144,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     #[track_caller]
-    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB>> {
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N::ChainSpec>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
@@ -185,10 +186,15 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
-    type Provider = DatabaseProviderRO<N::DB>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX, N::ChainSpec>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N::ChainSpec>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        self.provider_rw().map(|provider| provider.0)
     }
 }
 
@@ -545,7 +551,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -558,7 +564,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -570,7 +576,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -582,7 +588,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
@@ -628,6 +634,7 @@ mod tests {
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
+    use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
@@ -636,7 +643,7 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_primitives::{StaticFileSegment, TxNumber, B256, U256};
+    use reth_primitives::StaticFileSegment;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
@@ -701,9 +708,9 @@ mod tests {
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body[0].recover_signer().unwrap()
+                if sender == block.body.transactions[0].recover_signer().unwrap()
             );
-            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
+            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(Some(0)));
         }
 
         {
@@ -718,7 +725,7 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
+            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(None));
         }
     }
 
@@ -746,7 +753,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body[tx_number as usize].recover_signer().unwrap()
+                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );
@@ -759,7 +766,13 @@ mod tests {
                 result,
                 Ok(vec![(
                     0,
-                    block.body.iter().cloned().map(|tx| tx.into_ecrecovered().unwrap()).collect()
+                    block
+                        .body
+                        .transactions
+                        .iter()
+                        .cloned()
+                        .map(|tx| tx.into_ecrecovered().unwrap())
+                        .collect()
                 )])
             )
         }
@@ -786,8 +799,9 @@ mod tests {
         );
 
         // Checkpoint and no gap
+        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
-            provider.static_file_provider().latest_writer(StaticFileSegment::Headers).unwrap();
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
         static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);

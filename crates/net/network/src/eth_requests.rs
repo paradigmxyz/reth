@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -16,7 +17,7 @@ use reth_eth_wire::{
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
+use reth_primitives::{BlockBody, Header};
 use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;

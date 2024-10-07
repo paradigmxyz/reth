@@ -1,8 +1,9 @@
-use reth_primitives::BlockNumHash;
+use alloy_eips::BlockNumHash;
 
-#[allow(clippy::doc_markdown)]
-/// A head of the ExEx. It determines the highest block committed to the internal ExEx state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A head of the ExEx. It contains the highest host block committed to the
+/// internal ExEx state. I.e. the latest block that the ExEx has fully
+/// processed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExExHead {
     /// The head block.
     pub block: BlockNumHash,

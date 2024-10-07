@@ -3,21 +3,19 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
+use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
-    primitives::{
-        address,
-        revm_primitives::{Env, PrecompileResult},
-        Bytes,
-    },
+    primitives::revm_primitives::{Env, PrecompileResult},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
+        primitives::BlockEnv,
         ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     rpc::types::engine::PayloadAttributes,
@@ -27,7 +25,8 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
-    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes, NodeTypesWithEngine, PayloadTypes,
+    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
+    NodeTypesWithEngine, PayloadTypes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -36,7 +35,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{
     revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
-    Address, Header, TransactionSigned, U256,
+    Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
@@ -87,14 +86,7 @@ impl MyEvmConfig {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
-        total_difficulty: U256,
-    ) {
-        self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
-    }
+    type Header = Header;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender);
@@ -108,6 +100,23 @@ impl ConfigureEvmEnv for MyEvmConfig {
         data: Bytes,
     ) {
         self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
+    }
+
+    fn fill_cfg_env(
+        &self,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
+        header: &Self::Header,
+        total_difficulty: U256,
+    ) {
+        self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
+    }
+
+    fn next_cfg_and_block_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
 
@@ -217,7 +226,7 @@ async fn main() -> eyre::Result<()> {
                 .executor(MyExecutorBuilder::default())
                 .payload(MyPayloadBuilder::default()),
         )
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .launch()
         .await
         .unwrap();

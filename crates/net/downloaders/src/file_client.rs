@@ -1,5 +1,7 @@
 use std::{collections::HashMap, io, path::Path};
 
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
 use futures::Future;
 use itertools::Either;
 use reth_network_p2p::{
@@ -10,9 +12,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
-};
+use reth_primitives::{BlockBody, Header, SealedHeader};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
@@ -115,7 +115,11 @@ impl FileClient {
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
+        self.headers.get(&self.max_block()?).map(|h| {
+            let sealed = h.clone().seal_slow();
+            let (header, seal) = sealed.into_parts();
+            SealedHeader::new(header, seal)
+        })
     }
 
     /// Returns true if all blocks are canonical (no gaps)
@@ -192,9 +196,9 @@ impl FromReader for FileClient {
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut headers = HashMap::new();
-        let mut hash_to_number = HashMap::new();
-        let mut bodies = HashMap::new();
+        let mut headers = HashMap::default();
+        let mut hash_to_number = HashMap::default();
+        let mut bodies = HashMap::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);

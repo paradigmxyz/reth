@@ -40,6 +40,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
+    // type Engine: EngineTypes;
 }
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the
@@ -121,7 +122,7 @@ impl<P, C> AnyNodeTypes<P, C> {
 impl<P, C> NodeTypes for AnyNodeTypes<P, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -157,7 +158,7 @@ impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -167,7 +168,7 @@ impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Engine = E;
 }

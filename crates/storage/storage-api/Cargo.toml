@@ -23,7 +23,8 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie.workspace = true
 
-# alloy
+# ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 auto_impl.workspace = true

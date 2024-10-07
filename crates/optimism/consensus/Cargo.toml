@@ -19,6 +19,10 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-trie-common.workspace = true
 
+# op-reth
+reth-optimism-forks.workspace = true
+reth-optimism-chainspec.workspace = true
+
 # ethereum
 alloy-primitives.workspace = true
 

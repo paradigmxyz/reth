@@ -49,7 +49,6 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
 /// The cursor to iterate over account trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct InMemoryAccountTrieCursor<'a, C> {
     /// The database cursor.
     cursor: C,
@@ -114,7 +113,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     }
 }
 
-impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
+impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -189,7 +188,7 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
     }
 }
 
-impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
+impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
     fn seek_inner(
         &mut self,
         key: Nibbles,
@@ -238,7 +237,7 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
     }
 }
 
-impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
+impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,

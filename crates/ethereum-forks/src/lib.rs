@@ -27,7 +27,7 @@ mod head;
 pub use forkid::{
     EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
 };
-pub use hardfork::{EthereumHardfork, Hardfork, OptimismHardfork, DEV_HARDFORKS};
+pub use hardfork::{EthereumHardfork, Hardfork, DEV_HARDFORKS};
 pub use head::Head;
 
 pub use display::DisplayHardforks;

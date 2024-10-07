@@ -5,6 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -13,31 +14,22 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::{
-        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
-        apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
-    },
+    system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
-};
+use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Request};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
-    db::{
-        states::{bundle_state::BundleRetention, StorageSlot},
-        BundleAccount, State,
-    },
+    db::{states::bundle_state::BundleRetention, State},
     state_change::post_block_balance_increments,
     Evm,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::collections::hash_map::Entry;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -67,7 +59,7 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig> {
 
 impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
@@ -83,7 +75,7 @@ where
 
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBlockExecutor<EvmConfig, DB>;
@@ -126,7 +118,7 @@ struct EthEvmExecutor<EvmConfig> {
 
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Executes the transactions in the block and returns the receipts of the transactions in the
     /// block, the total gas used and the list of EIP-7685 [requests](Request).
@@ -134,40 +126,31 @@ where
     /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
     /// executes the transactions.
     ///
+    /// The optional `state_hook` will be executed with the state changes if present.
+    ///
     /// # Note
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
     /// [`EthBlockExecutor::post_execution`].
-    fn execute_state_transitions<Ext, DB>(
+    fn execute_state_transitions<Ext, DB, F>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        state_hook: Option<F>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
+        F: OnStateHook,
     {
-        // apply pre execution changes
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
-            &mut evm,
-        )?;
-        apply_blockhashes_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_hash,
-            &mut evm,
-        )?;
+        let mut system_caller =
+            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
+
+        system_caller.apply_pre_execution_changes(block, &mut evm)?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
+        let mut receipts = Vec::with_capacity(block.body.transactions.len());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -183,20 +166,16 @@ where
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
-                let new_err = match err {
-                    EVMError::Transaction(e) => EVMError::Transaction(e),
-                    EVMError::Header(e) => EVMError::Header(e),
-                    EVMError::Database(e) => EVMError::Database(e.into()),
-                    EVMError::Custom(e) => EVMError::Custom(e),
-                    EVMError::Precompile(e) => EVMError::Precompile(e),
-                };
+            let result_and_state = evm.transact().map_err(move |err| {
+                let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
                     error: Box::new(new_err),
                 }
             })?;
+            system_caller.on_state(&result_and_state);
+            let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
             // append gas used
@@ -223,15 +202,9 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-            // Collect all EIP-7685 requests
-            let withdrawal_requests =
-                apply_withdrawal_requests_contract_call(&self.evm_config, &mut evm)?;
+            let post_execution_requests = system_caller.apply_post_execution_changes(&mut evm)?;
 
-            // Collect all EIP-7251 requests
-            let consolidation_requests =
-                apply_consolidation_requests_contract_call(&self.evm_config, &mut evm)?;
-
-            [deposit_requests, withdrawal_requests, consolidation_requests].concat()
+            [deposit_requests, post_execution_requests].concat()
         } else {
             vec![]
         };
@@ -273,7 +246,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -294,17 +267,31 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
+    /// Convenience method to invoke `execute_without_verification_with_state_hook` setting the
+    /// state hook as `None`.
+    fn execute_without_verification(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+        self.execute_without_verification_with_state_hook(block, total_difficulty, None::<NoopHook>)
+    }
+
     /// Execute a single block and apply the state changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block, the total gas used and the list of
     /// EIP-7685 [requests](Request).
     ///
     /// Returns an error if execution fails.
-    fn execute_without_verification(
+    fn execute_without_verification_with_state_hook<F>(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+        state_hook: Option<F>,
+    ) -> Result<EthExecuteOutput, BlockExecutionError>
+    where
+        F: OnStateHook,
+    {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -312,7 +299,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, evm)
+            self.executor.execute_state_transitions(block, evm, state_hook)
         }?;
 
         // 3. apply post execution changes
@@ -362,7 +349,7 @@ where
 
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -384,90 +371,46 @@ where
 
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
-}
 
-/// An executor that retains all cache state from execution in its bundle state.
-#[derive(Debug)]
-pub struct BlockAccessListExecutor<EvmConfig, DB> {
-    /// The executor used to execute single blocks
-    ///
-    /// All state changes are committed to the [State].
-    executor: EthBlockExecutor<EvmConfig, DB>,
-}
-
-impl<EvmConfig, DB> Executor<DB> for BlockAccessListExecutor<EvmConfig, DB>
-where
-    EvmConfig: ConfigureEvm,
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
-    type Error = BlockExecutionError;
-
-    /// Executes the block and commits the changes to the internal state.
-    ///
-    /// Returns the receipts of the transactions in the block.
-    ///
-    /// This also returns the accounts from the internal state cache in the bundle state, allowing
-    /// access to not only the state that changed during execution, but also the state accessed
-    /// during execution.
-    ///
-    /// Returns an error if the block could not be executed or failed verification.
-    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_with_state_witness<F>(
+        mut self,
+        input: Self::Input<'_>,
+        mut witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =
-            self.executor.execute_without_verification(block, total_difficulty)?;
+            self.execute_without_verification(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
-        self.executor.state.merge_transitions(BundleRetention::Reverts);
+        self.state.merge_transitions(BundleRetention::Reverts);
+        witness(&self.state);
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+    }
 
-        // now, ensure each account from the state is included in the bundle state
-        let mut bundle_state = self.executor.state.take_bundle();
-        for (address, account) in self.executor.state.cache.accounts {
-            // convert all slots, insert all slots
-            let account_info = account.account_info();
-            let account_storage = account.account.map(|a| a.storage).unwrap_or_default();
+    fn execute_with_state_hook<F>(
+        mut self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+        let EthExecuteOutput { receipts, requests, gas_used } = self
+            .execute_without_verification_with_state_hook(
+                block,
+                total_difficulty,
+                Some(state_hook),
+            )?;
 
-            match bundle_state.state.entry(address) {
-                Entry::Vacant(entry) => {
-                    // we have to add the entire account here
-                    let extracted_storage = account_storage
-                        .into_iter()
-                        .map(|(k, v)| {
-                            (k, StorageSlot { previous_or_original_value: v, present_value: v })
-                        })
-                        .collect();
-
-                    let bundle_account = BundleAccount {
-                        info: account_info.clone(),
-                        original_info: account_info,
-                        storage: extracted_storage,
-                        status: account.status,
-                    };
-                    entry.insert(bundle_account);
-                }
-                Entry::Occupied(mut entry) => {
-                    // only add slots that are unchanged
-                    let current_account = entry.get_mut();
-
-                    // iterate over all storage slots, checking keys that are not in the bundle
-                    // state
-                    for (k, v) in account_storage {
-                        if let Entry::Vacant(storage_entry) = current_account.storage.entry(k) {
-                            storage_entry.insert(StorageSlot {
-                                previous_or_original_value: v,
-                                present_value: v,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(BlockExecutionOutput { state: bundle_state, receipts, requests, gas_used })
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
-
 /// An executor for a batch of blocks.
 ///
 /// State changes are tracked until the executor is finalized.
@@ -491,7 +434,7 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -548,21 +491,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxLegacy;
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
+    use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        keccak256, public_key_to_address, Account, Block, Transaction, TxKind, TxLegacy, B256,
+        public_key_to_address, Account, Block, BlockBody, Transaction,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
+    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
@@ -579,7 +524,7 @@ mod tests {
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
             Some(BEACON_ROOTS_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -598,7 +543,7 @@ mod tests {
             WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
             withdrawal_requests_contract_account,
             Some(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -632,10 +577,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -663,10 +610,12 @@ mod tests {
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
-                        body: vec![],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+                        body: BlockBody {
+                            transactions: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                     },
                     senders: vec![],
                 },
@@ -729,10 +678,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -753,7 +704,7 @@ mod tests {
         let mut db = create_state_provider_with_beacon_root_contract();
 
         // insert an empty SYSTEM_ADDRESS
-        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
+        db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::default());
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
@@ -782,10 +733,12 @@ mod tests {
                     &BlockWithSenders {
                         block: Block {
                             header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
+                            body: BlockBody {
+                                transactions: vec![],
+                                ommers: vec![],
+                                withdrawals: None,
+                                requests: None,
+                            },
                         },
                         senders: vec![],
                     },
@@ -824,13 +777,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header: header.clone(), body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -851,13 +798,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -910,13 +851,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header: header.clone(),
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header: header.clone(), body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -967,7 +902,7 @@ mod tests {
             HISTORY_STORAGE_ADDRESS,
             blockhashes_contract_account,
             Some(HISTORY_STORAGE_CODE.clone()),
-            HashMap::new(),
+            HashMap::default(),
         );
 
         db
@@ -995,13 +930,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1045,13 +974,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1102,13 +1025,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1165,13 +1082,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1219,13 +1130,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1261,13 +1166,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1303,13 +1202,7 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        block: Block { header, body: Default::default() },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -1356,7 +1249,7 @@ mod tests {
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
-            HashMap::new(),
+            HashMap::default(),
         );
 
         // https://github.com/lightclient/7002asm/blob/e0d68e04d15f25057af7b6d180423d94b6b3bdb3/test/Contract.t.sol.in#L49-L64
@@ -1394,10 +1287,7 @@ mod tests {
                 (
                     &Block {
                         header,
-                        body: vec![tx],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+                        body: BlockBody { transactions: vec![tx], ..Default::default() },
                     }
                     .with_recovered_senders()
                     .unwrap(),
@@ -1442,7 +1332,7 @@ mod tests {
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
-            HashMap::new(),
+            HashMap::default(),
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes
@@ -1480,15 +1370,9 @@ mod tests {
         // Execute the block and capture the result
         let exec_result = executor.execute(
             (
-                &Block {
-                    header,
-                    body: vec![tx],
-                    ommers: vec![],
-                    withdrawals: None,
-                    requests: None,
-                }
-                .with_recovered_senders()
-                .unwrap(),
+                &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                    .with_recovered_senders()
+                    .unwrap(),
                 U256::ZERO,
             )
                 .into(),

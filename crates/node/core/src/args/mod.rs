@@ -14,7 +14,7 @@ pub use rpc_state_cache::RpcStateCacheArgs;
 
 /// DebugArgs struct for debugging purposes
 mod debug;
-pub use debug::{DebugArgs, InvalidBlockHook, InvalidBlockSelection};
+pub use debug::{DebugArgs, InvalidBlockHookType, InvalidBlockSelection};
 
 /// DatabaseArgs struct for configuring the database
 mod database;
@@ -55,8 +55,6 @@ pub use datadir_args::DatadirArgs;
 /// BenchmarkArgs struct for configuring the benchmark to run
 mod benchmark_args;
 pub use benchmark_args::BenchmarkArgs;
-
-pub mod utils;
 
 mod error;
 pub mod types;

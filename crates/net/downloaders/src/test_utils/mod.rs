@@ -3,8 +3,9 @@
 #![allow(dead_code)]
 
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
+use alloy_primitives::B256;
 use futures::SinkExt;
-use reth_primitives::{BlockBody, SealedHeader, B256};
+use reth_primitives::{BlockBody, SealedHeader};
 use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
 use tokio::{fs::File, io::AsyncSeekExt};
@@ -28,20 +29,7 @@ pub(crate) fn generate_bodies(
     );
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
-    let bodies = blocks
-        .into_iter()
-        .map(|block| {
-            (
-                block.hash(),
-                BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                    requests: block.requests,
-                },
-            )
-        })
-        .collect();
+    let bodies = blocks.into_iter().map(|block| (block.hash(), block.body)).collect();
 
     (headers, bodies)
 }

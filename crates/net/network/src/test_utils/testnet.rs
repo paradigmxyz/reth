@@ -10,14 +10,14 @@ use std::{
 
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_chainspec::MAINNET;
+use reth_chainspec::{Hardforks, MAINNET};
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
-use reth_provider::test_utils::NoopProvider;
+use reth_provider::{test_utils::NoopProvider, ChainSpecProvider};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_tasks::TokioTaskExecutor;
 use reth_tokio_util::EventStream;
@@ -54,7 +54,7 @@ pub struct Testnet<C, Pool> {
 
 impl<C> Testnet<C, TestPool>
 where
-    C: BlockReader + HeaderProvider + Clone + 'static,
+    C: BlockReader + HeaderProvider + Clone + 'static + ChainSpecProvider<ChainSpec: Hardforks>,
 {
     /// Same as [`Self::try_create_with`] but panics on error
     pub async fn create_with(num_peers: usize, provider: C) -> Self {
@@ -548,7 +548,10 @@ where
 
     /// Initialize the network with a random secret key, allowing the devp2p and discovery to bind
     /// to any available IP and port.
-    pub fn new(client: C) -> Self {
+    pub fn new(client: C) -> Self
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let config = Self::network_config_builder(secret_key).build(client.clone());
         Self { config, client, secret_key }
@@ -556,13 +559,19 @@ where
 
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
     /// available IP and port.
-    pub fn with_secret_key(client: C, secret_key: SecretKey) -> Self {
+    pub fn with_secret_key(client: C, secret_key: SecretKey) -> Self
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
         let config = Self::network_config_builder(secret_key).build(client.clone());
         Self { config, client, secret_key }
     }
 
     /// Initialize the network with a given capabilities.
-    pub fn with_protocols(client: C, protocols: impl IntoIterator<Item = Protocol>) -> Self {
+    pub fn with_protocols(client: C, protocols: impl IntoIterator<Item = Protocol>) -> Self
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let builder = Self::network_config_builder(secret_key);

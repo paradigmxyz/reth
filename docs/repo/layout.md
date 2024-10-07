@@ -132,14 +132,13 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 - [`rpc/rpc-api`](../../crates/rpc/rpc-api): RPC traits
   - Supported transports: HTTP, WS, IPC
   - Supported namespaces: `eth_`, `engine_`, `debug_`
-- [`rpc/rpc-types`](../../crates/rpc/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
 - [`rpc/rpc-eth-api`](../../crates/rpc/rpc-eth-api/): Reth RPC 'eth' namespace API (including interface and implementation), this crate is re-exported by `rpc/rpc-api`
 - [`rpc/rpc-eth-types`](../../crates/rpc/rpc-eth-types/): Types `supporting implementation` of 'eth' namespace RPC server API
 - [`rpc/rpc-server-types`](../../crates/rpc/rpc-server-types/): RPC server types and constants
 
 #### Utilities Crates
 
-- [`rpc/rpc-types-compat`](../../crates/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
+- [`rpc/rpc-types-compat`](../../crates/rpc/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
 - [`rpc/layer`](../../crates/rpc/rpc-layer/): Some RPC middleware layers (e.g. `AuthValidator`, `JwtAuthValidator`)
 - [`rpc/rpc-testing-util`](../../crates/rpc/rpc-testing-util/): Reth RPC testing helpers
 

@@ -4,10 +4,10 @@
 use std::fmt::{self, Debug, Formatter};
 
 use alloy_primitives::{B256, U256};
+use alloy_rpc_types::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
 use reth_rpc_server_types::constants;
-use reth_rpc_types::BlockId;
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
@@ -221,11 +221,11 @@ where
         let parent_hash = block.parent_hash;
 
         // sort the functions by ascending effective tip first
-        block.body.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
+        block.body.transactions.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in &block.body {
+        for tx in block.body.transactions() {
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
