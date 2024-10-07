@@ -256,6 +256,22 @@ impl<Tx: DbTx + DbTxMut + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
 
         writer.append_header(block.header.as_ref(), ttd, &block.hash())?;
 
+        // Write transactions to static files with the right `tx_num``
+        let mut bodies_cursor = self.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+        let mut tx_num = bodies_cursor
+            .seek_exact(block.number.saturating_sub(1))?
+            .map(|(_, indices)| indices.next_tx_num())
+            .unwrap_or_default();
+
+        let mut transactions_writer =
+            self.static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
+        transactions_writer.increment_block(block.number)?;
+        for tx in block.transactions() {
+            let tx: TransactionSignedNoHash = tx.clone().into();
+            transactions_writer.append_transaction(tx_num, &tx)?;
+            tx_num += 1;
+        }
+
         self.insert_block(block)
     }
 }
