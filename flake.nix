@@ -13,6 +13,7 @@
         libclang.lib
         llvmPackages.libcxxClang
         clang
+        openssl
       ]);
       overlays = [ (import inputs.rust-overlay) ];
       pkgs = import nixpkgs {
@@ -54,7 +55,7 @@
           "--skip=cli::tests::parse_env_filter_directives"
         ];
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-        buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [ Security CoreFoundation CoreServices ]);
+        nativeBuildInputs = (with pkgs;[  ]) ++ macPackages ++ linuxPackages;
         src = ./.;
       };
     }
