@@ -498,15 +498,20 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
 {
     /// eth API implementation.
     type EthApi: EthApiTypes;
+
+    /// Returns a mutable reference to RPC hooks.
+    fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
 }
 
-impl<N, EthApi, T> RethRpcAddOns<N> for T
+impl<N: FullNodeComponents, EthApi: EthApiTypes> RethRpcAddOns<N> for RpcAddOns<N, EthApi>
 where
-    N: FullNodeComponents,
-    EthApi: EthApiTypes,
-    T: NodeAddOns<N, Handle = RpcHandle<N, EthApi>>,
+    Self: NodeAddOns<N, Handle = RpcHandle<N, EthApi>>,
 {
     type EthApi = EthApi;
+
+    fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi> {
+        &mut self.hooks
+    }
 }
 
 /// A `EthApi` that knows how to build itself from [`EthApiBuilderCtx`].

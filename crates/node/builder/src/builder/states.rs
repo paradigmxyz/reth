@@ -19,7 +19,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::RethRpcAddOns,
+    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     AddOns, FullNode,
 };
 
@@ -264,5 +264,34 @@ where
         L: LaunchNode<Self>,
     {
         launcher.launch_node(self).await
+    }
+
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(
+                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.map_add_ons(|mut add_ons| {
+            add_ons.hooks_mut().set_on_rpc_started(hook);
+            add_ons
+        })
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.map_add_ons(|mut add_ons| {
+            add_ons.hooks_mut().set_extend_rpc_modules(hook);
+            add_ons
+        })
     }
 }

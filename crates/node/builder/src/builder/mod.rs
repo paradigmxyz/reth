@@ -38,7 +38,10 @@ use secp256k1::SecretKey;
 use tracing::{info, trace, warn};
 
 use crate::{
-    common::WithConfigs, components::NodeComponentsBuilder, node::FullNode, rpc::RethRpcAddOns,
+    common::WithConfigs,
+    components::NodeComponentsBuilder,
+    node::FullNode,
+    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 
@@ -432,6 +435,29 @@ where
         F: FnOnce(AO) -> AO,
     {
         Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
+    }
+
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(
+                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Launches the node with the given launcher.

@@ -21,21 +21,15 @@ fn test_basic_setup() {
             Ok(())
         })
         .on_node_started(|_full_node| Ok(()))
-        .map_add_ons(|mut add_ons| {
-            add_ons.0 = add_ons
-                .0
-                .on_rpc_started(|_ctx, handles| {
-                    let _client = handles.rpc.http_client();
-                    Ok(())
-                })
-                .extend_rpc_modules(|ctx| {
-                    let _ = ctx.config();
-                    let _ = ctx.node().provider();
+        .on_rpc_started(|_ctx, handles| {
+            let _client = handles.rpc.http_client();
+            Ok(())
+        })
+        .extend_rpc_modules(|ctx| {
+            let _ = ctx.config();
+            let _ = ctx.node().provider();
 
-                    Ok(())
-                });
-
-            add_ons
+            Ok(())
         })
         .check_launch();
 }
