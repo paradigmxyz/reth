@@ -92,25 +92,26 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
-        let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
-        let block_id = block_id.unwrap_or_default();
-
-        // Check whether the distance to the block exceeds the maximum configured window.
-        let block_number = LoadState::provider(self)
-            .block_number_for_id(block_id)
-            .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
-        let max_window = self.max_proof_window();
-        if chain_info.best_number.saturating_sub(block_number) > max_window {
-            return Err(EthApiError::ExceedsMaxProofWindow.into())
-        }
-
         Ok(async move {
             let _permit = self
                 .acquire_owned()
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
+
+            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_id = block_id.unwrap_or_default();
+
+            // Check whether the distance to the block exceeds the maximum configured window.
+            let block_number = LoadState::provider(self)
+                .block_number_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let max_window = self.max_proof_window();
+            if chain_info.best_number.saturating_sub(block_number) > max_window {
+                return Err(EthApiError::ExceedsMaxProofWindow.into())
+            }
+
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
