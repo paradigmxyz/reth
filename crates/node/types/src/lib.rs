@@ -22,11 +22,11 @@ use reth_engine_primitives::EngineTypes;
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives {
     /// Block primitive.
-    type Block;
+    type Block: Block;
 }
 
 impl NodePrimitives for () {
-    type Block = ();
+    type Block = reth_primitives::Block;
 }
 
 /// The type that configures the essential types of an Ethereum-like node.
