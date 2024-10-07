@@ -611,7 +611,7 @@ where
     /// Returns all new pending transactions received since the last poll.
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
     where
-        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
     {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
@@ -633,7 +633,7 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>> + 'static,
     TxCompat: TransactionCompat + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {

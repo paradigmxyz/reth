@@ -231,7 +231,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::{EthereumChainSpecParser, SUPPORTED_CHAINS};
+    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
 
     #[test]
     fn parse_common_import_command_chain_args() {

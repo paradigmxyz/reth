@@ -154,6 +154,10 @@ where
             .consensus(TestConsensusBuilder::default())
             .engine_validator(EthereumEngineValidatorBuilder::default())
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        EthereumAddOns::default()
+    }
 }
 
 /// A shared [`TempDatabase`] used for testing

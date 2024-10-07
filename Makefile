@@ -325,7 +325,7 @@ fmt:
 	cargo +nightly fmt
 
 lint-reth:
-	cargo +nightly clippy \
+	cargo +nightly-2024-09-25-aarch64-apple-darwin clippy \
 	--workspace \
 	--bin "reth" \
 	--lib \
@@ -336,7 +336,7 @@ lint-reth:
 	-- -D warnings
 
 lint-op-reth:
-	cargo +nightly clippy \
+	cargo +nightly-2024-09-25-aarch64-apple-darwin clippy \
 	--workspace \
 	--bin "op-reth" \
 	--lib \
@@ -347,7 +347,7 @@ lint-op-reth:
 	-- -D warnings
 
 lint-other-targets:
-	cargo +nightly clippy \
+	cargo +nightly-2024-09-25-aarch64-apple-darwin clippy \
 	--workspace \
 	--lib \
 	--examples \

@@ -8,7 +8,7 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
@@ -22,28 +22,6 @@ pub struct SealedHeader<H = Header> {
     #[as_ref]
     #[deref]
     header: H,
-}
-
-impl<H: Compact> Compact for SealedHeader<H> {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut buffer = Vec::new();
-        self.hash.to_compact(&mut buffer);
-        self.header.to_compact(&mut buffer);
-        buf.put(&buffer[..]);
-        buffer.len()
-    }
-
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (hash, new_buf) = BlockHash::from_compact(buf, buf.len());
-        buf = new_buf;
-        let (header, new_buf) = H::from_compact(buf, buf.len());
-        buf = new_buf;
-        let sealed_header = Self { hash, header };
-        (sealed_header, buf)
-    }
 }
 
 impl<H> SealedHeader<H> {
@@ -89,9 +67,12 @@ impl SealedHeader {
     }
 }
 
-impl Default for SealedHeader {
+impl<H> Default for SealedHeader<H>
+where
+    H: Default + Sealable,
+{
     fn default() -> Self {
-        let sealed = Header::default().seal_slow();
+        let sealed = H::default().seal_slow();
         let (header, hash) = sealed.into_parts();
         Self { header, hash }
     }
@@ -156,11 +137,11 @@ impl SealedHeader {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
+impl<H> arbitrary::Arbitrary<'_> for SealedHeader<H>
 where
-    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
+    H: for<'a> arbitrary::Arbitrary<'a> + Sealable,
 {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
         let header = H::arbitrary(u)?;
 
         let sealed = header.seal_slow();
@@ -210,7 +191,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::SealedHeader> for SealedHeader<'a> {
+    impl SerializeAs<super::SealedHeader> for SealedHeader<'_> {
         fn serialize_as<S>(source: &super::SealedHeader, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,

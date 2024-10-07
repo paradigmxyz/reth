@@ -27,13 +27,9 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-trie.workspace = true
 
-# op
-op-alloy-rpc-types = { workspace = true, optional = true }
-
 # misc
 auto_impl.workspace = true
 once_cell.workspace = true
-serde = { workspace = true, optional = true }
 serde_json.workspace = true
 derive_more.workspace = true
 
@@ -44,12 +40,9 @@ alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-genesis.workspace = true
 
-# op
-op-alloy-rpc-types.workspace = true
-
 [features]
 default = ["std"]
-optimism = ["serde", "dep:op-alloy-rpc-types", "reth-optimism-forks"]
+optimism = ["reth-optimism-forks"]
 std = [
     "alloy-chains/std",
     "alloy-eips/std",

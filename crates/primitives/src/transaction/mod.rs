@@ -1885,7 +1885,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::Transaction> for Transaction<'a> {
+    impl SerializeAs<super::Transaction> for Transaction<'_> {
         fn serialize_as<S>(source: &super::Transaction, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -1945,7 +1945,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::TransactionSigned> for TransactionSigned<'a> {
+    impl SerializeAs<super::TransactionSigned> for TransactionSigned<'_> {
         fn serialize_as<S>(
             source: &super::TransactionSigned,
             serializer: S,

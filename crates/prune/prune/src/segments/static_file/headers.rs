@@ -137,7 +137,7 @@ where
     }
 }
 
-impl<'a, Provider> Iterator for HeaderTablesIter<'a, Provider>
+impl<Provider> Iterator for HeaderTablesIter<'_, Provider>
 where
     Provider: DBProvider<Tx: DbTxMut>,
 {
