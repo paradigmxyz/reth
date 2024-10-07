@@ -6702,6 +6702,7 @@ dependencies = [
  "iai-callgrind",
  "metrics",
  "page_size",
+ "parking_lot 0.12.3",
  "paste",
  "pprof",
  "proptest",
