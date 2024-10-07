@@ -3907,6 +3907,153 @@ mod tests {
         Ok(())
     }
 
+    /// Macro to test provider methods that expect a single item from either a `u64` or `hash`.
+    /// 
+    /// # Parameters
+    ///   - `$method`: The provider method to call.
+    ///   - `$item_extractor`: Closure that extracts `(method_argument, method_expected_result)` from a block.
+    ///   - `$invalid_arg`: An argument that should return `None`.
+    macro_rules! test_single_item {
+        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $item_extractor:expr, $invalid_arg:expr)),* $(,)?]) => {{
+            $(
+                // Ensure that the first generated in-memory block exists
+                // In the future this block will be persisted to disk and removed from memory AFTER the firsk database query. 
+                // This ensures that we query the in-memory state before the database.
+                {
+                    let mem_block = &$in_memory_blocks[0];
+                    let (arg, expected_item) = $item_extractor(mem_block);
+
+                    let result = $provider.$method(arg)?;
+                    assert_eq!(result, expected_item, "{}: item does not match the expected item for {:?}", stringify!($method), arg);
+                }
+
+                // Invalid/Non-existent argument should return `None`
+                {
+                    let invalid_result = $provider.$method($invalid_arg)?;
+                    assert!(invalid_result.is_none(), "{}: method did not return None for invalid argument {:?}", stringify!($method), $invalid_arg);
+                }
+
+                // Additional logic: Check that the item is only in memory and not in database
+                {
+                    let last_mem_block = &$in_memory_blocks[$in_memory_blocks.len() - 1];
+                    let (arg, expected_item) = $item_extractor(last_mem_block);
+                    let mem_result = $provider.$method(arg)?;
+                    assert_eq!(mem_result, expected_item, "{}: item does not match the expected item in memory for {:?}", stringify!($method), arg);
+
+                    // Ensure the item is not in storage
+                    let db_result = $provider.database.$method(arg)?;
+                    assert!(db_result.is_none(), "{}: item should not exist in the database for {:?}", stringify!($method), arg);
+                }
+
+            )*
+            Ok(())
+        }};
+    }
+
+    #[test]
+    fn test_single_item_single_arg() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
+        )?;
+
+        // Helper closures to extract transaction data
+        let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
+        let tx_num = |block: &SealedBlock| {
+            database_blocks
+                .iter()
+                .chain(in_memory_blocks.iter())
+                .take_while(|b| b.number < block.number)
+                .map(|b| b.body.transactions.len())
+                .sum::<usize>() as u64
+        };
+        let tx = |block: &SealedBlock| block.body.transactions[0].clone();
+        let test_tx_index = 0;
+
+        test_single_item!(
+            provider,
+            database_blocks,
+            in_memory_blocks,
+            [
+                // ( METHOD, FN -> (METHOD_ARGUMENT, EXPECTED_RESULT), INVALID_ARGUMENT)
+                (
+                    transaction_id,
+                    |block: &SealedBlock| (tx_hash(block), Some(tx_num(block))),
+                    B256::random()
+                ),
+                (
+                    transaction_by_id,
+                    |block: &SealedBlock| (tx_num(block), Some(tx(block))),
+                    u64::MAX
+                ),
+                (
+                    transaction_by_id_no_hash,
+                    |block: &SealedBlock| (
+                        tx_num(block),
+                        Some(tx(block)).map(Into::<TransactionSignedNoHash>::into)
+                    ),
+                    u64::MAX
+                ),
+                (
+                    transaction_by_hash,
+                    |block: &SealedBlock| (tx_hash(block), Some(tx(block))),
+                    B256::random()
+                ),
+                (
+                    transaction_block,
+                    |block: &SealedBlock| (tx_num(block), Some(block.number)),
+                    u64::MAX
+                ),
+                (
+                    transactions_by_block,
+                    |block: &SealedBlock| (
+                        BlockHashOrNumber::Number(block.number),
+                        Some(block.body.transactions.clone())
+                    ),
+                    BlockHashOrNumber::Number(u64::MAX)
+                ),
+                (
+                    transaction_sender,
+                    |block: &SealedBlock| (
+                        tx_num(block),
+                        block.body.transactions[test_tx_index].recover_signer()
+                    ),
+                    u64::MAX
+                ),
+                (
+                    receipt,
+                    |block: &SealedBlock| (
+                        tx_num(block),
+                        Some(receipts[block.number as usize][test_tx_index].clone())
+                    ),
+                    u64::MAX
+                ),
+                (
+                    receipt_by_hash,
+                    |block: &SealedBlock| (
+                        tx_hash(block),
+                        Some(receipts[block.number as usize][test_tx_index].clone())
+                    ),
+                    B256::random()
+                ),
+                (
+                    receipts_by_block,
+                    |block: &SealedBlock| (
+                        BlockHashOrNumber::Number(block.number),
+                        Some(receipts[block.number as usize].clone())
+                    ),
+                    BlockHashOrNumber::Number(u64::MAX)
+                )
+            ]
+        )
+    }
+
     #[test]
     fn transaction_sender_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
