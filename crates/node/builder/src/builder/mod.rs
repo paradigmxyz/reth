@@ -412,23 +412,6 @@ where
         Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
     }
 
-    /// Installs an `ExEx` (Execution Extension) in the node.
-    ///
-    /// # Note
-    ///
-    /// The `ExEx` ID must be unique.
-    pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
-    where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
-    {
-        Self {
-            builder: self.builder.install_exex(exex_id, exex),
-            task_executor: self.task_executor,
-        }
-    }
-
     /// Modifies the addons with the given closure.
     pub fn map_add_ons<F>(self, f: F) -> Self
     where
@@ -458,6 +441,23 @@ where
             + 'static,
     {
         Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
+    }
+
+    /// Installs an `ExEx` (Execution Extension) in the node.
+    ///
+    /// # Note
+    ///
+    /// The `ExEx` ID must be unique.
+    pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        Self {
+            builder: self.builder.install_exex(exex_id, exex),
+            task_executor: self.task_executor,
+        }
     }
 
     /// Launches the node with the given launcher.
