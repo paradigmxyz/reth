@@ -516,7 +516,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
     use reth_trie::serde_bincode_compat::updates::TrieUpdates;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     use crate::ExecutionOutcome;
@@ -538,19 +538,47 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Chain<'a> {
-        blocks: BTreeMap<BlockNumber, SealedBlockWithSenders<'a>>,
+        blocks: SealedBlocksWithSenders<'a>,
         execution_outcome: Cow<'a, ExecutionOutcome>,
         trie_updates: Option<TrieUpdates<'a>>,
+    }
+
+    #[derive(Debug)]
+    struct SealedBlocksWithSenders<'a>(
+        Cow<'a, BTreeMap<BlockNumber, reth_primitives::SealedBlockWithSenders>>,
+    );
+
+    impl Serialize for SealedBlocksWithSenders<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut state = serializer.serialize_map(Some(self.0.len()))?;
+
+            for (block_number, block) in self.0.iter() {
+                state.serialize_entry(block_number, &SealedBlockWithSenders::<'_>::from(block))?;
+            }
+
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SealedBlocksWithSenders<'_> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Ok(Self(Cow::Owned(
+                BTreeMap::<BlockNumber, SealedBlockWithSenders<'_>>::deserialize(deserializer)
+                    .map(|blocks| blocks.into_iter().map(|(n, b)| (n, b.into())).collect())?,
+            )))
+        }
     }
 
     impl<'a> From<&'a super::Chain> for Chain<'a> {
         fn from(value: &'a super::Chain) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .iter()
-                    .map(|(block_number, block)| (*block_number, block.into()))
-                    .collect(),
+                blocks: SealedBlocksWithSenders(Cow::Borrowed(&value.blocks)),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
@@ -560,11 +588,7 @@ pub(super) mod serde_bincode_compat {
     impl<'a> From<Chain<'a>> for super::Chain {
         fn from(value: Chain<'a>) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .into_iter()
-                    .map(|(block_number, block)| (block_number, block.into()))
-                    .collect(),
+                blocks: value.blocks.0.into_owned(),
                 execution_outcome: value.execution_outcome.into_owned(),
                 trie_updates: value.trie_updates.map(Into::into),
             }

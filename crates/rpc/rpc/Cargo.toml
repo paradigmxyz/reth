@@ -101,6 +101,5 @@ js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "reth-rpc-eth-api/optimism",
     "reth-revm/optimism",
 ]
