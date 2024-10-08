@@ -97,7 +97,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             // Note: this is mostly used to fetch pooled transactions so we check the pool first
             if let Some(tx) =
-                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
                 return Ok(Some(tx))
             }

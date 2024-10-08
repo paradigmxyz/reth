@@ -1,5 +1,6 @@
 //! Decoding tests for [`PooledTransactions`]
 
+use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::hex;
 use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
@@ -72,5 +73,5 @@ fn decode_blob_rpc_transaction() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/rpc_blob_transaction");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = PooledTransactionsElement::decode_enveloped(&mut hex_data.as_ref()).unwrap();
+    let _txs = PooledTransactionsElement::decode_2718(&mut hex_data.as_ref()).unwrap();
 }
