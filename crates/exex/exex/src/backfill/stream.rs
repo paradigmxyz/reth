@@ -18,16 +18,21 @@ use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
 use tokio::task::JoinHandle;
 
+use super::job::BackfillJobResult;
+
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
 pub(crate) const DEFAULT_PARALLELISM: usize = 4;
 /// The default batch size for active tasks in [`StreamBackfillJob`].
 const DEFAULT_BATCH_SIZE: usize = 100;
 
-type BackfillTaskOutput<T> = Result<T, BlockExecutionError>;
+/// Boxed thread-safe iterator that yields [`BackfillJobResult`]s.
 type BackfillTaskIterator<T> =
-    Box<dyn Iterator<Item = BackfillTaskOutput<T>> + Send + Sync + 'static>;
+    Box<dyn Iterator<Item = BackfillJobResult<T>> + Send + Sync + 'static>;
+
+/// Ordered queue of [`JoinHandle`]s that yield optional [`BackfillJobResult`]s along with the
+/// respective [`BackfillTaskIterator`]s.
 type BackfillTasks<T> =
-    FuturesOrdered<JoinHandle<(BackfillTaskIterator<T>, Option<BackfillTaskOutput<T>>)>>;
+    FuturesOrdered<JoinHandle<(Option<BackfillJobResult<T>>, BackfillTaskIterator<T>)>>;
 
 type SingleBlockStreamItem = (BlockWithSenders, BlockExecutionOutput<Receipt>);
 type BatchBlockStreamItem = Chain;
@@ -64,18 +69,21 @@ where
         self
     }
 
+    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
+    /// [`BackfillTasks`] queue.
+    fn push_task(&mut self, mut job: BackfillTaskIterator<T>) {
+        self.tasks.push_back(tokio::task::spawn_blocking(move || (job.next(), job)));
+    }
+
     /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
-    fn poll_next_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<BackfillTaskOutput<T>>> {
+    fn poll_next_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<BackfillJobResult<T>>> {
         while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
             let task_result = res.map_err(BlockExecutionError::other)?;
 
-            if let (mut job, Some(job_result)) = task_result {
+            if let (Some(job_result), job) = task_result {
                 // If the task returned a non-empty result, a new task advancing the job is created
                 // and pushed to the front of the queue.
-                self.tasks.push_front(tokio::task::spawn_blocking(move || {
-                    let result = job.next();
-                    (job, result)
-                }));
+                self.push_task(job);
 
                 return Poll::Ready(Some(job_result))
             };
@@ -90,7 +98,7 @@ where
     E: BlockExecutorProvider + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
-    type Item = Result<SingleBlockStreamItem, BlockExecutionError>;
+    type Item = BackfillJobResult<SingleBlockStreamItem>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -105,17 +113,13 @@ where
 
             // Spawn a new task for that block
             debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?block_number, "Spawning new single block backfill task");
-            let mut job = Box::new(SingleBlockBackfillJob {
+            let job = Box::new(SingleBlockBackfillJob {
                 executor: this.executor.clone(),
                 provider: this.provider.clone(),
                 range: block_number..=block_number,
                 stream_parallelism: this.parallelism,
             }) as BackfillTaskIterator<_>;
-            let task = tokio::task::spawn_blocking(move || {
-                let result = job.next();
-                (job, result)
-            });
-            this.tasks.push_back(task);
+            this.push_task(job);
         }
 
         this.poll_next_task(cx)
@@ -127,7 +131,7 @@ where
     E: BlockExecutorProvider + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
-    type Item = Result<BatchBlockStreamItem, BlockExecutionError>;
+    type Item = BackfillJobResult<BatchBlockStreamItem>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -147,7 +151,7 @@ where
 
             // Spawn a new task for that range
             debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
-            let mut job = Box::new(BackfillJob {
+            let job = Box::new(BackfillJob {
                 executor: this.executor.clone(),
                 provider: this.provider.clone(),
                 prune_modes: this.prune_modes.clone(),
@@ -155,11 +159,7 @@ where
                 range,
                 stream_parallelism: this.parallelism,
             }) as BackfillTaskIterator<_>;
-            let task = tokio::task::spawn_blocking(move || {
-                let result = job.next();
-                (job, result)
-            });
-            this.tasks.push_back(task);
+            this.push_task(job);
         }
 
         this.poll_next_task(cx)
