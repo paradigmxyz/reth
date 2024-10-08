@@ -4,12 +4,15 @@
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+pub use reth_execution_types::{
+    BlockExecOutput, BlockExecutionInput, EthBlockExecOutput, ExecutionOutcome,
+};
 pub use reth_storage_errors::provider::ProviderError;
 
-use alloy_primitives::BlockNumber;
 use core::fmt::Display;
-use reth_primitives::{BlockWithSenders, Receipt};
+
+use alloy_primitives::BlockNumber;
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use revm::State;
 use revm_primitives::db::Database;
@@ -135,7 +138,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output: BlockExecOutput,
         Error = BlockExecutionError,
     >;
 
@@ -196,7 +199,7 @@ mod tests {
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BlockExecutionOutput<Receipt>;
+        type Output = EthBlockExecOutput;
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {

@@ -1,7 +1,7 @@
 use alloy_primitives::B256;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
-use reth_provider::BlockExecutionOutput;
+use reth_provider::BlockExecOutput;
 use reth_trie::updates::TrieUpdates;
 
 /// A no-op [`InvalidBlockHook`] that does nothing.
@@ -14,7 +14,7 @@ impl InvalidBlockHook for NoopInvalidBlockHook {
         &self,
         _parent_header: &SealedHeader,
         _block: &SealedBlockWithSenders,
-        _output: &BlockExecutionOutput<Receipt>,
+        _output: impl BlockExecOutput,
         _trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
     }
@@ -34,7 +34,7 @@ impl InvalidBlockHook for InvalidBlockHooks {
         &self,
         parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        output: impl BlockExecOutput,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         for hook in &self.0 {

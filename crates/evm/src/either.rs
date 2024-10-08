@@ -8,8 +8,8 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_execution_types::{BlockExecOutput, BlockExecutionInput, ExecutionOutcome};
+use reth_primitives::BlockWithSenders;
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
@@ -55,19 +55,19 @@ where
     A: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output: BlockExecOutput,
         Error = BlockExecutionError,
     >,
     B: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
+        Output = A::Output,
         Error = BlockExecutionError,
     >,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
+    type Output = A::Output;
     type Error = BlockExecutionError;
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
