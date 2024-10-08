@@ -66,12 +66,9 @@ impl SealedHeader {
     }
 }
 
-impl<H> Default for SealedHeader<H>
-where
-    H: Default + Sealable,
-{
+impl Default for SealedHeader {
     fn default() -> Self {
-        let sealed = H::default().seal_slow();
+        let sealed = Header::default().seal_slow();
         let (header, hash) = sealed.into_parts();
         Self { header, hash }
     }
@@ -136,12 +133,9 @@ impl SealedHeader {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<H> arbitrary::Arbitrary<'_> for SealedHeader<H>
-where
-    H: for<'a> arbitrary::Arbitrary<'a> + Sealable,
-{
-    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
-        let header = H::arbitrary(u)?;
+impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header = Header::arbitrary(u)?;
 
         let sealed = header.seal_slow();
         let (header, seal) = sealed.into_parts();

@@ -3,12 +3,11 @@
 pub mod body;
 
 use alloc::{fmt, vec::Vec};
-use core::ops;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
 
-use crate::{traits::BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
+use crate::{traits::BlockBody, BlockWithSenders, SealedBlock};
 
 /// Helper trait, unifies behaviour required of a block header.
 pub trait Header: BlockHeader + Sealable {}
