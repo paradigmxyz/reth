@@ -117,7 +117,7 @@ impl Signature for alloy_primitives::Signature {
 }
 
 pub mod secp256k1 {
-    //! Utilities for SECP256k1 signatures.
+    //! Utilities for [`SECP256K1`] signatures.
 
     use alloy_primitives::{keccak256, Address, U256};
     use secp256k1::{
