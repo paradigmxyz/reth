@@ -77,8 +77,7 @@ tempfile.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
-    "reth-rpc-types-compat/optimism",
+    "reth-primitives/optimism"
 ]
 # Features for vergen to generate correct env vars
 jemalloc = []
