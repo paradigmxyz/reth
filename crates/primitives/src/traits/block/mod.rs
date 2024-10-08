@@ -2,15 +2,22 @@
 
 pub mod body;
 
-use alloc::fmt;
-use core::ops;
+use alloc::{fmt, vec::Vec};
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
 
-use crate::{traits::BlockBody, BlockWithSenders, SealedBlock, SealedHeader};
+use crate::{traits::BlockBody, BlockWithSenders, SealedBlock};
+
+/// Helper trait, unifies behaviour required of a block header.
+pub trait Header: BlockHeader + Sealable {}
+
+impl<T> Header for T where T: BlockHeader + Sealable {}
 
 /// Abstraction of block data type.
+// todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
+// todo: make with senders extension trait, so block can be impl by block type already containing
+// senders
 pub trait Block:
     fmt::Debug
     + Clone
@@ -23,7 +30,7 @@ pub trait Block:
     + Into<(Self::Header, Self::Body)>
 {
     /// Header part of the block.
-    type Header: BlockHeader + Sealable;
+    type Header: Header;
 
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;
@@ -35,23 +42,14 @@ pub trait Block:
     fn body(&self) -> &Self::Body;
 
     /// Calculate the header hash and seal the block so that it can't be changed.
-    fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.into();
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body }
-    }
-
+    fn seal_slow(self) -> SealedBlock;
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.into();
-        SealedBlock { header: SealedHeader::new(header, hash), body }
-    }
+    fn seal(self, hash: B256) -> SealedBlock;
 
     /// Expensive operation that recovers transaction signer. See
-    /// [`SealedBlockWithSenders`](reth_primitives::SealedBlockWithSenders).
+    /// [`SealedBlockWithSenders`](crate::SealedBlockWithSenders).
     fn senders(&self) -> Option<Vec<Address>> {
         self.body().recover_signers()
     }
@@ -65,7 +63,7 @@ pub trait Block:
     ///
     /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders<Self> {
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
@@ -73,65 +71,18 @@ pub trait Block:
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    /// See also [`TransactionSigned::recover_signer_unchecked`](crate::TransactionSigned).
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
-    fn try_with_senders_unchecked(
-        self,
-        senders: Vec<Address>,
-    ) -> Result<BlockWithSenders<Self>, Self> {
-        let senders = if self.body().transactions().len() == senders.len() {
-            senders
-        } else {
-            let Some(senders) = self.body().recover_signers() else { return Err(self) };
-            senders
-        };
-
-        Ok(BlockWithSenders { block: self, senders })
-    }
+    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<BlockWithSenders, Self>;
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<BlockWithSenders<Self>> {
-        let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
-    }
+    fn with_recovered_senders(self) -> Option<BlockWithSenders>;
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     fn size(&self) -> usize;
-}
-
-impl<T> Block for T
-where
-    T: ops::Deref<Target: Block>
-        + fmt::Debug
-        + Clone
-        + PartialEq
-        + Eq
-        + Default
-        + serde::Serialize
-        + for<'a> serde::Deserialize<'a>
-        + From<(<T::Target as Block>::Header, <T::Target as Block>::Body)>
-        + Into<(<T::Target as Block>::Header, <T::Target as Block>::Body)>,
-{
-    type Header = <T::Target as Block>::Header;
-    type Body = <T::Target as Block>::Body;
-
-    #[inline]
-    fn header(&self) -> &Self::Header {
-        self.deref().header()
-    }
-
-    #[inline]
-    fn body(&self) -> &Self::Body {
-        self.deref().body()
-    }
-
-    #[inline]
-    fn size(&self) -> usize {
-        self.deref().size()
-    }
 }

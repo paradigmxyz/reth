@@ -1,6 +1,6 @@
 //! Block body abstraction.
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use core::ops;
 
 use alloy_consensus::{BlockHeader, Transaction, TxType};
@@ -37,7 +37,7 @@ pub trait BlockBody:
     /// Returns reference to uncle block headers.
     fn ommers(&self) -> &[Self::Header];
 
-    /// Returns [`Request`] in block, if any.
+    /// Returns [`Requests`] in block, if any.
     fn requests(&self) -> Option<&Requests>;
 
     /// Create a [`Block`] from the body and its header.
@@ -68,17 +68,17 @@ pub trait BlockBody:
 
     /// Returns whether or not the block body contains any blob transactions.
     fn has_blob_transactions(&self) -> bool {
-        self.transactions().iter().any(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
+        self.transactions().iter().any(|tx| tx.ty() == TxType::Eip4844 as u8)
     }
 
     /// Returns whether or not the block body contains any EIP-7702 transactions.
     fn has_eip7702_transactions(&self) -> bool {
-        self.transactions().iter().any(|tx| tx.ty() as u8 == TxType::Eip7702 as u8)
+        self.transactions().iter().any(|tx| tx.ty() == TxType::Eip7702 as u8)
     }
 
     /// Returns an iterator over all blob transactions of the block
     fn blob_transactions_iter(&self) -> impl Iterator<Item = &Self::SignedTransaction> + '_ {
-        self.transactions().iter().filter(|tx| tx.ty() as u8 == TxType::Eip4844 as u8)
+        self.transactions().iter().filter(|tx| tx.ty() == TxType::Eip4844 as u8)
     }
 
     /// Returns only the blob transactions, if any, from the block body.
@@ -114,7 +114,7 @@ where
     type Header = <T::Target as BlockBody>::Header;
     type SignedTransaction = <T::Target as BlockBody>::SignedTransaction;
 
-    fn transactions(&self) -> &Vec<Self::SignedTransaction> {
+    fn transactions(&self) -> &[Self::SignedTransaction] {
         self.deref().transactions()
     }
 
@@ -122,7 +122,7 @@ where
         self.deref().withdrawals()
     }
 
-    fn ommers(&self) -> &Vec<Self::Header> {
+    fn ommers(&self) -> &[Self::Header] {
         self.deref().ommers()
     }
 
