@@ -187,8 +187,71 @@ pub trait BlockExecutionStrategy<DB> {
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(self, hook: Option<Box<dyn OnStateHook>>) -> Self;
 
-    /// Consumes the strategy and returns the final bundle state.
+    /// Returns the final bundle state.
     fn finish(&self) -> BundleState;
+}
+
+/// A strategy factory that can create block execution strategies.
+pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+    /// Associated strategy type.
+    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
+        DB,
+        Error = BlockExecutionError,
+    >;
+
+    /// Creates a strategy using the give database.
+    fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>;
+}
+
+impl<F> Clone for GenericBlockExecutorProvider<F>
+where
+    F: Clone,
+{
+    fn clone(&self) -> Self {
+        Self { strategy_factory: self.strategy_factory.clone() }
+    }
+}
+
+/// A generic block executor provider that can create executors using a strategy factory.
+#[allow(missing_debug_implementations)]
+pub struct GenericBlockExecutorProvider<F> {
+    strategy_factory: F,
+}
+
+impl<F> GenericBlockExecutorProvider<F> {
+    /// Creates a new `GenericBlockExecutorProvider` with the given strategy factory.
+    pub const fn new(strategy_factory: F) -> Self {
+        Self { strategy_factory }
+    }
+}
+
+impl<F> BlockExecutorProvider for GenericBlockExecutorProvider<F>
+where
+    F: BlockExecutionStrategyFactory,
+{
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+        GenericBlockExecutor<F::Strategy<DB>, DB>;
+
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
+        GenericBatchExecutor<F::Strategy<DB>, DB>;
+
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>,
+    {
+        let strategy = self.strategy_factory.create_strategy(db);
+        GenericBlockExecutor::new(strategy)
+    }
+
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>,
+    {
+        let strategy = self.strategy_factory.create_strategy(db);
+        GenericBatchExecutor::new(strategy)
+    }
 }
 
 /// A generic block executor that uses a [`BlockExecutionStrategy`] to
@@ -206,7 +269,7 @@ impl<S, DB> GenericBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
 {
-    /// Creates a new `GenericBlockExecutor` with the given strategy factory.
+    /// Creates a new `GenericBlockExecutor` with the given strategy.
     pub const fn new(strategy: S) -> Self {
         Self { strategy: RefCell::new(strategy), _phantom: PhantomData }
     }
@@ -277,6 +340,51 @@ where
         let state = strategy.finish();
 
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
+    }
+}
+
+/// A generic batch executor that uses a [`BlockExecutionStrategy`] to
+/// execute batches.
+#[allow(missing_debug_implementations)]
+pub struct GenericBatchExecutor<S, DB> {
+    _strategy: S,
+    _phantom: PhantomData<DB>,
+}
+
+impl<S, DB> GenericBatchExecutor<S, DB> {
+    /// Creates a new `GenericBatchExecutor` with the given strategy.
+    pub const fn new(_strategy: S) -> Self {
+        Self { _strategy, _phantom: PhantomData }
+    }
+}
+
+impl<S, DB> BatchExecutor<DB> for GenericBatchExecutor<S, DB>
+where
+    S: BlockExecutionStrategy<DB, Error = BlockExecutionError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
+{
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Output = ExecutionOutcome;
+    type Error = BlockExecutionError;
+
+    fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn finalize(self) -> Self::Output {
+        todo!()
+    }
+
+    fn set_tip(&mut self, _tip: BlockNumber) {
+        todo!()
+    }
+
+    fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
+        todo!()
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -382,6 +490,40 @@ mod tests {
         finish_result: BundleState,
     }
 
+    #[derive(Clone)]
+    struct TestExecutorStrategyFactory {
+        execute_transactions_result: (Vec<Receipt>, u64),
+        apply_post_execution_changes_result: Vec<Request>,
+        finish_result: BundleState,
+    }
+
+    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+        type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+            TestExecutorStrategy<DB, TestEvmConfig>;
+
+        fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
+        where
+            DB: Database<Error: Into<ProviderError> + Display>,
+        {
+            let state = State::builder()
+                .with_database(db)
+                .with_bundle_update()
+                .without_state_clear()
+                .build();
+
+            TestExecutorStrategy {
+                _chain_spec: MAINNET.clone(),
+                _evm_config: TestEvmConfig {},
+                execute_transactions_result: self.execute_transactions_result.clone(),
+                apply_post_execution_changes_result: self
+                    .apply_post_execution_changes_result
+                    .clone(),
+                finish_result: self.finish_result.clone(),
+                state,
+            }
+        }
+    }
+
     impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig> {
         type Error = BlockExecutionError;
 
@@ -434,21 +576,16 @@ mod tests {
             vec![Request::DepositRequest(DepositRequest::default())];
         let expected_finish_result = BundleState::default();
 
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
-
-        let strategy = TestExecutorStrategy {
-            _chain_spec: MAINNET.clone(),
-            _evm_config: TestEvmConfig {},
+        let strategy_factory = TestExecutorStrategyFactory {
             execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
             finish_result: expected_finish_result.clone(),
-            state,
         };
 
-        let executor = GenericBlockExecutor::new(strategy);
+        let provider = GenericBlockExecutorProvider::new(strategy_factory);
+        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let executor = provider.executor(db);
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
         assert!(result.is_ok());
 
