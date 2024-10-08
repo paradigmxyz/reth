@@ -59,6 +59,10 @@ impl<E, P, T> StreamBackfillJob<E, P, T> {
         self
     }
 
+    /// Polls the next task in the [`BackfillTasks`] queue.
+    ///
+    /// If the task returned a non-empty range, then a new task is created via `create_task` and
+    /// pushed into the beginning of the queue.
     fn poll_next_task(
         &mut self,
         cx: &mut Context<'_>,
@@ -87,30 +91,6 @@ impl<E, P, T> StreamBackfillJob<E, P, T> {
     }
 }
 
-impl<E, P> StreamBackfillJob<E, P, SingleBlockStreamItem>
-where
-    E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
-{
-    fn create_task(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> JoinHandle<
-        Result<(Option<RangeInclusive<BlockNumber>>, SingleBlockStreamItem), BlockExecutionError>,
-    > {
-        let mut job = SingleBlockBackfillJob {
-            executor: self.executor.clone(),
-            provider: self.provider.clone(),
-            range,
-            stream_parallelism: self.parallelism,
-        };
-        tokio::task::spawn_blocking(move || {
-            let result = job.next().expect("non-empty range");
-            result.map(|item| (job.range.is_empty().not().then_some(job.range), item))
-        })
-    }
-}
-
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem>
 where
     E: BlockExecutorProvider + Clone + Send + 'static,
@@ -121,46 +101,36 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // A closure that creates a new task that advances the `SingleBlockBackfillJob` iterator for
+        // the given range.
+        let create_task = |this: &Self, range| {
+            let mut job = SingleBlockBackfillJob {
+                executor: this.executor.clone(),
+                provider: this.provider.clone(),
+                range,
+                stream_parallelism: this.parallelism,
+            };
+            tokio::task::spawn_blocking(move || {
+                let result = job.next().expect("non-empty range");
+                result.map(|item| (job.range.is_empty().not().then_some(job.range), item))
+            })
+        };
+
         // Spawn new tasks only if we are below the parallelism configured.
         while this.tasks.len() < this.parallelism {
             // If we have a block number, then we can spawn a new task for that block
             if let Some(block_number) = this.range.next() {
-                let task = this.create_task(block_number..=block_number);
+                let task = create_task(this, block_number..=block_number);
                 this.tasks.push_back(task);
             } else {
                 break;
             }
         }
 
-        this.poll_next_task(cx, |this, range| this.create_task(range))
+        this.poll_next_task(cx, create_task)
     }
 }
 
-impl<E, P> StreamBackfillJob<E, P, BatchBlockStreamItem>
-where
-    E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
-{
-    fn create_task(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> JoinHandle<
-        Result<(Option<RangeInclusive<BlockNumber>>, BatchBlockStreamItem), BlockExecutionError>,
-    > {
-        let mut job = BackfillJob {
-            executor: self.executor.clone(),
-            provider: self.provider.clone(),
-            prune_modes: self.prune_modes.clone(),
-            thresholds: self.thresholds.clone(),
-            range,
-            stream_parallelism: self.parallelism,
-        };
-        tokio::task::spawn_blocking(move || {
-            let result = job.next().expect("non-empty range");
-            result.map(|item| (job.range.is_empty().not().then_some(job.range), item))
-        })
-    }
-}
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem>
 where
     E: BlockExecutorProvider + Clone + Send + 'static,
@@ -170,6 +140,23 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+
+        // A closure that creates a new task that advances the `BackfillJob` iterator for the given
+        // range.
+        let create_task = |this: &Self, range| {
+            let mut job = BackfillJob {
+                executor: this.executor.clone(),
+                provider: this.provider.clone(),
+                prune_modes: this.prune_modes.clone(),
+                thresholds: this.thresholds.clone(),
+                range,
+                stream_parallelism: this.parallelism,
+            };
+            tokio::task::spawn_blocking(move || {
+                let result = job.next().expect("non-empty range");
+                result.map(|item| (job.range.is_empty().not().then_some(job.range), item))
+            })
+        };
 
         // Spawn new tasks only if we are below the parallelism configured.
         while this.tasks.len() < this.parallelism {
@@ -182,7 +169,7 @@ where
             if let Some((first, last)) = range_bounds {
                 let range = first..=last;
                 debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new backfill task");
-                let task = this.create_task(range);
+                let task = create_task(this, range);
                 this.tasks.push_back(task);
             } else {
                 debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more blocks to backfill");
@@ -190,7 +177,7 @@ where
             }
         }
 
-        this.poll_next_task(cx, |this, range| this.create_task(range))
+        this.poll_next_task(cx, create_task)
     }
 }
 
