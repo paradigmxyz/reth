@@ -152,8 +152,8 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas
-                && (is_regolith || !transaction.is_system_transaction())
+            if transaction.gas_limit() > block_available_gas &&
+                (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
@@ -217,8 +217,8 @@ where
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
                 // receipt hashes should be computed when set. The state transition process ensures
                 // this is only set for post-Canyon deposit transactions.
-                deposit_receipt_version: (transaction.is_deposit()
-                    && self
+                deposit_receipt_version: (transaction.is_deposit() &&
+                    self
                         .chain_spec
                         .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
                 .then_some(1),
@@ -530,14 +530,15 @@ mod tests {
     };
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
     use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
-    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
-    use reth_primitives::{Receipts, Request, Requests, TxType};
+    use reth_primitives::{
+        Account, Block, BlockBody, Receipts, Request, Requests, Signature, Transaction,
+        TransactionSigned, TxType,
+    };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
-    use revm::db::states::BundleState;
-    use revm::primitives::AccountInfo;
     use std::{collections::HashMap, str::FromStr};
+    use revm::{db::states::BundleState, primitives::AccountInfo};
 
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();
