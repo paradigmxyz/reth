@@ -22,7 +22,7 @@ use reth_engine_primitives::EngineTypes;
 /// Configures all the primitive types of the node.
 pub trait NodePrimitives {
     /// Block primitive.
-    type Block: Block;
+    type Block;
 }
 
 impl NodePrimitives for () {
