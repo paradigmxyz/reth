@@ -356,6 +356,15 @@ impl StorageRootProvider for NoopProvider {
     ) -> ProviderResult<B256> {
         Ok(B256::default())
     }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(reth_trie::StorageProof::new(slot))
+    }
 }
 
 impl StateProofProvider for NoopProvider {
