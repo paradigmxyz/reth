@@ -278,9 +278,8 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
 #[cfg(feature = "optimism")]
 mod tests {
     use super::*;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{address, Address, B256, U256};
     use alloy_rpc_types::Transaction as AlloyTransaction;
-    use revm_primitives::{address, Address};
 
     #[test]
     fn optimism_deposit_tx_conversion_no_mint() {

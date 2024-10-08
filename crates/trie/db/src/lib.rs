@@ -12,7 +12,7 @@ pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
 };
 pub use prefix_set::PrefixSetLoader;
-pub use proof::DatabaseProof;
+pub use proof::{DatabaseProof, DatabaseStorageProof};
 pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
 pub use storage::{DatabaseHashedStorage, DatabaseStorageRoot};
 pub use trie_cursor::{

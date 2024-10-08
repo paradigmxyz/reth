@@ -124,7 +124,7 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
-                    .storage_proof(proof_targets)?;
+                    .storage_multiproof(proof_targets)?;
 
                     // Encode account
                     account_rlp.clear();
@@ -170,6 +170,26 @@ impl<T, H> StorageProof<T, H> {
         }
     }
 
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageProof<TF, H> {
+        StorageProof {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            hashed_address: self.hashed_address,
+            prefix_set: self.prefix_set,
+        }
+    }
+
+    /// Set the hashed cursor factory.
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageProof<T, HF> {
+        StorageProof {
+            trie_cursor_factory: self.trie_cursor_factory,
+            hashed_cursor_factory,
+            hashed_address: self.hashed_address,
+            prefix_set: self.prefix_set,
+        }
+    }
+
     /// Set the changed prefixes.
     pub fn with_prefix_set_mut(mut self, prefix_set: PrefixSetMut) -> Self {
         self.prefix_set = prefix_set;
@@ -182,8 +202,17 @@ where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
 {
-    /// Generate storage proof.
+    /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(
+        self,
+        slot: B256,
+    ) -> Result<reth_trie_common::StorageProof, StateProofError> {
+        let targets = HashSet::from_iter([keccak256(slot)]);
+        Ok(self.storage_multiproof(targets)?.storage_proof(slot)?)
+    }
+
+    /// Generate storage proof.
+    pub fn storage_multiproof(
         mut self,
         targets: HashSet<B256>,
     ) -> Result<StorageMultiProof, StateProofError> {
