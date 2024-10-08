@@ -3332,39 +3332,72 @@ mod tests {
     /// ( `NUMBER_ARGUMENTS`, METHOD, FN -> ((`METHOD_ARGUMENT(s)`,...), `EXPECTED_RESULT`),
     /// `INVALID_ARGUMENTS`)
     macro_rules! test_non_range {
-    ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, $receipts:expr, [$(($arg_count:ident, $method:ident, $item_extractor:expr, $invalid_args:expr)),* $(,)?]) => {{
+    ([$(($arg_count:ident, $method:ident, $item_extractor:expr, $invalid_args:expr)),* $(,)?]) => {{
+
+        // Get the number methods being tested.
+        // Since each method tested will move a block from memory to storage, this ensures we have enough.
+        let extra_blocks = [$(stringify!($arg_count)),*].len();
+
+        let mut rng = generators::rng();
+        let (provider, mut database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT + extra_blocks,
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
+        )?;
+        let provider = Arc::new(provider);
+
+        let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
+
         $(
             let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
             let tx_num = |block: &SealedBlock| {
-                $database_blocks
+                database_blocks
                     .iter()
-                    .chain($in_memory_blocks.iter())
+                    .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
                     .map(|b| b.body.transactions.len())
                     .sum::<usize>() as u64
             };
 
             // Ensure that the first generated in-memory block exists
-            // In the future this block will be persisted to disk and removed from memory AFTER the firsk database query.
-            // This ensures that we query the in-memory state before the database avoiding any race condition.
             {
-                call_method!($arg_count, $provider, $method, $item_extractor, tx_num, tx_hash, &$in_memory_blocks[0], &$receipts);
+                // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+
+                call_method!($arg_count, provider, $method, $item_extractor, tx_num, tx_hash, &in_memory_blocks[0], &receipts);
+
+                // Move the block as well in our own structures
+                database_blocks.push(in_memory_blocks.pop_front().unwrap());
             }
+
+            // database_blocks is changed above
+            let tx_num = |block: &SealedBlock| {
+                database_blocks
+                    .iter()
+                    .chain(in_memory_blocks.iter())
+                    .take_while(|b| b.number < block.number)
+                    .map(|b| b.body.transactions.len())
+                    .sum::<usize>() as u64
+            };
 
             // Invalid/Non-existent argument should return `None`
             {
-                call_method!($arg_count, $provider, $method, |_,_,_,_| ( ($invalid_args, None)), tx_num, tx_hash, &$in_memory_blocks[0], &$receipts);
+                call_method!($arg_count, provider, $method, |_,_,_,_| ( ($invalid_args, None)), tx_num, tx_hash, &in_memory_blocks[0], &receipts);
             }
 
             // Check that the item is only in memory and not in database
             {
-                let last_mem_block = &$in_memory_blocks[$in_memory_blocks.len() - 1];
+                let last_mem_block = &in_memory_blocks[in_memory_blocks.len() - 1];
 
-                let (args, expected_item) = $item_extractor(last_mem_block, tx_num(last_mem_block), tx_hash(last_mem_block), &$receipts);
-                call_method!($arg_count, $provider, $method, |_,_,_,_| (args.clone(), expected_item), tx_num, tx_hash, last_mem_block, &$receipts);
+                let (args, expected_item) = $item_extractor(last_mem_block, tx_num(last_mem_block), tx_hash(last_mem_block), &receipts);
+                call_method!($arg_count, provider, $method, |_,_,_,_| (args.clone(), expected_item), tx_num, tx_hash, last_mem_block, &receipts);
 
                 // Ensure the item is not in storage
-                call_method!($arg_count, $provider.database, $method, |_,_,_,_| ( (args, None)), tx_num, tx_hash, last_mem_block, &$receipts);
+                call_method!($arg_count, provider.database, $method, |_,_,_,_| ( (args, None)), tx_num, tx_hash, last_mem_block, &receipts);
             }
         )*
     }};
@@ -3374,265 +3407,232 @@ mod tests {
     fn test_non_range_methods() -> eyre::Result<()> {
         let test_tx_index = 0;
 
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
-
-        test_non_range!(
-            provider,
-            database_blocks,
-            in_memory_blocks,
-            receipts,
-            [
-                // TODO: header should use B256 like others instead of &B256
-                // (
-                //     ONE,
-                //     header,
-                //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
-                //     (&B256::random())
-                // ),
-                (
-                    ONE,
-                    header_by_number,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(block.header.header().clone())
-                    ),
-                    u64::MAX
+        test_non_range!([
+            // TODO: header should use B256 like others instead of &B256
+            // (
+            //     ONE,
+            //     header,
+            //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
+            //     (&B256::random())
+            // ),
+            (
+                ONE,
+                header_by_number,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.header.header().clone())
                 ),
-                (
-                    ONE,
-                    sealed_header,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(block.header.clone())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                sealed_header,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.header.clone())
                 ),
-                (
-                    ONE,
-                    block_hash,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(block.hash())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                block_hash,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.hash())
                 ),
-                (
-                    ONE,
-                    block_number,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.hash(),
-                        Some(block.number)
-                    ),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                block_number,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.hash(),
+                    Some(block.number)
                 ),
-                (
-                    ONE,
-                    block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(block.clone().unseal())
-                    ),
-                    BlockHashOrNumber::Hash(B256::random())
+                B256::random()
+            ),
+            (
+                ONE,
+                block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(block.clone().unseal())
                 ),
-                (
-                    ONE,
-                    block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(block.clone().unseal())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                BlockHashOrNumber::Hash(B256::random())
+            ),
+            (
+                ONE,
+                block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(block.clone().unseal())
                 ),
-                (
-                    ONE,
-                    block_body_indices,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(StoredBlockBodyIndices {
-                            first_tx_num: tx_num,
-                            tx_count: block.body.transactions.len() as u64
-                        })
-                    ),
-                    u64::MAX
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                block_body_indices,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(StoredBlockBodyIndices {
+                        first_tx_num: tx_num,
+                        tx_count: block.body.transactions.len() as u64
+                    })
                 ),
-                (
-                    TWO,
-                    block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                        block.clone().unseal().with_recovered_senders()
-                    ),
-                    (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+                u64::MAX
+            ),
+            (
+                TWO,
+                block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
+                    block.clone().unseal().with_recovered_senders()
                 ),
-                (
-                    TWO,
-                    block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                        block.clone().unseal().with_recovered_senders()
-                    ),
-                    (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+                (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
+                    block.clone().unseal().with_recovered_senders()
                 ),
-                (
-                    TWO,
-                    sealed_block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                        Some(
-                            block
-                                .clone()
-                                .unseal()
-                                .with_recovered_senders()
-                                .unwrap()
-                                .seal(block.hash())
-                        )
-                    ),
-                    (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+                (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                sealed_block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
+                    Some(
+                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                    )
                 ),
-                (
-                    TWO,
-                    sealed_block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                        Some(
-                            block
-                                .clone()
-                                .unseal()
-                                .with_recovered_senders()
-                                .unwrap()
-                                .seal(block.hash())
-                        )
-                    ),
-                    (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+                (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                sealed_block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
+                    Some(
+                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                    )
                 ),
-                (
-                    ONE,
-                    transaction_id,
-                    |_: &SealedBlock, tx_num: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_hash,
-                        Some(tx_num)
-                    ),
-                    B256::random()
+                (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+            ),
+            (
+                ONE,
+                transaction_id,
+                |_: &SealedBlock, tx_num: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(tx_num)
                 ),
-                (
-                    ONE,
-                    transaction_by_id,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(block.body.transactions[test_tx_index].clone())
-                    ),
-                    u64::MAX
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_by_id,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    transaction_by_id_no_hash,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(Into::<TransactionSignedNoHash>::into(
-                            block.body.transactions[test_tx_index].clone()
-                        ))
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                transaction_by_id_no_hash,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(Into::<TransactionSignedNoHash>::into(
+                        block.body.transactions[test_tx_index].clone()
+                    ))
                 ),
-                (
-                    ONE,
-                    transaction_by_hash,
-                    |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_hash,
-                        Some(block.body.transactions[test_tx_index].clone())
-                    ),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                transaction_by_hash,
+                |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    transaction_block,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(block.number)
-                    ),
-                    u64::MAX
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_block,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(block.number)
                 ),
-                (
-                    ONE,
-                    transactions_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(block.body.transactions.clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                u64::MAX
+            ),
+            (
+                ONE,
+                transactions_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(block.body.transactions.clone())
                 ),
-                (
-                    ONE,
-                    transactions_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(block.body.transactions.clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                transactions_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(block.body.transactions.clone())
                 ),
-                (
-                    ONE,
-                    transaction_sender,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        block.body.transactions[test_tx_index].recover_signer()
-                    ),
-                    u64::MAX
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                transaction_sender,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    block.body.transactions[test_tx_index].recover_signer()
                 ),
-                (
-                    ONE,
-                    receipt,
-                    |block: &SealedBlock,
-                     tx_num: TxNumber,
-                     _: B256,
-                     receipts: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(receipts[block.number as usize][test_tx_index].clone())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                receipt,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(receipts[block.number as usize][test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    receipt_by_hash,
-                    |block: &SealedBlock,
-                     _: TxNumber,
-                     tx_hash: B256,
-                     receipts: &Vec<Vec<Receipt>>| (
-                        tx_hash,
-                        Some(receipts[block.number as usize][test_tx_index].clone())
-                    ),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                receipt_by_hash,
+                |block: &SealedBlock, _: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(receipts[block.number as usize][test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    receipts_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(receipts[block.number as usize].clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                B256::random()
+            ),
+            (
+                ONE,
+                receipts_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(receipts[block.number as usize].clone())
                 ),
-                (
-                    ONE,
-                    receipts_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(receipts[block.number as usize].clone())
-                    ),
-                    BlockHashOrNumber::Hash(B256::random())
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                receipts_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(receipts[block.number as usize].clone())
                 ),
-                // TODO: withdrawals, requests, ommers
-            ]
-        );
+                BlockHashOrNumber::Hash(B256::random())
+            ),
+            // TODO: withdrawals, requests, ommers
+        ]);
 
         Ok(())
     }
