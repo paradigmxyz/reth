@@ -209,7 +209,7 @@ where
 
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().block_with_senders(block_id),
+            self.eth_api().block_with_senders(block_hash.into()),
         )?;
 
         let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
