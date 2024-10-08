@@ -556,10 +556,7 @@ pub(super) mod serde_bincode_compat {
             let mut state = serializer.serialize_map(Some(self.0.len()))?;
 
             for (block_number, block) in self.0.iter() {
-                state.serialize_entry(
-                    block_number,
-                    &Into::<SealedBlockWithSenders<'_>>::into(block),
-                )?;
+                state.serialize_entry(block_number, &SealedBlockWithSenders::<'_>::from(block))?;
             }
 
             state.end()
