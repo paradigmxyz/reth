@@ -185,7 +185,7 @@ pub trait BlockExecutionStrategy<DB> {
     fn state_ref(&self) -> &State<DB>;
 
     /// Sets a hook to be called after each state change during execution.
-    fn with_state_hook(self, hook: Option<Box<dyn OnStateHook>>) -> Self;
+    fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
 
     /// Returns the final bundle state.
     fn finish(&self) -> BundleState;
@@ -324,7 +324,7 @@ where
     fn execute_with_state_hook<H>(
         self,
         input: Self::Input<'_>,
-        _state_hook: H,
+        state_hook: H,
     ) -> Result<Self::Output, Self::Error>
     where
         H: OnStateHook + 'static,
@@ -332,6 +332,8 @@ where
         let BlockExecutionInput { block, total_difficulty: _ } = input;
 
         let mut strategy = self.strategy.borrow_mut();
+
+        strategy.with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
@@ -546,9 +548,7 @@ mod tests {
             &self.state
         }
 
-        fn with_state_hook(self, _hook: Option<Box<dyn OnStateHook>>) -> Self {
-            self
-        }
+        fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
 
         fn finish(&self) -> BundleState {
             self.finish_result.clone()
@@ -570,7 +570,6 @@ mod tests {
     fn test_strategy() {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
-
         let expected_execute_transactions_result = (expected_receipts.clone(), expected_gas_used);
         let expected_apply_post_execution_changes_result =
             vec![Request::DepositRequest(DepositRequest::default())];
@@ -582,15 +581,13 @@ mod tests {
                 .clone(),
             finish_result: expected_finish_result.clone(),
         };
-
         let provider = GenericBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
+
         assert!(result.is_ok());
-
         let block_execution_output = result.unwrap();
-
         assert_eq!(block_execution_output.gas_used, expected_gas_used);
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
