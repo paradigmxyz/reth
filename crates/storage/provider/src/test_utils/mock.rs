@@ -31,7 +31,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
+    TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -638,6 +639,15 @@ impl StorageRootProvider for MockEthProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(EMPTY_ROOT_HASH)
+    }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(StorageProof::new(slot))
     }
 }
 

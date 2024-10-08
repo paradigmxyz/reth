@@ -744,6 +744,15 @@ where
         self.get_pool_data().get_transactions_by_sender(sender_id)
     }
 
+    /// Returns the highest transaction of the address
+    pub(crate) fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_highest_transaction_by_sender(sender_id)
+    }
+
     /// Returns all transactions that where submitted with the given [`TransactionOrigin`]
     pub(crate) fn get_transactions_by_origin(
         &self,

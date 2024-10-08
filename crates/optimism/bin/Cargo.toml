@@ -31,7 +31,7 @@ workspace = true
 [features]
 default = ["jemalloc"]
 
-jemalloc = ["reth-cli-util/jemalloc"]
+jemalloc = ["reth-cli-util/jemalloc", "reth-optimism-cli/jemalloc"]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 

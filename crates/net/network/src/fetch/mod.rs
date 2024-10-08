@@ -590,7 +590,7 @@ mod tests {
                 },
                 response: tx,
             };
-            let mut header = SealedHeader::<Header>::default().unseal();
+            let mut header = SealedHeader::default().unseal();
             header.number = 0u64;
             (req, header)
         };

@@ -700,7 +700,7 @@ mod tests {
     #[tokio::test]
     async fn download_single_full_block() {
         let client = TestFullBlockClient::default();
-        let header = SealedHeader::<Header>::default();
+        let header = SealedHeader::default();
         let body = BlockBody::default();
         client.insert(header.clone(), body.clone());
         let client = FullBlockClient::test_client(client);
@@ -712,7 +712,7 @@ mod tests {
     #[tokio::test]
     async fn download_single_full_block_range() {
         let client = TestFullBlockClient::default();
-        let header = SealedHeader::<Header>::default();
+        let header = SealedHeader::default();
         let body = BlockBody::default();
         client.insert(header.clone(), body.clone());
         let client = FullBlockClient::test_client(client);
@@ -727,7 +727,7 @@ mod tests {
         client: &TestFullBlockClient,
         range: Range<usize>,
     ) -> (SealedHeader, BlockBody) {
-        let mut sealed_header = SealedHeader::<Header>::default();
+        let mut sealed_header = SealedHeader::default();
         let body = BlockBody::default();
         for _ in range {
             let (mut header, hash) = sealed_header.split();

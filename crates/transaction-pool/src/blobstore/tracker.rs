@@ -2,7 +2,6 @@
 
 use alloy_primitives::{BlockNumber, B256};
 use reth_execution_types::ChainBlocks;
-use reth_primitives::traits::BlockBody;
 use std::collections::BTreeMap;
 
 /// The type that is used to track canonical blob transactions.
@@ -43,7 +42,6 @@ impl BlobStoreCanonTracker {
             let iter = block
                 .body
                 .transactions()
-                .iter()
                 .filter(|tx| tx.transaction.is_eip4844())
                 .map(|tx| tx.hash);
             (*num, iter)

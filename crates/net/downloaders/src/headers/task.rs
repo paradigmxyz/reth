@@ -183,7 +183,6 @@ mod tests {
     use crate::headers::{
         reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
     };
-    use alloy_consensus::Header;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
     use std::sync::Arc;
@@ -192,7 +191,7 @@ mod tests {
     async fn download_one_by_one_on_task() {
         reth_tracing::init_test_tracing();
 
-        let p3 = SealedHeader::<Header>::default();
+        let p3 = SealedHeader::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);

@@ -6892,7 +6892,6 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.0.8"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -7040,7 +7039,6 @@ dependencies = [
 name = "reth-engine-service"
 version = "1.0.8"
 dependencies = [
- "alloy-consensus",
  "futures",
  "pin-project",
  "reth-beacon-consensus",
@@ -7370,7 +7368,6 @@ dependencies = [
 name = "reth-execution-types"
 version = "1.0.8"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "arbitrary",
@@ -8010,6 +8007,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
+ "reth-node-metrics",
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-node",

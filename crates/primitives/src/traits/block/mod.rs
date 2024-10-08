@@ -44,20 +44,11 @@ pub trait Block:
     fn body(&self) -> &Self::Body;
 
     /// Calculate the header hash and seal the block so that it can't be changed.
-    fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.into();
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body }
-    }
-
+    fn seal_slow(self) -> SealedBlock;
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.into();
-        SealedBlock { header: SealedHeader::new(header, hash), body }
-    }
+    fn seal(self, hash: B256) -> SealedBlock;
 
     /// Expensive operation that recovers transaction signer. See
     /// [`SealedBlockWithSenders`](crate::SealedBlockWithSenders).
@@ -74,7 +65,7 @@ pub trait Block:
     ///
     /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders<Self> {
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
@@ -86,28 +77,13 @@ pub trait Block:
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
-    fn try_with_senders_unchecked(
-        self,
-        senders: Vec<Address>,
-    ) -> Result<BlockWithSenders<Self>, Self> {
-        let senders = if self.body().transactions().len() == senders.len() {
-            senders
-        } else {
-            let Some(senders) = self.body().recover_signers() else { return Err(self) };
-            senders
-        };
-
-        Ok(BlockWithSenders { block: self, senders })
-    }
+    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<BlockWithSenders, Self>;
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<BlockWithSenders<Self>> {
-        let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
-    }
+    fn with_recovered_senders(self) -> Option<BlockWithSenders>;
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     fn size(&self) -> usize;

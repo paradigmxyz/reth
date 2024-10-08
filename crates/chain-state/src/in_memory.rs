@@ -11,8 +11,8 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    traits::BlockBody, BlockWithSenders, Header, Receipt, Receipts, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    BlockWithSenders, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -542,13 +542,8 @@ impl CanonicalInMemoryState {
     /// Returns a `TransactionSigned` for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
         for block_state in self.canonical_chain() {
-            if let Some(tx) = block_state
-                .block_ref()
-                .block()
-                .body
-                .transactions()
-                .iter()
-                .find(|tx| tx.hash() == hash)
+            if let Some(tx) =
+                block_state.block_ref().block().body.transactions().find(|tx| tx.hash() == hash)
             {
                 return Some(tx.clone())
             }
@@ -568,7 +563,6 @@ impl CanonicalInMemoryState {
                 .block()
                 .body
                 .transactions()
-                .iter()
                 .enumerate()
                 .find(|(_, tx)| tx.hash() == tx_hash)
             {
@@ -878,7 +872,7 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
+    use reth_trie::{AccountProof, HashedStorage, MultiProof, StorageProof, TrieInput};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -978,6 +972,15 @@ mod tests {
             _hashed_storage: HashedStorage,
         ) -> ProviderResult<B256> {
             Ok(B256::random())
+        }
+
+        fn storage_proof(
+            &self,
+            _address: Address,
+            slot: B256,
+            _hashed_storage: HashedStorage,
+        ) -> ProviderResult<StorageProof> {
+            Ok(StorageProof::new(slot))
         }
     }
 

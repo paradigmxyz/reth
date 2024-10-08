@@ -7,8 +7,8 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    traits::BlockBody, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    TransactionSigned, TransactionSignedEcRecovered,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
@@ -233,7 +233,7 @@ impl Chain {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
-            for (tx, receipt) in block.body.transactions().iter().zip(receipts.iter()) {
+            for (tx, receipt) in block.body.transactions().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -516,7 +516,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
     use reth_trie::serde_bincode_compat::updates::TrieUpdates;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     use crate::ExecutionOutcome;
@@ -538,19 +538,47 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Chain<'a> {
-        blocks: BTreeMap<BlockNumber, SealedBlockWithSenders<'a>>,
+        blocks: SealedBlocksWithSenders<'a>,
         execution_outcome: Cow<'a, ExecutionOutcome>,
         trie_updates: Option<TrieUpdates<'a>>,
+    }
+
+    #[derive(Debug)]
+    struct SealedBlocksWithSenders<'a>(
+        Cow<'a, BTreeMap<BlockNumber, reth_primitives::SealedBlockWithSenders>>,
+    );
+
+    impl Serialize for SealedBlocksWithSenders<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut state = serializer.serialize_map(Some(self.0.len()))?;
+
+            for (block_number, block) in self.0.iter() {
+                state.serialize_entry(block_number, &SealedBlockWithSenders::<'_>::from(block))?;
+            }
+
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SealedBlocksWithSenders<'_> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Ok(Self(Cow::Owned(
+                BTreeMap::<BlockNumber, SealedBlockWithSenders<'_>>::deserialize(deserializer)
+                    .map(|blocks| blocks.into_iter().map(|(n, b)| (n, b.into())).collect())?,
+            )))
+        }
     }
 
     impl<'a> From<&'a super::Chain> for Chain<'a> {
         fn from(value: &'a super::Chain) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .iter()
-                    .map(|(block_number, block)| (*block_number, block.into()))
-                    .collect(),
+                blocks: SealedBlocksWithSenders(Cow::Borrowed(&value.blocks)),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
@@ -560,11 +588,7 @@ pub(super) mod serde_bincode_compat {
     impl<'a> From<Chain<'a>> for super::Chain {
         fn from(value: Chain<'a>) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .into_iter()
-                    .map(|(block_number, block)| (block_number, block.into()))
-                    .collect(),
+                blocks: value.blocks.0.into_owned(),
                 execution_outcome: value.execution_outcome.into_owned(),
                 trie_updates: value.trie_updates.map(Into::into),
             }
@@ -631,14 +655,13 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
     use alloy_primitives::B256;
-    use reth_primitives::{BlockBody, Receipt, Receipts, TxType};
+    use reth_primitives::{Receipt, Receipts, TxType};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
     fn chain_append() {
-        let block = SealedBlockWithSenders::<Header, BlockBody>::default();
+        let block = SealedBlockWithSenders::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -702,13 +725,13 @@ mod tests {
             vec![],
         );
 
-        let mut block1 = SealedBlockWithSenders::<Header, BlockBody>::default();
+        let mut block1 = SealedBlockWithSenders::default();
         let block1_hash = B256::new([15; 32]);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
         block1.senders.push(Address::new([4; 20]));
 
-        let mut block2 = SealedBlockWithSenders::<Header, BlockBody>::default();
+        let mut block2 = SealedBlockWithSenders::default();
         let block2_hash = B256::new([16; 32]);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
@@ -768,7 +791,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block = SealedBlockWithSenders::<Header, BlockBody>::default();
+        let block = SealedBlockWithSenders::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);

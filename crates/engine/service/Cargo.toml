@@ -40,7 +40,5 @@ reth-exex-types.workspace = true
 reth-primitives.workspace = true
 reth-chainspec.workspace = true
 
-alloy-consensus.workspace = true
-
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

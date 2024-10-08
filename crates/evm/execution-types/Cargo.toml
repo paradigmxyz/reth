@@ -30,7 +30,6 @@ arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
-alloy-consensus.workspace = true
 
 [features]
 default = ["std"]

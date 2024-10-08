@@ -563,7 +563,7 @@ mod tests {
     async fn download_headers_at_fork_head() {
         reth_tracing::init_test_tracing();
 
-        let p3 = SealedHeader::<Header>::default();
+        let p3 = SealedHeader::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
