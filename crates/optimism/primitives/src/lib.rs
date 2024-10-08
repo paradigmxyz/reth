@@ -6,5 +6,12 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(feature = "optimism")]
 
 pub mod bedrock;
+pub mod signature;
+pub mod signed_transaction;
+
+pub use signature::OpSignature;
+pub use signed_transaction::OpTransactionSigned;
