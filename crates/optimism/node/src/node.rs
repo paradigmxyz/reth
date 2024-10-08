@@ -13,7 +13,8 @@ use reth_node_builder::{
         NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    BuilderContext, Node, PayloadBuilderConfig,
+    rpc::{RethRpcAddOns, RpcAddOns, RpcHandle},
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
@@ -97,7 +98,9 @@ where
         OptimismEngineValidatorBuilder,
     >;
 
-    type AddOns = OptimismAddOns;
+    type AddOns = OptimismAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
@@ -119,25 +122,43 @@ impl NodeTypesWithEngine for OptimismNode {
 }
 
 /// Add-ons w.r.t. optimism.
-#[derive(Debug, Clone)]
-pub struct OptimismAddOns {
-    sequencer_http: Option<String>,
+#[derive(Debug)]
+pub struct OptimismAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>>);
+
+impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
-impl OptimismAddOns {
+impl<N: FullNodeComponents> OptimismAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
-    pub const fn new(sequencer_http: Option<String>) -> Self {
-        Self { sequencer_http }
-    }
-
-    /// Returns the sequencer HTTP URL.
-    pub fn sequencer_http(&self) -> Option<&str> {
-        self.sequencer_http.as_deref()
+    pub fn new(sequencer_http: Option<String>) -> Self {
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http)))
     }
 }
 
-impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOns<N>
+    for OptimismAddOns<N>
+{
+    type Handle = RpcHandle<N, OpEthApi<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        self.0.launch_add_ons(ctx).await
+    }
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> RethRpcAddOns<N>
+    for OptimismAddOns<N>
+{
     type EthApi = OpEthApi<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.0.hooks_mut()
+    }
 }
 
 /// A regular optimism evm and executor builder.

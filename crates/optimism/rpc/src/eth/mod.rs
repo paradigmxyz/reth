@@ -17,7 +17,7 @@ use op_alloy_network::Optimism;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
@@ -38,7 +38,6 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use tokio::sync::OnceCell;
 
 use crate::{OpEthApiError, OpTxBuilder, SequencerClient};
 
@@ -67,13 +66,12 @@ pub struct OpEthApi<N: FullNodeComponents> {
     inner: Arc<EthApiNodeBackend<N>>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    sequencer_client: Arc<OnceCell<SequencerClient>>,
+    sequencer_client: Option<SequencerClient>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
     /// Creates a new instance for given context.
-    #[allow(clippy::type_complexity)]
-    pub fn with_spawner(ctx: &EthApiBuilderCtx<N, Self>) -> Self {
+    pub fn new(ctx: &EthApiBuilderCtx<N>, sequencer_http: Option<String>) -> Self {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
@@ -93,7 +91,7 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), sequencer_client: Arc::new(OnceCell::new()) }
+        Self { inner: Arc::new(inner), sequencer_client: sequencer_http.map(SequencerClient::new) }
     }
 }
 
@@ -243,18 +241,6 @@ where
 {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
-    }
-}
-
-impl<N> BuilderProvider<N> for OpEthApi<N>
-where
-    Self: Send,
-    N: FullNodeComponents,
-{
-    type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(Self::with_spawner)
     }
 }
 

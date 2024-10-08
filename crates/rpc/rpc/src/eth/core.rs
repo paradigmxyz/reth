@@ -6,7 +6,6 @@ use std::sync::Arc;
 use alloy_network::AnyNetwork;
 use alloy_primitives::U256;
 use derive_more::Deref;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
@@ -19,7 +18,7 @@ use reth_rpc_eth_types::{
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskExecutor, TaskSpawner, TokioTaskExecutor,
+    TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::Mutex;
 
@@ -95,7 +94,7 @@ where
 {
     /// Creates a new, shareable instance.
     pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Self>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
@@ -160,25 +159,6 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.blocking_task_guard()
-    }
-}
-
-impl<N> BuilderProvider<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
-where
-    N: FullNodeComponents,
-{
-    type Ctx<'a> = &'a EthApiBuilderCtx<
-        N::Provider,
-        N::Pool,
-        N::Evm,
-        N::Network,
-        TaskExecutor,
-        N::Provider,
-        Self,
-    >;
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(Self::with_spawner)
     }
 }
 

@@ -81,17 +81,9 @@ impl<N> OpEthApi<N>
 where
     N: FullNodeComponents,
 {
-    /// Sets a [`SequencerClient`] for `eth_sendRawTransaction` to forward transactions to.
-    pub fn set_sequencer_client(
-        &self,
-        sequencer_client: SequencerClient,
-    ) -> Result<(), tokio::sync::SetError<SequencerClient>> {
-        self.sequencer_client.set(sequencer_client)
-    }
-
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.get().cloned()
+        self.sequencer_client.clone()
     }
 }
 

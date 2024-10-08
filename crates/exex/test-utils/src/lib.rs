@@ -142,7 +142,9 @@ where
         TestConsensusBuilder,
         EthereumEngineValidatorBuilder,
     >;
-    type AddOns = EthereumAddOns;
+    type AddOns = EthereumAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
