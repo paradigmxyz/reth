@@ -12,6 +12,9 @@
       cargoTOML = (builtins.fromTOML (builtins.readFile ./Cargo.toml));
       packageVersion = cargoTOML.workspace.package.version;
       rustVersion = cargoTOML.workspace.package.rust-version;
+      rustPkg = pkgs.rust-bin.stable."${rustVersion}".default.override {
+        extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
+      };
       # platform packages
       macPackages = pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [ Security CoreFoundation CoreServices ]);
       linuxPackages = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
@@ -28,8 +31,8 @@
         lockFile = ./Cargo.lock;
       };
       rustPlatform = pkgs.makeRustPlatform {
-        rustc = pkgs.rust-bin.stable."${rustVersion}".default;
-        cargo = pkgs.rust-bin.stable."${rustVersion}".default;
+        rustc = rustPkg;
+        cargo = rustPkg;
       };
     in
     {
@@ -37,15 +40,12 @@
         buildInputs = with pkgs; [
           macPackages
           linuxPackages
+          rustPkg
           cargoDeps
-          (rust-bin.stable."${rustVersion}".default.override {
-            extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
-          })
         ];
         RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
-      #defaultPackage = pkgs.rustPlatform.buildRustPackage {
 
       defaultPackage = rustPlatform.buildRustPackage {
         pname = "reth";
