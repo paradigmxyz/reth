@@ -3,7 +3,7 @@
 use alloc::fmt;
 use core::hash::Hash;
 
-use alloy_consensus::SignableTransaction;
+use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, TxHash, B256};
 
@@ -24,7 +24,7 @@ pub trait SignedTransaction:
     + Decodable2718
 {
     /// Transaction type that is signed.
-    type Transaction: SignableTransaction<Self::Signature>;
+    type Transaction: Transaction;
 
     /// Signature type that results from signing transaction.
     type Signature;
