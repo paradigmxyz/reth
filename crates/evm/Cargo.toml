@@ -21,6 +21,7 @@ reth-prune-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-storage-errors.workspace = true
 reth-execution-types.workspace = true
+reth-revm.workspace = true
 
 revm.workspace = true
 

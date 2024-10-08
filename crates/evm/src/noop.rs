@@ -6,6 +6,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
+use reth_revm::database::MeteredDatabase;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
@@ -57,7 +58,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
         _: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnMut(&State<MeteredDatabase<DB>>),
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }

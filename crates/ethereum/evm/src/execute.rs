@@ -22,6 +22,7 @@ use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Reque
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
+    database::MeteredDatabase,
     db::{states::bundle_state::BundleRetention, State},
     state_change::post_block_balance_increments,
     Evm,
@@ -68,7 +69,11 @@ where
         EthBlockExecutor::new(
             self.chain_spec.clone(),
             self.evm_config.clone(),
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
+            State::builder()
+                .with_database(MeteredDatabase::new(db))
+                .with_bundle_update()
+                .without_state_clear()
+                .build(),
         )
     }
 }
@@ -223,12 +228,16 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
     /// Chain specific evm config that's used to execute a block.
     executor: EthEvmExecutor<EvmConfig>,
     /// The state to use for execution
-    state: State<DB>,
+    state: State<MeteredDatabase<DB>>,
 }
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(
+        chain_spec: Arc<ChainSpec>,
+        evm_config: EvmConfig,
+        state: State<MeteredDatabase<DB>>,
+    ) -> Self {
         Self { executor: EthEvmExecutor { chain_spec, evm_config }, state }
     }
 
@@ -239,7 +248,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
     /// Returns mutable reference to the state that wraps the underlying database.
     #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<MeteredDatabase<DB>> {
         &mut self.state
     }
 }
@@ -369,7 +378,13 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests,
+            gas_used,
+            state_read_latency: self.state.database.latency,
+        })
     }
 
     fn execute_with_state_witness<F>(
@@ -378,7 +393,7 @@ where
         mut witness: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnMut(&State<MeteredDatabase<DB>>),
     {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =
@@ -387,7 +402,13 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests,
+            gas_used,
+            state_read_latency: self.state.database.latency,
+        })
     }
 
     fn execute_with_state_hook<F>(
@@ -408,7 +429,13 @@ where
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests,
+            gas_used,
+            state_read_latency: self.state.database.latency,
+        })
     }
 }
 /// An executor for a batch of blocks.
@@ -427,7 +454,7 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
     /// Returns mutable reference to the state that wraps the underlying database.
     #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<MeteredDatabase<DB>> {
         self.executor.state_mut()
     }
 }

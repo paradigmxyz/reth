@@ -275,15 +275,17 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered((&block, td).into(), |input| {
-                let sealed = block.header.clone().seal_slow();
-                let (header, seal) = sealed.into_parts();
+            let sealed = block.header.clone().seal_slow();
+            let (header, seal) = sealed.into_parts();
 
-                executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
+            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
+                StageError::Block {
                     block: Box::new(SealedHeader::new(header, seal)),
                     error: BlockErrorKind::Execution(error),
-                })
+                }
             })?;
+            // self.metrics.metered((&block, td).into(), |input| {
+            // })?;
 
             execution_duration += execute_start.elapsed();
 

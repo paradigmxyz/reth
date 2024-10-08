@@ -1,6 +1,7 @@
 use alloy_primitives::U256;
 use reth_primitives::Request;
 use revm::db::BundleState;
+use std::time::Duration;
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
 #[derive(Debug)]
@@ -37,4 +38,6 @@ pub struct BlockExecutionOutput<T> {
     pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
+    /// Total number of seconds spent on retrieving state.
+    pub state_read_latency: Duration,
 }

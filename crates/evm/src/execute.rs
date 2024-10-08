@@ -5,6 +5,7 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+use reth_revm::database::MeteredDatabase;
 pub use reth_storage_errors::provider::ProviderError;
 
 use alloy_primitives::BlockNumber;
@@ -46,7 +47,7 @@ pub trait Executor<DB> {
         witness: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>);
+        F: FnMut(&State<MeteredDatabase<DB>>);
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.

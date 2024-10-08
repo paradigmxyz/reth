@@ -1,6 +1,9 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use alloy_primitives::{Address, B256, U256};
-use core::ops::{Deref, DerefMut};
+use core::{
+    ops::{Deref, DerefMut},
+    time::Duration,
+};
 use reth_primitives::Account;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
@@ -8,6 +11,7 @@ use revm::{
     primitives::{AccountInfo, Bytecode},
     Database,
 };
+use std::time::Instant;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
@@ -158,5 +162,56 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
         Ok(self.0.block_hash(number)?.unwrap_or_default())
+    }
+}
+
+/// Database wrapper that tracks state read latency.
+#[derive(Debug)]
+pub struct MeteredDatabase<DB> {
+    inner: DB,
+    /// State read latency.
+    pub latency: Duration,
+}
+
+impl<DB> MeteredDatabase<DB> {
+    /// Create new metered database.
+    pub fn new(inner: DB) -> Self {
+        Self { inner, latency: Default::default() }
+    }
+}
+
+impl<DB: Database<Error: Into<ProviderError>>> Database for MeteredDatabase<DB> {
+    type Error = DB::Error;
+
+    fn basic(
+        &mut self,
+        address: revm::primitives::Address,
+    ) -> Result<Option<revm::primitives::AccountInfo>, Self::Error> {
+        let started_at = Instant::now();
+        let result = self.inner.basic(address);
+        self.latency += started_at.elapsed();
+        result
+    }
+
+    fn storage(
+        &mut self,
+        address: revm::primitives::Address,
+        index: U256,
+    ) -> Result<U256, Self::Error> {
+        let started_at = Instant::now();
+        let result = self.inner.storage(address, index);
+        self.latency += started_at.elapsed();
+        result
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<revm::primitives::B256, Self::Error> {
+        self.inner.block_hash(number)
+    }
+
+    fn code_by_hash(
+        &mut self,
+        code_hash: revm::primitives::B256,
+    ) -> Result<revm::primitives::Bytecode, Self::Error> {
+        self.inner.code_by_hash(code_hash)
     }
 }

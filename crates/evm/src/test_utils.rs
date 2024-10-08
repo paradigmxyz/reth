@@ -12,6 +12,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
+use reth_revm::database::MeteredDatabase;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
@@ -63,6 +64,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             receipts: receipts.into_iter().flatten().flatten().collect(),
             requests: requests.into_iter().flatten().collect(),
             gas_used: 0,
+            state_read_latency: Default::default(),
         })
     }
 
@@ -72,7 +74,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
         _: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnMut(&State<MeteredDatabase<DB>>),
     {
         unimplemented!()
     }

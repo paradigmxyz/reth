@@ -5,7 +5,7 @@
 use std::time::Instant;
 
 use metrics::{Counter, Gauge, Histogram};
-use reth_execution_types::BlockExecutionInput;
+use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
 use reth_metrics::Metrics;
 use reth_primitives::BlockWithSenders;
 
@@ -22,19 +22,27 @@ pub struct ExecutorMetrics {
     pub execution_histogram: Histogram,
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
+    /// State read latency.
+    pub state_read_duration: Histogram,
 }
 
 impl ExecutorMetrics {
     /// Execute the given block and update metrics for the execution.
-    pub fn metered<F, R>(&self, input: BlockExecutionInput<'_, BlockWithSenders>, f: F) -> R
+    pub fn metered<F, R, Error>(
+        &self,
+        input: BlockExecutionInput<'_, BlockWithSenders>,
+        f: F,
+    ) -> Result<BlockExecutionOutput<R>, Error>
     where
-        F: FnOnce(BlockExecutionInput<'_, BlockWithSenders>) -> R,
+        F: FnOnce(
+            BlockExecutionInput<'_, BlockWithSenders>,
+        ) -> Result<BlockExecutionOutput<R>, Error>,
     {
         let gas_used = input.block.gas_used;
 
         // Execute the block and record the elapsed time.
         let execute_start = Instant::now();
-        let output = f(input);
+        let output = f(input)?;
         let execution_duration = execute_start.elapsed().as_secs_f64();
 
         // Update gas metrics.
@@ -42,7 +50,8 @@ impl ExecutorMetrics {
         self.gas_per_second.set(gas_used as f64 / execution_duration);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
+        self.state_read_duration.record(output.state_read_latency.as_secs_f64());
 
-        output
+        Ok(output)
     }
 }
