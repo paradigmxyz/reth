@@ -3,7 +3,7 @@
 use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
-use alloy_primitives::{BlockNumber, U256, Address, B256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
@@ -16,7 +16,7 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType, Account, StorageEntry};
+use reth_primitives::{Account, BlockWithSenders, Header, Receipt, Receipts, StorageEntry, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
@@ -26,9 +26,9 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
+use std::collections::HashMap;
 use std::{fmt::Display, sync::Arc};
 use tracing::trace;
-use std::collections::HashMap;
 
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]
@@ -152,19 +152,19 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas &&
-                (is_regolith || !transaction.is_system_transaction())
+            if transaction.gas_limit() > block_available_gas
+                && (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into())
+                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into());
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -217,8 +217,9 @@ where
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
                 // receipt hashes should be computed when set. The state transition process ensures
                 // this is only set for post-Canyon deposit transactions.
-                deposit_receipt_version: (transaction.is_deposit() &&
-                    self.chain_spec
+                deposit_receipt_version: (transaction.is_deposit()
+                    && self
+                        .chain_spec
                         .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
@@ -523,18 +524,20 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{b256, Address,FixedBytes, StorageKey, StorageValue, B256, LogData, Log};
+    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
+    use alloy_primitives::{
+        b256, Address, FixedBytes, Log, LogData, StorageKey, StorageValue, B256,
+    };
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
     use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
+    use reth_primitives::{Receipts, Request, Requests, TxType};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
-    use std::{collections::HashMap, str::FromStr};
-    use reth_primitives::{Receipts, Request, Requests, TxType};
-    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
     use revm::db::states::BundleState;
     use revm::primitives::AccountInfo;
+    use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();
