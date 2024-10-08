@@ -566,13 +566,13 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de: 'a, 'a> Deserialize<'de> for SealedBlocksWithSenders<'a> {
+    impl<'de> Deserialize<'de> for SealedBlocksWithSenders<'_> {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {
             Ok(Self(Cow::Owned(
-                BTreeMap::<BlockNumber, SealedBlockWithSenders<'a>>::deserialize(deserializer)
+                BTreeMap::<BlockNumber, SealedBlockWithSenders<'_>>::deserialize(deserializer)
                     .map(|blocks| blocks.into_iter().map(|(n, b)| (n, b.into())).collect())?,
             )))
         }
