@@ -290,7 +290,7 @@ impl DiskFileBlobStoreInner {
             self.blob_cache.lock().insert(tx, Arc::new(blob.clone()));
         }
 
-        blob.map(|e| Arc::new(e)).map_err(Err)
+        Ok(blob.map(|e| Arc::new(e)))
     }
 
     /// Returns the path to the blob file for the given transaction hash.
@@ -496,6 +496,7 @@ pub enum OpenDiskFileBlobStore {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
     use super::*;
     use std::sync::atomic::Ordering;
 
@@ -528,8 +529,10 @@ mod tests {
         // all cached
         for (tx, blob) in &blobs {
             assert!(store.is_cached(tx));
-            assert_eq!(store.get(*tx).unwrap().unwrap(), *blob);
+            let a = store.get(*tx).unwrap().unwrap().read().unwrap();
+            assert_eq!(a, *blob);
         }
+
         let all = store.get_all(all_hashes.clone()).unwrap();
         for (tx, blob) in all {
             assert!(blobs.contains(&(tx, blob)), "missing blob {tx:?}");
