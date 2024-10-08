@@ -1,11 +1,13 @@
 //! Optimism wrapper of [`Signature`]
 
 use alloy_primitives::{Parity, Signature, U256};
-use derive_more::Deref;
+use derive_more::{Deref, From};
+use serde::{Deserialize, Serialize};
 
 /// Optimism wrapper for [`Signature`].
-#[derive(Debug, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, Deref, Serialize, Deserialize)]
 pub struct OpSignature {
+    #[serde(flatten)]
     inner: Signature,
 }
 

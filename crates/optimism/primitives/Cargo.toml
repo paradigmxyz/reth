@@ -20,4 +20,4 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
-derive_more = { workspace = true, default-features = false, features = [ "deref" ] }
+derive_more = { workspace = true, features = [ "deref", "from" ] }
