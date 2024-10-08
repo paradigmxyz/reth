@@ -3,7 +3,7 @@
 use alloc::fmt;
 use core::hash::Hash;
 
-use alloy_consensus::{SignableTransaction, TxLegacy};
+use alloy_consensus::SignableTransaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, TxHash, B256};
 
@@ -64,63 +64,6 @@ pub trait SignedTransaction:
 
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
     fn length_without_header(&self) -> usize;
-
-    /// Decodes legacy transaction from the data buffer.
-    ///
-    /// This should be used _only_ be used in general transaction decoding methods, which have
-    /// already ensured that the input is a legacy transaction with the following format:
-    /// `rlp(legacy_tx)`
-    ///
-    /// Legacy transactions are encoded as lists, so the input should start with a RLP list header.
-    ///
-    /// This expects `rlp(legacy_tx)`
-    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
-    // so decoding methods do not need to manually advance the buffer
-    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self>;
-
-    /// Decodes legacy transaction from the data buffer into a tuple.
-    ///
-    /// This expects `rlp(legacy_tx)`
-    ///
-    /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
-    /// format expected.
-    fn decode_rlp_legacy_transaction_tuple(
-        data: &mut &[u8],
-    ) -> alloy_rlp::Result<(TxLegacy, TxHash, Self::Signature)> {
-        // keep this around, so we can use it to calculate the hash
-        let original_encoding = *data;
-
-        let header = alloy_rlp::Header::decode(data)?;
-        let remaining_len = data.len();
-
-        let transaction_payload_len = header.payload_length;
-
-        if transaction_payload_len > remaining_len {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
-        let mut transaction = TxLegacy {
-            nonce: alloy_rlp::Decodable::decode(data)?,
-            gas_price: alloy_rlp::Decodable::decode(data)?,
-            gas_limit: alloy_rlp::Decodable::decode(data)?,
-            to: alloy_rlp::Decodable::decode(data)?,
-            value: alloy_rlp::Decodable::decode(data)?,
-            input: alloy_rlp::Decodable::decode(data)?,
-            chain_id: None,
-        };
-        let (signature, extracted_id) = Self::Signature::decode_with_eip155_chain_id(data)?;
-        transaction.chain_id = extracted_id;
-
-        // check the new length, compared to the original length and the header length
-        let decoded = remaining_len - data.len();
-        if decoded != transaction_payload_len {
-            return Err(alloy_rlp::Error::UnexpectedLength)
-        }
-
-        let tx_length = header.payload_length + header.length();
-        let hash = keccak256(&original_encoding[..tx_length]);
-        Ok((transaction, hash, signature))
-    }
 
     /// Create a new signed transaction from a transaction and its signature.
     ///
