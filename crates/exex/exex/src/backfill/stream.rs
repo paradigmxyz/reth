@@ -29,10 +29,14 @@ const DEFAULT_BATCH_SIZE: usize = 100;
 type BackfillTaskIterator<T> =
     Box<dyn Iterator<Item = BackfillJobResult<T>> + Send + Sync + 'static>;
 
-/// Ordered queue of [`JoinHandle`]s that yield optional [`BackfillJobResult`]s along with the
-/// respective [`BackfillTaskIterator`]s.
-type BackfillTasks<T> =
-    FuturesOrdered<JoinHandle<(Option<BackfillJobResult<T>>, BackfillTaskIterator<T>)>>;
+/// Backfill task output.
+struct BackfillTaskOutput<T> {
+    job: BackfillTaskIterator<T>,
+    result: Option<BackfillJobResult<T>>,
+}
+
+/// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
+type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
 type SingleBlockStreamItem = (BlockWithSenders, BlockExecutionOutput<Receipt>);
 type BatchBlockStreamItem = Chain;
@@ -72,7 +76,10 @@ where
     /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
     /// [`BackfillTasks`] queue.
     fn push_task(&mut self, mut job: BackfillTaskIterator<T>) {
-        self.tasks.push_back(tokio::task::spawn_blocking(move || (job.next(), job)));
+        self.tasks.push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
+            result: job.next(),
+            job,
+        }));
     }
 
     /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
@@ -80,7 +87,7 @@ where
         while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
             let task_result = res.map_err(BlockExecutionError::other)?;
 
-            if let (Some(job_result), job) = task_result {
+            if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
                 // If the task returned a non-empty result, a new task advancing the job is created
                 // and pushed to the front of the queue.
                 self.push_task(job);
