@@ -382,12 +382,13 @@ where
                     .header_by_hash_or_number(block_hash.into())?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
 
+                let block_num_hash = BlockNumHash::new(header.number, block_hash);
+
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
                 let (receipts, maybe_block) = self
                     .receipts_and_maybe_block(
-                        block_hash,
-                        &header,
+                        &block_num_hash,
                         self.provider.chain_info()?.best_number,
                     )
                     .await?
@@ -400,7 +401,7 @@ where
                         .map(|b| ProviderOrSealedBlock::Block(b))
                         .unwrap_or_else(|| ProviderOrSealedBlock::Provider(&self.provider)),
                     &FilteredParams::new(Some(filter)),
-                    BlockNumHash::new(header.number, block_hash),
+                    block_num_hash,
                     &receipts,
                     false,
                     header.timestamp,
@@ -497,9 +498,9 @@ where
                             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
-                    if let Some((receipts, maybe_block)) = self
-                        .receipts_and_maybe_block(block_hash, header, chain_info.best_number)
-                        .await?
+                    let num_hash = BlockNumHash::new(header.number, block_hash);
+                    if let Some((receipts, maybe_block)) =
+                        self.receipts_and_maybe_block(&num_hash, chain_info.best_number).await?
                     {
                         append_matching_block_logs(
                             &mut all_logs,
@@ -507,7 +508,7 @@ where
                                 .map(|block| ProviderOrSealedBlock::Block(block))
                                 .unwrap_or_else(|| ProviderOrSealedBlock::Provider(&self.provider)),
                             &filter_params,
-                            BlockNumHash::new(header.number, block_hash),
+                            num_hash,
                             &receipts,
                             false,
                             header.timestamp,
@@ -532,16 +533,16 @@ where
     /// Retrieves receipts and block from cache if near the tip (4 blocks), otherwise only receipts.
     async fn receipts_and_maybe_block(
         &self,
-        block_hash: BlockHash,
-        header: &Header,
+        block_num_hash: &BlockNumHash,
         best_number: u64,
     ) -> Result<Option<(Arc<Vec<Receipt>>, Option<SealedBlock>)>, EthFilterError> {
-        let receipts_block = if (best_number - 4..=best_number).contains(&header.number) {
-            self.eth_cache.get_block_and_receipts(block_hash).await?
+        let receipts_block = if (best_number - 4..=best_number).contains(&block_num_hash.number) {
+            self.eth_cache
+                .get_block_and_receipts(block_num_hash.hash)
+                .await?
                 .map(|(b, r)| (r, Some(b)))
         } else {
-            self.eth_cache.get_receipts(block_hash).await?
-                .map(|r| (r, None))
+            self.eth_cache.get_receipts(block_num_hash.hash).await?.map(|r| (r, None))
         };
         Ok(receipts_block)
     }
