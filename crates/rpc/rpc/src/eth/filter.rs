@@ -24,9 +24,9 @@ use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
-    EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
+    EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
-use reth_rpc_server_types::ToRpcResult;
+use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -611,7 +611,7 @@ where
     /// Returns all new pending transactions received since the last poll.
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction>
     where
-        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
     {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
@@ -633,7 +633,7 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
+    T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>> + 'static,
     TxCompat: TransactionCompat + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
@@ -692,6 +692,55 @@ impl Iterator for BlockRangeInclusiveIter {
             return None
         }
         Some((start, end))
+    }
+}
+
+/// Errors that can occur in the handler implementation
+#[derive(Debug, thiserror::Error)]
+pub enum EthFilterError {
+    /// Filter not found.
+    #[error("filter not found")]
+    FilterNotFound(FilterId),
+    /// Invalid block range.
+    #[error("invalid block range params")]
+    InvalidBlockRangeParams,
+    /// Query scope is too broad.
+    #[error("query exceeds max block range {0}")]
+    QueryExceedsMaxBlocks(u64),
+    /// Query result is too large.
+    #[error("query exceeds max results {0}")]
+    QueryExceedsMaxResults(usize),
+    /// Error serving request in `eth_` namespace.
+    #[error(transparent)]
+    EthAPIError(#[from] EthApiError),
+    /// Error thrown when a spawned task failed to deliver a response.
+    #[error("internal filter error")]
+    InternalError,
+}
+
+impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
+    fn from(err: EthFilterError) -> Self {
+        match err {
+            EthFilterError::FilterNotFound(_) => rpc_error_with_code(
+                jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                "filter not found",
+            ),
+            err @ EthFilterError::InternalError => {
+                rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
+            }
+            EthFilterError::EthAPIError(err) => err.into(),
+            err @ (EthFilterError::InvalidBlockRangeParams |
+            EthFilterError::QueryExceedsMaxBlocks(_) |
+            EthFilterError::QueryExceedsMaxResults(_)) => {
+                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+            }
+        }
+    }
+}
+
+impl From<ProviderError> for EthFilterError {
+    fn from(err: ProviderError) -> Self {
+        Self::EthAPIError(err.into())
     }
 }
 

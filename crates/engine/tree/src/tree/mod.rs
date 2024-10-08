@@ -282,7 +282,7 @@ impl TreeState {
         }
 
         // remove trie updates that are below the finalized block
-        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num < finalized_num);
+        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num > finalized_num);
 
         // The only block that should remain at the `finalized` number now, is the finalized
         // block, if it exists.
@@ -1219,6 +1219,10 @@ where
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(Into::into))
                                 {
+                                    self.metrics
+                                        .engine
+                                        .failed_forkchoice_updated_response_deliveries
+                                        .increment(1);
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
@@ -1230,6 +1234,10 @@ where
                                     )
                                 })) {
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
                                 }
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {

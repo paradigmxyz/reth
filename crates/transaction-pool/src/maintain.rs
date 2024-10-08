@@ -18,6 +18,7 @@ use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -334,11 +335,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     .ok()
                                 })
                                 .map(|tx| {
-                                    <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled(tx)
+                                    <P as TransactionPool>::Transaction::from_pooled(tx.into())
                                 })
                         } else {
-
-                            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+                            <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -583,7 +583,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
         })
         .collect::<Vec<_>>();
 
@@ -606,7 +606,11 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.to_recovered_transaction().into_signed())
+        .map(|tx| {
+            let recovered: TransactionSignedEcRecovered =
+                tx.transaction.clone().into_consensus().into();
+            recovered.into_signed()
+        })
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
@@ -672,6 +676,7 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
@@ -695,7 +700,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
-        let tx = PooledTransactionsElement::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+        let tx = PooledTransactionsElement::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
         let transaction: EthPooledTransaction = tx.try_into_ecrecovered().unwrap().into();
         let tx_to_cmp = transaction.clone();

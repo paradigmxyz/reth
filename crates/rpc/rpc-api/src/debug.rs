@@ -140,11 +140,8 @@ pub trait DebugApi {
     /// The first argument is the block number or block hash. The second argument is a boolean
     /// indicating whether to include the preimages of keys in the response.
     #[method(name = "executionWitness")]
-    async fn debug_execution_witness(
-        &self,
-        block: BlockNumberOrTag,
-        include_preimages: bool,
-    ) -> RpcResult<ExecutionWitness>;
+    async fn debug_execution_witness(&self, block: BlockNumberOrTag)
+        -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will

@@ -51,9 +51,9 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-pub use op_alloy_consensus::TxDeposit;
+use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
-pub use reth_optimism_chainspec::optimism_deposit_tx_signature;
+use reth_optimism_chainspec::optimism_deposit_tx_signature;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
@@ -1640,7 +1640,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::Transaction> for Transaction<'a> {
+    impl SerializeAs<super::Transaction> for Transaction<'_> {
         fn serialize_as<S>(source: &super::Transaction, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -1700,7 +1700,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::TransactionSigned> for TransactionSigned<'a> {
+    impl SerializeAs<super::TransactionSigned> for TransactionSigned<'_> {
         fn serialize_as<S>(
             source: &super::TransactionSigned,
             serializer: S,

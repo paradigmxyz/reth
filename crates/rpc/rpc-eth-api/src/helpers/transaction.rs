@@ -22,8 +22,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
 
 use super::{
-    Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
-    SpawnBlocking,
+    Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
 };
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -98,7 +97,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             // Note: this is mostly used to fetch pooled transactions so we check the pool first
             if let Some(tx) =
-                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
                 return Ok(Some(tx))
             }
@@ -231,7 +230,7 @@ pub trait EthTransactions: LoadTransaction {
                     LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction)));
+                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction.into())));
                 }
             }
 
@@ -324,7 +323,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             let recovered = recover_raw_transaction(tx.clone())?;
             let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -344,7 +343,7 @@ pub trait EthTransactions: LoadTransaction {
         mut request: TransactionRequest,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + LoadFee + Call,
+        Self: EthApiSpec + LoadBlock + LoadPendingBlock + Call,
     {
         async move {
             let from = match request.from {
@@ -376,7 +375,7 @@ pub trait EthTransactions: LoadTransaction {
             let recovered =
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered).map_err(|_| EthApiError::TransactionConversionError)?;
+            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered.into()).map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
             let hash = LoadTransaction::pool(self)
@@ -518,7 +517,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
                 if let Some(tx) =
                     self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
                 {
-                    resp = Some(TransactionSource::Pool(tx));
+                    resp = Some(TransactionSource::Pool(tx.into()));
                 }
             }
 

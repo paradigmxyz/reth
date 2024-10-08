@@ -1832,6 +1832,13 @@ impl TransportRpcModules {
         }
     }
 
+    /// Removes the given methods from the configured http methods.
+    pub fn remove_http_methods(&mut self, methods: impl IntoIterator<Item = &'static str>) {
+        for name in methods {
+            self.remove_http_method(name);
+        }
+    }
+
     /// Removes the method with the given name from the configured ws methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
@@ -1844,6 +1851,13 @@ impl TransportRpcModules {
             ws_module.remove_method(method_name).is_some()
         } else {
             false
+        }
+    }
+
+    /// Removes the given methods from the configured ws methods.
+    pub fn remove_ws_methods(&mut self, methods: impl IntoIterator<Item = &'static str>) {
+        for name in methods {
+            self.remove_ws_method(name);
         }
     }
 
@@ -1862,6 +1876,13 @@ impl TransportRpcModules {
         }
     }
 
+    /// Removes the given methods from the configured ipc methods.
+    pub fn remove_ipc_methods(&mut self, methods: impl IntoIterator<Item = &'static str>) {
+        for name in methods {
+            self.remove_ipc_method(name);
+        }
+    }
+
     /// Removes the method with the given name from all configured transports.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
@@ -1871,6 +1892,56 @@ impl TransportRpcModules {
         let ipc_removed = self.remove_ipc_method(method_name);
 
         http_removed || ws_removed || ipc_removed
+    }
+
+    /// Replace the given [Methods] in the configured http methods.
+    ///
+    /// Fails if any of the methods in other is present already or if the method being removed is
+    /// not present
+    ///
+    /// Returns [Ok(false)] if no http transport is configured.
+    pub fn replace_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_http_methods(other.method_names());
+        self.merge_http(other)
+    }
+
+    /// Replace the given [Methods] in the configured ipc methods.
+    ///
+    /// Fails if any of the methods in other is present already or if the method being removed is
+    /// not present
+    ///
+    /// Returns [Ok(false)] if no ipc transport is configured.
+    pub fn replace_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_ipc_methods(other.method_names());
+        self.merge_ipc(other)
+    }
+
+    /// Replace the given [Methods] in the configured ws methods.
+    ///
+    /// Fails if any of the methods in other is present already or if the method being removed is
+    /// not present
+    ///
+    /// Returns [Ok(false)] if no ws transport is configured.
+    pub fn replace_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_ws_methods(other.method_names());
+        self.merge_ws(other)
+    }
+
+    /// Replaces the method with the given name from all configured transports.
+    ///
+    /// Returns `true` if the method was found and replaced, `false` otherwise
+    pub fn replace_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.replace_http(other.clone())?;
+        self.replace_ws(other.clone())?;
+        self.replace_ipc(other)?;
+        Ok(true)
     }
 }
 
@@ -2121,81 +2192,152 @@ mod tests {
         )
     }
 
-    mod remove_methods {
-        use super::*;
+    fn create_test_module() -> RpcModule<()> {
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module
+    }
 
-        fn create_test_module() -> RpcModule<()> {
-            let mut module = RpcModule::new(());
-            module.register_method("anything", |_, _, _| "succeed").unwrap();
-            module
-        }
+    #[test]
+    fn test_remove_http_method() {
+        let mut modules =
+            TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
+        // Remove a method that exists
+        assert!(modules.remove_http_method("anything"));
 
-        #[test]
-        fn test_remove_http_method() {
-            let mut modules =
-                TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
-            // Remove a method that exists
-            assert!(modules.remove_http_method("anything"));
+        // Remove a method that does not exist
+        assert!(!modules.remove_http_method("non_existent_method"));
 
-            // Remove a method that does not exist
-            assert!(!modules.remove_http_method("non_existent_method"));
+        // Verify that the method was removed
+        assert!(modules.http.as_ref().unwrap().method("anything").is_none());
+    }
 
-            // Verify that the method was removed
-            assert!(modules.http.as_ref().unwrap().method("anything").is_none());
-        }
+    #[test]
+    fn test_remove_ws_method() {
+        let mut modules =
+            TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
 
-        #[test]
-        fn test_remove_ws_method() {
-            let mut modules =
-                TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
+        // Remove a method that exists
+        assert!(modules.remove_ws_method("anything"));
 
-            // Remove a method that exists
-            assert!(modules.remove_ws_method("anything"));
+        // Remove a method that does not exist
+        assert!(!modules.remove_ws_method("non_existent_method"));
 
-            // Remove a method that does not exist
-            assert!(!modules.remove_ws_method("non_existent_method"));
+        // Verify that the method was removed
+        assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
+    }
 
-            // Verify that the method was removed
-            assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
-        }
+    #[test]
+    fn test_remove_ipc_method() {
+        let mut modules =
+            TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
 
-        #[test]
-        fn test_remove_ipc_method() {
-            let mut modules =
-                TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
+        // Remove a method that exists
+        assert!(modules.remove_ipc_method("anything"));
 
-            // Remove a method that exists
-            assert!(modules.remove_ipc_method("anything"));
+        // Remove a method that does not exist
+        assert!(!modules.remove_ipc_method("non_existent_method"));
 
-            // Remove a method that does not exist
-            assert!(!modules.remove_ipc_method("non_existent_method"));
+        // Verify that the method was removed
+        assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+    }
 
-            // Verify that the method was removed
-            assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
-        }
+    #[test]
+    fn test_remove_method_from_configured() {
+        let mut modules = TransportRpcModules {
+            http: Some(create_test_module()),
+            ws: Some(create_test_module()),
+            ipc: Some(create_test_module()),
+            ..Default::default()
+        };
 
-        #[test]
-        fn test_remove_method_from_configured() {
-            let mut modules = TransportRpcModules {
-                http: Some(create_test_module()),
-                ws: Some(create_test_module()),
-                ipc: Some(create_test_module()),
-                ..Default::default()
-            };
+        // Remove a method that exists
+        assert!(modules.remove_method_from_configured("anything"));
 
-            // Remove a method that exists
-            assert!(modules.remove_method_from_configured("anything"));
+        // Remove a method that was just removed (it does not exist anymore)
+        assert!(!modules.remove_method_from_configured("anything"));
 
-            // Remove a method that was just removed (it does not exist anymore)
-            assert!(!modules.remove_method_from_configured("anything"));
+        // Remove a method that does not exist
+        assert!(!modules.remove_method_from_configured("non_existent_method"));
 
-            // Remove a method that does not exist
-            assert!(!modules.remove_method_from_configured("non_existent_method"));
+        // Verify that the method was removed from all transports
+        assert!(modules.http.as_ref().unwrap().method("anything").is_none());
+        assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
+        assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+    }
 
-            // Verify that the method was removed from all transports
-            assert!(modules.http.as_ref().unwrap().method("anything").is_none());
-            assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
-            assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
-        }
+    #[test]
+    fn test_replace_http_method() {
+        let mut modules =
+            TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
+
+        let mut other_module = RpcModule::new(());
+        other_module.register_method("something", |_, _, _| "fails").unwrap();
+
+        assert!(modules.replace_http(other_module.clone()).unwrap());
+
+        assert!(modules.http.as_ref().unwrap().method("something").is_some());
+
+        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        assert!(modules.replace_http(other_module.clone()).unwrap());
+
+        assert!(modules.http.as_ref().unwrap().method("anything").is_some());
+    }
+    #[test]
+    fn test_replace_ipc_method() {
+        let mut modules =
+            TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
+
+        let mut other_module = RpcModule::new(());
+        other_module.register_method("something", |_, _, _| "fails").unwrap();
+
+        assert!(modules.replace_ipc(other_module.clone()).unwrap());
+
+        assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
+
+        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        assert!(modules.replace_ipc(other_module.clone()).unwrap());
+
+        assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
+    }
+    #[test]
+    fn test_replace_ws_method() {
+        let mut modules =
+            TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
+
+        let mut other_module = RpcModule::new(());
+        other_module.register_method("something", |_, _, _| "fails").unwrap();
+
+        assert!(modules.replace_ws(other_module.clone()).unwrap());
+
+        assert!(modules.ws.as_ref().unwrap().method("something").is_some());
+
+        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        assert!(modules.replace_ws(other_module.clone()).unwrap());
+
+        assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+    }
+
+    #[test]
+    fn test_replace_configured() {
+        let mut modules = TransportRpcModules {
+            http: Some(create_test_module()),
+            ws: Some(create_test_module()),
+            ipc: Some(create_test_module()),
+            ..Default::default()
+        };
+        let mut other_module = RpcModule::new(());
+        other_module.register_method("something", |_, _, _| "fails").unwrap();
+
+        assert!(modules.replace_configured(other_module).unwrap());
+
+        // Verify that the other_method was added
+        assert!(modules.http.as_ref().unwrap().method("something").is_some());
+        assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
+        assert!(modules.ws.as_ref().unwrap().method("something").is_some());
+
+        assert!(modules.http.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
     }
 }

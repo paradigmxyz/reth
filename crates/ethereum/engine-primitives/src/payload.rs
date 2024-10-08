@@ -89,7 +89,7 @@ impl BuiltPayload for EthBuiltPayload {
     }
 }
 
-impl<'a> BuiltPayload for &'a EthBuiltPayload {
+impl BuiltPayload for &EthBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
