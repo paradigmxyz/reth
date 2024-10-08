@@ -3231,48 +3231,74 @@ mod tests {
     }
 
     macro_rules! test_by_block_range {
-        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
-            let db_block_count = $database_blocks.len() as u64;
-            let in_mem_block_count = $in_memory_blocks.len() as u64;
+        ([$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
+            // Get the number methods being tested.
+            // Since each method tested will move a block from memory to storage, this ensures we have enough.
+            let extra_blocks = [$(stringify!($method)),*].len();
 
-            let db_range = 0..=db_block_count - 1;
-            let in_mem_range = db_block_count..=(in_mem_block_count + db_range.end());
+            let mut rng = generators::rng();
+            let (provider, mut database_blocks, mut in_memory_blocks, _) = provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT + extra_blocks,
+                BlockRangeParams {
+                    tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                    ..Default::default()
+                },
+            )?;
+            let provider = Arc::new(provider);
 
             $(
+                // Since data moves for each tried method, need to recalculate everything
+                let db_block_count = database_blocks.len() as u64;
+                let in_mem_block_count = in_memory_blocks.len() as u64;
+
+                let db_range = 0..=db_block_count - 1;
+                let in_mem_range = db_block_count..=(in_mem_block_count + db_range.end());
+
                 // Retrieve the expected database data
                 let database_data =
-                    $database_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
-                assert_eq!($provider.$method(db_range.clone())?, database_data);
+                    database_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!(provider.$method(db_range.clone())?, database_data);
 
                 // Retrieve the expected in-memory data
                 let in_memory_data =
-                    $in_memory_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
-                assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
+                    in_memory_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!(provider.$method(in_mem_range.clone())?, in_memory_data);
 
                 // Test partial in-memory range
                 assert_eq!(
-                    &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                    &provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
                     &in_memory_data[1..in_memory_data.len() - 1]
                 );
 
                 // Test range that spans database and in-memory
-                assert_eq!(
-                    $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
-                    database_data[database_data.len() - 2..]
-                        .iter()
-                        .chain(&in_memory_data[..in_memory_data.len() - 1])
-                        .cloned()
-                        .collect::<Vec<_>>()
-                );
+                {
+
+                    // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                    persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+
+                    assert_eq!(
+                        provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                        database_data[database_data.len() - 2..]
+                            .iter()
+                            .chain(&in_memory_data[..in_memory_data.len() - 1])
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    );
+
+                    // Adjust our blocks accordingly
+                    database_blocks.push(in_memory_blocks.remove(0));
+                }
 
                 // Test invalid range
                 let start_block_num = u64::MAX;
                 let end_block_num = u64::MAX;
-                let result = $provider.$method(start_block_num..=end_block_num-1)?;
+                let result = provider.$method(start_block_num..=end_block_num-1)?;
                 assert!(result.is_empty(), "No data should be found for an invalid block range");
 
                 // Test valid range with empty results
-                let result = $provider.$method(in_mem_range.end() + 10..=in_mem_range.end() + 20)?;
+                let result = provider.$method(in_mem_range.end() + 10..=in_mem_range.end() + 20)?;
                 assert!(result.is_empty(), "No data should be found for an empty block range");
             )*
         }};
@@ -3280,40 +3306,21 @@ mod tests {
 
     #[test]
     fn test_methods_by_block_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
-
         // todo(joshie) add canonical_hashes_range below after changing its interface into range
         // instead start end
-        test_by_block_range!(
-            provider,
-            database_blocks,
-            in_memory_blocks,
-            [
-                (headers_range, |block: &SealedBlock| block.header().clone()),
-                (sealed_headers_range, |block: &SealedBlock| block.header.clone()),
-                (block_range, |block: &SealedBlock| block.clone().unseal()),
-                (block_with_senders_range, |block: &SealedBlock| block
-                    .clone()
-                    .unseal()
-                    .with_senders_unchecked(vec![])),
-                (sealed_block_with_senders_range, |block: &SealedBlock| block
-                    .clone()
-                    .with_senders_unchecked(vec![])),
-                (transactions_by_block_range, |block: &SealedBlock| block
-                    .body
-                    .transactions
-                    .clone()),
-            ]
-        );
+        test_by_block_range!([
+            (headers_range, |block: &SealedBlock| block.header().clone()),
+            (sealed_headers_range, |block: &SealedBlock| block.header.clone()),
+            (block_range, |block: &SealedBlock| block.clone().unseal()),
+            (block_with_senders_range, |block: &SealedBlock| block
+                .clone()
+                .unseal()
+                .with_senders_unchecked(vec![])),
+            (sealed_block_with_senders_range, |block: &SealedBlock| block
+                .clone()
+                .with_senders_unchecked(vec![])),
+            (transactions_by_block_range, |block: &SealedBlock| block.body.transactions.clone()),
+        ]);
 
         Ok(())
     }
