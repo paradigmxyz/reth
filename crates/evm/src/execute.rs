@@ -191,8 +191,8 @@ pub trait BlockExecutionStrategy<DB> {
     fn finish(&self) -> BundleState;
 }
 
-/// A generic block executor that uses a [`BlockExecutionStrategyFactory`] to
-/// create and run block execution strategies.
+/// A generic block executor that uses a [`BlockExecutionStrategy`] to
+/// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
 pub struct GenericBlockExecutor<S, DB>
 where
