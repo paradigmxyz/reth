@@ -27,7 +27,6 @@ pub trait Block:
     + Default
     + serde::Serialize
     + for<'a> serde::Deserialize<'a>
-    + ops::Deref<Target: Header>
     + From<(Self::Header, Self::Body)>
     + Into<(Self::Header, Self::Body)>
 {
