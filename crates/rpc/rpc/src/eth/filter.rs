@@ -536,15 +536,14 @@ where
         header: &Header,
         best_number: u64,
     ) -> Result<Option<(Arc<Vec<Receipt>>, Option<SealedBlock>)>, EthFilterError> {
-        let cached_range = best_number - 4..=best_number;
-        if cached_range.contains(&header.number) {
-            return Ok(self
-                .eth_cache
-                .get_block_and_receipts(block_hash)
-                .await?
-                .map(|(b, r)| (r, Some(b))))
-        }
-        Ok(self.eth_cache.get_receipts(block_hash).await?.map(|r| (r, None)))
+        let receipts_block = if (best_number - 4..=best_number).contains(&header.number) {
+            self.eth_cache.get_block_and_receipts(block_hash).await?
+                .map(|(b, r)| (r, Some(b)))
+        } else {
+            self.eth_cache.get_receipts(block_hash).await?
+                .map(|r| (r, None))
+        };
+        Ok(receipts_block)
     }
 }
 
