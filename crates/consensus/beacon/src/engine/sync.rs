@@ -551,7 +551,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(&client, SealedHeader::default(), 0..10);
+        insert_headers_into_client(&client, SealedHeader::<Header>::default(), 0..10);
         // force the pipeline to be "done" after 5 blocks
         let pipeline = TestPipelineBuilder::new()
             .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {

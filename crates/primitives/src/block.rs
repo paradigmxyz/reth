@@ -297,16 +297,25 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
-pub struct SealedBlock {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader,
+    pub header: SealedHeader<H>,
     /// Block body.
-    pub body: BlockBody,
+    pub body: B,
+}
+
+impl<H, B> Default for SealedBlock<H, B>
+where
+    H: Default + Sealable,
+    B: Default,
+{
+    fn default() -> Self {
+        Self { header: SealedHeader::<H>::default(), body: Default::default() }
+    }
 }
 
 impl SealedBlock {
@@ -477,6 +486,20 @@ impl From<SealedBlock> for Block {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
+where
+    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
+    B: for<'b> arbitrary::Arbitrary<'b>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header = SealedHeader::<H>::arbitrary(u)?;
+        let body = B::arbitrary(u)?;
+
+        Ok(Self { header, body })
+    }
+}
+
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders {
@@ -544,7 +567,7 @@ impl SealedBlockWithSenders {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = SealedBlock::arbitrary(u)?;
+        let block: SealedBlock<Header, BlockBody> = SealedBlock::arbitrary(u)?;
 
         let senders = block
             .body
@@ -1133,7 +1156,7 @@ mod tests {
 
     #[test]
     fn test_default_seal() {
-        let block = SealedBlock::default();
+        let block = SealedBlock::<Header, BlockBody>::default();
         let sealed = block.hash();
         let block = block.unseal();
         let block = block.seal_slow();
