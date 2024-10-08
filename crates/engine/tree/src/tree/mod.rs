@@ -282,7 +282,7 @@ impl TreeState {
         }
 
         // remove trie updates that are below the finalized block
-        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num < finalized_num);
+        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num > finalized_num);
 
         // The only block that should remain at the `finalized` number now, is the finalized
         // block, if it exists.
