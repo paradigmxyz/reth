@@ -218,8 +218,7 @@ where
                 // receipt hashes should be computed when set. The state transition process ensures
                 // this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: (transaction.is_deposit() &&
-                    self
-                        .chain_spec
+                    self.chain_spec
                         .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
@@ -537,8 +536,8 @@ mod tests {
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
-    use std::{collections::HashMap, str::FromStr};
     use revm::{db::states::BundleState, primitives::AccountInfo};
+    use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();
