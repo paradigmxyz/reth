@@ -30,8 +30,8 @@ pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
 /// Returns an error if the caller has insufficient funds.
 /// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
 ///
-/// Note: this takes [Database] because we the loaded sender can be reused for the following
-/// operation like `eth_call`.
+/// Note: this takes the mut [Database] trait because the loaded sender can be reused for the
+/// following operation like `eth_call`.
 pub fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
