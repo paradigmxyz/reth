@@ -20,8 +20,6 @@
       linuxPackages = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
         libclang.lib
         llvmPackages.libcxxClang
-        clang
-        openssl
       ]);
       overlays = [ (import inputs.rust-overlay) ];
       pkgs = import nixpkgs {
@@ -37,6 +35,7 @@
     in
     {
       devShell = pkgs.mkShell {
+        hardeningDisable = [ "fortify" ];
         buildInputs = with pkgs; [
           macPackages
           linuxPackages
