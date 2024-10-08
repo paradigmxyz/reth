@@ -44,7 +44,7 @@ where
     type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
 }
 
-/// A default payload type for [`EthEngineTypes`]
+/// A default payload type for [`OptimismEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct OptimismPayloadTypes;
