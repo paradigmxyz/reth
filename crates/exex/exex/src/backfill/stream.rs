@@ -64,15 +64,14 @@ where
         self
     }
 
-    /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result that
-    /// gets returned from this function.
-    ///
-    /// If the task returned a non-empty result, a new task advancing the job is
-    /// created and pushed to the front of the queue.
+    /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
     fn poll_next_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<BackfillTaskOutput<T>>> {
         while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
             let task_result = res.map_err(BlockExecutionError::other)?;
+
             if let (mut job, Some(job_result)) = task_result {
+                // If the task returned a non-empty result, a new task advancing the job is created
+                // and pushed to the front of the queue.
                 self.tasks.push_front(tokio::task::spawn_blocking(move || {
                     let result = job.next();
                     (job, result)
@@ -98,24 +97,25 @@ where
 
         // Spawn new tasks only if we are below the parallelism configured.
         while this.tasks.len() < this.parallelism {
-            // If we have a block number, then we can spawn a new task for that block
-            if let Some(block_number) = this.range.next() {
-                debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?block_number, "Spawning new single block backfill task");
-                let mut job = Box::new(SingleBlockBackfillJob {
-                    executor: this.executor.clone(),
-                    provider: this.provider.clone(),
-                    range: block_number..=block_number,
-                    stream_parallelism: this.parallelism,
-                }) as BackfillTaskIterator<_>;
-                let task = tokio::task::spawn_blocking(move || {
-                    let result = job.next();
-                    (job, result)
-                });
-                this.tasks.push_back(task);
-            } else {
+            // Get the next block number from the range. If it is empty, we are done.
+            let Some(block_number) = this.range.next() else {
                 debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more single blocks to backfill");
                 break;
-            }
+            };
+
+            // Spawn a new task for that block
+            debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?block_number, "Spawning new single block backfill task");
+            let mut job = Box::new(SingleBlockBackfillJob {
+                executor: this.executor.clone(),
+                provider: this.provider.clone(),
+                range: block_number..=block_number,
+                stream_parallelism: this.parallelism,
+            }) as BackfillTaskIterator<_>;
+            let task = tokio::task::spawn_blocking(move || {
+                let result = job.next();
+                (job, result)
+            });
+            this.tasks.push_back(task);
         }
 
         this.poll_next_task(cx)
@@ -139,27 +139,27 @@ where
             let start = range.next();
             let range_bounds = start.zip(range.last().or(start));
 
-            // If we have range bounds, then we can spawn a new task for that range
-            if let Some((first, last)) = range_bounds {
-                let range = first..=last;
-                debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
-                let mut job = Box::new(BackfillJob {
-                    executor: this.executor.clone(),
-                    provider: this.provider.clone(),
-                    prune_modes: this.prune_modes.clone(),
-                    thresholds: this.thresholds.clone(),
-                    range,
-                    stream_parallelism: this.parallelism,
-                }) as BackfillTaskIterator<_>;
-                let task = tokio::task::spawn_blocking(move || {
-                    let result = job.next();
-                    (job, result)
-                });
-                this.tasks.push_back(task);
-            } else {
+            // Create the range from the range bounds. If it is empty, we are done.
+            let Some(range) = range_bounds.map(|(first, last)| first..=last) else {
                 debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more block batches to backfill");
                 break;
-            }
+            };
+
+            // Spawn a new task for that range
+            debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
+            let mut job = Box::new(BackfillJob {
+                executor: this.executor.clone(),
+                provider: this.provider.clone(),
+                prune_modes: this.prune_modes.clone(),
+                thresholds: this.thresholds.clone(),
+                range,
+                stream_parallelism: this.parallelism,
+            }) as BackfillTaskIterator<_>;
+            let task = tokio::task::spawn_blocking(move || {
+                let result = job.next();
+                (job, result)
+            });
+            this.tasks.push_back(task);
         }
 
         this.poll_next_task(cx)
