@@ -716,6 +716,7 @@ pub trait Call: LoadState + SpawnBlocking {
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.gas;
         let tx_request_gas_price = request.gas_price;
+        // the gas limit of the corresponding block
         let block_env_gas_limit = block.gas_limit;
 
         // Determine the highest possible gas limit, considering both the request's specified limit
@@ -1083,6 +1084,8 @@ pub trait Call: LoadState + SpawnBlocking {
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
     ///  - `nonce` is set to `None`
+    ///
+    /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
     fn prepare_call_env<DB>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
@@ -1101,6 +1104,9 @@ pub trait Call: LoadState + SpawnBlocking {
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
             )
         }
+
+        // apply configured gas cap
+        block.gas_limit = U256::from(self.call_gas_limit());
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>

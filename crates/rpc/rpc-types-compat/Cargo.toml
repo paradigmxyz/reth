@@ -27,6 +27,3 @@ alloy-rpc-types-engine.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-
-[features]
-optimism = ["reth-primitives/optimism"]
