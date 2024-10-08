@@ -463,8 +463,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             let block_tx_count = block_state.block_ref().block().body.transactions.len();
             let remaining = (tx_range.end() - tx_range.start() + 1) as usize;
 
-            // If the transaction range start is higher than this block last transaction, advance
-            if *tx_range.start() > in_memory_tx_num + block_tx_count as u64 - 1 {
+            // If the transaction range start is equal or higher than the next block first
+            // transaction, advance
+            if *tx_range.start() >= in_memory_tx_num + block_tx_count as u64 {
                 in_memory_tx_num += block_tx_count as u64;
                 continue
             }
