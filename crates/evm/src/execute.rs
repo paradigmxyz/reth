@@ -9,11 +9,7 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::BlockNumber;
-use core::{
-    cell::{Ref, RefCell},
-    fmt::Display,
-    marker::PhantomData,
-};
+use core::{cell::RefCell, fmt::Display, marker::PhantomData};
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, State};
@@ -186,7 +182,7 @@ pub trait BlockExecutionStrategy<DB> {
     fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error>;
 
     /// Returns a reference to the current state.
-    fn state_ref(&self) -> Ref<'_, State<DB>>;
+    fn state_ref(&self) -> &State<DB>;
 
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(self, hook: Option<Box<dyn OnStateHook>>) -> Self;
@@ -255,7 +251,7 @@ where
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
         let requests = strategy.apply_post_execution_changes()?;
 
-        witness(&strategy.state_ref());
+        witness(strategy.state_ref());
 
         let state = strategy.finish();
 
@@ -289,10 +285,9 @@ mod tests {
     use super::*;
     use alloy_eips::eip6110::DepositRequest;
     use alloy_primitives::U256;
-    use core::cell::{Ref, RefCell};
     use reth_chainspec::{ChainSpec, MAINNET};
     use revm::db::{CacheDB, EmptyDBTyped};
-    use std::{marker::PhantomData, sync::Arc};
+    use std::sync::Arc;
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
@@ -381,7 +376,7 @@ mod tests {
         // factory can use them in a real use case.
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
-        state: RefCell<State<DB>>,
+        state: State<DB>,
         execute_transactions_result: (Vec<Receipt>, u64),
         apply_post_execution_changes_result: Vec<Request>,
         finish_result: BundleState,
@@ -405,8 +400,8 @@ mod tests {
             Ok(self.apply_post_execution_changes_result.clone())
         }
 
-        fn state_ref(&self) -> Ref<'_, State<DB>> {
-            self.state.borrow()
+        fn state_ref(&self) -> &State<DB> {
+            &self.state
         }
 
         fn with_state_hook(self, _hook: Option<Box<dyn OnStateHook>>) -> Self {
@@ -450,7 +445,7 @@ mod tests {
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
             finish_result: expected_finish_result.clone(),
-            state: RefCell::new(state),
+            state,
         };
 
         let executor = GenericBlockExecutor::new(strategy);
