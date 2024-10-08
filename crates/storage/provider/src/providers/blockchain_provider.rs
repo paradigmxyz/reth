@@ -3116,66 +3116,96 @@ mod tests {
     }
 
     macro_rules! test_by_tx_range {
-        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
-            let db_tx_count =
-                $database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
-            let in_mem_tx_count =
-                $in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+        ([$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
 
-            let db_range = 0..=(db_tx_count - 1);
-            let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
+            // Get the number methods being tested.
+            // Since each method tested will move a block from memory to storage, this ensures we have enough.
+            let extra_blocks = [$(stringify!($method)),*].len();
+
+            let mut rng = generators::rng();
+            let (provider, mut database_blocks, mut in_memory_blocks, receipts) = provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT + extra_blocks,
+                BlockRangeParams {
+                    tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                    ..Default::default()
+                },
+            )?;
+            let provider = Arc::new(provider);
 
             $(
+                // Since data moves for each tried method, need to recalculate everything
+                let db_tx_count =
+                    database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+                let in_mem_tx_count =
+                    in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+
+                let db_range = 0..=(db_tx_count - 1);
+                let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
+
                 // Retrieve the expected database data
                 let database_data =
-                    $database_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
-                assert_eq!($provider.$method(db_range.clone())?, database_data);
+                    database_blocks.iter().flat_map(|b| $data_extractor(b, &receipts)).collect::<Vec<_>>();
+                assert_eq!(provider.$method(db_range.clone())?, database_data, "full db data");
 
                 // Retrieve the expected in-memory data
                 let in_memory_data =
-                    $in_memory_blocks.iter().flat_map(|b| $data_extractor(b)).collect::<Vec<_>>();
-                assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
+                    in_memory_blocks.iter().flat_map(|b| $data_extractor(b, &receipts)).collect::<Vec<_>>();
+                assert_eq!(provider.$method(in_mem_range.clone())?, in_memory_data, "full mem data");
 
                 // Test partial in-memory range
                 assert_eq!(
-                    &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
-                    &in_memory_data[1..in_memory_data.len() - 1]
+                    &provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                    &in_memory_data[1..in_memory_data.len() - 1],
+                    "partial mem data"
                 );
 
                 // Test range in in-memory to unbounded end
-                assert_eq!($provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..]);
+                assert_eq!(provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..], "unbounded mem data");
 
                 // Test last element in-memory
-                assert_eq!($provider.$method(in_mem_range.end()..)?, &in_memory_data[in_memory_data.len() -1 ..]);
-
-                // Test range that spans database and in-memory
-                assert_eq!(
-                    $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
-                    database_data[database_data.len() - 2..]
-                        .iter()
-                        .chain(&in_memory_data[..in_memory_data.len() - 1])
-                        .cloned()
-                        .collect::<Vec<_>>()
-                );
+                assert_eq!(provider.$method(in_mem_range.end()..)?, &in_memory_data[in_memory_data.len() -1 ..], "last mem data");
 
                 // Test range that spans database and in-memory with unbounded end
                 assert_eq!(
-                    $provider.$method(in_mem_range.start() - 2..)?,
+                    provider.$method(in_mem_range.start() - 2..)?,
                     database_data[database_data.len() - 2..]
                         .iter()
                         .chain(&in_memory_data[..])
                         .cloned()
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>(),
+                    "unbounded span data"
                 );
+
+                // Test range that spans database and in-memory
+                #[allow(unused_assignments)]
+                {
+                    // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                    persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+
+                    assert_eq!(
+                        provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                        database_data[database_data.len() - 2..]
+                            .iter()
+                            .chain(&in_memory_data[..in_memory_data.len() - 1])
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        "span data"
+                    );
+
+                    // Adjust our blocks accordingly
+                    database_blocks.push(in_memory_blocks.remove(0));
+                }
 
                 // Test invalid range
                 let start_tx_num = u64::MAX;
                 let end_tx_num = u64::MAX;
-                let result = $provider.$method(start_tx_num..end_tx_num)?;
+                let result = provider.$method(start_tx_num..end_tx_num)?;
                 assert!(result.is_empty(), "No data should be found for an invalid transaction range");
 
                 // Test empty range
-                let result = $provider.$method(in_mem_range.end()+10..in_mem_range.end()+20)?;
+                let result = provider.$method(in_mem_range.end()+10..in_mem_range.end()+20)?;
                 assert!(result.is_empty(), "No data should be found for an empty transaction range");
             )*
         }};
@@ -3183,80 +3213,93 @@ mod tests {
 
     #[test]
     fn test_methods_by_tx_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
-
-        test_by_tx_range!(
-            provider,
-            database_blocks,
-            in_memory_blocks,
-            [
-                (senders_by_tx_range, |block: &SealedBlock| block.senders().unwrap()),
-                (transactions_by_tx_range, |block: &SealedBlock| block
-                    .body
-                    .transactions
-                    .iter()
-                    .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
-                    .collect::<Vec<_>>()),
-                (receipts_by_tx_range, |block: &SealedBlock| receipts[block.number as usize]
-                    .clone())
-            ]
-        );
+        test_by_tx_range!([
+            (senders_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
+                .senders()
+                .unwrap()),
+            (transactions_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
+                .body
+                .transactions
+                .iter()
+                .map(|tx| Into::<TransactionSignedNoHash>::into(tx.clone()))
+                .collect::<Vec<_>>()),
+            (receipts_by_tx_range, |block: &SealedBlock, receipts: &Vec<Vec<Receipt>>| receipts
+                [block.number as usize]
+                .clone())
+        ]);
 
         Ok(())
     }
 
     macro_rules! test_by_block_range {
-        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
-            let db_block_count = $database_blocks.len() as u64;
-            let in_mem_block_count = $in_memory_blocks.len() as u64;
+        ([$(($method:ident, $data_extractor:expr)),* $(,)?]) => {{
+            // Get the number methods being tested.
+            // Since each method tested will move a block from memory to storage, this ensures we have enough.
+            let extra_blocks = [$(stringify!($method)),*].len();
 
-            let db_range = 0..=db_block_count - 1;
-            let in_mem_range = db_block_count..=(in_mem_block_count + db_range.end());
+            let mut rng = generators::rng();
+            let (provider, mut database_blocks, mut in_memory_blocks, _) = provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT + extra_blocks,
+                BlockRangeParams {
+                    tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                    ..Default::default()
+                },
+            )?;
+            let provider = Arc::new(provider);
 
             $(
+                // Since data moves for each tried method, need to recalculate everything
+                let db_block_count = database_blocks.len() as u64;
+                let in_mem_block_count = in_memory_blocks.len() as u64;
+
+                let db_range = 0..=db_block_count - 1;
+                let in_mem_range = db_block_count..=(in_mem_block_count + db_range.end());
+
                 // Retrieve the expected database data
                 let database_data =
-                    $database_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
-                assert_eq!($provider.$method(db_range.clone())?, database_data);
+                    database_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!(provider.$method(db_range.clone())?, database_data);
 
                 // Retrieve the expected in-memory data
                 let in_memory_data =
-                    $in_memory_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
-                assert_eq!($provider.$method(in_mem_range.clone())?, in_memory_data);
+                    in_memory_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                assert_eq!(provider.$method(in_mem_range.clone())?, in_memory_data);
 
                 // Test partial in-memory range
                 assert_eq!(
-                    &$provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
+                    &provider.$method(in_mem_range.start() + 1..=in_mem_range.end() - 1)?,
                     &in_memory_data[1..in_memory_data.len() - 1]
                 );
 
                 // Test range that spans database and in-memory
-                assert_eq!(
-                    $provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
-                    database_data[database_data.len() - 2..]
-                        .iter()
-                        .chain(&in_memory_data[..in_memory_data.len() - 1])
-                        .cloned()
-                        .collect::<Vec<_>>()
-                );
+                {
+
+                    // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                    persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+
+                    assert_eq!(
+                        provider.$method(in_mem_range.start() - 2..=in_mem_range.end() - 1)?,
+                        database_data[database_data.len() - 2..]
+                            .iter()
+                            .chain(&in_memory_data[..in_memory_data.len() - 1])
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    );
+
+                    // Adjust our blocks accordingly
+                    database_blocks.push(in_memory_blocks.remove(0));
+                }
 
                 // Test invalid range
                 let start_block_num = u64::MAX;
                 let end_block_num = u64::MAX;
-                let result = $provider.$method(start_block_num..=end_block_num-1)?;
+                let result = provider.$method(start_block_num..=end_block_num-1)?;
                 assert!(result.is_empty(), "No data should be found for an invalid block range");
 
                 // Test valid range with empty results
-                let result = $provider.$method(in_mem_range.end() + 10..=in_mem_range.end() + 20)?;
+                let result = provider.$method(in_mem_range.end() + 10..=in_mem_range.end() + 20)?;
                 assert!(result.is_empty(), "No data should be found for an empty block range");
             )*
         }};
@@ -3264,40 +3307,21 @@ mod tests {
 
     #[test]
     fn test_methods_by_block_range() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
-
         // todo(joshie) add canonical_hashes_range below after changing its interface into range
         // instead start end
-        test_by_block_range!(
-            provider,
-            database_blocks,
-            in_memory_blocks,
-            [
-                (headers_range, |block: &SealedBlock| block.header().clone()),
-                (sealed_headers_range, |block: &SealedBlock| block.header.clone()),
-                (block_range, |block: &SealedBlock| block.clone().unseal()),
-                (block_with_senders_range, |block: &SealedBlock| block
-                    .clone()
-                    .unseal()
-                    .with_senders_unchecked(vec![])),
-                (sealed_block_with_senders_range, |block: &SealedBlock| block
-                    .clone()
-                    .with_senders_unchecked(vec![])),
-                (transactions_by_block_range, |block: &SealedBlock| block
-                    .body
-                    .transactions
-                    .clone()),
-            ]
-        );
+        test_by_block_range!([
+            (headers_range, |block: &SealedBlock| block.header().clone()),
+            (sealed_headers_range, |block: &SealedBlock| block.header.clone()),
+            (block_range, |block: &SealedBlock| block.clone().unseal()),
+            (block_with_senders_range, |block: &SealedBlock| block
+                .clone()
+                .unseal()
+                .with_senders_unchecked(vec![])),
+            (sealed_block_with_senders_range, |block: &SealedBlock| block
+                .clone()
+                .with_senders_unchecked(vec![])),
+            (transactions_by_block_range, |block: &SealedBlock| block.body.transactions.clone()),
+        ]);
 
         Ok(())
     }
@@ -3333,39 +3357,72 @@ mod tests {
     /// ( `NUMBER_ARGUMENTS`, METHOD, FN -> ((`METHOD_ARGUMENT(s)`,...), `EXPECTED_RESULT`),
     /// `INVALID_ARGUMENTS`)
     macro_rules! test_non_range {
-    ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, $receipts:expr, [$(($arg_count:ident, $method:ident, $item_extractor:expr, $invalid_args:expr)),* $(,)?]) => {{
+    ([$(($arg_count:ident, $method:ident, $item_extractor:expr, $invalid_args:expr)),* $(,)?]) => {{
+
+        // Get the number methods being tested.
+        // Since each method tested will move a block from memory to storage, this ensures we have enough.
+        let extra_blocks = [$(stringify!($arg_count)),*].len();
+
+        let mut rng = generators::rng();
+        let (provider, mut database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT + extra_blocks,
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
+        )?;
+        let provider = Arc::new(provider);
+
+        let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
+
         $(
             let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
             let tx_num = |block: &SealedBlock| {
-                $database_blocks
+                database_blocks
                     .iter()
-                    .chain($in_memory_blocks.iter())
+                    .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
                     .map(|b| b.body.transactions.len())
                     .sum::<usize>() as u64
             };
 
             // Ensure that the first generated in-memory block exists
-            // In the future this block will be persisted to disk and removed from memory AFTER the firsk database query.
-            // This ensures that we query the in-memory state before the database avoiding any race condition.
             {
-                call_method!($arg_count, $provider, $method, $item_extractor, tx_num, tx_hash, &$in_memory_blocks[0], &$receipts);
+                // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
+
+                call_method!($arg_count, provider, $method, $item_extractor, tx_num, tx_hash, &in_memory_blocks[0], &receipts);
+
+                // Move the block as well in our own structures
+                database_blocks.push(in_memory_blocks.pop_front().unwrap());
             }
+
+            // database_blocks is changed above
+            let tx_num = |block: &SealedBlock| {
+                database_blocks
+                    .iter()
+                    .chain(in_memory_blocks.iter())
+                    .take_while(|b| b.number < block.number)
+                    .map(|b| b.body.transactions.len())
+                    .sum::<usize>() as u64
+            };
 
             // Invalid/Non-existent argument should return `None`
             {
-                call_method!($arg_count, $provider, $method, |_,_,_,_| ( ($invalid_args, None)), tx_num, tx_hash, &$in_memory_blocks[0], &$receipts);
+                call_method!($arg_count, provider, $method, |_,_,_,_| ( ($invalid_args, None)), tx_num, tx_hash, &in_memory_blocks[0], &receipts);
             }
 
             // Check that the item is only in memory and not in database
             {
-                let last_mem_block = &$in_memory_blocks[$in_memory_blocks.len() - 1];
+                let last_mem_block = &in_memory_blocks[in_memory_blocks.len() - 1];
 
-                let (args, expected_item) = $item_extractor(last_mem_block, tx_num(last_mem_block), tx_hash(last_mem_block), &$receipts);
-                call_method!($arg_count, $provider, $method, |_,_,_,_| (args.clone(), expected_item), tx_num, tx_hash, last_mem_block, &$receipts);
+                let (args, expected_item) = $item_extractor(last_mem_block, tx_num(last_mem_block), tx_hash(last_mem_block), &receipts);
+                call_method!($arg_count, provider, $method, |_,_,_,_| (args.clone(), expected_item), tx_num, tx_hash, last_mem_block, &receipts);
 
                 // Ensure the item is not in storage
-                call_method!($arg_count, $provider.database, $method, |_,_,_,_| ( (args, None)), tx_num, tx_hash, last_mem_block, &$receipts);
+                call_method!($arg_count, provider.database, $method, |_,_,_,_| ( (args, None)), tx_num, tx_hash, last_mem_block, &receipts);
             }
         )*
     }};
@@ -3375,265 +3432,232 @@ mod tests {
     fn test_non_range_methods() -> eyre::Result<()> {
         let test_tx_index = 0;
 
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
-
-        test_non_range!(
-            provider,
-            database_blocks,
-            in_memory_blocks,
-            receipts,
-            [
-                // TODO: header should use B256 like others instead of &B256
-                // (
-                //     ONE,
-                //     header,
-                //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
-                //     (&B256::random())
-                // ),
-                (
-                    ONE,
-                    header_by_number,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(block.header.header().clone())
-                    ),
-                    u64::MAX
+        test_non_range!([
+            // TODO: header should use B256 like others instead of &B256
+            // (
+            //     ONE,
+            //     header,
+            //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
+            //     (&B256::random())
+            // ),
+            (
+                ONE,
+                header_by_number,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.header.header().clone())
                 ),
-                (
-                    ONE,
-                    sealed_header,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(block.header.clone())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                sealed_header,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.header.clone())
                 ),
-                (
-                    ONE,
-                    block_hash,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(block.hash())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                block_hash,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.hash())
                 ),
-                (
-                    ONE,
-                    block_number,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.hash(),
-                        Some(block.number)
-                    ),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                block_number,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.hash(),
+                    Some(block.number)
                 ),
-                (
-                    ONE,
-                    block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(block.clone().unseal())
-                    ),
-                    BlockHashOrNumber::Hash(B256::random())
+                B256::random()
+            ),
+            (
+                ONE,
+                block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(block.clone().unseal())
                 ),
-                (
-                    ONE,
-                    block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(block.clone().unseal())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                BlockHashOrNumber::Hash(B256::random())
+            ),
+            (
+                ONE,
+                block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(block.clone().unseal())
                 ),
-                (
-                    ONE,
-                    block_body_indices,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        block.number,
-                        Some(StoredBlockBodyIndices {
-                            first_tx_num: tx_num,
-                            tx_count: block.body.transactions.len() as u64
-                        })
-                    ),
-                    u64::MAX
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                block_body_indices,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(StoredBlockBodyIndices {
+                        first_tx_num: tx_num,
+                        tx_count: block.body.transactions.len() as u64
+                    })
                 ),
-                (
-                    TWO,
-                    block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                        block.clone().unseal().with_recovered_senders()
-                    ),
-                    (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+                u64::MAX
+            ),
+            (
+                TWO,
+                block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
+                    block.clone().unseal().with_recovered_senders()
                 ),
-                (
-                    TWO,
-                    block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                        block.clone().unseal().with_recovered_senders()
-                    ),
-                    (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+                (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
+                    block.clone().unseal().with_recovered_senders()
                 ),
-                (
-                    TWO,
-                    sealed_block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                        Some(
-                            block
-                                .clone()
-                                .unseal()
-                                .with_recovered_senders()
-                                .unwrap()
-                                .seal(block.hash())
-                        )
-                    ),
-                    (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+                (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                sealed_block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
+                    Some(
+                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                    )
                 ),
-                (
-                    TWO,
-                    sealed_block_with_senders,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                        Some(
-                            block
-                                .clone()
-                                .unseal()
-                                .with_recovered_senders()
-                                .unwrap()
-                                .seal(block.hash())
-                        )
-                    ),
-                    (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+                (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                sealed_block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
+                    Some(
+                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                    )
                 ),
-                (
-                    ONE,
-                    transaction_id,
-                    |_: &SealedBlock, tx_num: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_hash,
-                        Some(tx_num)
-                    ),
-                    B256::random()
+                (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+            ),
+            (
+                ONE,
+                transaction_id,
+                |_: &SealedBlock, tx_num: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(tx_num)
                 ),
-                (
-                    ONE,
-                    transaction_by_id,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(block.body.transactions[test_tx_index].clone())
-                    ),
-                    u64::MAX
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_by_id,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    transaction_by_id_no_hash,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(Into::<TransactionSignedNoHash>::into(
-                            block.body.transactions[test_tx_index].clone()
-                        ))
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                transaction_by_id_no_hash,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(Into::<TransactionSignedNoHash>::into(
+                        block.body.transactions[test_tx_index].clone()
+                    ))
                 ),
-                (
-                    ONE,
-                    transaction_by_hash,
-                    |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_hash,
-                        Some(block.body.transactions[test_tx_index].clone())
-                    ),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                transaction_by_hash,
+                |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    transaction_block,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(block.number)
-                    ),
-                    u64::MAX
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_block,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(block.number)
                 ),
-                (
-                    ONE,
-                    transactions_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(block.body.transactions.clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                u64::MAX
+            ),
+            (
+                ONE,
+                transactions_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(block.body.transactions.clone())
                 ),
-                (
-                    ONE,
-                    transactions_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(block.body.transactions.clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                transactions_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(block.body.transactions.clone())
                 ),
-                (
-                    ONE,
-                    transaction_sender,
-                    |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        block.body.transactions[test_tx_index].recover_signer()
-                    ),
-                    u64::MAX
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                transaction_sender,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    block.body.transactions[test_tx_index].recover_signer()
                 ),
-                (
-                    ONE,
-                    receipt,
-                    |block: &SealedBlock,
-                     tx_num: TxNumber,
-                     _: B256,
-                     receipts: &Vec<Vec<Receipt>>| (
-                        tx_num,
-                        Some(receipts[block.number as usize][test_tx_index].clone())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                receipt,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(receipts[block.number as usize][test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    receipt_by_hash,
-                    |block: &SealedBlock,
-                     _: TxNumber,
-                     tx_hash: B256,
-                     receipts: &Vec<Vec<Receipt>>| (
-                        tx_hash,
-                        Some(receipts[block.number as usize][test_tx_index].clone())
-                    ),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                receipt_by_hash,
+                |block: &SealedBlock, _: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(receipts[block.number as usize][test_tx_index].clone())
                 ),
-                (
-                    ONE,
-                    receipts_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(receipts[block.number as usize].clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                B256::random()
+            ),
+            (
+                ONE,
+                receipts_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(receipts[block.number as usize].clone())
                 ),
-                (
-                    ONE,
-                    receipts_by_block,
-                    |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(receipts[block.number as usize].clone())
-                    ),
-                    BlockHashOrNumber::Hash(B256::random())
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                receipts_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(receipts[block.number as usize].clone())
                 ),
-                // TODO: withdrawals, requests, ommers
-            ]
-        );
+                BlockHashOrNumber::Hash(B256::random())
+            ),
+            // TODO: withdrawals, requests, ommers
+        ]);
 
         Ok(())
     }
