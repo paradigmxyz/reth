@@ -1,5 +1,6 @@
 //! utilities for working with revm
 
+use super::{EthApiError, EthResult, RpcInvalidTransactionError};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -7,21 +8,11 @@ use alloy_rpc_types::{
 };
 use revm::{
     db::CacheDB,
-    precompile::{PrecompileSpecId, Precompiles},
-    primitives::{db::DatabaseRef, Bytecode, SpecId, TxEnv},
+    primitives::{db::DatabaseRef, Bytecode, TxEnv},
     Database,
 };
 use revm_primitives::BlockEnv;
 use std::cmp::min;
-
-use super::{EthApiError, EthResult, RpcInvalidTransactionError};
-
-/// Returns the addresses of the precompiles corresponding to the `SpecId`.
-#[inline]
-pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
-    let spec = PrecompileSpecId::from_spec_id(spec_id);
-    Precompiles::new(spec).addresses().copied().map(Address::from)
-}
 
 /// Caps the configured [`TxEnv`] `gas_limit` with the allowance of the caller.
 pub fn cap_tx_gas_limit_with_caller_allowance<DB>(db: &mut DB, env: &mut TxEnv) -> EthResult<()>

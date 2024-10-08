@@ -29,7 +29,7 @@ use reth_rpc_eth_types::{
     error::ensure_success,
     revm_utils::{
         apply_block_overrides, apply_state_overrides, caller_gas_allowance,
-        cap_tx_gas_limit_with_caller_allowance, get_precompiles, CallFees,
+        cap_tx_gas_limit_with_caller_allowance, CallFees,
     },
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
