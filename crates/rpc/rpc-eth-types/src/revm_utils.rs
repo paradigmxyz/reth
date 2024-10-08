@@ -23,25 +23,15 @@ pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
     Precompiles::new(spec).addresses().copied().map(Address::from)
 }
 
-/// Caps the configured [`TxEnv`] `gas_limit` with the allowance of the caller.
-pub fn cap_tx_gas_limit_with_caller_allowance<DB>(db: &mut DB, env: &mut TxEnv) -> EthResult<()>
-where
-    DB: Database,
-    EthApiError: From<<DB as Database>::Error>,
-{
-    if let Ok(gas_limit) = caller_gas_allowance(db, env)?.try_into() {
-        env.gas_limit = gas_limit;
-    }
-
-    Ok(())
-}
-
 /// Calculates the caller gas allowance.
 ///
 /// `allowance = (account.balance - tx.value) / tx.gas_price`
 ///
 /// Returns an error if the caller has insufficient funds.
 /// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
+///
+/// Note: this takes the mut [Database] trait because the loaded sender can be reused for the
+/// following operation like `eth_call`.
 pub fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
