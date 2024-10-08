@@ -58,6 +58,15 @@ impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<'_> 
     ) -> ProviderResult<B256> {
         self.0.storage_root(address, hashed_storage)
     }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        self.0.storage_proof(address, slot, hashed_storage)
+    }
 }
 
 impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {

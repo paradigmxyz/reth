@@ -13,8 +13,129 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
-/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
+/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks. If the
+/// stream is configured with a head via [`ExExNotifications::set_with_head`] or
+/// [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
+#[derive(Debug)]
 pub struct ExExNotifications<P, E> {
+    inner: ExExNotificationsInner<P, E>,
+}
+
+#[derive(Debug)]
+enum ExExNotificationsInner<P, E> {
+    /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
+    WithoutHead(ExExNotificationsWithoutHead<P, E>),
+    /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that
+    /// are committed or reverted after the given head.
+    WithHead(ExExNotificationsWithHead<P, E>),
+    /// Internal state used when transitioning between [`ExExNotificationsInner::WithoutHead`] and
+    /// [`ExExNotificationsInner::WithHead`].
+    Invalid,
+}
+
+impl<P, E> ExExNotifications<P, E> {
+    /// Creates a new stream of [`ExExNotifications`] without a head.
+    pub const fn new(
+        node_head: Head,
+        provider: P,
+        executor: E,
+        notifications: Receiver<ExExNotification>,
+        wal_handle: WalHandle,
+    ) -> Self {
+        Self {
+            inner: ExExNotificationsInner::WithoutHead(ExExNotificationsWithoutHead::new(
+                node_head,
+                provider,
+                executor,
+                notifications,
+                wal_handle,
+            )),
+        }
+    }
+
+    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s without a head.
+    ///
+    /// It's a no-op if the stream has already been configured without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    pub fn set_without_head(&mut self) {
+        let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
+        self.inner = ExExNotificationsInner::WithoutHead(match current {
+            ExExNotificationsInner::WithoutHead(notifications) => notifications,
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithoutHead::new(
+                notifications.node_head,
+                notifications.provider,
+                notifications.executor,
+                notifications.notifications,
+                notifications.wal_handle,
+            ),
+            ExExNotificationsInner::Invalid => unreachable!(),
+        });
+    }
+
+    /// Returns a new [`ExExNotifications`] without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    pub fn without_head(mut self) -> Self {
+        self.set_without_head();
+        self
+    }
+
+    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s with the provided head.
+    ///
+    /// It's a no-op if the stream has already been configured with a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    pub fn set_with_head(&mut self, exex_head: ExExHead) {
+        let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
+        self.inner = ExExNotificationsInner::WithHead(match current {
+            ExExNotificationsInner::WithoutHead(notifications) => {
+                notifications.with_head(exex_head)
+            }
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithHead::new(
+                notifications.node_head,
+                notifications.provider,
+                notifications.executor,
+                notifications.notifications,
+                notifications.wal_handle,
+                exex_head,
+            ),
+            ExExNotificationsInner::Invalid => unreachable!(),
+        });
+    }
+
+    /// Returns a new [`ExExNotifications`] with the provided head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    pub fn with_head(mut self, exex_head: ExExHead) -> Self {
+        self.set_with_head(exex_head);
+        self
+    }
+}
+
+impl<P, E> Stream for ExExNotifications<P, E>
+where
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Unpin + 'static,
+{
+    type Item = eyre::Result<ExExNotification>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match &mut self.get_mut().inner {
+            ExExNotificationsInner::WithoutHead(notifications) => {
+                notifications.poll_next_unpin(cx).map(|result| result.map(Ok))
+            }
+            ExExNotificationsInner::WithHead(notifications) => notifications.poll_next_unpin(cx),
+            ExExNotificationsInner::Invalid => unreachable!(),
+        }
+    }
+}
+
+/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
+pub struct ExExNotificationsWithoutHead<P, E> {
     node_head: Head,
     provider: P,
     executor: E,
@@ -22,7 +143,7 @@ pub struct ExExNotifications<P, E> {
     wal_handle: WalHandle,
 }
 
-impl<P: Debug, E: Debug> Debug for ExExNotifications<P, E> {
+impl<P: Debug, E: Debug> Debug for ExExNotificationsWithoutHead<P, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
             .field("provider", &self.provider)
@@ -32,9 +153,9 @@ impl<P: Debug, E: Debug> Debug for ExExNotifications<P, E> {
     }
 }
 
-impl<P, E> ExExNotifications<P, E> {
-    /// Creates a new instance of [`ExExNotifications`].
-    pub const fn new(
+impl<P, E> ExExNotificationsWithoutHead<P, E> {
+    /// Creates a new instance of [`ExExNotificationsWithoutHead`].
+    const fn new(
         node_head: Head,
         provider: P,
         executor: E,
@@ -44,70 +165,8 @@ impl<P, E> ExExNotifications<P, E> {
         Self { node_head, provider, executor, notifications, wal_handle }
     }
 
-    /// Receives the next value for this receiver.
-    ///
-    /// This method returns `None` if the channel has been closed and there are
-    /// no remaining messages in the channel's buffer. This indicates that no
-    /// further values can ever be received from this `Receiver`. The channel is
-    /// closed when all senders have been dropped, or when [`Receiver::close`] is called.
-    ///
-    /// # Cancel safety
-    ///
-    /// This method is cancel safe. If `recv` is used as the event in a
-    /// [`tokio::select!`] statement and some other branch
-    /// completes first, it is guaranteed that no messages were received on this
-    /// channel.
-    ///
-    /// For full documentation, see [`Receiver::recv`].
-    #[deprecated(note = "use `ExExNotifications::next` and its `Stream` implementation instead")]
-    pub async fn recv(&mut self) -> Option<ExExNotification> {
-        self.notifications.recv().await
-    }
-
-    /// Polls to receive the next message on this channel.
-    ///
-    /// This method returns:
-    ///
-    ///  * `Poll::Pending` if no messages are available but the channel is not closed, or if a
-    ///    spurious failure happens.
-    ///  * `Poll::Ready(Some(message))` if a message is available.
-    ///  * `Poll::Ready(None)` if the channel has been closed and all messages sent before it was
-    ///    closed have been received.
-    ///
-    /// When the method returns `Poll::Pending`, the `Waker` in the provided
-    /// `Context` is scheduled to receive a wakeup when a message is sent on any
-    /// receiver, or when the channel is closed.  Note that on multiple calls to
-    /// `poll_recv` or `poll_recv_many`, only the `Waker` from the `Context`
-    /// passed to the most recent call is scheduled to receive a wakeup.
-    ///
-    /// If this method returns `Poll::Pending` due to a spurious failure, then
-    /// the `Waker` will be notified when the situation causing the spurious
-    /// failure has been resolved. Note that receiving such a wakeup does not
-    /// guarantee that the next call will succeed — it could fail with another
-    /// spurious failure.
-    ///
-    /// For full documentation, see [`Receiver::poll_recv`].
-    #[deprecated(
-        note = "use `ExExNotifications::poll_next` and its `Stream` implementation instead"
-    )]
-    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<ExExNotification>> {
-        self.notifications.poll_recv(cx)
-    }
-}
-
-impl<P, E> ExExNotifications<P, E>
-where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
-{
-    /// Subscribe to notifications with the given head. This head is the ExEx's
-    /// latest view of the host chain.
-    ///
-    /// Notifications will be sent starting from the head, not inclusive. For
-    /// example, if `head.number == 10`, then the first notification will be
-    /// with `block.number == 11`. A `head.number` of 10 indicates that the ExEx
-    /// has processed up to block 10, and is ready to process block 11.
-    pub fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
+    /// Subscribe to notifications with the given head.
+    fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
         ExExNotificationsWithHead::new(
             self.node_head,
             self.provider,
@@ -119,7 +178,7 @@ where
     }
 }
 
-impl<P: Unpin, E: Unpin> Stream for ExExNotifications<P, E> {
+impl<P: Unpin, E: Unpin> Stream for ExExNotificationsWithoutHead<P, E> {
     type Item = ExExNotification;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -128,7 +187,13 @@ impl<P: Unpin, E: Unpin> Stream for ExExNotifications<P, E> {
 }
 
 /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
-/// committed or reverted after the given head.
+/// committed or reverted after the given head. The head is the ExEx's latest view of the host
+/// chain.
+///
+/// Notifications will be sent starting from the head, not inclusive. For example, if
+/// `exex_head.number == 10`, then the first notification will be with `block.number == 11`. An
+/// `exex_head.number` of 10 indicates that the ExEx has processed up to block 10, and is ready to
+/// process block 11.
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<P, E> {
     node_head: Head,
@@ -147,13 +212,9 @@ pub struct ExExNotificationsWithHead<P, E> {
     backfill_job: Option<StreamBackfillJob<E, P, Chain>>,
 }
 
-impl<P, E> ExExNotificationsWithHead<P, E>
-where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
-{
+impl<P, E> ExExNotificationsWithHead<P, E> {
     /// Creates a new [`ExExNotificationsWithHead`].
-    pub const fn new(
+    const fn new(
         node_head: Head,
         provider: P,
         executor: E,
@@ -173,7 +234,13 @@ where
             backfill_job: None,
         }
     }
+}
 
+impl<P, E> ExExNotificationsWithHead<P, E>
+where
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Unpin + 'static,
+{
     /// Checks if the ExEx head is on the canonical chain.
     ///
     /// If the head block is not found in the database or it's ahead of the node head, it means
@@ -367,7 +434,7 @@ mod tests {
 
         notifications_tx.send(notification.clone()).await?;
 
-        let mut notifications = ExExNotifications::new(
+        let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
             EthExecutorProvider::mainnet(),
@@ -438,7 +505,7 @@ mod tests {
 
         notifications_tx.send(notification.clone()).await?;
 
-        let mut notifications = ExExNotifications::new(
+        let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
             EthExecutorProvider::mainnet(),
@@ -528,7 +595,7 @@ mod tests {
 
         notifications_tx.send(new_notification.clone()).await?;
 
-        let mut notifications = ExExNotifications::new(
+        let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
             EthExecutorProvider::mainnet(),
@@ -609,7 +676,7 @@ mod tests {
 
         notifications_tx.send(new_notification.clone()).await?;
 
-        let mut notifications = ExExNotifications::new(
+        let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
             EthExecutorProvider::mainnet(),

@@ -489,6 +489,13 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_highest_transaction_by_sender(sender)
+    }
+
     fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,

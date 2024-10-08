@@ -347,6 +347,18 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the discovery port to an unused port.
+    /// This is useful for testing.
+    pub fn with_unused_discovery_port(self) -> Self {
+        self.discovery_port(0)
+    }
+
+    /// Sets the listener port to an unused port.
+    /// This is useful for testing.
+    pub fn with_unused_listener_port(self) -> Self {
+        self.listener_port(0)
+    }
+
     /// Sets the external ip resolver to use for discovery v4.
     ///
     /// If no [`Discv4ConfigBuilder`] is set via [`Self::discovery`], this will create a new one.

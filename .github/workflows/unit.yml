@@ -42,6 +42,11 @@ jobs:
             --workspace --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
+      - name: Run tests on book sources
+        run: |
+          cargo nextest run \
+            --manifest-path book/sources/Cargo.toml --workspace \
+            -E "!kind(test)"
 
   state:
     name: Ethereum state tests
