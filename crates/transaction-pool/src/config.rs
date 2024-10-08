@@ -113,7 +113,7 @@ impl Mul<usize> for SubPoolLimit {
 
     fn mul(self, rhs: usize) -> Self::Output {
         let Self { max_txs, max_size } = self;
-        Self { max_txs: max_txs * 2, max_size: max_size * rhs }
+        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
     }
 }
 
