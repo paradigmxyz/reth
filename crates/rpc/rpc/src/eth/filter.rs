@@ -10,8 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy_consensus::Header;
-use alloy_primitives::{BlockHash, TxHash};
+use alloy_primitives::TxHash;
 use alloy_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
