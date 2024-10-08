@@ -7,8 +7,6 @@ use alloy_consensus::SignableTransaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, TxHash, B256};
 
-use crate::Signature;
-
 /// A signed transaction.
 pub trait SignedTransaction:
     fmt::Debug
@@ -29,7 +27,7 @@ pub trait SignedTransaction:
     type Transaction: SignableTransaction<Self::Signature>;
 
     /// Signature type that results from signing transaction.
-    type Signature: Signature;
+    type Signature;
 
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;

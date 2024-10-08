@@ -23,9 +23,6 @@ pub use account::{Account, Bytecode};
 pub mod signed_tx;
 pub use signed_tx::SignedTransaction;
 
-pub mod signature;
-pub use signature::Signature;
-
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
