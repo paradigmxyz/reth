@@ -3,7 +3,7 @@
 use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
-use alloy_primitives::{BlockNumber, U256};
+use alloy_primitives::{BlockNumber, U256, Address, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
@@ -16,7 +16,7 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
+use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType, Account, StorageEntry};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
@@ -28,6 +28,7 @@ use revm_primitives::{
 };
 use std::{fmt::Display, sync::Arc};
 use tracing::trace;
+use std::collections::HashMap;
 
 /// Provides executors to execute regular optimism blocks
 #[derive(Debug, Clone)]
@@ -227,6 +228,12 @@ where
         Ok((receipts, cumulative_gas_used))
     }
 }
+
+/// Types used inside `RevertsInit` to initialize revms reverts.
+pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
+
+/// Type used to initialize revms reverts.
+pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
 /// A basic Optimism block executor.
 ///
@@ -454,6 +461,10 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
     }
 }
 
+/// Type used to initialize revms bundle state.
+pub type BundleStateInit =
+    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+
 impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
@@ -512,7 +523,7 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{b256, Address, StorageKey, StorageValue};
+    use alloy_primitives::{b256, Address,FixedBytes, StorageKey, StorageValue, B256, LogData, Log};
     use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
     use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
@@ -520,6 +531,10 @@ mod tests {
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
     use std::{collections::HashMap, str::FromStr};
+    use reth_primitives::{Receipts, Request, Requests, TxType};
+    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
+    use revm::db::states::BundleState;
+    use revm::primitives::AccountInfo;
 
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();
@@ -738,7 +753,6 @@ mod tests {
                 success: true,
                 deposit_nonce: Some(18),
                 deposit_receipt_version: Some(34),
-
             })]],
         };
 
