@@ -26,8 +26,7 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::collections::HashMap;
-use std::{fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Provides executors to execute regular optimism blocks
