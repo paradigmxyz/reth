@@ -21,7 +21,9 @@ use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilder
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes;
+pub struct OptimismEngineTypes<T: PayloadTypes = OptimismPayloadTypes> {
+    _marker: std::marker::PhantomData<T>,
+}
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
@@ -36,17 +38,34 @@ impl OptimismEngineValidator {
     }
 }
 
-impl PayloadTypes for OptimismEngineTypes {
-    type BuiltPayload = OptimismBuiltPayload;
-    type PayloadAttributes = OptimismPayloadAttributes;
-    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
+impl<T: PayloadTypes> PayloadTypes for OptimismEngineTypes<T> {
+    type BuiltPayload = T::OptimismBuiltPayload;
+    type PayloadAttributes = T::OptimismPayloadAttributes;
+    type PayloadBuilderAttributes = T::OptimismPayloadBuilderAttributes;
 }
 
-impl EngineTypes for OptimismEngineTypes {
+impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
+where
+    T::BuiltPayload: TryInto<ExecutionPayloadV1>
+        + TryInto<ExecutionPayloadEnvelopeV2>
+        + TryInto<ExecutionPayloadEnvelopeV3>
+        + TryInto<ExecutionPayloadEnvelopeV4>,
+{
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
     type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
+}
+
+/// A default payload type for [`EthEngineTypes`]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct OpPayloadTypes;
+
+impl PayloadTypes for OptimismPayloadTypes {
+    type BuiltPayload = OptimismBuiltPayload;
+    type PayloadAttributes = OptimismPayloadAttributes;
+    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
 }
 
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
