@@ -4,6 +4,15 @@ use alloy_primitives::{Address, Parity, B256, U256};
 
 /// Reth extension for alloy type [`Signature`](alloy_primitives::Signature).
 pub trait Signature: Sized + Send + Sync {
+    /// Returns ref to `r` value.
+    fn r(&self) -> U256;
+
+    /// Returns ref to `s` value.
+    fn s(&self) -> U256;
+
+    /// Returns ref to `v` value.
+    fn v(&self) -> Parity;
+
     /// Decodes RLP-encoded signature, w.r.t. chain ID.
     fn decode_with_eip155_chain_id(buf: &mut &[u8]) -> alloy_rlp::Result<(Self, Option<u64>)>;
 
@@ -36,6 +45,18 @@ pub trait Signature: Sized + Send + Sync {
 // todo: add optimism type that wraps Signature, to impl separately for OP to account for system
 // null signature
 impl Signature for alloy_primitives::Signature {
+    fn r(&self) -> U256 {
+        Self::r(self)
+    }
+
+    fn s(&self) -> U256 {
+        Self::s(self)
+    }
+
+    fn v(&self) -> Parity {
+        Self::v(self)
+    }
+
     fn decode_with_eip155_chain_id(buf: &mut &[u8]) -> alloy_rlp::Result<(Self, Option<u64>)> {
         let v: Parity = alloy_rlp::Decodable::decode(buf)?;
         let r: U256 = alloy_rlp::Decodable::decode(buf)?;
