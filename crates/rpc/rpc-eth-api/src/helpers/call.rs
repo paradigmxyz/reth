@@ -28,8 +28,8 @@ use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::ensure_success,
     revm_utils::{
-        apply_block_overrides, apply_state_overrides, caller_gas_allowance,
-        cap_tx_gas_limit_with_caller_allowance, get_precompiles, CallFees,
+        apply_block_overrides, apply_state_overrides, caller_gas_allowance, get_precompiles,
+        CallFees,
     },
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
@@ -379,8 +379,9 @@ pub trait EthCall: Call + LoadPendingBlock {
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
+            let cap = caller_gas_allowance(&mut db, &env.tx)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
-            cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
+            env.tx.gas_limit = cap.min(env.block.gas_limit).saturating_to();
         }
 
         let from = request.from.unwrap_or_default();
