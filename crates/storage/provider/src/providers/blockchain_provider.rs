@@ -1490,7 +1490,7 @@ mod tests {
         StaticFileWriter,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{BlockNumber, TxNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1508,8 +1508,7 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        Receipt, SealedBlock, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
-        Withdrawals,
+        Receipt, SealedBlock, StaticFileSegment, TransactionSignedNoHash, Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -2030,284 +2029,6 @@ mod tests {
         let mut rng = rand::thread_rng();
         let random_block_number: u64 = rng.gen();
         assert_eq!(provider.block_body_indices(random_block_number)?, None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_by_hash_in_memory() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first in-memory block
-        let first_in_mem_block = in_memory_blocks.first().unwrap();
-        let block_hash = first_in_mem_block.hash();
-
-        // Get the block with senders by hash and check if it matches the first in-memory block
-        let block_with_senders = provider
-            .block_with_senders(BlockHashOrNumber::Hash(block_hash), TransactionVariant::WithHash)?
-            .unwrap();
-        assert_eq!(block_with_senders.block.seal(block_hash), first_in_mem_block.clone());
-        assert_eq!(block_with_senders.senders, first_in_mem_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_by_number_in_memory() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first in-memory block
-        let first_in_mem_block = in_memory_blocks.first().unwrap();
-        let block_number = first_in_mem_block.number;
-
-        // Get the block with senders by number and check if it matches the first in-memory block
-        let block_with_senders = provider
-            .block_with_senders(
-                BlockHashOrNumber::Number(block_number),
-                TransactionVariant::WithHash,
-            )?
-            .unwrap();
-        assert_eq!(
-            block_with_senders.block.seal(first_in_mem_block.hash()),
-            first_in_mem_block.clone()
-        );
-        assert_eq!(block_with_senders.senders, first_in_mem_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_by_hash_in_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first database block
-        let first_db_block = database_blocks.first().unwrap();
-        let block_hash = first_db_block.hash();
-
-        // Get the block with senders by hash and check if it matches the first database block
-        let block_with_senders = provider
-            .block_with_senders(BlockHashOrNumber::Hash(block_hash), TransactionVariant::WithHash)?
-            .unwrap();
-        assert_eq!(block_with_senders.block.seal(block_hash), first_db_block.clone());
-        assert_eq!(block_with_senders.senders, first_db_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_by_number_in_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first database block
-        let first_db_block = database_blocks.first().unwrap();
-        let block_number = first_db_block.number;
-
-        // Get the block with senders by number and check if it matches the first database block
-        let block_with_senders = provider
-            .block_with_senders(
-                BlockHashOrNumber::Number(block_number),
-                TransactionVariant::WithHash,
-            )?
-            .unwrap();
-        assert_eq!(block_with_senders.block.seal(first_db_block.hash()), first_db_block.clone());
-        assert_eq!(block_with_senders.senders, first_db_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_with_senders_non_existent_block() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Generate a random hash (non-existent block)
-        let non_existent_hash = B256::random();
-        let result = provider.block_with_senders(
-            BlockHashOrNumber::Hash(non_existent_hash),
-            TransactionVariant::WithHash,
-        )?;
-        // The block should not be found
-        assert!(result.is_none());
-
-        // Generate a random number (non-existent block)
-        let non_existent_number = 9999;
-        let result = provider.block_with_senders(
-            BlockHashOrNumber::Number(non_existent_number),
-            TransactionVariant::WithHash,
-        )?;
-        // The block should not be found
-        assert!(result.is_none());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_by_hash_in_memory() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first in-memory block
-        let first_in_mem_block = in_memory_blocks.first().unwrap();
-        let block_hash = first_in_mem_block.hash();
-
-        // Get the sealed block with senders by hash and check if it matches the first in-memory
-        // block
-        let sealed_block_with_senders = provider
-            .sealed_block_with_senders(
-                BlockHashOrNumber::Hash(block_hash),
-                TransactionVariant::WithHash,
-            )?
-            .unwrap();
-        assert_eq!(sealed_block_with_senders.block, first_in_mem_block.clone());
-        assert_eq!(sealed_block_with_senders.senders, first_in_mem_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_by_number_in_memory() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first in-memory block
-        let first_in_mem_block = in_memory_blocks.first().unwrap();
-        let block_number = first_in_mem_block.number;
-
-        // Get the sealed block with senders by number and check if it matches the first in-memory
-        let sealed_block_with_senders = provider
-            .sealed_block_with_senders(
-                BlockHashOrNumber::Number(block_number),
-                TransactionVariant::WithHash,
-            )?
-            .unwrap();
-        assert_eq!(sealed_block_with_senders.block, first_in_mem_block.clone());
-        assert_eq!(sealed_block_with_senders.senders, first_in_mem_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_by_hash_in_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first database block
-        let first_db_block = database_blocks.first().unwrap();
-        let block_hash = first_db_block.hash();
-
-        // Get the sealed block with senders by hash and check if it matches the first database
-        // block
-        let sealed_block_with_senders = provider
-            .sealed_block_with_senders(
-                BlockHashOrNumber::Hash(block_hash),
-                TransactionVariant::WithHash,
-            )?
-            .unwrap();
-        assert_eq!(sealed_block_with_senders.block, first_db_block.clone());
-        assert_eq!(sealed_block_with_senders.senders, first_db_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_by_number_in_database() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Get the first database block
-        let first_db_block = database_blocks.first().unwrap();
-        let block_number = first_db_block.number;
-
-        // Get the sealed block with senders by number and check if it matches the first database
-        // block
-        let sealed_block_with_senders = provider
-            .sealed_block_with_senders(
-                BlockHashOrNumber::Number(block_number),
-                TransactionVariant::WithHash,
-            )?
-            .unwrap();
-        assert_eq!(sealed_block_with_senders.block, first_db_block.clone());
-        assert_eq!(sealed_block_with_senders.senders, first_db_block.senders().unwrap());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sealed_block_with_senders_non_existent_block() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        // Generate a random hash (non-existent block)
-        let non_existent_hash = B256::random();
-        let result = provider.sealed_block_with_senders(
-            BlockHashOrNumber::Hash(non_existent_hash),
-            TransactionVariant::WithHash,
-        )?;
-        // The block should not be found
-        assert!(result.is_none());
-
-        // Generate a random number (non-existent block)
-        let non_existent_number = 9999;
-        let result = provider.sealed_block_with_senders(
-            BlockHashOrNumber::Number(non_existent_number),
-            TransactionVariant::WithHash,
-        )?;
-        // The block should not be found
-        assert!(result.is_none());
 
         Ok(())
     }
@@ -3357,212 +3078,318 @@ mod tests {
         Ok(())
     }
 
-    /// Macro to test provider methods that expect a single item from either a `u64` or `hash`.
-    ///
-    /// # Parameters
-    ///   - `$method`: The provider method to call.
-    ///   - `$item_extractor`: Closure that extracts `(method_argument, method_expected_result)`
-    ///     from a block.
-    ///   - `$invalid_arg`: An argument that should return `None`.
-    macro_rules! test_single_item {
-        ($provider:expr, $database_blocks:expr, $in_memory_blocks:expr, [$(($method:ident, $item_extractor:expr, $invalid_arg:expr)),* $(,)?]) => {{
-            $(
-                // Ensure that the first generated in-memory block exists
-                // In the future this block will be persisted to disk and removed from memory AFTER the firsk database query.
-                // This ensures that we query the in-memory state before the database.
-                {
-                    let mem_block = &$in_memory_blocks[0];
-                    let (arg, expected_item) = $item_extractor(mem_block);
+    /// Helper macro to call a provider method based on argument count and check its result
+    macro_rules! call_method {
+        ($provider:expr, $method:ident, ($($args:expr),*), $expected_item:expr) => {{
+            let result = $provider.$method($($args),*)?;
+            assert_eq!(
+                result,
+                $expected_item,
+                "{}: item does not match the expected item for arguments {:?}",
+                stringify!($method),
+                ($($args),*)
+            );
+        }};
 
-                    let result = $provider.$method(arg)?;
-                    assert_eq!(result, expected_item, "{}: item does not match the expected item for {:?}", stringify!($method), arg);
-                }
+        // Handle valid or invalid arguments for one argument
+        (ONE, $provider:expr, $method:ident, $item_extractor:expr, $txnum:expr, $txhash:expr, $block:expr, $receipts:expr) => {{
+            let (arg, expected_item) = $item_extractor($block, $txnum($block), $txhash($block), $receipts);
+            call_method!($provider, $method, (arg), expected_item);
+        }};
 
-                // Invalid/Non-existent argument should return `None`
-                {
-                    let invalid_result = $provider.$method($invalid_arg)?;
-                    assert!(invalid_result.is_none(), "{}: method did not return None for invalid argument {:?}", stringify!($method), $invalid_arg);
-                }
-
-                // Additional logic: Check that the item is only in memory and not in database
-                {
-                    let last_mem_block = &$in_memory_blocks[$in_memory_blocks.len() - 1];
-                    let (arg, expected_item) = $item_extractor(last_mem_block);
-                    let mem_result = $provider.$method(arg)?;
-                    assert_eq!(mem_result, expected_item, "{}: item does not match the expected item in memory for {:?}", stringify!($method), arg);
-
-                    // Ensure the item is not in storage
-                    let db_result = $provider.database.$method(arg)?;
-                    assert!(db_result.is_none(), "{}: item should not exist in the database for {:?}", stringify!($method), arg);
-                }
-
-            )*
-            Ok(())
+        // Handle valid or invalid arguments for two arguments
+        (TWO, $provider:expr, $method:ident, $item_extractor:expr, $txnum:expr, $txhash:expr, $block:expr, $receipts:expr) => {{
+            let ((arg1, arg2), expected_item) = $item_extractor($block, $txnum($block), $txhash($block), $receipts);
+            call_method!($provider, $method, (arg1, arg2), expected_item);
         }};
     }
 
-    #[test]
-    fn test_single_item_single_arg() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
+    /// Macro to test non-range methods.
+    ///
+    /// ( `NUMBER_ARGUMENTS`, METHOD, FN -> ((`METHOD_ARGUMENT(s)`,...), `EXPECTED_RESULT`),
+    /// `INVALID_ARGUMENTS`)
+    macro_rules! test_non_range {
+    ([$(($arg_count:ident, $method:ident, $item_extractor:expr, $invalid_args:expr)),* $(,)?]) => {{
+        $(
+            let mut rng = generators::rng();
+            let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT,
+                BlockRangeParams {
+                    tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                    ..Default::default()
+                },
+            )?;
 
-        // Helper closures to extract transaction data
-        let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
-        let tx_num = |block: &SealedBlock| {
-            database_blocks
-                .iter()
-                .chain(in_memory_blocks.iter())
-                .take_while(|b| b.number < block.number)
-                .map(|b| b.body.transactions.len())
-                .sum::<usize>() as u64
-        };
-        let tx = |block: &SealedBlock| block.body.transactions[0].clone();
+            let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
+            let tx_num = |block: &SealedBlock| {
+                database_blocks
+                    .iter()
+                    .chain(in_memory_blocks.iter())
+                    .take_while(|b| b.number < block.number)
+                    .map(|b| b.body.transactions.len())
+                    .sum::<usize>() as u64
+            };
+
+            // Ensure that the first generated in-memory block exists
+            // In the future this block will be persisted to disk and removed from memory AFTER the firsk database query.
+            // This ensures that we query the in-memory state before the database avoiding any race condition.
+            {
+                call_method!($arg_count, provider, $method, $item_extractor, tx_num, tx_hash, &in_memory_blocks[0], &receipts);
+            }
+
+            // Invalid/Non-existent argument should return `None`
+            {
+                call_method!($arg_count, provider, $method, |_,_,_,_| ( ($invalid_args, None)), tx_num, tx_hash, &in_memory_blocks[0], &receipts);
+            }
+
+            // Check that the item is only in memory and not in database
+            {
+                let last_mem_block = &in_memory_blocks[in_memory_blocks.len() - 1];
+
+                let (args, expected_item) = $item_extractor(last_mem_block, tx_num(last_mem_block), tx_hash(last_mem_block), &receipts);
+                call_method!($arg_count, provider, $method, |_,_,_,_| (args.clone(), expected_item), tx_num, tx_hash, last_mem_block, &receipts);
+
+                // Ensure the item is not in storage
+                call_method!($arg_count, provider.database, $method, |_,_,_,_| ( (args, None)), tx_num, tx_hash, last_mem_block, &receipts);
+            }
+        )*
+    }};
+}
+
+    #[test]
+    fn test_non_range_methods() -> eyre::Result<()> {
         let test_tx_index = 0;
 
-        test_single_item!(
-            provider,
-            database_blocks,
-            in_memory_blocks,
-            [
-                // ( METHOD, FN -> (METHOD_ARGUMENT, EXPECTED_RESULT), INVALID_ARGUMENT)
-                (
-                    header,
-                    |block: &SealedBlock| (&block.hash(), Some(block.header.header().clone())),
-                    &B256::random()
+        test_non_range!([
+            // TODO: header should use B256 like others instead of &B256
+            // (
+            //     ONE,
+            //     header,
+            //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
+            //     (&B256::random())
+            // ),
+            (
+                ONE,
+                header_by_number,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.header.header().clone())
                 ),
-                (
-                    header_by_number,
-                    |block: &SealedBlock| (block.number, Some(block.header.header().clone())),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                sealed_header,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.header.clone())
                 ),
-                (sealed_header, |block: &SealedBlock| (block.number, Some(block.header)), u64::MAX),
-                (block_hash, |block: &SealedBlock| (block.number, Some(block.hash())), u64::MAX),
-                (
-                    block_number,
-                    |block: &SealedBlock| (block.hash(), Some(block.number)),
-                    B256::random()
+                u64::MAX
+            ),
+            (
+                ONE,
+                block_hash,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(block.hash())
                 ),
-                (
-                    block,
-                    |block: &SealedBlock| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(block.clone().unseal())
-                    ),
-                    BlockHashOrNumber::Hash(B256::random())
+                u64::MAX
+            ),
+            (
+                ONE,
+                block_number,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.hash(),
+                    Some(block.number)
                 ),
-                (
-                    block,
-                    |block: &SealedBlock| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(block.clone().unseal())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                B256::random()
+            ),
+            (
+                ONE,
+                block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(block.clone().unseal())
                 ),
-                (
-                    block_body_indices,
-                    |block: &SealedBlock| (
-                        block.number,
-                        Some(StoredBlockBodyIndices {
-                            first_tx_num: tx_num(block),
-                            tx_count: block.body.transactions.len() as u64
-                        })
-                    ),
-                    u64::MAX
+                BlockHashOrNumber::Hash(B256::random())
+            ),
+            (
+                ONE,
+                block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(block.clone().unseal())
                 ),
-                (
-                    transaction_id,
-                    |block: &SealedBlock| (tx_hash(block), Some(tx_num(block))),
-                    B256::random()
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                block_body_indices,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.number,
+                    Some(StoredBlockBodyIndices {
+                        first_tx_num: tx_num,
+                        tx_count: block.body.transactions.len() as u64
+                    })
                 ),
-                (
-                    transaction_by_id,
-                    |block: &SealedBlock| (tx_num(block), Some(tx(block))),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                TWO,
+                block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
+                    block.clone().unseal().with_recovered_senders()
                 ),
-                (
-                    transaction_by_id_no_hash,
-                    |block: &SealedBlock| (
-                        tx_num(block),
-                        Some(tx(block)).map(Into::<TransactionSignedNoHash>::into)
-                    ),
-                    u64::MAX
+                (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
+                    block.clone().unseal().with_recovered_senders()
                 ),
-                (
-                    transaction_by_hash,
-                    |block: &SealedBlock| (tx_hash(block), Some(tx(block))),
-                    B256::random()
+                (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                sealed_block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
+                    Some(
+                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                    )
                 ),
-                (
-                    transaction_block,
-                    |block: &SealedBlock| (tx_num(block), Some(block.number)),
-                    u64::MAX
+                (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
+            ),
+            (
+                TWO,
+                sealed_block_with_senders,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
+                    Some(
+                        block.clone().unseal().with_recovered_senders().unwrap().seal(block.hash())
+                    )
                 ),
-                (
-                    transactions_by_block,
-                    |block: &SealedBlock| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(block.body.transactions.clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
+            ),
+            (
+                ONE,
+                transaction_id,
+                |_: &SealedBlock, tx_num: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(tx_num)
                 ),
-                (
-                    transactions_by_block,
-                    |block: &SealedBlock| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(block.body.transactions.clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_by_id,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
-                (
-                    transaction_sender,
-                    |block: &SealedBlock| (
-                        tx_num(block),
-                        block.body.transactions[test_tx_index].recover_signer()
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                transaction_by_id_no_hash,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(Into::<TransactionSignedNoHash>::into(
+                        block.body.transactions[test_tx_index].clone()
+                    ))
                 ),
-                (
-                    receipt,
-                    |block: &SealedBlock| (
-                        tx_num(block),
-                        Some(receipts[block.number as usize][test_tx_index].clone())
-                    ),
-                    u64::MAX
+                u64::MAX
+            ),
+            (
+                ONE,
+                transaction_by_hash,
+                |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(block.body.transactions[test_tx_index].clone())
                 ),
-                (
-                    receipt_by_hash,
-                    |block: &SealedBlock| (
-                        tx_hash(block),
-                        Some(receipts[block.number as usize][test_tx_index].clone())
-                    ),
-                    B256::random()
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_block,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(block.number)
                 ),
-                (
-                    receipts_by_block,
-                    |block: &SealedBlock| (
-                        BlockHashOrNumber::Number(block.number),
-                        Some(receipts[block.number as usize].clone())
-                    ),
-                    BlockHashOrNumber::Number(u64::MAX)
+                u64::MAX
+            ),
+            (
+                ONE,
+                transactions_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(block.body.transactions.clone())
                 ),
-                (
-                    receipts_by_block,
-                    |block: &SealedBlock| (
-                        BlockHashOrNumber::Hash(block.hash()),
-                        Some(receipts[block.number as usize].clone())
-                    ),
-                    BlockHashOrNumber::Hash(B256::random())
-                )
-            ]
-        )
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                transactions_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(block.body.transactions.clone())
+                ),
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                transaction_sender,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    block.body.transactions[test_tx_index].recover_signer()
+                ),
+                u64::MAX
+            ),
+            (
+                ONE,
+                receipt,
+                |block: &SealedBlock, tx_num: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    tx_num,
+                    Some(receipts[block.number as usize][test_tx_index].clone())
+                ),
+                u64::MAX
+            ),
+            (
+                ONE,
+                receipt_by_hash,
+                |block: &SealedBlock, _: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (
+                    tx_hash,
+                    Some(receipts[block.number as usize][test_tx_index].clone())
+                ),
+                B256::random()
+            ),
+            (
+                ONE,
+                receipts_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Number(block.number),
+                    Some(receipts[block.number as usize].clone())
+                ),
+                BlockHashOrNumber::Number(u64::MAX)
+            ),
+            (
+                ONE,
+                receipts_by_block,
+                |block: &SealedBlock, _: TxNumber, _: B256, receipts: &Vec<Vec<Receipt>>| (
+                    BlockHashOrNumber::Hash(block.hash()),
+                    Some(receipts[block.number as usize].clone())
+                ),
+                BlockHashOrNumber::Hash(B256::random())
+            ),
+            // TODO: withdrawals, requests, ommers
+        ]);
+
+        Ok(())
     }
 
     #[test]
