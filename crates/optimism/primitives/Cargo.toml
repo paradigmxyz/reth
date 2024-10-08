@@ -19,5 +19,8 @@ reth-primitives-traits.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+# io
+serde.workspace = true
+
 # misc
 derive_more = { workspace = true, features = [ "deref", "from" ] }
