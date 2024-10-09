@@ -282,7 +282,7 @@ impl TreeState {
         }
 
         // remove trie updates that are below the finalized block
-        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num < finalized_num);
+        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num > finalized_num);
 
         // The only block that should remain at the `finalized` number now, is the finalized
         // block, if it exists.
@@ -899,16 +899,9 @@ where
                 return Ok(None);
             }
 
-            if old_hash == current_hash {
-                // We've found the fork point
-                break;
-            }
-
             if let Some(block) = self.executed_block_by_hash(current_hash)? {
-                if self.is_fork(block.block.hash())? {
-                    current_hash = block.block.parent_hash;
-                    new_chain.push(block);
-                }
+                current_hash = block.block.parent_hash;
+                new_chain.push(block);
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");

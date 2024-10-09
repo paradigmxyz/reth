@@ -18,6 +18,8 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 
+pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
+
 /// Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] that executes blocks in batches according to the provided thresholds
@@ -37,7 +39,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<Chain, BlockExecutionError>;
+    type Item = BackfillJobResult<Chain>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
@@ -63,7 +65,7 @@ where
         self.into()
     }
 
-    fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
+    fn execute_range(&mut self) -> BackfillJobResult<Chain> {
         debug!(
             target: "exex::backfill",
             range = ?self.range,
@@ -165,7 +167,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError>;
+    type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range.next().map(|block_number| self.execute_block(block_number))
@@ -187,7 +189,7 @@ where
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
-    ) -> Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError> {
+    ) -> BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)> {
         let td = self
             .provider
             .header_td_by_number(block_number)?

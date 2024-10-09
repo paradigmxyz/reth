@@ -21,7 +21,39 @@ use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilder
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes;
+pub struct OptimismEngineTypes<T: PayloadTypes = OptimismPayloadTypes> {
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: PayloadTypes> PayloadTypes for OptimismEngineTypes<T> {
+    type BuiltPayload = T::BuiltPayload;
+    type PayloadAttributes = T::PayloadAttributes;
+    type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
+}
+
+impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
+where
+    T::BuiltPayload: TryInto<ExecutionPayloadV1>
+        + TryInto<ExecutionPayloadEnvelopeV2>
+        + TryInto<OptimismExecutionPayloadEnvelopeV3>
+        + TryInto<OptimismExecutionPayloadEnvelopeV4>,
+{
+    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
+}
+
+/// A default payload type for [`OptimismEngineTypes`]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct OptimismPayloadTypes;
+
+impl PayloadTypes for OptimismPayloadTypes {
+    type BuiltPayload = OptimismBuiltPayload;
+    type PayloadAttributes = OptimismPayloadAttributes;
+    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
+}
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
@@ -34,19 +66,6 @@ impl OptimismEngineValidator {
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
-}
-
-impl PayloadTypes for OptimismEngineTypes {
-    type BuiltPayload = OptimismBuiltPayload;
-    type PayloadAttributes = OptimismPayloadAttributes;
-    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
-}
-
-impl EngineTypes for OptimismEngineTypes {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
 }
 
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
