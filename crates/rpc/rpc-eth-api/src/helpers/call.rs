@@ -22,8 +22,7 @@ use reth_primitives::{
     },
     Header, TransactionSignedEcRecovered,
 };
-use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, StateProvider,
-};
+use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
