@@ -9,6 +9,13 @@ pub use states::*;
 
 use std::sync::Arc;
 
+use crate::{
+    common::WithConfigs,
+    components::NodeComponentsBuilder,
+    node::FullNode,
+    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
+    DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
+};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
@@ -18,7 +25,8 @@ use reth_db_api::{
 };
 use reth_exex::ExExContext;
 use reth_network::{
-    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
+    NetworkHandle, NetworkManager,
 };
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
@@ -37,14 +45,6 @@ use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 use tracing::{info, trace, warn};
-use reth_network::transactions::TransactionsManagerConfig;
-use crate::{
-    common::WithConfigs,
-    components::NodeComponentsBuilder,
-    node::FullNode,
-    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
-};
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -600,7 +600,12 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network_with<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool, tx_config: TransactionsManagerConfig) -> NetworkHandle
+    pub fn start_network_with<Pool>(
+        &self,
+        builder: NetworkBuilder<(), ()>,
+        pool: Pool,
+        tx_config: TransactionsManagerConfig,
+    ) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
     {
