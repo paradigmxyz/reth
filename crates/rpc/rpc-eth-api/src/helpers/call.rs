@@ -247,13 +247,18 @@ pub trait EthCall: Call + LoadPendingBlock {
                 state_context.unwrap_or_default();
             let transaction_index = transaction_index.unwrap_or_default();
 
-            let block_number = block_number.unwrap_or_default();
-            let target_block: BlockId = LoadBlock::provider(self)
-                .block_hash_for_id(block_number)
-                .map_err(|_| EthApiError::HeaderNotFound(block_number))?
-                .ok_or_else(|| EthApiError::HeaderNotFound(block_number))?
-                .into();
+            let mut target_block = block_number.unwrap_or_default();
             let is_block_target_pending = target_block.is_pending();
+
+            // if it's not pending, we should always use block_hash over block_number to ensure that
+            // different providers query data related to the same block.
+            if !is_block_target_pending {
+                target_block = LoadBlock::provider(self)
+                    .block_hash_for_id(target_block)
+                    .map_err(|_| EthApiError::HeaderNotFound(target_block))?
+                    .ok_or_else(|| EthApiError::HeaderNotFound(target_block))?
+                    .into();
+            }
 
             let ((cfg, block_env, _), block) = futures::try_join!(
                 self.evm_env_at(target_block),
