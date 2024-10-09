@@ -255,7 +255,7 @@ where
         &self,
         state: &HashedPostState,
     ) -> Result<HashMap<B256, HashSet<B256>>, StateProofError> {
-        let mut proof_targets = HashMap::with_capacity(state.accounts.len());
+        let mut proof_targets = HashMap::default();
         for hashed_address in state.accounts.keys() {
             proof_targets.insert(*hashed_address, HashSet::default());
         }
