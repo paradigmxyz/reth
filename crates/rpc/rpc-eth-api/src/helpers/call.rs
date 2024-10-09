@@ -251,7 +251,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             let is_block_target_pending = target_block.is_pending();
 
             // if it's not pending, we should always use block_hash over block_number to ensure that
-            // different providers query data related to the same block.
+            // different provider calls query data related to the same block.
             if !is_block_target_pending {
                 target_block = LoadBlock::provider(self)
                     .block_hash_for_id(target_block)
