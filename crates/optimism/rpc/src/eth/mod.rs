@@ -68,6 +68,8 @@ pub struct OpEthApi<N: FullNodeComponents> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Arc<OnceCell<SequencerClient>>,
+    /// Builds RPC transaction response (transaction + block/chain metadata).
+    tx_resp_builder: OpTxBuilder,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
@@ -93,7 +95,13 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), sequencer_client: Arc::new(OnceCell::new()) }
+        let tx_resp_builder = OpTxBuilder::new(inner.provider().chain_spec().clone());
+
+        Self {
+            inner: Arc::new(inner),
+            sequencer_client: Arc::new(OnceCell::new()),
+            tx_resp_builder,
+        }
     }
 }
 
@@ -105,6 +113,10 @@ where
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
     type TransactionCompat = OpTxBuilder;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        &self.tx_resp_builder
+    }
 }
 
 impl<N> EthApiSpec for OpEthApi<N>
@@ -251,7 +263,7 @@ where
     Self: Send,
     N: FullNodeComponents,
 {
-    type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<N>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
         Box::new(Self::with_spawner)

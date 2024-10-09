@@ -97,12 +97,19 @@ where
 
 /// Builds OP transaction response type.
 #[derive(Clone, Debug, Copy)]
-pub struct OpTxBuilder;
+pub struct OpTxBuilder {
+    /// Chain spec.
+    pub chain_spec: Arc<ChainSpec>,
+}
 
 impl TransactionCompat for OpTxBuilder {
     type Transaction = Transaction;
 
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        tx_info: TransactionInfo,
+    ) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
 
         let mut inner = EthTxBuilder::fill(tx, tx_info).inner;
