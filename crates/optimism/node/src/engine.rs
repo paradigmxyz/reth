@@ -148,6 +148,16 @@ where
             ))
         }
 
+        if self.chain_spec.is_fork_active_at_timestamp(
+            OptimismHardfork::Holocene,
+            attributes.payload_attributes.timestamp,
+        ) && attributes.eip_1559_params.is_none()
+        {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
+            ))
+        }
+
         Ok(())
     }
 }

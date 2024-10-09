@@ -64,11 +64,9 @@ impl Fee for OpChainSpec {
     fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
         let is_holocene =
             self.inner.is_fork_active_at_timestamp(OptimismHardfork::Holocene, timestamp);
-        let not_first =
-            self.inner.is_fork_active_at_timestamp(OptimismHardfork::Holocene, parent.timestamp);
         // If we are in the Holocene, we need to use the base fee params from the parent block's
         // nonce Else, use the base fee params from chainspec
-        if is_holocene && not_first {
+        if is_holocene && parent.nonce != B64::ZERO {
             // First 4 bytes of the nonce are the base fee denominator, the last 4 bytes are the
             // elasticity
             let denominator = parent.nonce & DENOMINATOR_MASK;
@@ -853,16 +851,15 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene_first_block() {
+    fn test_get_base_fee_holocene_nonce_not_set() {
         let op_chain_spec = holocene_chainspec();
         let mut parent = Header::default();
         parent.base_fee_per_gas = Some(1);
         parent.gas_used = 15763614;
         parent.gas_limit = 144000000;
-        parent.nonce = B64::from_str("0x0000000800000008").unwrap();
-        parent.timestamp = 1799999999;
+        parent.timestamp = 1800000003;
 
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000001);
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
         assert_eq!(
             base_fee,
             U256::from(

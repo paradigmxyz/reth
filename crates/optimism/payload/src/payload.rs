@@ -316,6 +316,10 @@ pub(crate) fn payload_id_optimism(
         hasher.update(gas_limit.to_be_bytes());
     }
 
+    if let Some(eip_1559_params) = &attributes.eip_1559_params {
+        hasher.update(eip_1559_params.as_slice());
+    }
+
     let out = hasher.finalize();
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }

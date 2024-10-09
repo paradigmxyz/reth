@@ -583,6 +583,8 @@ fn get_nonce(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
