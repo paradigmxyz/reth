@@ -95,7 +95,6 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-use std::ops::Deref;
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
