@@ -63,6 +63,8 @@ pub struct TreeMetrics {
     pub trie_updates_insert_cached: Counter,
     /// The number of times trie updates were recomputed for insert.
     pub trie_updates_insert_recomputed: Counter,
+    /// Tracks the blocks for which we fetched the entire execution output from disk.
+    pub get_state_call_block_numbers: Histogram,
 }
 
 /// Represents actions for making a canonical chain.
