@@ -61,11 +61,11 @@ pub fn optimism_deposit_tx_signature() -> Signature {
 }
 
 /// Extracts the Holcene 1599 parameters from the encoded form:
-/// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding
+/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
 pub fn decode_holocene_1559_params(nonce: B64) -> (u64, u64) {
     let elasticity = nonce & ELASTICITY_MASK;
     let denominator = nonce & DENOMINATOR_MASK;
-    return (elasticity.into(), denominator.into());
+    (elasticity.into(), denominator.into())
 }
 
 impl Fee for OpChainSpec {
@@ -78,8 +78,7 @@ impl Fee for OpChainSpec {
             // First 4 bytes of the nonce are the base fee denominator, the last 4 bytes are the
             // elasticity
             let (elasticity, denominator) = decode_holocene_1559_params(parent.nonce);
-            let base_fee_params =
-                BaseFeeParams::new(u64::from(denominator) as u128, u64::from(elasticity) as u128);
+            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
             U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
         } else {
             U256::from(
