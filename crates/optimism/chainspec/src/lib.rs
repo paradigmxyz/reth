@@ -224,14 +224,14 @@ impl From<Genesis> for OpChainSpec {
 
 #[derive(Default, Debug)]
 struct OptimismGenesisInfo {
-    optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo,
+    optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
 }
 
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut info = Self {
-            optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
+            optimism_chain_info: op_alloy_rpc_types::genesis::OpChainInfo::extract_from(
                 &genesis.config.extra_fields,
             )
             .unwrap_or_default(),
@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn parse_genesis_optimism_with_variable_base_fee_params() {
-        use op_alloy_rpc_types::genesis::OptimismBaseFeeInfo;
+        use op_alloy_rpc_types::genesis::OpBaseFeeInfo;
 
         let geth_genesis = r#"
     {
@@ -673,11 +673,11 @@ mod tests {
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         let optimism_base_fee_info =
-            serde_json::from_value::<OptimismBaseFeeInfo>(optimism_object.clone()).unwrap();
+            serde_json::from_value::<OpBaseFeeInfo>(optimism_object.clone()).unwrap();
 
         assert_eq!(
             optimism_base_fee_info,
-            OptimismBaseFeeInfo {
+            OpBaseFeeInfo {
                 eip1559_elasticity: Some(6),
                 eip1559_denominator: Some(50),
                 eip1559_denominator_canyon: None,
