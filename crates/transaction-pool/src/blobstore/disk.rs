@@ -1,15 +1,18 @@
 //! A simple diskstore for blobs
 
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
-use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{TxHash, B256};
-use alloy_rlp::{Decodable, Encodable};
-use parking_lot::{Mutex, RwLock};
-use reth_primitives::BlobTransactionSidecar;
-use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
+
+use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_primitives::{B256, TxHash};
+use alloy_rlp::{Decodable, Encodable};
 use futures_util::TryStreamExt;
+use parking_lot::{Mutex, RwLock};
+use schnellru::{ByLength, LruMap};
 use tracing::{debug, trace};
+
+use reth_primitives::BlobTransactionSidecar;
+
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 
 /// How many [`BlobTransactionSidecar`] to cache in memory.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
@@ -496,9 +499,9 @@ pub enum OpenDiskFileBlobStore {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-    use super::*;
     use std::sync::atomic::Ordering;
+
+    use super::*;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -529,13 +532,13 @@ mod tests {
         // all cached
         for (tx, blob) in &blobs {
             assert!(store.is_cached(tx));
-            let a = store.get(*tx).unwrap().unwrap().read().unwrap();
-            assert_eq!(a, *blob);
+            let b = (*(store.get(*tx).unwrap().unwrap())).clone();
+            assert_eq!(b, *blob);
         }
 
         let all = store.get_all(all_hashes.clone()).unwrap();
         for (tx, blob) in all {
-            assert!(blobs.contains(&(tx, blob)), "missing blob {tx:?}");
+            assert!(blobs.contains(&(tx, (*blob).clone())), "missing blob {tx:?}");
         }
 
         assert!(store.contains(all_hashes[0]).unwrap());

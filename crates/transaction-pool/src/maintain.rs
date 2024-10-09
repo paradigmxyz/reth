@@ -27,6 +27,8 @@ use std::{
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
 };
+use std::ops::Deref;
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
@@ -328,8 +330,11 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 .ok()
                                 .flatten()
                                 .and_then(|sidecar| {
+                                    let a: BlobTransactionSidecar = (*sidecar).clone();
+                                    let a_clone = a.clone();
+
                                     PooledTransactionsElementEcRecovered::try_from_blob_transaction(
-                                        tx, sidecar,
+                                        tx, (*sidecar).clone(),
                                     )
                                     .ok()
                                 })
