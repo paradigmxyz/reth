@@ -16,7 +16,7 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display};
 
 use alloy_genesis::Genesis;
 use alloy_primitives::{b64, Parity, Signature, B256, B64, U256};
@@ -314,6 +314,7 @@ mod tests {
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
+    use std::str::FromStr;
 
     use crate::*;
 
@@ -733,6 +734,7 @@ mod tests {
         assert!(chainspec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
     }
 
+    #[test]
     fn test_fork_order_optimism_mainnet() {
         use reth_optimism_forks::OptimismHardfork;
 
