@@ -213,7 +213,7 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
-    use reth_node_core::args::utils::EthereumChainSpecParser;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     use super::*;
 

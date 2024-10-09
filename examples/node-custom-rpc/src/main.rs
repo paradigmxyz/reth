@@ -14,7 +14,7 @@
 
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
+use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
 use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
 

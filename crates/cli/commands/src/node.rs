@@ -6,11 +6,12 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        utils::EthereumChainSpecParser, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -210,7 +211,7 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,

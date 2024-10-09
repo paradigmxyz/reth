@@ -206,6 +206,13 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_highest_transaction_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
+    }
+
     fn get_transaction_by_sender_and_nonce(
         &self,
         _sender: Address,

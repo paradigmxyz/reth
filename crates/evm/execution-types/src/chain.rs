@@ -355,7 +355,7 @@ impl Chain {
 #[derive(Debug)]
 pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
 
-impl<'a> fmt::Display for DisplayBlocksChain<'a> {
+impl fmt::Display for DisplayBlocksChain<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = f.debug_list();
         let mut values = self.0.values().map(|block| block.num_hash());
@@ -376,7 +376,7 @@ pub struct ChainBlocks<'a> {
     blocks: Cow<'a, BTreeMap<BlockNumber, SealedBlockWithSenders>>,
 }
 
-impl<'a> ChainBlocks<'a> {
+impl ChainBlocks<'_> {
     /// Creates a consuming iterator over all blocks in the chain with increasing block number.
     ///
     /// Note: this always yields at least one block.
@@ -442,7 +442,7 @@ impl<'a> ChainBlocks<'a> {
     }
 }
 
-impl<'a> IntoIterator for ChainBlocks<'a> {
+impl IntoIterator for ChainBlocks<'_> {
     type Item = (BlockNumber, SealedBlockWithSenders);
     type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, SealedBlockWithSenders>;
 
@@ -516,7 +516,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_primitives::BlockNumber;
     use reth_primitives::serde_bincode_compat::SealedBlockWithSenders;
     use reth_trie::serde_bincode_compat::updates::TrieUpdates;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     use crate::ExecutionOutcome;
@@ -538,19 +538,47 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Chain<'a> {
-        blocks: BTreeMap<BlockNumber, SealedBlockWithSenders<'a>>,
+        blocks: SealedBlocksWithSenders<'a>,
         execution_outcome: Cow<'a, ExecutionOutcome>,
         trie_updates: Option<TrieUpdates<'a>>,
+    }
+
+    #[derive(Debug)]
+    struct SealedBlocksWithSenders<'a>(
+        Cow<'a, BTreeMap<BlockNumber, reth_primitives::SealedBlockWithSenders>>,
+    );
+
+    impl Serialize for SealedBlocksWithSenders<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut state = serializer.serialize_map(Some(self.0.len()))?;
+
+            for (block_number, block) in self.0.iter() {
+                state.serialize_entry(block_number, &SealedBlockWithSenders::<'_>::from(block))?;
+            }
+
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SealedBlocksWithSenders<'_> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Ok(Self(Cow::Owned(
+                BTreeMap::<BlockNumber, SealedBlockWithSenders<'_>>::deserialize(deserializer)
+                    .map(|blocks| blocks.into_iter().map(|(n, b)| (n, b.into())).collect())?,
+            )))
+        }
     }
 
     impl<'a> From<&'a super::Chain> for Chain<'a> {
         fn from(value: &'a super::Chain) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .iter()
-                    .map(|(block_number, block)| (*block_number, block.into()))
-                    .collect(),
+                blocks: SealedBlocksWithSenders(Cow::Borrowed(&value.blocks)),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
@@ -560,18 +588,14 @@ pub(super) mod serde_bincode_compat {
     impl<'a> From<Chain<'a>> for super::Chain {
         fn from(value: Chain<'a>) -> Self {
             Self {
-                blocks: value
-                    .blocks
-                    .into_iter()
-                    .map(|(block_number, block)| (block_number, block.into()))
-                    .collect(),
+                blocks: value.blocks.0.into_owned(),
                 execution_outcome: value.execution_outcome.into_owned(),
                 trie_updates: value.trie_updates.map(Into::into),
             }
         }
     }
 
-    impl<'a> SerializeAs<super::Chain> for Chain<'a> {
+    impl SerializeAs<super::Chain> for Chain<'_> {
         fn serialize_as<S>(source: &super::Chain, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,

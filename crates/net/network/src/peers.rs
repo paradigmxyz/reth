@@ -1131,7 +1131,7 @@ mod tests {
         peers: &'a mut PeersManager,
     }
 
-    impl<'a> Future for PeerActionFuture<'a> {
+    impl Future for PeerActionFuture<'_> {
         type Output = PeerAction;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

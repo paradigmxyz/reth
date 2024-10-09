@@ -1,9 +1,8 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
-use alloy_genesis::Genesis;
 use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks, MAINNET};
+use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{EthereumHardfork, ForkId, Head};
 use std::fmt::{Debug, Display};
@@ -43,23 +42,6 @@ pub struct Status {
     pub forkid: ForkId,
 }
 
-impl From<Genesis> for Status {
-    fn from(genesis: Genesis) -> Self {
-        let chain = genesis.config.chain_id;
-        let total_difficulty = genesis.difficulty;
-        let chainspec = ChainSpec::from(genesis);
-
-        Self {
-            version: EthVersion::Eth68 as u8,
-            chain: Chain::from_id(chain),
-            total_difficulty,
-            blockhash: chainspec.genesis_hash(),
-            genesis: chainspec.genesis_hash(),
-            forkid: chainspec.fork_id(&Head::default()),
-        }
-    }
-}
-
 impl Status {
     /// Helper for returning a builder for the status message.
     pub fn builder() -> StatusBuilder {
@@ -71,10 +53,10 @@ impl Status {
         self.version = version as u8;
     }
 
-    /// Create a [`StatusBuilder`] from the given [`ChainSpec`] and head block.
+    /// Create a [`StatusBuilder`] from the given [`EthChainSpec`] and head block.
     ///
-    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
-    /// and head.
+    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the
+    /// [`EthChainSpec`] and head.
     pub fn spec_builder<Spec>(spec: Spec, head: &Head) -> StatusBuilder
     where
         Spec: EthChainSpec + Hardforks,

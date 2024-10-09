@@ -12,7 +12,7 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
+pub use config::{TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
@@ -246,8 +246,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
-    /// Max number of seen transactions to store for each peer.
-    max_transactions_seen_by_peer_history: u32,
+    /// How the `TransactionsManager` is configured.
+    config: TransactionsManagerConfig,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -298,8 +298,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
-            max_transactions_seen_by_peer_history: transactions_manager_config
-                .max_transactions_seen_by_peer_history,
+            config: transactions_manager_config,
             metrics,
         }
     }
@@ -424,9 +423,8 @@ where
             return propagated
         }
 
-        // send full transactions to a fraction of the connected peers (square root of the total
-        // number of connected peers)
-        let max_num_full = (self.peers.len() as f64).sqrt().round() as usize;
+        // send full transactions to a set of the connected peers based on the configured mode
+        let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
@@ -904,6 +902,7 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
+                self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::SessionEstablished {
                 peer_id, client_version, messages, version, ..
@@ -913,7 +912,7 @@ where
                     messages,
                     version,
                     client_version,
-                    self.max_transactions_seen_by_peer_history,
+                    self.config.max_transactions_seen_by_peer_history,
                 );
                 let peer = match self.peers.entry(peer_id) {
                     Entry::Occupied(mut entry) => {
@@ -1033,7 +1032,7 @@ where
                             has_bad_transactions = true;
                         } else {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
+                            let pool_transaction = Pool::Transaction::from_pooled(tx.into());
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1396,11 +1395,14 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
-        tx: Arc<ValidPoolTransaction<T>>,
-    ) -> Self {
+    fn new<T>(tx: Arc<ValidPoolTransaction<T>>) -> Self
+    where
+        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
+        let recovered: TransactionSignedEcRecovered =
+            tx.transaction.clone().into_consensus().into();
+        let transaction = Arc::new(recovered.into_signed());
         Self { size, transaction }
     }
 }

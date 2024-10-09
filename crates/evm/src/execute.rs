@@ -1,7 +1,9 @@
 //! Traits for execution.
 
 // Re-export execution types
-pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+pub use reth_execution_errors::{
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
+};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
@@ -11,6 +13,8 @@ use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm::State;
 use revm_primitives::db::Database;
+
+use crate::system_calls::OnStateHook;
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -43,6 +47,16 @@ pub trait Executor<DB> {
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>);
+
+    /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
+    /// the EVM state after execution.
+    fn execute_with_state_hook<F>(
+        self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook;
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
@@ -196,6 +210,17 @@ mod tests {
         ) -> Result<Self::Output, Self::Error>
         where
             F: FnMut(&State<DB>),
+        {
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
+        }
+
+        fn execute_with_state_hook<F>(
+            self,
+            _: Self::Input<'_>,
+            _: F,
+        ) -> Result<Self::Output, Self::Error>
+        where
+            F: OnStateHook,
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
