@@ -3,7 +3,7 @@ use reth_metrics::Metrics;
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
-pub(crate) struct DurationsRecorder {
+pub struct DurationsRecorder {
     start: Instant,
     current_metrics: DatabaseProviderMetrics,
     pub(crate) actions: Vec<(Action, Duration)>,
