@@ -37,9 +37,9 @@ impl Default for TransactionsManagerConfig {
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TransactionPropagationMode {
-    /// Send full transactions to sqrt2 of current peers.
+    /// Send full transactions to sqrt of current peers.
     #[default]
-    Sqrt2,
+    Sqrt,
     /// Always send transactions in full.
     All,
     /// Send full transactions to a maximum number of peers
@@ -50,7 +50,7 @@ impl TransactionPropagationMode {
     /// Returns the number of peers that should
     pub(crate) fn full_peer_count(&self, peer_count: usize) -> usize {
         match self {
-            Self::Sqrt2 => (peer_count as f64).sqrt().round() as usize,
+            Self::Sqrt => (peer_count as f64).sqrt().round() as usize,
             Self::All => peer_count,
             Self::Max(max) => peer_count.min(*max),
         }
