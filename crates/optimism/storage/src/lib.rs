@@ -11,10 +11,6 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::alloy::transaction::{
-        eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
-        legacy::TxLegacy,
-    };
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
     use reth_db_api::models::{
         CompactClientVersion, CompactU256, CompactU64, StoredBlockBodyIndices, StoredBlockOmmers,
@@ -79,20 +75,5 @@ mod tests {
         validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(Withdrawals, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(Requests, UnusedBits::Zero);
-
-        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
-        assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
-        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
-        assert_eq!(TxEip7702::bitflag_encoded_bytes(), 4);
-    }
-
-    #[cfg(feature = "optimism")]
-    use crate::alloy::transaction::optimism::TxDeposit;
-
-    #[cfg(feature = "optimism")]
-    #[test]
-    fn test_ensure_backwards_compatibility_optimism() {
-        assert_eq!(TxDeposit::bitflag_encoded_bytes(), 2);
     }
 }
