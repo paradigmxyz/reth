@@ -47,7 +47,7 @@ where
 
 /// Helper enum to fetch a transaction either from a block or from the provider.
 #[derive(Debug)]
-pub enum ProviderOrSealedBlock<'a, P: BlockReader> {
+pub enum ProviderOrBlock<'a, P: BlockReader> {
     /// Provider
     Provider(&'a P),
     /// [`SealedBlock`]
@@ -56,9 +56,9 @@ pub enum ProviderOrSealedBlock<'a, P: BlockReader> {
 
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-pub fn append_matching_block_logs(
+pub fn append_matching_block_logs<P: BlockReader>(
     all_logs: &mut Vec<Log>,
-    provider_or_block: ProviderOrSealedBlock<'_, impl BlockReader>,
+    provider_or_block: ProviderOrBlock<'_, P>,
     filter: &FilteredParams,
     block_num_hash: BlockNumHash,
     receipts: &[Receipt],
@@ -83,10 +83,10 @@ pub fn append_matching_block_logs(
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
-                        ProviderOrSealedBlock::Block(block) => {
+                        ProviderOrBlock::Block(block) => {
                             Some(block.body.transactions[receipt_idx].hash())
                         }
-                        ProviderOrSealedBlock::Provider(provider) => {
+                        ProviderOrBlock::Provider(provider) => {
                             let first_tx_num = match loaded_first_tx_num {
                                 Some(num) => num,
                                 None => {

@@ -23,7 +23,7 @@ use reth_primitives::{Receipt, SealedBlock, TransactionSignedEcRecovered};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrSealedBlock},
+    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
@@ -397,8 +397,8 @@ where
                 append_matching_block_logs(
                     &mut all_logs,
                     maybe_block
-                        .map(|b| ProviderOrSealedBlock::Block(b))
-                        .unwrap_or_else(|| ProviderOrSealedBlock::Provider(&self.provider)),
+                        .map(|b| ProviderOrBlock::Block(b))
+                        .unwrap_or_else(|| ProviderOrBlock::Provider(&self.provider)),
                     &FilteredParams::new(Some(filter)),
                     block_num_hash,
                     &receipts,
@@ -504,8 +504,8 @@ where
                         append_matching_block_logs(
                             &mut all_logs,
                             maybe_block
-                                .map(|block| ProviderOrSealedBlock::Block(block))
-                                .unwrap_or_else(|| ProviderOrSealedBlock::Provider(&self.provider)),
+                                .map(|block| ProviderOrBlock::Block(block))
+                                .unwrap_or_else(|| ProviderOrBlock::Provider(&self.provider)),
                             &filter_params,
                             num_hash,
                             &receipts,
@@ -535,7 +535,9 @@ where
         block_num_hash: &BlockNumHash,
         best_number: u64,
     ) -> Result<Option<(Arc<Vec<Receipt>>, Option<SealedBlock>)>, EthFilterError> {
-        let receipts_block = if (best_number - 4..=best_number).contains(&block_num_hash.number) {
+        // The last 4 blocks are most likely cached, so we can just fetch them 
+        let cached_range = best_number.saturating_sub(4)..=best_number;
+        let receipts_block = if cached_range.contains(&block_num_hash.number) {
             self.eth_cache
                 .get_block_and_receipts(block_num_hash.hash)
                 .await?
