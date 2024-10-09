@@ -8,7 +8,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthFilterApi<T: RpcObject> {
-    /// Creates anew filter and returns its id.
+    /// Creates a new filter and returns its id.
     #[method(name = "newFilter")]
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId>;
 

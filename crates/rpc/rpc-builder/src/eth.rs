@@ -99,6 +99,7 @@ where
             ctx.config.filter_config(),
             Box::new(ctx.executor.clone()),
         );
+        filter.spawn_watch_reorgs(ctx.events.clone());
 
         let pubsub = EthPubSub::with_spawner(
             ctx.provider.clone(),

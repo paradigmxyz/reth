@@ -1,7 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     iter::StepBy,
     marker::PhantomData,
@@ -10,17 +10,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy_primitives::TxHash;
+use alloy_primitives::{BlockHash, BlockNumber, TxHash};
 use alloy_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
+use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_node_api::EthApiTypes;
-use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
+use reth_primitives::{SealedBlockWithSenders, TransactionSignedEcRecovered};
+use reth_provider::{
+    BlockIdReader, BlockReader, CanonStateNotification, CanonStateNotificationStream,
+    CanonStateSubscriptions, EvmEnvProvider, ProviderError,
+};
 use reth_rpc_eth_api::{EthFilterApiServer, FullEthApiTypes, RpcTransaction, TransactionCompat};
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
@@ -34,6 +38,7 @@ use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
+use tokio_stream::StreamExt;
 use tracing::trace;
 
 /// The maximum number of headers we read at once when handling a range filter.
@@ -106,6 +111,21 @@ where
         eth_filter
     }
 
+    /// Create a background task and listener for reorged blocks updates relevant active filters
+    pub fn spawn_watch_reorgs<Events>(&self, events: Events)
+    where
+        Events: CanonStateSubscriptions + 'static,
+    {
+        let this = self.clone();
+        self.inner.task_spawner.spawn_critical(
+            "eth-filters-watch-reorgs",
+            Box::pin(async move {
+                let notifications = events.canonical_state_stream();
+                this.watch_reorgs(notifications).await;
+            }),
+        );
+    }
+
     /// Returns all currently active filters
     pub fn active_filters(&self) -> &ActiveFilters<RpcTransaction<Eth::NetworkTypes>> {
         &self.inner.active_filters
@@ -139,6 +159,52 @@ where
             is_valid
         })
     }
+
+    /// Watch block reorgs and update filters accordingly
+    async fn watch_reorgs(&self, mut notifications: CanonStateNotificationStream) {
+        while let Some(notification) = notifications.next().await {
+            if let CanonStateNotification::Reorg { old, .. } = notification {
+                self.update_reorg(old.blocks()).await;
+            }
+        }
+    }
+
+    /// update a reorg block for all active filters
+    async fn update_reorg(&self, old_blocks: &BTreeMap<BlockNumber, SealedBlockWithSenders>) {
+        let reorg_blocks: HashMap<BlockHash, BlockNumber> =
+            old_blocks.iter().map(|(k, v)| (v.header.hash(), *k)).collect();
+
+        for active_filter in self.active_filters().inner.lock().await.values_mut() {
+            if let FilterKind::Log(filter) = &active_filter.kind {
+                match filter.block_option {
+                    FilterBlockOption::AtBlockHash(block_hash) => {
+                        if let Some(block_number) = reorg_blocks.get(&block_hash) {
+                            active_filter.reorg_blocks.write().insert(block_hash, *block_number);
+                        }
+                    }
+                    FilterBlockOption::Range { ref from_block, ref to_block } => {
+                        if let (Some(from), Some(to)) = (
+                            from_block.and_then(|from| from.as_number()),
+                            to_block.and_then(|to| to.as_number()),
+                        ) {
+                            if from > to {
+                                continue
+                            }
+
+                            for block_number in from..=to {
+                                if let Some(block) = old_blocks.get(&block_number) {
+                                    active_filter
+                                        .reorg_blocks
+                                        .write()
+                                        .insert(block.header.hash(), block_number);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
@@ -158,7 +224,7 @@ where
 
         // start_block is the block from which we should start fetching changes, the next block from
         // the last time changes were polled, in other words the best block at last poll + 1
-        let (start_block, kind) = {
+        let (start_block, kind, reorg_blocks) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
 
@@ -174,7 +240,7 @@ where
             std::mem::swap(&mut filter.block, &mut block);
             filter.last_poll_timestamp = Instant::now();
 
-            (block, filter.kind.clone())
+            (block, filter.kind.clone(), filter.reorg_blocks.clone())
         };
 
         match kind {
@@ -211,7 +277,13 @@ where
                 };
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
+                    .get_logs_in_block_range(
+                        &filter,
+                        from_block_number,
+                        to_block_number,
+                        info,
+                        reorg_blocks,
+                    )
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -224,19 +296,19 @@ where
     ///
     /// Handler for `eth_getFilterLogs`
     pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, EthFilterError> {
-        let filter = {
+        let (filter, reorg_blocks) = {
             let filters = self.inner.active_filters.inner.lock().await;
-            if let FilterKind::Log(ref filter) =
-                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?.kind
-            {
-                *filter.clone()
+            let active_filter =
+                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
+            if let FilterKind::Log(ref filter) = active_filter.kind {
+                (*filter.clone(), active_filter.reorg_blocks.clone())
             } else {
                 // Not a log filter
                 return Err(EthFilterError::FilterNotFound(id))
             }
         };
 
-        self.inner.logs_for_filter(filter).await
+        self.inner.logs_for_filter(filter, reorg_blocks).await
     }
 }
 
@@ -327,7 +399,7 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.inner.logs_for_filter(filter).await?)
+        Ok(self.inner.logs_for_filter(filter, Arc::new(RwLock::new(HashMap::new()))).await?)
     }
 }
 
@@ -371,7 +443,11 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
-    async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, EthFilterError> {
+    async fn logs_for_filter(
+        &self,
+        filter: Filter,
+        reorg_blocks: Arc<RwLock<HashMap<BlockHash, BlockNumber>>>,
+    ) -> Result<Vec<Log>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
                 // for all matching logs in the block
@@ -388,7 +464,12 @@ where
                     .get_receipts(block_hash)
                     .await?
                     .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
-
+                let removed = if let Some(block_number) = reorg_blocks.read().get(&block_hash) {
+                    trace!(target: "rpc::eth::filter", block_number=block_number, "reorged");
+                    true
+                } else {
+                    false
+                };
                 let mut all_logs = Vec::new();
                 let filter = FilteredParams::new(Some(filter));
                 logs_utils::append_matching_block_logs(
@@ -397,7 +478,7 @@ where
                     &filter,
                     (block_hash, block.number).into(),
                     &receipts,
-                    false,
+                    removed,
                     block.timestamp,
                 )?;
 
@@ -419,8 +500,14 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
-                    .await
+                self.get_logs_in_block_range(
+                    &filter,
+                    from_block_number,
+                    to_block_number,
+                    info,
+                    Arc::new(RwLock::new(HashMap::new())),
+                )
+                .await
             }
         }
     }
@@ -436,6 +523,7 @@ where
                 block: last_poll_block_number,
                 last_poll_timestamp: Instant::now(),
                 kind,
+                reorg_blocks: Arc::new(RwLock::new(HashMap::new())),
             },
         );
         Ok(id)
@@ -452,6 +540,7 @@ where
         from_block: u64,
         to_block: u64,
         chain_info: ChainInfo,
+        reorg_blocks: Arc<RwLock<HashMap<BlockHash, BlockNumber>>>,
     ) -> Result<Vec<Log>, EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
         let best_number = chain_info.best_number;
@@ -475,13 +564,17 @@ where
             if let Some((block, receipts)) =
                 self.eth_cache.get_block_and_receipts(chain_info.best_hash).await?
             {
+                let removed = reorg_blocks.read().contains_key(&chain_info.best_hash);
+                if removed {
+                    trace!(target: "rpc::eth::filter", block_number=best_number, "reorged");
+                }
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
                     &self.provider,
                     &filter_params,
                     chain_info.into(),
                     &receipts,
-                    false,
+                    removed,
                     block.header.timestamp,
                 )?;
             }
@@ -515,13 +608,21 @@ where
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
+                        let removed = if let Some(block_number) =
+                            reorg_blocks.read().get(&block_hash)
+                        {
+                            trace!(target: "rpc::eth::filter", block_number=block_number, "reorged");
+                            true
+                        } else {
+                            false
+                        };
                         append_matching_block_logs(
                             &mut all_logs,
                             &self.provider,
                             &filter_params,
                             BlockNumHash::new(header.number, block_hash),
                             &receipts,
-                            false,
+                            removed,
                             header.timestamp,
                         )?;
 
@@ -564,6 +665,8 @@ struct ActiveFilter<T> {
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
     kind: FilterKind<T>,
+    /// reorg blocks that are relevant to this filter
+    reorg_blocks: Arc<RwLock<HashMap<BlockHash, BlockNumber>>>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.
