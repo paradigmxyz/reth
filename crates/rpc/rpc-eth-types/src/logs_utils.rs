@@ -84,7 +84,7 @@ pub fn append_matching_block_logs<P: BlockReader>(
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
                         ProviderOrBlock::Block(block) => {
-                            Some(block.body.transactions[receipt_idx].hash())
+                            block.body.transactions.get(receipt_idx).map(|t| t.hash())
                         }
                         ProviderOrBlock::Provider(provider) => {
                             let first_tx_num = match loaded_first_tx_num {
