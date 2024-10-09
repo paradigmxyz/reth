@@ -92,3 +92,5 @@ pub mod serde_bincode_compat {
         transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
     };
 }
+
+use reth_optimism_codecs as _;

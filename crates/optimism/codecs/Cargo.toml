@@ -25,10 +25,6 @@ modular-bitfield.workspace = true
 bytes.workspace = true
 serde = { workspace = true, features = ["derive"] }
 
-# test-util
-test-fuzz.workspace = true
-proptest-arbitrary-interop.workspace = true
-
 [dev-dependencies]
 reth-primitives.workspace = true
 reth-codecs.workspace = true
@@ -36,7 +32,11 @@ reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 proptest.workspace = true
-arbitrary.workspace = true
+proptest-arbitrary-interop.workspace = true
+arbitrary = { workspace = true, features = ["derive"] }
+test-fuzz.workspace = true
 
 [features]
+default = ["std"]
+std = ["alloy-primitives/std", "bytes/std", "reth-codecs/std", "op-alloy-consensus/std"]
 optimism = ["reth-primitives/optimism"]

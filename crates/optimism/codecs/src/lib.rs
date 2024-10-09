@@ -6,14 +6,18 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+// The `optimism` feature must be enabled to use this module.
+#[cfg(feature = "optimism")]
 pub mod tx_deposit;
-
+// The `optimism` feature must be enabled to use this module.
+#[cfg(feature = "optimism")]
 pub use tx_deposit::{TxDepositDecode, TxDepositEncode};
 
 #[cfg(test)]
+// The `optimism` feature must be enabled to use this module.
+#[cfg(feature = "optimism")]
 mod tests {
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
     use reth_db_api::models::{
