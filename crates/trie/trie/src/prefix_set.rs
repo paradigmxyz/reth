@@ -20,9 +20,9 @@ pub struct TriePrefixSetsMut {
 impl TriePrefixSetsMut {
     /// Extends prefix sets with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
-        self.account_prefix_set.extend(other.account_prefix_set.keys);
+        self.account_prefix_set.extend(other.account_prefix_set);
         for (hashed_address, prefix_set) in other.storage_prefix_sets {
-            self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set.keys);
+            self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set);
         }
         self.destroyed_accounts.extend(other.destroyed_accounts);
     }
@@ -115,12 +115,18 @@ impl PrefixSetMut {
         self.keys.push(nibbles);
     }
 
+    /// Extend prefix set with contents of another prefix set.
+    pub fn extend(&mut self, other: PrefixSetMut) {
+        self.all |= other.all;
+        self.keys.extend(other.keys);
+    }
+
     /// Extend prefix set keys with contents of provided iterator.
-    pub fn extend<I>(&mut self, nibbles_iter: I)
+    pub fn extend_keys<I>(&mut self, keys: I)
     where
         I: IntoIterator<Item = Nibbles>,
     {
-        self.keys.extend(nibbles_iter);
+        self.keys.extend(keys);
     }
 
     /// Returns the number of elements in the set.
