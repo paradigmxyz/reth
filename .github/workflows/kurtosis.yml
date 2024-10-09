@@ -3,6 +3,7 @@
 name: kurtosis
 
 on:
+  pull_request:
   workflow_dispatch:
   schedule:
     # every day
