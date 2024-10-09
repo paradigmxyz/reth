@@ -60,6 +60,14 @@ pub fn optimism_deposit_tx_signature() -> Signature {
     Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
+/// Extracts the Holcene 1599 parameters from the encoded form:
+/// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding
+pub fn decode_holocene_1559_params(nonce: B64) -> (u64, u64) {
+    let elasticity = nonce & ELASTICITY_MASK;
+    let denominator = nonce & DENOMINATOR_MASK;
+    return (elasticity.into(), denominator.into());
+}
+
 impl Fee for OpChainSpec {
     fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
         let is_holocene =
@@ -69,8 +77,7 @@ impl Fee for OpChainSpec {
         if is_holocene && parent.nonce != B64::ZERO {
             // First 4 bytes of the nonce are the base fee denominator, the last 4 bytes are the
             // elasticity
-            let denominator = parent.nonce & DENOMINATOR_MASK;
-            let elasticity = parent.nonce & ELASTICITY_MASK;
+            let (elasticity, denominator) = decode_holocene_1559_params(parent.nonce);
             let base_fee_params =
                 BaseFeeParams::new(u64::from(denominator) as u128, u64::from(elasticity) as u128);
             U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
@@ -812,12 +819,12 @@ mod tests {
     #[test]
     fn test_get_base_fee_pre_holocene() {
         let op_chain_spec = &BASE_SEPOLIA;
-        let mut parent = Header::default();
-        parent.base_fee_per_gas = Some(1);
-        parent.gas_used = 15763614;
-        parent.gas_limit = 144000000;
-        parent.nonce = B64::from_str("0x0000000800000008").unwrap();
-
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            ..Default::default()
+        };
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
         assert_eq!(
             base_fee,
@@ -832,32 +839,31 @@ mod tests {
     fn holocene_chainspec() -> Arc<OpChainSpec> {
         let mut hardforks = OptimismHardfork::base_sepolia();
         hardforks.insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
-        Arc::new(
-            OpChainSpec {
-                inner: ChainSpec {
-                    chain: BASE_SEPOLIA.inner.chain.clone(),
-                    genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                    genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
-                    paris_block_and_final_difficulty: Some((0, U256::from(0))),
-                    hardforks,
-                    base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                    max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
-                    prune_delete_limit: 10000,
-                    ..Default::default()
-                },
-            }
-            .into(),
-        )
+        Arc::new(OpChainSpec {
+            inner: ChainSpec {
+                chain: BASE_SEPOLIA.inner.chain,
+                genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                paris_block_and_final_difficulty: Some((0, U256::from(0))),
+                hardforks,
+                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
+                prune_delete_limit: 10000,
+                ..Default::default()
+            },
+        })
     }
 
     #[test]
     fn test_get_base_fee_holocene_nonce_not_set() {
         let op_chain_spec = holocene_chainspec();
-        let mut parent = Header::default();
-        parent.base_fee_per_gas = Some(1);
-        parent.gas_used = 15763614;
-        parent.gas_limit = 144000000;
-        parent.timestamp = 1800000003;
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            timestamp: 1800000003,
+            ..Default::default()
+        };
 
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
         assert_eq!(
@@ -871,14 +877,16 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_holocene_not_first_block() {
+    fn test_get_base_fee_holocene_nonce_set() {
         let op_chain_spec = holocene_chainspec();
-        let mut parent = Header::default();
-        parent.base_fee_per_gas = Some(1);
-        parent.gas_used = 15763614;
-        parent.gas_limit = 144000000;
-        parent.nonce = B64::from_str("0x0000000800000008").unwrap();
-        parent.timestamp = 1800000003;
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            nonce: B64::from_str("0x0000000800000008").unwrap(),
+            timestamp: 1800000003,
+            ..Default::default()
+        };
 
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
         assert_eq!(

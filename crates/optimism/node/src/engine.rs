@@ -13,7 +13,7 @@ use reth_node_api::{
     },
     validate_version_specific_fields, EngineTypes, EngineValidator,
 };
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{decode_holocene_1559_params, OpChainSpec};
 use reth_optimism_forks::OptimismHardfork;
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 
@@ -150,11 +150,22 @@ where
         if self.chain_spec.is_fork_active_at_timestamp(
             OptimismHardfork::Holocene,
             attributes.payload_attributes.timestamp,
-        ) && attributes.eip_1559_params.is_none()
-        {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
-            ))
+        ) {
+            if attributes.eip_1559_params.is_none() {
+                return Err(EngineObjectValidationError::InvalidParams(
+                    "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
+                ))
+            }
+
+            let (_, denominator) = decode_holocene_1559_params(
+                attributes.eip_1559_params.expect("eip_1559_params is none"),
+            );
+
+            if denominator == 0 {
+                return Err(EngineObjectValidationError::InvalidParams(
+                    "Eip1559ParamsDenominatorZero".to_string().into(),
+                ))
+            }
         }
 
         Ok(())
