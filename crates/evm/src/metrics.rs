@@ -96,6 +96,9 @@ impl ExecutorMetrics {
                     .sum::<usize>();
                 let bytecodes = cache_state.contracts.len();
 
+                // Record all state present in the cache state as loaded even though some might have
+                // been newly created.
+                // TODO: Consider spitting these into loaded and newly created.
                 self.accounts_loaded_total.increment(accounts as u64);
                 self.storage_slots_loaded_total.increment(storage_slots as u64);
                 self.bytecodes_loaded_total.increment(bytecodes as u64);
