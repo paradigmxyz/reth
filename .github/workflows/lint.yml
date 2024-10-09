@@ -26,7 +26,6 @@ jobs:
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
             features: ""
-            install_protoc: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
@@ -36,7 +35,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - if: "${{ matrix.install_protoc }}"
+      - if: "${{ matrix.type == 'book' }}"
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
