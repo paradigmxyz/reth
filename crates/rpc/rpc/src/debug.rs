@@ -619,7 +619,7 @@ where
                                 .cache
                                 .contracts
                                 .iter()
-                                .map(|(hash, code)| (*hash, code.bytes()))
+                                .map(|(hash, code)| (*hash, code.original_bytes()))
                                 .collect();
 
                             for (address, account) in &statedb.cache.accounts {
