@@ -7,7 +7,8 @@ use reth_primitives::{
     constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
     EIP4844_TX_TYPE_ID,
 };
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Mul};
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -104,6 +105,15 @@ impl SubPoolLimit {
     #[inline]
     pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
+    }
+}
+
+impl Mul<usize> for SubPoolLimit {
+    type Output = Self;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        let Self { max_txs, max_size } = self;
+        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
     }
 }
 
@@ -317,5 +327,15 @@ mod tests {
 
         let new_config = config.set_propagate_local_transactions(false);
         assert!(!new_config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn scale_pool_limit() {
+        let limit = SubPoolLimit::default();
+        let double = limit * 2;
+        assert_eq!(
+            double,
+            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
+        )
     }
 }
