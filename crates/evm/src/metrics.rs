@@ -66,16 +66,19 @@ impl ExecutorMetrics {
     ///
     /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
     /// of accounts, storage slots and bytecodes loaded and updated.
-    pub fn execute_metered<'a, DB, O, E>(
+    pub fn execute_metered<'a, E, DB, O, Error>(
         &self,
-        executor: impl Executor<
+        executor: E,
+        input: BlockExecutionInput<'a, BlockWithSenders>,
+    ) -> Result<BlockExecutionOutput<O>, Error>
+    where
+        E: Executor<
             DB,
             Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
             Output = BlockExecutionOutput<O>,
-            Error = E,
+            Error = Error,
         >,
-        input: BlockExecutionInput<'a, BlockWithSenders>,
-    ) -> Result<BlockExecutionOutput<O>, E> {
+    {
         let output = self.metered(input.block, || {
             executor.execute_with_state_closure(input, |state| {
                 // Help LSP to resolve the type correctly
