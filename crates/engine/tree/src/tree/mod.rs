@@ -899,16 +899,9 @@ where
                 return Ok(None);
             }
 
-            if old_hash == current_hash {
-                // We've found the fork point
-                break;
-            }
-
             if let Some(block) = self.executed_block_by_hash(current_hash)? {
-                if self.is_fork(block.block.hash())? {
-                    current_hash = block.block.parent_hash;
-                    new_chain.push(block);
-                }
+                current_hash = block.block.parent_hash;
+                new_chain.push(block);
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
