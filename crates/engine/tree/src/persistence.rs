@@ -9,8 +9,7 @@ use reth_provider::{
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
-    sync::mpsc::{Receiver, SendError, Sender},
-    time::Instant,
+    sync::mpsc::{Receiver, SendError, Sender}, thread::sleep, time::{Duration, Instant}
 };
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -130,6 +129,9 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
             let static_file_provider = self.provider.static_file_provider();
 
             UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
+
+            // make it slower!
+            sleep(Duration::new(2, 3000000));
             UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
