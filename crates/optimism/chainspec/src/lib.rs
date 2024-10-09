@@ -16,7 +16,7 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use std::{fmt::Display};
+use std::fmt::Display;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::{b64, Parity, Signature, B256, B64, U256};
@@ -309,9 +309,11 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use crate::OpChainSpec;
+    use alloc::sync::Arc;
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::b256;
-    use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
+    use alloy_primitives::{b256, U256};
+    use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
     use std::str::FromStr;
@@ -813,7 +815,10 @@ mod tests {
     fn test_get_base_fee_pre_holocene() {
         let op_chain_spec = &BASE_SEPOLIA;
         let mut parent = Header::default();
-        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
+        parent.base_fee_per_gas = Some(1);
+        parent.gas_used = 15763614;
+        parent.gas_limit = 144000000;
+        parent.nonce = B64::from_str("0x0000000800000008").unwrap();
 
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
         assert_eq!(
@@ -826,18 +831,43 @@ mod tests {
         );
     }
 
+    fn holocene_chainspec() -> Arc<OpChainSpec> {
+        let mut hardforks = OptimismHardfork::base_sepolia();
+        hardforks.insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        Arc::new(
+            OpChainSpec {
+                inner: ChainSpec {
+                    chain: BASE_SEPOLIA.inner.chain.clone(),
+                    genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                    genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                    paris_block_and_final_difficulty: Some((0, U256::from(0))),
+                    hardforks,
+                    base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                    max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
+                    prune_delete_limit: 10000,
+                    ..Default::default()
+                },
+            }
+            .into(),
+        )
+    }
+
     #[test]
     fn test_get_base_fee_holocene_first_block() {
-        let op_chain_spec = &BASE_SEPOLIA;
+        let op_chain_spec = holocene_chainspec();
         let mut parent = Header::default();
-        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
+        parent.base_fee_per_gas = Some(1);
+        parent.gas_used = 15763614;
+        parent.gas_limit = 144000000;
+        parent.nonce = B64::from_str("0x0000000800000008").unwrap();
+        parent.timestamp = 1799999999;
 
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000001);
         assert_eq!(
             base_fee,
             U256::from(
                 parent
-                    .next_block_base_fee(BaseFeeParams::new(0x12345678, 0x12345678))
+                    .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
                     .unwrap_or_default()
             )
         );
@@ -845,16 +875,20 @@ mod tests {
 
     #[test]
     fn test_get_base_fee_holocene_not_first_block() {
-        let op_chain_spec = &BASE_SEPOLIA;
+        let op_chain_spec = holocene_chainspec();
         let mut parent = Header::default();
-        parent.nonce = B64::from_str("0x1234567812345678").unwrap();
+        parent.base_fee_per_gas = Some(1);
+        parent.gas_used = 15763614;
+        parent.gas_limit = 144000000;
+        parent.nonce = B64::from_str("0x0000000800000008").unwrap();
+        parent.timestamp = 1800000003;
 
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
         assert_eq!(
             base_fee,
             U256::from(
                 parent
-                    .next_block_base_fee(BaseFeeParams::new(0x12345678, 0x12345678))
+                    .next_block_base_fee(BaseFeeParams::new(0x00000008, 0x00000008))
                     .unwrap_or_default()
             )
         );

@@ -18,7 +18,7 @@ use reth_primitives::{
     Head, Header, TransactionSigned,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
