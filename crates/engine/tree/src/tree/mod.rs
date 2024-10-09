@@ -2160,10 +2160,7 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
-        let output = self
-            .metrics
-            .executor
-            .execute_metered_with_output(executor, (&block, U256::MAX).into())?;
+        let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
         if let Err(err) = self.consensus.validate_block_post_execution(

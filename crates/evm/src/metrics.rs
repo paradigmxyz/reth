@@ -1,7 +1,7 @@
 //! Executor metrics.
 //!
-//! Block processing related to syncing should take care to update the metrics by using e.g.
-//! [`ExecutorMetrics::metered`].
+//! Block processing related to syncing should take care to update the metrics by using either
+//! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
 use std::time::Instant;
 
 use metrics::{Counter, Gauge, Histogram};
@@ -63,7 +63,7 @@ impl ExecutorMetrics {
     ///
     /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
     /// of accounts, storage slots and bytecodes loaded and updated.
-    pub fn execute_metered_with_output<'a, DB, O, E>(
+    pub fn execute_metered<'a, DB, O, E>(
         &self,
         executor: impl Executor<
             DB,
