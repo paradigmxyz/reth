@@ -276,4 +276,11 @@ mod tests {
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
     }
+
+    #[test]
+    fn test_prefix_set_all_extend() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.extend(PrefixSetMut::all());
+        assert!(prefix_set_mut.all);
+    }
 }
