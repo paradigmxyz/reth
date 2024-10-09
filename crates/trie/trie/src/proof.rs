@@ -96,7 +96,7 @@ where
 
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
-        prefix_set.extend(targets.keys().map(Nibbles::unpack));
+        prefix_set.extend_keys(targets.keys().map(Nibbles::unpack));
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
@@ -225,7 +225,7 @@ where
         }
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
-        self.prefix_set.extend(target_nibbles.clone());
+        self.prefix_set.extend_keys(target_nibbles.clone());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
