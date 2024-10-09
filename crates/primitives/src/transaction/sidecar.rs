@@ -287,10 +287,8 @@ mod tests {
     };
     use alloy_primitives::hex;
     use alloy_rlp::Encodable;
+    use std::{fs, path::PathBuf, str::FromStr};
 
-    use crate::{kzg::Blob, PooledTransactionsElement};
-
-    use super::*;
 
     #[test]
     fn test_blob_transaction_sidecar_generation() {
