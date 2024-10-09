@@ -289,7 +289,6 @@ mod tests {
     use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
 
-
     #[test]
     fn test_blob_transaction_sidecar_generation() {
         // Read the contents of the JSON file into a string.

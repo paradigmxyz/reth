@@ -10,7 +10,6 @@ use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
-
 /// How many [`BlobTransactionSidecar`] to cache in memory.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
 
