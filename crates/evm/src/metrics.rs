@@ -61,8 +61,8 @@ impl ExecutorMetrics {
     /// Execute the given block using the provided [`Executor`] and update metrics for the
     /// execution.
     ///
-    /// Compared to [`Self::metered_one`], this method additionaly updates metrics for the number of
-    /// accounts, storage slots and bytecodes laoded and updated.
+    /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
+    /// of accounts, storage slots and bytecodes loaded and updated.
     pub fn execute_metered_with_output<'a, DB, O, E>(
         &self,
         executor: impl Executor<
