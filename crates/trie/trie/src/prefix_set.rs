@@ -116,7 +116,7 @@ impl PrefixSetMut {
     }
 
     /// Extend prefix set with contents of another prefix set.
-    pub fn extend(&mut self, other: PrefixSetMut) {
+    pub fn extend(&mut self, other: Self) {
         self.all |= other.all;
         self.keys.extend(other.keys);
     }
