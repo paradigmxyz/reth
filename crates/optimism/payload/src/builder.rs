@@ -1,6 +1,6 @@
 //! Optimism payload builder implementation.
 
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use alloy_primitives::{B64, U256};
 use reth_basic_payload_builder::*;
@@ -564,9 +564,7 @@ fn get_nonce(
     if is_holocene {
         // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
         // The eip 1559 params should exist here since there was a check previously
-        if attributes.eip_1559_params.unwrap() != B64::ZERO {
-            attributes.eip_1559_params.unwrap()
-        } else {
+        if attributes.eip_1559_params.unwrap() == B64::ZERO {
             let mut default_params = [0u8; 8];
             default_params[..4].copy_from_slice(
                 &(default_base_fee_params.max_change_denominator as u32).to_be_bytes(),
@@ -575,6 +573,8 @@ fn get_nonce(
                 &(default_base_fee_params.elasticity_multiplier as u32).to_be_bytes(),
             );
             B64::from_slice(default_params.as_ref())
+        } else {
+            attributes.eip_1559_params.unwrap()
         }
     } else {
         BEACON_NONCE.into()

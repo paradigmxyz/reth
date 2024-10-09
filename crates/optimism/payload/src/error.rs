@@ -1,7 +1,5 @@
 //! Error type
 
-use core::error;
-
 /// Optimism specific payload building errors.
 #[derive(Debug, thiserror::Error)]
 pub enum OptimismPayloadBuilderError {
