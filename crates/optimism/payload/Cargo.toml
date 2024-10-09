@@ -35,6 +35,7 @@ reth-optimism-forks.workspace = true
 
 # ethereum
 revm.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
@@ -51,7 +52,6 @@ optimism = [
     "reth-chainspec/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "reth-rpc-types-compat/optimism",
     "reth-optimism-evm/optimism",
     "reth-revm/optimism",
 ]

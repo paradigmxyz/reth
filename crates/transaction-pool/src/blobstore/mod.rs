@@ -90,7 +90,7 @@ pub enum BlobStoreError {
     DecodeError(#[from] alloy_rlp::Error),
     /// Other implementation specific error.
     #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Keeps track of the size of the blob store.

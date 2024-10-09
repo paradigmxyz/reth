@@ -36,7 +36,7 @@ impl Compact for AlloyTxDeposit {
             to: self.to,
             mint: self.mint,
             value: self.value,
-            gas_limit: self.gas_limit as u64,
+            gas_limit: self.gas_limit,
             is_system_transaction: self.is_system_transaction,
             input: self.input.clone(),
         };
@@ -51,7 +51,7 @@ impl Compact for AlloyTxDeposit {
             to: tx.to,
             mint: tx.mint,
             value: tx.value,
-            gas_limit: tx.gas_limit as u128,
+            gas_limit: tx.gas_limit,
             is_system_transaction: tx.is_system_transaction,
             input: tx.input,
         };

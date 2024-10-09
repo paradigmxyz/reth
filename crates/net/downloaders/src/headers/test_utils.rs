@@ -2,7 +2,8 @@
 
 #![allow(dead_code)]
 
-use reth_primitives::{alloy_primitives::Sealable, SealedHeader};
+use alloy_primitives::Sealable;
+use reth_primitives::SealedHeader;
 
 /// Returns a new [`SealedHeader`] that's the child header of the given `parent`.
 pub(crate) fn child_header(parent: &SealedHeader) -> SealedHeader {

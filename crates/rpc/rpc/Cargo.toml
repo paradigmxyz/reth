@@ -39,6 +39,7 @@ reth-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
+alloy-eips.workspace = true
 alloy-dyn-abi.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
@@ -99,8 +100,6 @@ jsonrpsee = { workspace = true, features = ["client"] }
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 optimism = [
     "reth-primitives/optimism",
-    "reth-rpc-types-compat/optimism",
     "reth-provider/optimism",
-    "reth-rpc-eth-api/optimism",
     "reth-revm/optimism",
 ]

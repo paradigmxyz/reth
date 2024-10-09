@@ -1,4 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
@@ -9,6 +8,8 @@ use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
+
+use tracing as _;
 
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
@@ -33,7 +34,7 @@ fn main() {
                     let handle = builder
                         .with_types_and_provider::<OptimismNode, BlockchainProvider2<_>>()
                         .with_components(OptimismNode::components(rollup_args))
-                        .with_add_ons::<OptimismAddOns>()
+                        .with_add_ons(OptimismAddOns::new(sequencer_http_arg.clone()))
                         .extend_rpc_modules(move |ctx| {
                             // register sequencer tx forwarder
                             if let Some(sequencer_http) = sequencer_http_arg {

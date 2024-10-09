@@ -170,4 +170,15 @@ mod tests {
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
     }
+
+    #[test]
+    fn txpool_parse_locals() {
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .args;
+        assert_eq!(args.locals, vec![Address::ZERO]);
+    }
 }

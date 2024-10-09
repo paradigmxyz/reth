@@ -7,7 +7,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_eips::{eip2930::AccessList, eip4844::BlobAndProofV1};
+use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
@@ -44,10 +44,7 @@ pub type PeerId = alloy_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction<
-        Pooled = PooledTransactionsElementEcRecovered,
-        Consensus = TransactionSignedEcRecovered,
-    >;
+    type Transaction: EthPoolTransaction;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -337,6 +334,12 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns the highest transaction sent by a given user
+    fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns a transaction sent by a given user and a nonce
     fn get_transaction_by_sender_and_nonce(
         &self,
@@ -496,12 +499,12 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 }
 
@@ -647,7 +650,7 @@ pub struct CanonicalStateUpdate<'a> {
     pub mined_transactions: Vec<B256>,
 }
 
-impl<'a> CanonicalStateUpdate<'a> {
+impl CanonicalStateUpdate<'_> {
     /// Returns the number of the tip block.
     pub fn number(&self) -> u64 {
         self.new_tip.number
@@ -666,7 +669,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: self.new_tip.gas_limit as u64,
+            block_gas_limit: self.new_tip.gas_limit,
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
@@ -813,19 +816,25 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     type TryFromConsensusError;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self> + TryInto<Self>;
+    type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
 
     /// Define a method to convert from the `Consensus` type to `Self`
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError>;
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
 
     /// Define a method to convert from the `Self` type to `Consensus`
-    fn into_consensus(self) -> Self::Consensus;
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
-    fn from_pooled(pooled: Self::Pooled) -> Self;
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -921,12 +930,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     fn chain_id(&self) -> Option<u64>;
 }
 
-/// An extension trait that provides additional interfaces for the
-/// [`EthTransactionValidator`](crate::EthTransactionValidator).
+/// Super trait for transactions that can be converted to and from Eth transactions
 pub trait EthPoolTransaction:
     PoolTransaction<
-    Pooled = PooledTransactionsElementEcRecovered,
-    Consensus = TransactionSignedEcRecovered,
+    Consensus: From<TransactionSignedEcRecovered> + Into<TransactionSignedEcRecovered>,
+    Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
 >
 {
     /// Extracts the blob sidecar from the transaction.
@@ -1043,7 +1051,7 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
@@ -1068,18 +1076,6 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
-
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
-        tx.try_into()
-    }
-
-    fn into_consensus(self) -> Self::Consensus {
-        self.into()
-    }
-
-    fn from_pooled(pooled: Self::Pooled) -> Self {
-        pooled.into()
-    }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
@@ -1251,7 +1247,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
         };
 
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let transaction = Self::new(tx, encoded_length);
         Ok(transaction)
     }

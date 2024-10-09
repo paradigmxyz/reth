@@ -14,10 +14,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::{
-        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
-        apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
-    },
+    system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -129,36 +126,27 @@ where
     /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
     /// executes the transactions.
     ///
+    /// The optional `state_hook` will be executed with the state changes if present.
+    ///
     /// # Note
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
     /// [`EthBlockExecutor::post_execution`].
-    fn execute_state_transitions<Ext, DB>(
+    fn execute_state_transitions<Ext, DB, F>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        state_hook: Option<F>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
+        F: OnStateHook,
     {
-        // apply pre execution changes
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
-            &mut evm,
-        )?;
-        apply_blockhashes_contract_call(
-            &self.evm_config,
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_hash,
-            &mut evm,
-        )?;
+        let mut system_caller =
+            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
+
+        system_caller.apply_pre_execution_changes(block, &mut evm)?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;
@@ -166,7 +154,7 @@ where
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = (block.header.gas_limit - cumulative_gas_used) as u64;
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
@@ -178,7 +166,7 @@ where
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+            let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
@@ -186,10 +174,12 @@ where
                     error: Box::new(new_err),
                 }
             })?;
+            system_caller.on_state(&result_and_state);
+            let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used() as u128;
+            cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(
@@ -199,7 +189,7 @@ where
                     // Success flag was added in `EIP-658: Embedding transaction status code in
                     // receipts`.
                     success: result.is_success(),
-                    cumulative_gas_used: cumulative_gas_used as u64,
+                    cumulative_gas_used,
                     // convert to reth log
                     logs: result.into_logs(),
                     ..Default::default()
@@ -212,20 +202,14 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-            // Collect all EIP-7685 requests
-            let withdrawal_requests =
-                apply_withdrawal_requests_contract_call(&self.evm_config, &mut evm)?;
+            let post_execution_requests = system_caller.apply_post_execution_changes(&mut evm)?;
 
-            // Collect all EIP-7251 requests
-            let consolidation_requests =
-                apply_consolidation_requests_contract_call(&self.evm_config, &mut evm)?;
-
-            [deposit_requests, withdrawal_requests, consolidation_requests].concat()
+            [deposit_requests, post_execution_requests].concat()
         } else {
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used as u64 })
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
 }
 
@@ -283,17 +267,31 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
+    /// Convenience method to invoke `execute_without_verification_with_state_hook` setting the
+    /// state hook as `None`.
+    fn execute_without_verification(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+        self.execute_without_verification_with_state_hook(block, total_difficulty, None::<NoopHook>)
+    }
+
     /// Execute a single block and apply the state changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block, the total gas used and the list of
     /// EIP-7685 [requests](Request).
     ///
     /// Returns an error if execution fails.
-    fn execute_without_verification(
+    fn execute_without_verification_with_state_hook<F>(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+        state_hook: Option<F>,
+    ) -> Result<EthExecuteOutput, BlockExecutionError>
+    where
+        F: OnStateHook,
+    {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -301,7 +299,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, evm)
+            self.executor.execute_state_transitions(block, evm, state_hook)
         }?;
 
         // 3. apply post execution changes
@@ -389,6 +387,27 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
         witness(&self.state);
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+    }
+
+    fn execute_with_state_hook<F>(
+        mut self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        let BlockExecutionInput { block, total_difficulty } = input;
+        let EthExecuteOutput { receipts, requests, gas_used } = self
+            .execute_without_verification_with_state_hook(
+                block,
+                total_difficulty,
+                Some(state_hook),
+            )?;
+
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
@@ -808,7 +827,7 @@ mod tests {
             timestamp: 1,
             number: 1,
             parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
-            base_fee_per_gas: Some(u64::MAX.into()),
+            base_fee_per_gas: Some(u64::MAX),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -1250,7 +1269,7 @@ mod tests {
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
-                gas_price: header.base_fee_per_gas.unwrap(),
+                gas_price: header.base_fee_per_gas.unwrap().into(),
                 gas_limit: 134_807,
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 // `MIN_WITHDRAWAL_REQUEST_FEE`
@@ -1337,7 +1356,7 @@ mod tests {
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
-                gas_price: header.base_fee_per_gas.unwrap(),
+                gas_price: header.base_fee_per_gas.unwrap().into(),
                 gas_limit: 2_500_000, // higher than block gas limit
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 value: U256::from(1),

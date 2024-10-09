@@ -28,11 +28,11 @@ impl Storage {
         Ok(Self { path: path.as_ref().to_path_buf() })
     }
 
-    fn file_path(&self, id: u64) -> PathBuf {
+    fn file_path(&self, id: u32) -> PathBuf {
         self.path.join(format!("{id}.wal"))
     }
 
-    fn parse_filename(filename: &str) -> eyre::Result<u64> {
+    fn parse_filename(filename: &str) -> eyre::Result<u32> {
         filename
             .strip_suffix(".wal")
             .and_then(|s| s.parse().ok())
@@ -40,18 +40,31 @@ impl Storage {
     }
 
     /// Removes notification for the given file ID from the storage.
-    #[instrument(target = "exex::wal::storage", skip(self))]
-    fn remove_notification(&self, file_id: u64) {
+    ///
+    /// # Returns
+    ///
+    /// The size of the file that was removed in bytes, if any.
+    #[instrument(skip(self))]
+    fn remove_notification(&self, file_id: u32) -> Option<u64> {
+        let path = self.file_path(file_id);
+        let size = path.metadata().ok()?.len();
+
         match reth_fs_util::remove_file(self.file_path(file_id)) {
-            Ok(()) => debug!("Notification was removed from the storage"),
-            Err(err) => debug!(?err, "Failed to remove notification from the storage"),
+            Ok(()) => {
+                debug!(target: "exex::wal::storage", "Notification was removed from the storage");
+                Some(size)
+            }
+            Err(err) => {
+                debug!(target: "exex::wal::storage", ?err, "Failed to remove notification from the storage");
+                None
+            }
         }
     }
 
     /// Returns the range of file IDs in the storage.
     ///
     /// If there are no files in the storage, returns `None`.
-    pub(super) fn files_range(&self) -> eyre::Result<Option<RangeInclusive<u64>>> {
+    pub(super) fn files_range(&self) -> eyre::Result<Option<RangeInclusive<u32>>> {
         let mut min_id = None;
         let mut max_id = None;
 
@@ -60,67 +73,95 @@ impl Storage {
             let file_name = entry.file_name();
             let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
 
-            min_id = min_id.map_or(Some(file_id), |min_id: u64| Some(min_id.min(file_id)));
-            max_id = max_id.map_or(Some(file_id), |max_id: u64| Some(max_id.max(file_id)));
+            min_id = min_id.map_or(Some(file_id), |min_id: u32| Some(min_id.min(file_id)));
+            max_id = max_id.map_or(Some(file_id), |max_id: u32| Some(max_id.max(file_id)));
         }
 
         Ok(min_id.zip(max_id).map(|(min_id, max_id)| min_id..=max_id))
     }
 
-    /// Removes notifications from the storage according to the given range.
+    /// Removes notifications from the storage according to the given list of file IDs.
     ///
     /// # Returns
     ///
-    /// Number of removed notifications.
-    pub(super) fn remove_notifications(&self, range: RangeInclusive<u64>) -> eyre::Result<usize> {
-        for id in range.clone() {
-            self.remove_notification(id);
+    /// Number of removed notifications and the total size of the removed files in bytes.
+    pub(super) fn remove_notifications(
+        &self,
+        file_ids: impl IntoIterator<Item = u32>,
+    ) -> eyre::Result<(usize, u64)> {
+        let mut deleted_total = 0;
+        let mut deleted_size = 0;
+
+        for id in file_ids {
+            if let Some(size) = self.remove_notification(id) {
+                deleted_total += 1;
+                deleted_size += size;
+            }
         }
 
-        Ok(range.count())
+        Ok((deleted_total, deleted_size))
     }
 
     pub(super) fn iter_notifications(
         &self,
-        range: RangeInclusive<u64>,
-    ) -> impl Iterator<Item = eyre::Result<(u64, ExExNotification)>> + '_ {
+        range: RangeInclusive<u32>,
+    ) -> impl Iterator<Item = eyre::Result<(u32, u64, ExExNotification)>> + '_ {
         range.map(move |id| {
-            let notification = self.read_notification(id)?.ok_or_eyre("notification not found")?;
+            let (notification, size) =
+                self.read_notification(id)?.ok_or_eyre("notification {id} not found")?;
 
-            Ok((id, notification))
+            Ok((id, size, notification))
         })
     }
 
-    /// Reads the notification from the file with the given id.
-    #[instrument(target = "exex::wal::storage", skip(self))]
-    pub(super) fn read_notification(&self, file_id: u64) -> eyre::Result<Option<ExExNotification>> {
+    /// Reads the notification from the file with the given ID.
+    #[instrument(skip(self))]
+    pub(super) fn read_notification(
+        &self,
+        file_id: u32,
+    ) -> eyre::Result<Option<(ExExNotification, u64)>> {
         let file_path = self.file_path(file_id);
-        debug!(?file_path, "Reading notification from WAL");
+        debug!(target: "exex::wal::storage", ?file_path, "Reading notification from WAL");
 
         let mut file = match File::open(&file_path) {
             Ok(file) => file,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(reth_fs_util::FsPathError::open(err, &file_path).into()),
         };
+        let size = file.metadata()?.len();
 
-        // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-        Ok(serde_json::from_reader(&mut file)?)
+        // Deserialize using the bincode- and msgpack-compatible serde wrapper
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
+            rmp_serde::decode::from_read(&mut file).map_err(|err| {
+                eyre::eyre!("failed to decode notification from {file_path:?}: {err:?}")
+            })?;
+
+        Ok(Some((notification.into(), size)))
     }
 
-    /// Writes the notification to the file with the given id.
-    #[instrument(target = "exex::wal::storage", skip(self, notification))]
+    /// Writes the notification to the file with the given ID.
+    ///
+    /// # Returns
+    ///
+    /// The size of the file that was written in bytes.
+    #[instrument(skip(self, notification))]
     pub(super) fn write_notification(
         &self,
-        file_id: u64,
+        file_id: u32,
         notification: &ExExNotification,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<u64> {
         let file_path = self.file_path(file_id);
-        debug!(?file_path, "Writing notification to WAL");
+        debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
-        Ok(reth_fs_util::atomic_write_file(&file_path, |file| {
-            // TODO(alexey): use rmp-serde when Alloy and Reth serde issues are resolved
-            serde_json::to_writer(file, notification)
-        })?)
+        // Serialize using the bincode- and msgpack-compatible serde wrapper
+        let notification =
+            reth_exex_types::serde_bincode_compat::ExExNotification::from(notification);
+
+        reth_fs_util::atomic_write_file(&file_path, |file| {
+            rmp_serde::encode::write(file, &notification)
+        })?;
+
+        Ok(file_path.metadata()?.len())
     }
 }
 
@@ -158,7 +199,10 @@ mod tests {
         let file_id = 0;
         storage.write_notification(file_id, &notification)?;
         let deserialized_notification = storage.read_notification(file_id)?;
-        assert_eq!(deserialized_notification, Some(notification));
+        assert_eq!(
+            deserialized_notification.map(|(notification, _)| notification),
+            Some(notification)
+        );
 
         Ok(())
     }

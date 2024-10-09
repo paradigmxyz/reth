@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use std::{collections::VecDeque, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{debug, trace};

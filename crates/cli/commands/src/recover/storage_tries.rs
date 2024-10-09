@@ -33,7 +33,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let best_block = provider.best_block_number()?;
         let best_header = provider
             .sealed_header(best_block)?
-            .ok_or(ProviderError::HeaderNotFound(best_block.into()))?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(best_block.into()))?;
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();

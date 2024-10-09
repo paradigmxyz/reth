@@ -37,11 +37,12 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// Formats gas price and max fee per gas for RPC transaction response w.r.t. network specific
     /// transaction type.
     fn gas_price(signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
+        #[allow(unreachable_patterns)]
         match signed_tx.tx_type() {
             TxType::Legacy | TxType::Eip2930 => {
                 GasPrice { gas_price: Some(signed_tx.max_fee_per_gas()), max_fee_per_gas: None }
             }
-            TxType::Eip1559 | TxType::Eip4844 => {
+            TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => {
                 // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
                 // baseFee`
                 let gas_price = base_fee
@@ -129,7 +130,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,
-        gas: Some(gas as u128),
+        gas: Some(gas),
         value: Some(value),
         input: TransactionInput::new(input),
         nonce: Some(nonce),

@@ -4,7 +4,7 @@ use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     Withdrawal,
 };
-use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::{SealedBlock, Withdrawals};
 use std::{future::Future, pin::Pin};
@@ -80,7 +80,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: std::error::Error;
+    type Error: core::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
@@ -145,7 +145,7 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-impl PayloadAttributes for OptimismPayloadAttributes {
+impl PayloadAttributes for OpPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
     }
@@ -164,7 +164,7 @@ pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
     /// The payload attributes type returned by the builder.
     type PayloadAttributes: PayloadAttributes;
     /// The error type returned by [`PayloadAttributesBuilder::build`].
-    type Error: std::error::Error + Send + Sync;
+    type Error: core::error::Error + Send + Sync;
 
     /// Return a new payload attribute from the builder.
     fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;

@@ -1,4 +1,4 @@
-//! Commonly used types in reth.
+//! Commonly used types in Reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.
 //!
@@ -69,11 +69,6 @@ pub use transaction::{
 };
 
 // Re-exports
-pub use alloy_primitives::{
-    self, address, b256, bloom, bytes,
-    bytes::{Buf, BufMut, BytesMut},
-    hex, Bytes, TxHash, B256, U256, U64,
-};
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
 
@@ -83,12 +78,17 @@ pub use arbitrary;
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
 
-/// Optimism specific re-exports
-#[cfg(feature = "optimism")]
-mod optimism {
-    pub use crate::transaction::{optimism_deposit_tx_signature, TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
+/// Bincode-compatible serde implementations for commonly used types in Reth.
+///
+/// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
+/// Reth types require optional serialization for RPC compatibility. This module makes so that
+/// all fields are serialized.
+///
+/// Read more: <https://github.com/bincode-org/bincode/issues/326>
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::{
+        block::serde_bincode_compat::*,
+        transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
+    };
 }
-
-#[cfg(feature = "optimism")]
-pub use optimism::*;

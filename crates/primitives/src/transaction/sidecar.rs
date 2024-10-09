@@ -1,8 +1,8 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
-use crate::{Signature, Transaction, TransactionSigned, TxHash, EIP4844_TX_TYPE_ID};
+use crate::{Signature, Transaction, TransactionSigned, EIP4844_TX_TYPE_ID};
 use alloy_consensus::{transaction::TxEip4844, TxEip4844WithSidecar};
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, TxHash};
 use alloy_rlp::{Decodable, Error as RlpError, Header};
 use serde::{Deserialize, Serialize};
 
@@ -282,8 +282,12 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
 #[cfg(all(test, feature = "c-kzg"))]
 mod tests {
     use super::*;
-    use crate::{hex, kzg::Blob, PooledTransactionsElement};
-    use alloy_eips::eip4844::Bytes48;
+    use crate::{kzg::Blob, PooledTransactionsElement};
+    use alloy_eips::{
+        eip2718::{Decodable2718, Encodable2718},
+        eip4844::Bytes48,
+    };
+    use alloy_primitives::hex;
     use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
 
@@ -434,15 +438,15 @@ mod tests {
             let entry = entry.unwrap();
             let content = fs::read_to_string(entry.path()).unwrap();
             let raw = hex::decode(content.trim()).unwrap();
-            let tx = PooledTransactionsElement::decode_enveloped(&mut raw.as_ref())
+            let tx = PooledTransactionsElement::decode_2718(&mut raw.as_ref())
                 .map_err(|err| {
                     panic!("Failed to decode transaction: {:?} {:?}", err, entry.path());
                 })
                 .unwrap();
             // We want to test only EIP-4844 transactions
             assert!(tx.is_eip4844());
-            let encoded = tx.envelope_encoded();
-            assert_eq!(encoded.as_ref(), &raw[..], "{:?}", entry.path());
+            let encoded = tx.encoded_2718();
+            assert_eq!(encoded.as_slice(), &raw[..], "{:?}", entry.path());
         }
     }
 }

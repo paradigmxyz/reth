@@ -133,10 +133,25 @@ impl StateRootProvider for MemoryOverlayStateProvider {
 impl StorageRootProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
+        let state = &self.trie_state().state;
         let mut hashed_storage =
-            self.trie_state().state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
         self.historical.storage_root(address, hashed_storage)
+    }
+
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let state = &self.trie_state().state;
+        let mut hashed_storage =
+            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        hashed_storage.extend(&storage);
+        self.historical.storage_proof(address, slot, hashed_storage)
     }
 }
 

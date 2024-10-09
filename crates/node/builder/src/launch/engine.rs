@@ -91,7 +91,7 @@ where
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: AddOns { hooks, rpc, exexs: installed_exex },
+            add_ons: AddOns { hooks, rpc, exexs: installed_exex, .. },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
@@ -348,7 +348,7 @@ where
                 tokio::select! {
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", hash=%executed_block.block().hash(),  "inserting built payload");
+                            debug!(target: "reth::cli", block=?executed_block.block().num_hash(),  "inserting built payload");
                             eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
                         }
                     }

@@ -46,7 +46,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
+use reth_storage_api::{StorageChangeSetReader, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -630,7 +630,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                             // recover the sender from the transaction if not found
                             let sender = tx
                                 .recover_signer_unchecked()
-                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                .ok_or(ProviderError::SenderRecoveryError)?;
                             senders.push(sender);
                         }
                         Some(sender) => senders.push(*sender),
@@ -1414,6 +1414,21 @@ impl<TX: DbTx, Spec: Send + Sync> AccountExtReader for DatabaseProvider<TX, Spec
     }
 }
 
+impl<TX: DbTx, Spec: Send + Sync> StorageChangeSetReader for DatabaseProvider<TX, Spec> {
+    fn storage_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let range = block_number..=block_number;
+        let storage_range = BlockNumberAddress::range(range);
+        self.tx
+            .cursor_dup_read::<tables::StorageChangeSets>()?
+            .walk_range(storage_range)?
+            .map(|result| -> ProviderResult<_> { Ok(result?) })
+            .collect()
+    }
+}
+
 impl<TX: DbTx, Spec: Send + Sync> ChangeSetReader for DatabaseProvider<TX, Spec> {
     fn account_block_changeset(
         &self,
@@ -1958,10 +1973,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
                                 index,
                                 block_hash,
                                 block_number,
-                                base_fee: header.base_fee_per_gas.map(|base_fee| base_fee as u64),
-                                excess_blob_gas: header
-                                    .excess_blob_gas
-                                    .map(|excess_blob| excess_blob as u64),
+                                base_fee: header.base_fee_per_gas,
+                                excess_blob_gas: header.excess_blob_gas,
                                 timestamp: header.timestamp,
                             };
 
