@@ -28,9 +28,9 @@ jobs:
         partition: [1, 2]
         include:
           - type: ethereum
-            args: --features ethereum
+            args: --features "asm-keccak ethereum" --locked
           - type: optimism
-            args: --features optimism
+            args: --features "asm-keccak optimism" --locked
           - type: book
             args: --manifest-path book/sources/Cargo.toml
     timeout-minutes: 30
@@ -44,8 +44,7 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked ${{ matrix.args }} --features "asm-keccak" \
-            --workspace --exclude ef-tests \
+            ${{ matrix.args }} --workspace --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 
