@@ -535,7 +535,7 @@ where
         block_num_hash: &BlockNumHash,
         best_number: u64,
     ) -> Result<Option<(Arc<Vec<Receipt>>, Option<SealedBlock>)>, EthFilterError> {
-        // The last 4 blocks are most likely cached, so we can just fetch them 
+        // The last 4 blocks are most likely cached, so we can just fetch them
         let cached_range = best_number.saturating_sub(4)..=best_number;
         let receipts_block = if cached_range.contains(&block_num_hash.number) {
             self.eth_cache
