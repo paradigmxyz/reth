@@ -760,7 +760,7 @@ impl ChainSpecBuilder {
         self
     }
 
-    /// Add the given forks with the given activation condition to the spec.
+    /// Add the given chain hardforks to the spec.
     pub fn with_forks(mut self, forks: ChainHardforks) -> Self {
         self.hardforks = forks;
         self

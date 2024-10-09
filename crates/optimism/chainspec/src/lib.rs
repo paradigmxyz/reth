@@ -32,12 +32,11 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_optimism_forks::OptimismHardfork;
 use reth_primitives_traits::Header;
 use std::{fmt::Display, sync::Arc};
 
 /// Chain spec builder for a OP stack chain.
-#[derive(Debug, Default, From, Constructor)]
+#[derive(Debug, Default, From)]
 pub struct OpChainSpecBuilder {
     /// [`ChainSpecBuilder`]
     inner: ChainSpecBuilder,
@@ -92,19 +91,9 @@ impl OpChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: OptimismHardfork) -> Self {
+    pub fn without_fork(mut self, fork: reth_optimism_forks::OptimismHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
-    }
-
-    /// Enable the Paris hardfork at the given TTD.
-    ///
-    /// Does not set the merge netsplit block.
-    pub fn paris_at_ttd(self, ttd: U256) -> Self {
-        self.with_fork(
-            EthereumHardfork::Paris,
-            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
-        )
     }
 
     /// Enable Bedrock at genesis
