@@ -9,6 +9,10 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+pub mod tx_deposit;
+
+pub use tx_deposit::{TxDepositDecode, TxDepositEncode};
+
 #[cfg(test)]
 mod tests {
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};

@@ -1,0 +1,42 @@
+[package]
+name = "reth-optimism-codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs.workspace = true
+reth-codecs-derive.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+
+# op
+op-alloy-consensus.workspace = true
+
+# codec
+modular-bitfield.workspace = true
+bytes.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+# test-util
+test-fuzz.workspace = true
+proptest-arbitrary-interop.workspace = true
+
+[dev-dependencies]
+reth-primitives.workspace = true
+reth-codecs.workspace = true
+reth-db-api.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+proptest.workspace = true
+arbitrary.workspace = true
+
+[features]
+optimism = ["reth-primitives/optimism"]

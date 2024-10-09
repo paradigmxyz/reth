@@ -22,6 +22,7 @@ reth-codecs = { workspace = true, optional = true }
 
 # op-reth
 reth-optimism-chainspec = { workspace = true, optional = true }
+reth-optimism-codecs = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
@@ -116,7 +117,7 @@ c-kzg = [
 optimism = [
     "dep:op-alloy-consensus",
     "dep:reth-optimism-chainspec",
-    "reth-codecs?/optimism",
+    "dep:reth-optimism-codecs",
     "revm-primitives/optimism",
 ]
 alloy-compat = [

@@ -6651,7 +6651,6 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -8065,6 +8064,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-codecs"
+version = "1.0.8"
+dependencies = [
+ "alloy-primitives",
+ "arbitrary",
+ "bytes",
+ "modular-bitfield",
+ "op-alloy-consensus",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "reth-codecs",
+ "reth-codecs-derive",
+ "reth-db-api",
+ "reth-primitives",
+ "reth-prune-types",
+ "reth-stages-types",
+ "serde",
+ "test-fuzz",
+]
+
+[[package]]
 name = "reth-optimism-consensus"
 version = "1.0.8"
 dependencies = [
@@ -8251,17 +8271,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-optimism-storage"
-version = "1.0.8"
-dependencies = [
- "reth-codecs",
- "reth-db-api",
- "reth-primitives",
- "reth-prune-types",
- "reth-stages-types",
-]
-
-[[package]]
 name = "reth-payload-builder"
 version = "1.0.8"
 dependencies = [
@@ -8345,6 +8354,7 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-optimism-chainspec",
+ "reth-optimism-codecs",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-testing-utils",
