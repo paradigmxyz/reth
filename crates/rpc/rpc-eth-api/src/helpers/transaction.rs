@@ -565,7 +565,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
                 .get_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
-            Ok(block.map(|block| (transaction, block.seal(block_hash))))
+            Ok(block.map(|block| (transaction, (*block).clone().seal(block_hash))))
         }
     }
 }
