@@ -37,7 +37,7 @@ use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 use tracing::{info, trace, warn};
-
+use reth_network::transactions::TransactionsManagerConfig;
 use crate::{
     common::WithConfigs,
     components::NodeComponentsBuilder,
@@ -583,7 +583,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.config().builder.clone()
     }
 
-    /// Convenience function to start the network.
+    /// Convenience function to start the network tasks.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
@@ -591,8 +591,21 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     where
         Pool: TransactionPool + Unpin + 'static,
     {
+        self.start_network_with(builder, pool, Default::default())
+    }
+
+    /// Convenience function to start the network tasks.
+    ///
+    /// Accepts the config for the transaction task.
+    ///
+    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
+    /// connected to that network.
+    pub fn start_network_with<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool, tx_config: TransactionsManagerConfig) -> NetworkHandle
+    where
+        Pool: TransactionPool + Unpin + 'static,
+    {
         let (handle, network, txpool, eth) = builder
-            .transactions(pool, Default::default())
+            .transactions(pool, tx_config)
             .request_handler(self.provider().clone())
             .split_with_handle();
 
