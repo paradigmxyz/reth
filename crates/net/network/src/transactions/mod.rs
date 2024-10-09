@@ -904,6 +904,7 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
+                self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::SessionEstablished {
                 peer_id, client_version, messages, version, ..
