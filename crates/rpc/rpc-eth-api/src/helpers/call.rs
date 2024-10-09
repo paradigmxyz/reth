@@ -22,7 +22,7 @@ use reth_primitives::{
     },
     Header, TransactionSignedEcRecovered,
 };
-use reth_provider::{ChainSpecProvider, HeaderProvider, StateProvider};
+use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -247,8 +247,18 @@ pub trait EthCall: Call + LoadPendingBlock {
                 state_context.unwrap_or_default();
             let transaction_index = transaction_index.unwrap_or_default();
 
-            let target_block = block_number.unwrap_or_default();
+            let mut target_block = block_number.unwrap_or_default();
             let is_block_target_pending = target_block.is_pending();
+
+            // if it's not pending, we should always use block_hash over block_number to ensure that
+            // different provider calls query data related to the same block.
+            if !is_block_target_pending {
+                target_block = LoadBlock::provider(self)
+                    .block_hash_for_id(target_block)
+                    .map_err(|_| EthApiError::HeaderNotFound(target_block))?
+                    .ok_or_else(|| EthApiError::HeaderNotFound(target_block))?
+                    .into();
+            }
 
             let ((cfg, block_env, _), block) = futures::try_join!(
                 self.evm_env_at(target_block),
