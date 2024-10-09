@@ -61,6 +61,16 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
+SOURCE_DATE_EPOCH := $(shell git log -1 --pretty=%ct)
+.PHONY: build-reproducible
+build-reproducible: ## Build the reth binary into `target` directory with reproducible builds.
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) \
+	CARGO_INCREMENTAL=0 \
+	LC_ALL=C \
+	TZ=UTC \
+	RUSTFLAGS="-C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $$(pwd)=." \
+	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked
+
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
