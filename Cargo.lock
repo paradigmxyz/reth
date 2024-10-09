@@ -282,9 +282,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.8.5"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "260d3ff3bff0bb84599f032a2f2c6828180b0ea0cd41fdaf44f39cef3ba41861"
+checksum = "8ecb848c43f6b06ae3de2e4a67496cbbabd78ae87db0f1248934f15d76192c6a"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -293,8 +293,9 @@ dependencies = [
  "const-hex",
  "derive_arbitrary",
  "derive_more 1.0.0",
+ "foldhash",
  "getrandom 0.2.15",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.0",
  "hex-literal",
  "indexmap 2.5.0",
  "itoa",
@@ -3102,6 +3103,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3433,6 +3440,15 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
  "allocator-api2",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+dependencies = [
+ "foldhash",
  "serde",
 ]
 
@@ -5158,9 +5174,9 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4f7f318f885db6e1455370ca91f74b7faed152c8142f6418f0936d606e582ff"
+checksum = "7ea7162170c6f3cad8f67f4dd7108e3f78349fd553da5b8bebff1e7ef8f38896"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5176,9 +5192,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-genesis"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8215c87b74d2fbbaff0fd2887868a8341df33a3c495ee01f813e5ddd5be9c46"
+checksum = "9f3d31dfbbd8dd898c7512f8ce7d30103980485416f668566100b0ed0994b958"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5190,9 +5206,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-network"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cd514c4ccd0b3c69fa3e7050cde77db842d4c308ae48f9a3e1ce263e823e45e"
+checksum = "d113b325527ba7da271a8793f1c14bdf7f035ce9e0611e668c36fc6812568c7f"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -5204,9 +5220,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-protocol"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa5c397fbe35e07f9c95a571440ca2e90df754e198496d82ff4127de00b89dd9"
+checksum = "310873e4fbfc41986716c4fb6000a8b49d025d932d2c261af58271c434b05288"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5221,9 +5237,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "547d29c5ab957ff32e14edddb93652dad748d2ef6cbe4b0fe8615ce06b0a3ddb"
+checksum = "323c65880e2561aa87f74f8af260fd15b9cc930c448c88a60ae95af86c88c634"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5238,9 +5254,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5041122e20b76644cc690bba688671eecdc4626e6384a76eb740535d6ddcef14"
+checksum = "349e7b420f45d1a00216ec4c65fcf3f0057a841bc39732c405c85ae782b94121"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -5257,8 +5273,14 @@ dependencies = [
  "clap",
  "reth-cli-util",
  "reth-node-builder",
+ "reth-optimism-chainspec",
  "reth-optimism-cli",
+ "reth-optimism-consensus",
+ "reth-optimism-evm",
+ "reth-optimism-forks",
  "reth-optimism-node",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-provider",
  "tracing",
@@ -6237,6 +6259,7 @@ dependencies = [
  "reth-downloaders",
  "reth-engine-util",
  "reth-errors",
+ "reth-ethereum-cli",
  "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-execution-types",
@@ -6508,13 +6531,11 @@ dependencies = [
  "auto_impl",
  "derive_more 1.0.0",
  "once_cell",
- "op-alloy-rpc-types",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-trie-common",
- "serde",
  "serde_json",
 ]
 
@@ -6522,9 +6543,12 @@ dependencies = [
 name = "reth-cli"
 version = "1.0.8"
 dependencies = [
+ "alloy-genesis",
  "clap",
  "eyre",
  "reth-cli-runner",
+ "serde_json",
+ "shellexpand",
 ]
 
 [[package]]
@@ -6561,6 +6585,7 @@ dependencies = [
  "reth-downloaders",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-ethereum-cli",
  "reth-evm",
  "reth-exex",
  "reth-fs-util",
@@ -6725,6 +6750,7 @@ dependencies = [
  "iai-callgrind",
  "metrics",
  "page_size",
+ "parking_lot 0.12.3",
  "paste",
  "pprof",
  "proptest",
@@ -7168,6 +7194,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "1.0.8"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -7225,14 +7252,11 @@ dependencies = [
 name = "reth-ethereum-cli"
 version = "1.0.8"
 dependencies = [
- "alloy-genesis",
  "clap",
  "eyre",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
- "serde_json",
- "shellexpand",
 ]
 
 [[package]]
@@ -7839,7 +7863,6 @@ dependencies = [
 name = "reth-node-core"
 version = "1.0.8"
 dependencies = [
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
@@ -7852,19 +7875,16 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-chainspec",
- "reth-cli",
  "reth-cli-util",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
  "reth-discv5",
- "reth-fs-util",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
- "reth-optimism-chainspec",
  "reth-primitives",
  "reth-prune-types",
  "reth-rpc-api",
@@ -7879,7 +7899,6 @@ dependencies = [
  "reth-transaction-pool",
  "secp256k1",
  "serde",
- "serde_json",
  "shellexpand",
  "strum",
  "tempfile",
@@ -8026,6 +8045,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
+ "reth-node-metrics",
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-node",

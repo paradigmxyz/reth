@@ -106,6 +106,14 @@ impl<C> NetworkConfig<C> {
         NetworkConfig::builder(secret_key).build(client)
     }
 
+    /// Apply a function to the config.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
     /// Sets the config to use for the discovery v4 protocol.
     pub fn set_discovery_v4(mut self, discovery_config: Discv4Config) -> Self {
         self.discovery_v4_config = Some(discovery_config);
@@ -337,6 +345,18 @@ impl NetworkConfigBuilder {
     pub fn discovery_port(mut self, port: u16) -> Self {
         self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
+    }
+
+    /// Sets the discovery port to an unused port.
+    /// This is useful for testing.
+    pub fn with_unused_discovery_port(self) -> Self {
+        self.discovery_port(0)
+    }
+
+    /// Sets the listener port to an unused port.
+    /// This is useful for testing.
+    pub fn with_unused_listener_port(self) -> Self {
+        self.listener_port(0)
     }
 
     /// Sets the external ip resolver to use for discovery v4.

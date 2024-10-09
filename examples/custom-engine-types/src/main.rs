@@ -253,6 +253,10 @@ where
             .consensus(EthereumConsensusBuilder::default())
             .engine_validator(CustomEngineValidatorBuilder::default())
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        EthereumAddOns::default()
+    }
 }
 
 /// A custom payload service builder that supports the custom engine types

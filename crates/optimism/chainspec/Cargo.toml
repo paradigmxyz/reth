@@ -26,12 +26,15 @@ alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
+# op
+op-alloy-rpc-types.workspace = true
+
 # io
 serde_json.workspace = true
 
 # misc
-once_cell.workspace = true
 derive_more.workspace = true
+once_cell.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }

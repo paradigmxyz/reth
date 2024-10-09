@@ -15,8 +15,8 @@ use alloy_rpc_types::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    args::utils::EthereumChainSpecParser,
     builder::NodeHandle,
+    chainspec::EthereumChainSpecParser,
     cli::Cli,
     primitives::BlockNumberOrTag,
     revm::{

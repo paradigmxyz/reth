@@ -147,7 +147,7 @@ impl UnifiedStorageWriter<'_, (), ()> {
     }
 }
 
-impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, &'b StaticFileProvider>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
         + BlockWriter
@@ -318,7 +318,7 @@ where
     }
 }
 
-impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
     ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider,
 {
@@ -429,7 +429,7 @@ where
     }
 }
 
-impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
     ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider,
 {
@@ -510,8 +510,8 @@ where
     }
 }
 
-impl<'a, 'b, ProviderDB> StateWriter
-    for UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> StateWriter
+    for UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
     ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + StateChangeWriter + HeaderProvider,
 {

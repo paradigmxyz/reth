@@ -10,7 +10,10 @@ use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
 
-use crate::execute::{BatchExecutor, BlockExecutorProvider, Executor};
+use crate::{
+    execute::{BatchExecutor, BlockExecutorProvider, Executor},
+    system_calls::OnStateHook,
+};
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 
@@ -55,6 +58,17 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
+    {
+        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        _: Self::Input<'_>,
+        _: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
