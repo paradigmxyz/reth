@@ -173,7 +173,11 @@ pub struct InMemoryStorageTrieCursor<'a, C> {
 }
 
 impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
-    fn new(hashed_address: B256, cursor: C, updates: Option<&'a StorageTrieUpdatesSorted>) -> Self {
+    pub fn new(
+        hashed_address: B256,
+        cursor: C,
+        updates: Option<&'a StorageTrieUpdatesSorted>,
+    ) -> Self {
         let in_memory_cursor = updates.map(|u| ForwardInMemoryCursor::new(&u.storage_nodes));
         let removed_nodes = updates.map(|u| &u.removed_nodes);
         let storage_trie_cleared = updates.map_or(false, |u| u.is_deleted);

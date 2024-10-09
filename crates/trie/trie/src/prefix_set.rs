@@ -82,7 +82,7 @@ pub struct TriePrefixSets {
 /// assert!(prefix_set.contains(&[0xa, 0xb]));
 /// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
-#[derive(Clone, Default, Debug)]
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct PrefixSetMut {
     /// Flag indicating that any entry should be considered changed.
     /// If set, the keys will be discarded.

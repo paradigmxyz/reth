@@ -6,6 +6,8 @@ use reth_storage_errors::db::DatabaseError;
 mod post_state;
 pub use post_state::*;
 
+pub mod noop;
+
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory {
     /// The hashed account cursor type.
