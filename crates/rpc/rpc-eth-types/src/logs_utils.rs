@@ -6,7 +6,7 @@ use alloy_primitives::TxHash;
 use alloy_rpc_types::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_primitives::{BlockNumHash, Receipt};
+use reth_primitives::{BlockNumHash, Receipt, SealedBlock};
 use reth_storage_api::BlockReader;
 
 /// Returns all matching of a block's receipts when the transaction hashes are known.
@@ -45,11 +45,20 @@ where
     all_logs
 }
 
+/// Helper enum to fetch a transaction either from a block or from the provider.
+#[derive(Debug)]
+pub enum ProviderOrBlock<'a, P: BlockReader> {
+    /// Provider
+    Provider(&'a P),
+    /// [`SealedBlock`]
+    Block(SealedBlock),
+}
+
 /// Appends all matching logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
-pub fn append_matching_block_logs(
+pub fn append_matching_block_logs<P: BlockReader>(
     all_logs: &mut Vec<Log>,
-    provider: impl BlockReader,
+    provider_or_block: ProviderOrBlock<'_, P>,
     filter: &FilteredParams,
     block_num_hash: BlockNumHash,
     receipts: &[Receipt],
@@ -60,8 +69,8 @@ pub fn append_matching_block_logs(
     let mut log_index: u64 = 0;
 
     // Lazy loaded number of the first transaction in the block.
-    // This is useful for blocks with multiple matching logs because it prevents
-    // re-querying the block body indices.
+    // This is useful for blocks with multiple matching logs because it
+    // prevents re-querying the block body indices.
     let mut loaded_first_tx_num = None;
 
     // Iterate over receipts and append matching logs.
@@ -71,27 +80,37 @@ pub fn append_matching_block_logs(
 
         for log in &receipt.logs {
             if log_matches_filter(block_num_hash, log, filter) {
-                let first_tx_num = match loaded_first_tx_num {
-                    Some(num) => num,
-                    None => {
-                        let block_body_indices =
-                            provider.block_body_indices(block_num_hash.number)?.ok_or(
-                                ProviderError::BlockBodyIndicesNotFound(block_num_hash.number),
-                            )?;
-                        loaded_first_tx_num = Some(block_body_indices.first_tx_num);
-                        block_body_indices.first_tx_num
-                    }
-                };
-
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
-                    // This is safe because Transactions and Receipts have the same keys.
-                    let transaction_id = first_tx_num + receipt_idx as u64;
-                    let transaction = provider
-                        .transaction_by_id(transaction_id)?
-                        .ok_or_else(|| ProviderError::TransactionNotFound(transaction_id.into()))?;
+                    transaction_hash = match &provider_or_block {
+                        ProviderOrBlock::Block(block) => {
+                            block.body.transactions.get(receipt_idx).map(|t| t.hash())
+                        }
+                        ProviderOrBlock::Provider(provider) => {
+                            let first_tx_num = match loaded_first_tx_num {
+                                Some(num) => num,
+                                None => {
+                                    let block_body_indices = provider
+                                        .block_body_indices(block_num_hash.number)?
+                                        .ok_or(ProviderError::BlockBodyIndicesNotFound(
+                                            block_num_hash.number,
+                                        ))?;
+                                    loaded_first_tx_num = Some(block_body_indices.first_tx_num);
+                                    block_body_indices.first_tx_num
+                                }
+                            };
 
-                    transaction_hash = Some(transaction.hash());
+                            // This is safe because Transactions and Receipts have the same
+                            // keys.
+                            let transaction_id = first_tx_num + receipt_idx as u64;
+                            let transaction =
+                                provider.transaction_by_id(transaction_id)?.ok_or_else(|| {
+                                    ProviderError::TransactionNotFound(transaction_id.into())
+                                })?;
+
+                            Some(transaction.hash())
+                        }
+                    };
                 }
 
                 let log = Log {
