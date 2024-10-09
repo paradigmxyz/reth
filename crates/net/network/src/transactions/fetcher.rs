@@ -98,6 +98,11 @@ pub struct TransactionFetcher {
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
+    /// Removes the peer from the active set.
+    pub(crate) fn remove_peer(&mut self, peer_id: &PeerId) {
+        self.active_peers.remove(peer_id);
+    }
+
     /// Updates metrics.
     #[inline]
     pub fn update_metrics(&self) {
@@ -164,7 +169,7 @@ impl TransactionFetcher {
     fn decrement_inflight_request_count_for(&mut self, peer_id: &PeerId) {
         let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
-                *inflight_count -= 1;
+                *inflight_count = inflight_count.saturating_sub(1);
                 if *inflight_count == 0 {
                     return true
                 }
@@ -666,8 +671,6 @@ impl TransactionFetcher {
             return Some(new_announced_hashes)
         }
 
-        *inflight_count += 1;
-
         #[cfg(debug_assertions)]
         {
             for hash in &new_announced_hashes {
@@ -702,6 +705,8 @@ impl TransactionFetcher {
                 }
             }
         }
+
+        *inflight_count += 1;
         // stores a new request future for the request
         self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, new_announced_hashes, rx));
 
@@ -1312,7 +1317,7 @@ pub struct TransactionFetcherInfo {
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
         Self::new(
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize * DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER as usize,
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize,
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
