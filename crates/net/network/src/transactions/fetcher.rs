@@ -125,20 +125,27 @@ impl TransactionFetcher {
 
     /// Sets up transaction fetcher with config
     pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
-        let mut tx_fetcher = Self::default();
+        let TransactionFetcherConfig {
+            max_inflight_requests,
+            max_capacity_cache_txns_pending_fetch,
+            ..
+        } = *config;
 
-        tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response =
-            config.soft_limit_byte_size_pooled_transactions_response;
-        tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
-            config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
-        tx_fetcher
-            .metrics
-            .capacity_inflight_requests
-            .increment(tx_fetcher.info.max_inflight_requests as u64);
-        tx_fetcher.info.max_capacity_cache_txns_pending_fetch =
-            config.max_capacity_cache_txns_pending_fetch;
+        let info = config.clone().into();
 
-        tx_fetcher
+        let metrics = TransactionFetcherMetrics::default();
+        metrics.capacity_inflight_requests.increment(max_inflight_requests as u64);
+
+        Self {
+            active_peers: LruMap::new(max_inflight_requests),
+            hashes_pending_fetch: LruCache::new(max_capacity_cache_txns_pending_fetch),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+                max_inflight_requests + max_capacity_cache_txns_pending_fetch,
+            ),
+            info,
+            metrics,
+            ..Default::default()
+        }
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -1310,6 +1317,26 @@ impl Default for TransactionFetcherInfo {
             DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+        )
+    }
+}
+
+impl From<TransactionFetcherConfig> for TransactionFetcherInfo {
+    fn from(config: TransactionFetcherConfig) -> Self {
+        let TransactionFetcherConfig {
+            max_inflight_requests,
+            max_inflight_requests_per_peer,
+            soft_limit_byte_size_pooled_transactions_response,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            max_capacity_cache_txns_pending_fetch,
+        } = config;
+
+        Self::new(
+            max_inflight_requests as usize,
+            max_inflight_requests_per_peer,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            soft_limit_byte_size_pooled_transactions_response,
+            max_capacity_cache_txns_pending_fetch,
         )
     }
 }
