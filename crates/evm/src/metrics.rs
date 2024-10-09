@@ -13,7 +13,7 @@ use revm::CacheState;
 use crate::execute::Executor;
 
 /// Executor metrics.
-// TODO(onbjerg): add sload/sstore, acc load/acc change, bytecode metrics
+// TODO(onbjerg): add sload/sstore
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.execution")]
 pub struct ExecutorMetrics {
@@ -21,16 +21,19 @@ pub struct ExecutorMetrics {
     pub gas_processed_total: Counter,
     /// The instantaneous amount of gas processed per second.
     pub gas_per_second: Gauge,
+
     /// The Histogram for amount of time taken to execute blocks.
     pub execution_histogram: Histogram,
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
+
     /// The total number of accounts loaded when executing the latest block.
     pub accounts_loaded_total: Counter,
     /// The total number of storage slots loaded when executing the latest block.
     pub storage_slots_loaded_total: Counter,
     /// The total number of bytecodes loaded when executing the latest block.
     pub bytecodes_loaded_total: Counter,
+
     /// The total number of accounts updated when executing the latest block.
     pub accounts_updated_total: Counter,
     /// The total number of storage slots updated when executing the latest block.
