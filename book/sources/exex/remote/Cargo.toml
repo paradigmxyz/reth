@@ -1,0 +1,52 @@
+[package]
+name = "remote-exex"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# reth
+reth = { git = "https://github.com/paradigmxyz/reth.git" }
+reth-exex = { git = "https://github.com/paradigmxyz/reth.git", features = ["serde"] }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git"}
+reth-node-api = { git = "https://github.com/paradigmxyz/reth.git"}
+reth-tracing = { git = "https://github.com/paradigmxyz/reth.git" }
+
+# async
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+
+# grpc
+tonic = "0.11"
+prost = "0.12"
+bincode = "1"
+
+# misc
+eyre = "0.6"
+
+[build-dependencies]
+tonic-build = "0.11"
+
+[[bin]]
+name = "exex_1"
+path = "src/exex_1.rs"
+
+[[bin]]
+name = "exex_2"
+path = "src/exex_2.rs"
+
+[[bin]]
+name = "exex_3"
+path = "src/exex_3.rs"
+
+[[bin]]
+name = "exex_4"
+path = "src/exex_4.rs"
+
+[[bin]]
+name = "exex"
+path = "src/exex.rs"
+
+[[bin]]
+name = "consumer"
+path = "src/consumer.rs"

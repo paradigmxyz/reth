@@ -1,0 +1,14 @@
+[package]
+name = "tracking-state"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reth = { git = "https://github.com/paradigmxyz/reth.git" }
+reth-exex = { git = "https://github.com/paradigmxyz/reth.git", features = ["serde"] }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git"}
+reth-tracing = { git = "https://github.com/paradigmxyz/reth.git" }
+
+eyre = "0.6" # Easy error handling
+futures-util = "0.3" # Stream utilities for consuming notifications
+alloy-primitives = "0.8.7"

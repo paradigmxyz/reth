@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "exex/hello-world",
+    "exex/remote",
+    "exex/tracking-state",
 ]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
