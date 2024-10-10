@@ -666,7 +666,12 @@ Pruning:
 
 Engine:
       --engine.experimental
-          Enable the engine2 experimental features on reth binary
+          Enable the experimental engine features on reth binary
+
+          DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy functionality
+
+      --engine.legacy
+          Enable the legacy engine on reth binary
 
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for engine experimental

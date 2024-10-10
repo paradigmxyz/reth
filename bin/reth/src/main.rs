@@ -14,14 +14,23 @@ use reth_node_builder::{
 };
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider2;
+use reth_tracing::tracing::warn;
+use tracing::info;
 
 /// Parameters for configuring the engine
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Engine")]
 pub struct EngineArgs {
-    /// Enable the engine2 experimental features on reth binary
+    /// Enable the experimental engine features on reth binary
+    ///
+    /// DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy
+    /// functionality
     #[arg(long = "engine.experimental", default_value = "false")]
     pub experimental: bool,
+
+    /// Enable the legacy engine on reth binary
+    #[arg(long = "engine.legacy", default_value = "false")]
+    pub legacy: bool,
 
     /// Configure persistence threshold for engine experimental.
     #[arg(long = "engine.persistence-threshold", requires = "experimental", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
@@ -36,6 +45,7 @@ impl Default for EngineArgs {
     fn default() -> Self {
         Self {
             experimental: false,
+            legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
         }
@@ -52,9 +62,13 @@ fn main() {
 
     if let Err(err) =
         Cli::<EthereumChainSpecParser, EngineArgs>::parse().run(|builder, engine_args| async move {
-            let enable_engine2 = engine_args.experimental;
-            match enable_engine2 {
-                true => {
+            if engine_args.experimental {
+                warn!(target: "reth::cli", "Experimental engine is default now, and the --engine.experimental flag is deprecated. To enable the legacy functionality, use --engine.legacy.");
+            }
+
+            let use_legacy_engine = engine_args.legacy;
+            match use_legacy_engine {
+                false => {
                     let engine_tree_config = TreeConfig::default()
                         .with_persistence_threshold(engine_args.persistence_threshold)
                         .with_memory_block_buffer_target(engine_args.memory_block_buffer_target);
@@ -73,7 +87,8 @@ fn main() {
                         .await?;
                     handle.node_exit_future.await
                 }
-                false => {
+                true => {
+                    info!(target: "reth::cli", "Running with legacy engine");
                     let handle = builder.launch_node(EthereumNode::default()).await?;
                     handle.node_exit_future.await
                 }
