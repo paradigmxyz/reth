@@ -13,7 +13,7 @@ use core::{cell::RefCell, fmt::Display, marker::PhantomData};
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, State};
-use revm_primitives::db::Database;
+use revm_primitives::{db::Database, U256};
 
 use crate::system_calls::OnStateHook;
 
@@ -176,6 +176,7 @@ pub trait BlockExecutionStrategy<DB> {
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
+        total_difficulty: U256,
     ) -> Result<(Vec<Receipt>, u64), Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
@@ -188,7 +189,7 @@ pub trait BlockExecutionStrategy<DB> {
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
 
     /// Returns the final bundle state.
-    fn finish(&self) -> BundleState;
+    fn finish(&mut self) -> BundleState;
 }
 
 /// A strategy factory that can create block execution strategies.
@@ -285,12 +286,12 @@ where
     type Error = S::Error;
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let BlockExecutionInput { block, total_difficulty: _ } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
 
         let mut strategy = self.strategy.borrow_mut();
 
         strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = strategy.execute_transactions(block)?;
+        let (receipts, gas_used) = strategy.execute_transactions(block, total_difficulty)?;
         let requests = strategy.apply_post_execution_changes()?;
         let state = strategy.finish();
 
@@ -306,12 +307,12 @@ where
         DB: Database,
         W: FnMut(&State<DB>),
     {
-        let BlockExecutionInput { block, total_difficulty: _ } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
 
         let mut strategy = self.strategy.borrow_mut();
 
         strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = strategy.execute_transactions(block)?;
+        let (receipts, gas_used) = strategy.execute_transactions(block, total_difficulty)?;
         let requests = strategy.apply_post_execution_changes()?;
 
         witness(strategy.state_ref());
@@ -329,14 +330,14 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let BlockExecutionInput { block, total_difficulty: _ } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
 
         let mut strategy = self.strategy.borrow_mut();
 
         strategy.with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = strategy.execute_transactions(block)?;
+        let (receipts, gas_used) = strategy.execute_transactions(block, total_difficulty)?;
         let requests = strategy.apply_post_execution_changes()?;
 
         let state = strategy.finish();
@@ -536,6 +537,7 @@ mod tests {
         fn execute_transactions(
             &mut self,
             _block: &BlockWithSenders,
+            _total_difficulty: U256,
         ) -> Result<(Vec<Receipt>, u64), Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
@@ -550,7 +552,7 @@ mod tests {
 
         fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
 
-        fn finish(&self) -> BundleState {
+        fn finish(&mut self) -> BundleState {
             self.finish_result.clone()
         }
     }
