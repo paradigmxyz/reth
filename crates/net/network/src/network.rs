@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -218,16 +218,11 @@ impl PeersInfo for NetworkHandle {
         } else if let Some(record) = self.inner.discv5.as_ref().and_then(|d| d.node_record()) {
             record
         } else {
-            let id = *self.peer_id();
+            let external_ip = self.inner.nat.and_then(|nat| nat.as_external_ip());
+
             let mut socket_addr = *self.inner.listener_address.lock();
-
-            let external_ip: Option<IpAddr> = self.inner.nat.and_then(|nat| match nat {
-                NatResolver::ExternalIp(ip) => Some(ip),
-                _ => None,
-            });
-
-            // if able to resolve external ip, use it instead
             if let Some(ip) = external_ip {
+                // if able to resolve external ip, use it instead and also set the local addrress
                 socket_addr.set_ip(ip)
             } else if socket_addr.ip().is_unspecified() {
                 // zero address is invalid
@@ -238,7 +233,7 @@ impl PeersInfo for NetworkHandle {
                 }
             }
 
-            NodeRecord::new(socket_addr, id)
+            NodeRecord::new(socket_addr, *self.peer_id())
         }
     }
 
