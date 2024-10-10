@@ -2151,10 +2151,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> RequestsProvider
     ) -> ProviderResult<Option<Requests>> {
         if self.chain_spec.is_prague_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
-                // If we are past Prague, then all blocks should have a requests list, even if
-                // empty
-                let requests = self.tx.get::<tables::BlockRequests>(number)?.unwrap_or_default();
-                return Ok(Some(requests))
+                let requests = self.tx.get::<tables::BlockRequests>(number)?;
+                return Ok(requests)
             }
         }
         Ok(None)
@@ -3483,10 +3481,8 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         }
 
         if let Some(requests) = block.block.body.requests {
-            if !requests.0.is_empty() {
-                self.tx.put::<tables::BlockRequests>(block_number, requests)?;
-                durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
-            }
+            self.tx.put::<tables::BlockRequests>(block_number, requests)?;
+            durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
