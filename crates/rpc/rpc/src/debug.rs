@@ -41,7 +41,7 @@ use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
 use revm_primitives::{keccak256, HashMap};
-use std::sync::Arc;
+use std::{collections::hash_map, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -614,7 +614,7 @@ where
                 let _ = block_executor
                     .execute_with_state_witness(
                         (&block.clone().unseal(), block.difficulty).into(),
-                        |statedb| {
+                        |statedb: &revm::db::State<_>| {
                             codes = statedb
                                 .cache
                                 .contracts
@@ -643,6 +643,17 @@ where
                                         storage.storage.insert(hashed_slot, *value);
 
                                         keys.insert(hashed_slot, slot.into());
+                                    }
+
+                                    // if the code from this account does not yet exist, then it may
+                                    // have been created in this block, and should be inserted into
+                                    // `codes`
+                                    if let Some(code) = &account.info.code {
+                                        if let hash_map::Entry::Vacant(vacant) =
+                                            codes.entry(account.info.code_hash)
+                                        {
+                                            vacant.insert(code.original_bytes());
+                                        }
                                     }
                                 }
                             }
