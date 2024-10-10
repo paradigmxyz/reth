@@ -206,7 +206,7 @@ mod test {
         })
     }
 
-    fn get_attributes(eip_1559_params: Option<B64>, timestamp: u64) -> OpPayloadAttributes {
+    const fn get_attributes(eip_1559_params: Option<B64>, timestamp: u64) -> OpPayloadAttributes {
         OpPayloadAttributes {
             gas_limit: Some(1000),
             eip_1559_params,
