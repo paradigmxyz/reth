@@ -95,6 +95,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             .flatten();
         let safe_header = provider
             .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
