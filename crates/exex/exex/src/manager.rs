@@ -46,13 +46,6 @@ pub enum ExExNotificationSource {
     BlockchainTree,
 }
 
-impl ExExNotificationSource {
-    /// Returns true if the notification was sent from the blockchain tree.
-    pub const fn is_blockchain_tree(&self) -> bool {
-        matches!(self, Self::BlockchainTree)
-    }
-}
-
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
@@ -449,17 +442,20 @@ where
         // Drain handle notifications
         while this.buffer.len() < this.max_capacity {
             if let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
-                debug!(
-                    target: "exex::manager",
-                    committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
-                    reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
-                    "Received new notification"
-                );
+                let committed_tip = notification.committed_chain().map(|chain| chain.tip().number);
+                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number);
+                debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
 
                 // Commit to WAL only notifications from blockchain tree. Pipeline notifications
                 // always contain only finalized blocks.
-                if source.is_blockchain_tree() {
-                    this.wal.commit(&notification)?;
+                match source {
+                    ExExNotificationSource::BlockchainTree => {
+                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
+                        this.wal.commit(&notification)?;
+                    }
+                    ExExNotificationSource::Pipeline => {
+                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
+                    }
                 }
 
                 this.push_notification(notification);

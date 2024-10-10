@@ -48,6 +48,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             return Ok(None)
         }
 
+        info!(target: "reth::cli", "Loading ExEx Write-Ahead Log...");
         let exex_wal = Wal::new(
             config_container
                 .config
