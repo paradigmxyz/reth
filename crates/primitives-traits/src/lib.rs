@@ -20,6 +20,9 @@ pub use constants::gas_units::{format_gas, format_gas_throughput};
 pub mod account;
 pub use account::{Account, Bytecode};
 
+pub mod receipt;
+pub use receipt::Receipt;
+
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
