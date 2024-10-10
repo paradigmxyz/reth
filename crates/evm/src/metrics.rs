@@ -8,7 +8,6 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
 use reth_metrics::Metrics;
 use reth_primitives::BlockWithSenders;
-use revm::CacheState;
 
 use crate::execute::Executor;
 
@@ -27,19 +26,19 @@ pub struct ExecutorMetrics {
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
 
-    /// The total number of accounts loaded when executing the latest block.
-    pub accounts_loaded_total: Counter,
-    /// The total number of storage slots loaded when executing the latest block.
-    pub storage_slots_loaded_total: Counter,
-    /// The total number of bytecodes loaded when executing the latest block.
-    pub bytecodes_loaded_total: Counter,
+    /// The Histogram for number of accounts loaded when executing the latest block.
+    pub accounts_loaded_histogram: Histogram,
+    /// The Histogram for number of storage slots loaded when executing the latest block.
+    pub storage_slots_loaded_histogram: Histogram,
+    /// The Histogram for number of bytecodes loaded when executing the latest block.
+    pub bytecodes_loaded_histogram: Histogram,
 
-    /// The total number of accounts updated when executing the latest block.
-    pub accounts_updated_total: Counter,
-    /// The total number of storage slots updated when executing the latest block.
-    pub storage_slots_updated_total: Counter,
-    /// The total number of bytecodes updated when executing the latest block.
-    pub bytecodes_updated_total: Counter,
+    /// The Histogram for number of accounts updated when executing the latest block.
+    pub accounts_updated_histogram: Histogram,
+    /// The Histogram for number of storage slots updated when executing the latest block.
+    pub storage_slots_updated_histogram: Histogram,
+    /// The Histogram for number of bytecodes updated when executing the latest block.
+    pub bytecodes_updated_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -80,28 +79,26 @@ impl ExecutorMetrics {
         >,
     {
         let output = self.metered(input.block, || {
-            executor.execute_with_state_closure(input, |state| {
-                // Help LSP to resolve the type correctly
-                let cache_state: &CacheState = &state.cache;
-
+            executor.execute_with_state_closure(input, |state: &revm::db::State<DB>| {
                 // Update the metrics for the number of accounts, storage slots and bytecodes
                 // loaded
-                let accounts = cache_state.accounts.len();
-                let storage_slots = cache_state
+                let accounts = state.cache.accounts.len();
+                let storage_slots = state
+                    .cache
                     .accounts
                     .values()
                     .filter_map(|account| {
                         account.account.as_ref().map(|account| account.storage.len())
                     })
                     .sum::<usize>();
-                let bytecodes = cache_state.contracts.len();
+                let bytecodes = state.cache.contracts.len();
 
                 // Record all state present in the cache state as loaded even though some might have
                 // been newly created.
                 // TODO: Consider spitting these into loaded and newly created.
-                self.accounts_loaded_total.increment(accounts as u64);
-                self.storage_slots_loaded_total.increment(storage_slots as u64);
-                self.bytecodes_loaded_total.increment(bytecodes as u64);
+                self.accounts_loaded_histogram.record(accounts as f64);
+                self.storage_slots_loaded_histogram.record(storage_slots as f64);
+                self.bytecodes_loaded_histogram.record(bytecodes as f64);
             })
         })?;
 
@@ -111,9 +108,9 @@ impl ExecutorMetrics {
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
         let bytecodes = output.state.contracts.len();
 
-        self.accounts_updated_total.increment(accounts as u64);
-        self.storage_slots_updated_total.increment(storage_slots as u64);
-        self.bytecodes_updated_total.increment(bytecodes as u64);
+        self.accounts_updated_histogram.record(accounts as f64);
+        self.storage_slots_updated_histogram.record(storage_slots as f64);
+        self.bytecodes_updated_histogram.record(bytecodes as f64);
 
         Ok(output)
     }
