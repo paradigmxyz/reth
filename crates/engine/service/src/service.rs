@@ -82,6 +82,7 @@ where
     ) -> Self {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
+        println!("{engine_kind:?}");
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 

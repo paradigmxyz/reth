@@ -95,6 +95,7 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn is_optimism(&self) -> bool {
+        println!("is optimism");
         true
     }
 }
