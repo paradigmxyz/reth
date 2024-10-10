@@ -397,27 +397,33 @@ impl PruneConfig {
     /// if the corresponding value in this config is not set.
     pub fn merge(&mut self, other: Option<Self>) {
         let Some(other) = other else { return };
+        let Self {
+            block_interval,
+            segments:
+                PruneModes {
+                    sender_recovery,
+                    transaction_lookup,
+                    receipts,
+                    account_history,
+                    storage_history,
+                    receipts_log_filter,
+                },
+        } = other;
 
         // Merge block_interval
-        if self.block_interval == 0 {
-            self.block_interval = other.block_interval;
+        if block_interval != 0 {
+            self.block_interval = block_interval;
         }
 
         // Merge the various segment prune modes
-        self.segments.sender_recovery =
-            self.segments.sender_recovery.or(other.segments.sender_recovery);
-        self.segments.transaction_lookup =
-            self.segments.transaction_lookup.or(other.segments.transaction_lookup);
-        self.segments.receipts = self.segments.receipts.or(other.segments.receipts);
-        self.segments.account_history =
-            self.segments.account_history.or(other.segments.account_history);
-        self.segments.storage_history =
-            self.segments.storage_history.or(other.segments.storage_history);
+        self.segments.sender_recovery = self.segments.sender_recovery.or(sender_recovery);
+        self.segments.transaction_lookup = self.segments.transaction_lookup.or(transaction_lookup);
+        self.segments.receipts = self.segments.receipts.or(receipts);
+        self.segments.account_history = self.segments.account_history.or(account_history);
+        self.segments.storage_history = self.segments.storage_history.or(storage_history);
 
-        if self.segments.receipts_log_filter.0.is_empty() &&
-            !other.segments.receipts_log_filter.0.is_empty()
-        {
-            self.segments.receipts_log_filter = other.segments.receipts_log_filter;
+        if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
+            self.segments.receipts_log_filter = receipts_log_filter;
         }
     }
 }
