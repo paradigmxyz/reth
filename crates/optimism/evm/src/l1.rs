@@ -301,7 +301,7 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OptimismHardforks;
-    use reth_primitives::{BlockBody, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, TransactionSigned};
 
     use super::*;
 
