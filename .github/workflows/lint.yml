@@ -11,7 +11,7 @@ env:
 
 jobs:
   clippy-binaries:
-    name: clippy / ${{ matrix.type }}
+    name: clippy binaries / ${{ matrix.type }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
