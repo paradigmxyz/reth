@@ -29,10 +29,7 @@ serde = { workspace = true, features = ["derive"] }
 ## reth-primitives will be removed when optimism receipt moved out of 
 ## primitives. circular dev dep will cause problem publishing crate.
 reth-primitives.workspace = true
-reth-codecs.workspace = true
-reth-db-api.workspace = true
-reth-prune-types.workspace = true
-reth-stages-types.workspace = true
+
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
