@@ -4,7 +4,7 @@ use crate::{
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
-use reth_chain_state::{ForkChoiceNotifications, ForkChoiceStream};
+use reth_chain_state::ForkChoiceStream;
 use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::{BlockNumHash, SealedHeader};
@@ -223,7 +223,8 @@ pub struct ExExManager<P> {
 
     /// Write-Ahead Log for the [`ExExNotification`]s.
     wal: Wal,
-    finalized_header_notifications: ForkChoiceNotifications,
+    /// Last finalized block.
+    last_finalized_block: Option<BlockNumHash>,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
 
@@ -246,7 +247,6 @@ impl<P> ExExManager<P> {
         handles: Vec<ExExHandle>,
         max_capacity: usize,
         wal: Wal,
-        finalized_header_notifications: ForkChoiceNotifications,
         finalized_header_stream: ForkChoiceStream<SealedHeader>,
     ) -> Self {
         let num_exexs = handles.len();
@@ -282,7 +282,7 @@ impl<P> ExExManager<P> {
             finished_height: finished_height_tx,
 
             wal,
-            finalized_header_notifications,
+            last_finalized_block: None,
             finalized_header_stream,
 
             handle: ExExManagerHandle {
@@ -321,6 +321,22 @@ impl<P> ExExManager<P> {
         let next_id = self.next_id;
         self.buffer.push_back((next_id, notification));
         self.next_id += 1;
+    }
+
+    /// Drain the finalized header stream and update the `last_finalized_header` field.
+    ///
+    /// Returns the last finalized header, if it was updated.
+    fn update_last_finalized_header(&mut self, cx: &mut Context<'_>) -> Option<SealedHeader> {
+        let mut last_finalized_header = None;
+        while let Poll::Ready(finalized_header) = self.finalized_header_stream.poll_next_unpin(cx) {
+            last_finalized_header = finalized_header;
+        }
+
+        if let Some(last_finalized_header) = last_finalized_header.as_ref() {
+            self.last_finalized_block = Some(last_finalized_header.num_hash());
+        }
+
+        last_finalized_header
     }
 }
 
@@ -421,12 +437,8 @@ where
             }
         }
 
-        // Drain the finalized header stream and finalize the WAL with the last header.
-        let mut last_finalized_header = None;
-        while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
-            last_finalized_header = finalized_header;
-        }
-        if let Some(header) = last_finalized_header {
+        // Finalize the WAL with the last finalized header, if it changed
+        if let Some(header) = this.update_last_finalized_header(cx) {
             this.finalize_wal(&header)?;
         }
 
@@ -440,17 +452,18 @@ where
                     "Received new notification"
                 );
 
+                // Update last finalized header in case it changed since the last time we updated it
+                this.update_last_finalized_header(cx);
+
                 // Commit only notifications with unfinalized blocks to WAL. This prevents the WAL
                 // from growing when syncing using the pipeline, because the pipeline sync is always
                 // running towards the finalized header.
-                let is_unfinalized_notification = this
-                    .finalized_header_notifications
-                    .borrow()
-                    .as_ref()
-                    .zip(notification.committed_chain())
-                    .map_or(true, |(finalized_header, committed_chain)| {
+                let is_unfinalized_notification = notification
+                    .committed_chain()
+                    .zip(this.last_finalized_block)
+                    .map_or(true, |(committed_chain, finalized_block)| {
                         // Check if the committed chain tip is unfinalized
-                        committed_chain.tip().number > finalized_header.number
+                        committed_chain.tip().number > finalized_block.number
                     });
                 if is_unfinalized_notification {
                     this.wal.commit(&notification)?;

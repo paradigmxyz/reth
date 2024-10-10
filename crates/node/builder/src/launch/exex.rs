@@ -112,7 +112,6 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             exex_handles,
             DEFAULT_EXEX_MANAGER_CAPACITY,
             exex_wal,
-            components.provider().subscribe_finalized_block(),
             components.provider().finalized_block_stream(),
         );
         let exex_manager_handle = exex_manager.handle();
