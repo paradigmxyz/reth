@@ -153,19 +153,6 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
-    /// Fetches both transactions and receipts for the given block hash.
-    pub async fn get_transactions_and_receipts(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<(Vec<TransactionSigned>, Arc<Vec<Receipt>>)>> {
-        let transactions = self.get_block_transactions(block_hash);
-        let receipts = self.get_receipts(block_hash);
-
-        let (transactions, receipts) = futures::try_join!(transactions, receipts)?;
-
-        Ok(transactions.zip(receipts))
-    }
-
     /// Requests the  [`SealedBlockWithSenders`] for the block hash
     ///
     /// Returns `None` if the block does not exist.

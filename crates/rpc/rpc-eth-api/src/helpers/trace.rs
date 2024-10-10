@@ -356,10 +356,10 @@ pub trait Trace: LoadState {
                 let mut results = Vec::with_capacity(max_transactions);
 
                 let mut transactions = block
-                    .into_transactions_ecrecovered()
+                    .transactions_with_sender()
                     .take(max_transactions)
                     .enumerate()
-                    .map(|(idx, tx)| {
+                    .map(|(idx, (signer, tx))| {
                         let tx_info = TransactionInfo {
                             hash: Some(tx.hash()),
                             index: Some(idx as u64),
@@ -367,7 +367,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(&tx);
+                        let tx_env = Trace::evm_config(&this).tx_env(tx, *signer);
                         (tx_info, tx_env)
                     })
                     .peekable();

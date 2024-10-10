@@ -172,8 +172,8 @@ pub trait EthFees: LoadFee {
 
                     // Percentiles were specified, so we need to collect reward percentile ino
                     if let Some(percentiles) = &reward_percentiles {
-                        let (transactions, receipts) = LoadFee::cache(self)
-                            .get_transactions_and_receipts(header.hash())
+                        let (block, receipts) = LoadFee::cache(self)
+                            .get_block_and_receipts(header.hash())
                             .await
                             .map_err(Self::Error::from_eth_err)?
                             .ok_or(EthApiError::InvalidBlockRange)?;
@@ -182,7 +182,7 @@ pub trait EthFees: LoadFee {
                                 percentiles,
                                 header.gas_used,
                                 header.base_fee_per_gas.unwrap_or_default(),
-                                &transactions,
+                                &block.body.transactions,
                                 &receipts,
                             )
                             .unwrap_or_default(),
