@@ -3,7 +3,7 @@
 //! Optimism builder support
 
 use alloy_eips::eip2718::Decodable2718;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
 /// Re-export for use in downstream arguments.
@@ -35,6 +35,8 @@ pub struct OptimismPayloadBuilderAttributes {
     pub transactions: Vec<WithEncoded<TransactionSigned>>,
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
+    /// EIP-1559 parameters for the generated payload
+    pub eip_1559_params: Option<B64>,
 }
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
@@ -79,6 +81,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
             transactions,
             gas_limit: attributes.gas_limit,
+            eip_1559_params: attributes.eip_1559_params,
         })
     }
 
@@ -108,6 +111,18 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
+    }
+}
+
+impl Default for OptimismPayloadBuilderAttributes {
+    fn default() -> Self {
+        Self {
+            payload_attributes: EthPayloadBuilderAttributes::default(),
+            no_tx_pool: false,
+            transactions: Vec::new(),
+            gas_limit: None,
+            eip_1559_params: Some(B64::default()),
+        }
     }
 }
 
@@ -294,6 +309,10 @@ pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttribute
 
     if let Some(gas_limit) = attributes.gas_limit {
         hasher.update(gas_limit.to_be_bytes());
+    }
+
+    if let Some(eip_1559_params) = &attributes.eip_1559_params {
+        hasher.update(eip_1559_params.as_slice());
     }
 
     let out = hasher.finalize();

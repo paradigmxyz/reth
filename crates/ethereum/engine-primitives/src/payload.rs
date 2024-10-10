@@ -248,6 +248,20 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     }
 }
 
+impl Default for EthPayloadBuilderAttributes {
+    fn default() -> Self {
+        Self {
+            id: PayloadId::new([0; 8]),
+            parent: B256::default(),
+            timestamp: 0,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::default(),
+            withdrawals: Withdrawals::default(),
+            parent_beacon_block_root: None,
+        }
+    }
+}
+
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.

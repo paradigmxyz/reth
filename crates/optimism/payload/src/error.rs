@@ -20,4 +20,7 @@ pub enum OptimismPayloadBuilderError {
     /// Thrown when a blob transaction is included in a sequencer's block.
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
+    /// Thrown when EIP1559 params are missing in the payload attributes post Holocene.
+    #[error("missing EIP1559 params in payload attributes")]
+    MissingEip1559Params,
 }

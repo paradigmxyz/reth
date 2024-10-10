@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, B64};
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
 use reth_chainspec::ChainSpecBuilder;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
@@ -72,5 +72,6 @@ pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuil
         transactions: vec![],
         no_tx_pool: false,
         gas_limit: Some(30_000_000),
+        eip_1559_params: Some(B64::default()),
     }
 }

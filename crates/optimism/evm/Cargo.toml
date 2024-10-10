@@ -23,6 +23,7 @@ reth-prune-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 op-alloy-consensus.workspace = true
 
 # Optimism
@@ -39,8 +40,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alloy-eips.workspace = true
-
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true

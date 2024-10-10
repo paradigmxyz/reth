@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::U256;
+use alloy_primitives::{B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{BaseFeeParams, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -182,6 +182,15 @@ where
         initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit)
     });
     let base_fee = initialized_block_env.basefee.to::<u64>();
+
+    let is_holocene = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Holocene,
+        attributes.payload_attributes.timestamp,
+    );
+
+    if is_holocene && attributes.eip_1559_params.is_none() {
+        return Err(PayloadBuilderError::other(OptimismPayloadBuilderError::MissingEip1559Params))
+    }
 
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
     let mut executed_senders = Vec::with_capacity(attributes.transactions.len());
@@ -496,7 +505,12 @@ where
         logs_bloom,
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
-        nonce: BEACON_NONCE.into(),
+        // Post holocene, adding eip 1559 params to the nonce field
+        nonce: get_nonce(
+            is_holocene,
+            &attributes,
+            chain_spec.base_fee_params_at_timestamp(attributes.payload_attributes.timestamp),
+        ),
         base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
         gas_limit: block_gas_limit,
@@ -540,4 +554,61 @@ where
     payload.extend_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
+}
+
+fn get_nonce(
+    is_holocene: bool,
+    attributes: &OptimismPayloadBuilderAttributes,
+    default_base_fee_params: BaseFeeParams,
+) -> B64 {
+    if is_holocene {
+        // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
+        // The eip 1559 params should exist here since there was a check previously
+        if attributes.eip_1559_params.unwrap() == B64::ZERO {
+            let mut default_params = [0u8; 8];
+            default_params[..4].copy_from_slice(
+                &(default_base_fee_params.max_change_denominator as u32).to_be_bytes(),
+            );
+            default_params[4..].copy_from_slice(
+                &(default_base_fee_params.elasticity_multiplier as u32).to_be_bytes(),
+            );
+            B64::from_slice(default_params.as_ref())
+        } else {
+            attributes.eip_1559_params.unwrap()
+        }
+    } else {
+        BEACON_NONCE.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_get_nonce_pre_holocene() {
+        let attributes = OptimismPayloadBuilderAttributes::default();
+        let nonce = get_nonce(false, &attributes, BaseFeeParams::new(80, 60));
+        assert_eq!(nonce, B64::from(BEACON_NONCE.to_le_bytes()));
+    }
+
+    #[test]
+    fn test_get_nonce_post_holocene() {
+        let attributes = OptimismPayloadBuilderAttributes {
+            eip_1559_params: Some(B64::from_str("0x1234567812345678").unwrap()),
+            ..Default::default()
+        };
+        let nonce = get_nonce(true, &attributes, BaseFeeParams::new(80, 60));
+        assert_eq!(nonce, B64::from_str("0x1234567812345678").unwrap());
+    }
+
+    #[test]
+    fn test_get_nonce_post_holocene_default() {
+        let attributes = OptimismPayloadBuilderAttributes::default();
+        let nonce = get_nonce(true, &attributes, BaseFeeParams::new(80, 60));
+        let default_params: [u8; 8] = [0, 0, 0, 80, 0, 0, 0, 60];
+        assert_eq!(nonce, B64::from_slice(&default_params));
+    }
 }
