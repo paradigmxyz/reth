@@ -124,11 +124,8 @@ impl ChainInfoTracker {
     pub fn set_finalized(&self, header: SealedHeader) {
         self.inner.finalized_block.send_if_modified(|current_header| {
             if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
-                // Only update if the new header has a higher block number
-                if current_header.as_ref().map(|h| h.number) < Some(header.number) {
-                    let _ = current_header.replace(header);
-                    return true;
-                }
+                let _ = current_header.replace(header);
+                return true;
             }
 
             false
@@ -303,7 +300,6 @@ mod tests {
         let header1 = random_header(&mut rng, 10, None);
         let header2 = random_header(&mut rng, 20, None);
         let header3 = random_header(&mut rng, 30, None);
-        let header4 = random_header(&mut rng, 15, None);
 
         // Create a new chain info tracker with the first header
         let tracker = ChainInfoTracker::new(header1, None);
@@ -334,20 +330,6 @@ mod tests {
         let updated_finalized_header = tracker.get_finalized_header();
         assert!(updated_finalized_header.is_some());
         assert_eq!(updated_finalized_header.unwrap(), header3);
-
-        // Case 4: attempt to set a lower block number as finalized (header4)
-        tracker.set_finalized(header4);
-
-        // The finalized header should not change and should still be header3
-        let final_header_after_lower_attempt = tracker.get_finalized_header();
-        assert_eq!(final_header_after_lower_attempt.unwrap(), header3);
-
-        // Case 5: Finalize back to header2 (which is lower than header3)
-        tracker.set_finalized(header2);
-
-        // The finalized header should still remain header3, as it has a higher block number
-        let final_header_after_lower_finalization = tracker.get_finalized_header();
-        assert_eq!(final_header_after_lower_finalization.unwrap(), header3);
     }
 
     #[test]
