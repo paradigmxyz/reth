@@ -160,18 +160,6 @@ pub trait ForkChoiceSubscriptions: Send + Sync {
     fn finalized_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
         ForkChoiceStream::new(self.subscribe_finalized_block().0)
     }
-
-    /// Convenience method to get a stream of the new safe blocks of the chain. This stream will
-    /// wait for the value to be changed and only then emit it.
-    fn safe_block_stream_from_changes(&self) -> ForkChoiceStream<SealedHeader> {
-        ForkChoiceStream::from_changes(self.subscribe_safe_block().0)
-    }
-
-    /// Convenience method to get a stream of the new finalized blocks of the chain. This stream
-    /// will wait for the value to be changed and only then emit it.
-    fn finalized_block_stream_from_changes(&self) -> ForkChoiceStream<SealedHeader> {
-        ForkChoiceStream::from_changes(self.subscribe_finalized_block().0)
-    }
 }
 
 /// A stream for fork choice watch channels (pending, safe or finalized watchers)
@@ -183,13 +171,8 @@ pub struct ForkChoiceStream<T> {
 }
 
 impl<T: Clone + Sync + Send + 'static> ForkChoiceStream<T> {
-    /// Creates a new [`ForkChoiceStream`]
+    /// Creates a new `ForkChoiceStream`
     pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
-        Self { st: WatchStream::new(rx) }
-    }
-
-    /// Creates a new [`ForkChoiceStream`] that waits for the value to be changed.
-    pub fn from_changes(rx: watch::Receiver<Option<T>>) -> Self {
         Self { st: WatchStream::from_changes(rx) }
     }
 }

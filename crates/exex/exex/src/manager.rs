@@ -4,7 +4,7 @@ use crate::{
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
-use reth_chain_state::ForkChoiceStream;
+use reth_chain_state::{ForkChoiceNotifications, ForkChoiceStream};
 use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::{BlockNumHash, SealedHeader};
@@ -223,8 +223,7 @@ pub struct ExExManager<P> {
 
     /// Write-Ahead Log for the [`ExExNotification`]s.
     wal: Wal,
-    /// Last finalized header.
-    last_finalized_header: Option<SealedHeader>,
+    finalized_header_notifications: ForkChoiceNotifications,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
 
@@ -247,6 +246,7 @@ impl<P> ExExManager<P> {
         handles: Vec<ExExHandle>,
         max_capacity: usize,
         wal: Wal,
+        finalized_header_notifications: ForkChoiceNotifications,
         finalized_header_stream: ForkChoiceStream<SealedHeader>,
     ) -> Self {
         let num_exexs = handles.len();
@@ -282,7 +282,7 @@ impl<P> ExExManager<P> {
             finished_height: finished_height_tx,
 
             wal,
-            last_finalized_header: None,
+            finalized_header_notifications,
             finalized_header_stream,
 
             handle: ExExManagerHandle {
@@ -421,15 +421,13 @@ where
             }
         }
 
-        // Drain the finalized header stream, finalize the WAL with the last header and update the
-        // `last_finalized_header` field.
+        // Drain the finalized header stream and finalize the WAL with the last header.
         let mut last_finalized_header = None;
         while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
             last_finalized_header = finalized_header;
         }
         if let Some(header) = last_finalized_header {
             this.finalize_wal(&header)?;
-            this.last_finalized_header = Some(header);
         }
 
         // Drain handle notifications
@@ -446,7 +444,8 @@ where
                 // from growing when syncing using the pipeline, because the pipeline sync is always
                 // running towards the finalized header.
                 let is_unfinalized_notification = this
-                    .last_finalized_header
+                    .finalized_header_notifications
+                    .borrow()
                     .as_ref()
                     .zip(notification.committed_chain())
                     .map_or(true, |(finalized_header, committed_chain)| {
