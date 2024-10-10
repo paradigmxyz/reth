@@ -63,7 +63,7 @@ impl NatResolver {
     }
 
     /// Returns the external ip, if it is [`NatResolver::ExternalIp`]
-    pub fn as_external_ip(self) -> Option<IpAddr> {
+    pub const fn as_external_ip(self) -> Option<IpAddr> {
         match self {
             Self::ExternalIp(ip) => Some(ip),
             _ => None,
