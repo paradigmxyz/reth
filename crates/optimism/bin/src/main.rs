@@ -9,7 +9,7 @@ use reth_optimism_node::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
 
-use tracing::{self as _, warn};
+use tracing as _;
 
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
@@ -24,15 +24,10 @@ fn main() {
 
     if let Err(err) =
         Cli::<OpChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
-            if rollup_args.experimental {
-                warn!(target: "reth::cli", "Experimental engine is default now, and the --engine.experimental flag is deprecated. To enable the legacy functionality, use --engine.legacy.");
-            }
-
-            let use_legacy_engine = rollup_args.legacy;
+            let enable_engine2 = rollup_args.experimental;
             let sequencer_http_arg = rollup_args.sequencer_http.clone();
-
-            match use_legacy_engine {
-                false => {
+            match enable_engine2 {
+                true => {
                     let engine_tree_config = TreeConfig::default()
                         .with_persistence_threshold(rollup_args.persistence_threshold)
                         .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
@@ -62,7 +57,7 @@ fn main() {
 
                     handle.node_exit_future.await
                 }
-                true => {
+                false => {
                     let handle = builder
                         .node(OptimismNode::new(rollup_args.clone()))
                         .extend_rpc_modules(move |ctx| {
