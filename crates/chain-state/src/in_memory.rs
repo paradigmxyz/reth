@@ -1302,7 +1302,7 @@ mod tests {
         let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);
 
-        let state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
         let chain: Vec<_> = state.canonical_chain().collect();
 
         assert_eq!(chain.len(), 1);
