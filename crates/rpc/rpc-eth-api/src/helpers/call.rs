@@ -663,7 +663,7 @@ pub trait Call: LoadState + SpawnBlocking {
                 break
             }
 
-            self.evm_config().fill_tx_env(evm.tx_mut(), &tx, *sender);
+            self.evm_config().fill_tx_env(evm.tx_mut(), tx, *sender);
             evm.transact_commit().map_err(Self::Error::from_evm_err)?;
             index += 1;
         }

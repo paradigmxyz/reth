@@ -82,7 +82,7 @@ impl FeeHistoryCache {
         let percentiles = self.predefined_percentiles();
         // Insert all new blocks and calculate approximated rewards
         for (block, receipts) in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(&block);
+            let mut fee_history_entry = FeeHistoryEntry::new(block);
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
                 fee_history_entry.gas_used,
