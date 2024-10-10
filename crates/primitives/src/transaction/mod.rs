@@ -1477,6 +1477,11 @@ impl TransactionSignedEcRecovered {
         self.signed_transaction
     }
 
+    /// Returns a reference to [`TransactionSigned`]
+    pub fn as_signed(&self) -> &TransactionSigned {
+        &self.signed_transaction
+    }
+
     /// Dissolve Self to its component
     pub fn to_components(self) -> (TransactionSigned, Address) {
         (self.signed_transaction, self.signer)

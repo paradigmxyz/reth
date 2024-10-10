@@ -296,7 +296,7 @@ pub trait LoadFee: LoadBlock {
                 None => {
                     // fetch pending base fee
                     let base_fee = self
-                        .block(BlockNumberOrTag::Pending.into())
+                        .block_with_senders(BlockNumberOrTag::Pending.into())
                         .await?
                         .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Pending.into()))?
                         .base_fee_per_gas
@@ -332,7 +332,7 @@ pub trait LoadFee: LoadBlock {
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
     fn gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        let header = self.block(BlockNumberOrTag::Latest.into());
+        let header = self.block_with_senders(BlockNumberOrTag::Latest.into());
         let suggested_tip = self.suggested_priority_fee();
         async move {
             let (header, suggested_tip) = futures::try_join!(header, suggested_tip)?;
@@ -344,9 +344,9 @@ pub trait LoadFee: LoadBlock {
     /// Returns a suggestion for a base fee for blob transactions.
     fn blob_base_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         async move {
-            self.block(BlockNumberOrTag::Latest.into())
+            self.block_with_senders(BlockNumberOrTag::Latest.into())
                 .await?
-                .and_then(|h: reth_primitives::SealedBlock| h.next_block_blob_fee())
+                .and_then(|h| h.next_block_blob_fee())
                 .ok_or(EthApiError::ExcessBlobGasNotSet.into())
                 .map(U256::from)
         }
