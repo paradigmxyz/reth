@@ -323,17 +323,19 @@ impl<P> ExExManager<P> {
         self.next_id += 1;
     }
 
-    /// Drain the finalized header stream and update the `last_finalized_header` field.
+    /// Drain the finalized header stream and update the `last_finalized_block` field.
     ///
     /// Returns the last finalized header, if it was updated.
-    fn update_last_finalized_header(&mut self, cx: &mut Context<'_>) -> Option<SealedHeader> {
+    fn update_last_finalized_block(&mut self, cx: &mut Context<'_>) -> Option<SealedHeader> {
         let mut last_finalized_header = None;
         while let Poll::Ready(finalized_header) = self.finalized_header_stream.poll_next_unpin(cx) {
             last_finalized_header = finalized_header;
         }
 
         if let Some(last_finalized_header) = last_finalized_header.as_ref() {
-            self.last_finalized_block = Some(last_finalized_header.num_hash());
+            let last_finalized_block = last_finalized_header.num_hash();
+            debug!(target: "exex::manager", ?last_finalized_block, "Updated last finalized block");
+            self.last_finalized_block = Some(last_finalized_block);
         }
 
         last_finalized_header
@@ -438,7 +440,7 @@ where
         }
 
         // Finalize the WAL with the last finalized header, if it changed
-        if let Some(header) = this.update_last_finalized_header(cx) {
+        if let Some(header) = this.update_last_finalized_block(cx) {
             this.finalize_wal(&header)?;
         }
 
@@ -453,7 +455,7 @@ where
                 );
 
                 // Update last finalized header in case it changed since the last time we updated it
-                this.update_last_finalized_header(cx);
+                this.update_last_finalized_block(cx);
 
                 // Commit only notifications with unfinalized blocks to WAL. This prevents the WAL
                 // from growing when syncing using the pipeline, because the pipeline sync is always
