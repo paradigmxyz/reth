@@ -630,16 +630,16 @@ impl Clone for ExExManagerHandle {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use futures::StreamExt;
+    use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
-        Chain, TransactionVariant,
+        BlockWriter, Chain, DatabaseProviderFactory, TransactionVariant,
     };
-    use reth_testing_utils::generators;
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         let (tx, rx) = watch::channel(None);
@@ -1197,6 +1197,18 @@ mod tests {
             .sealed_block_with_senders(genesis_hash.into(), TransactionVariant::NoHash)
             .unwrap()
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), ..Default::default() },
+        )
+        .seal_with_senders()
+        .unwrap();
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        provider_rw.insert_block(block.clone()).unwrap();
+        provider_rw.commit().unwrap();
+
         let provider = BlockchainProvider2::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1210,33 +1222,47 @@ mod tests {
             wal.handle(),
         );
 
-        let notification = ExExNotification::ChainCommitted {
+        let genesis_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![genesis_block.clone()], Default::default(), None)),
+        };
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);
+        finalized_headers_tx.send(Some(genesis_block.header.clone()))?;
         let finalized_header_stream = ForkChoiceStream::new(rx);
 
         let mut exex_manager = std::pin::pin!(ExExManager::new(
             provider,
             vec![exex_handle],
-            1,
+            2,
             wal,
             finalized_header_stream
         ));
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
+        exex_manager.handle().send(genesis_notification.clone())?;
         exex_manager.handle().send(notification.clone())?;
 
         assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
-        assert_eq!(notifications.next().await.unwrap().unwrap(), notification.clone());
+        assert_eq!(
+            notifications.try_poll_next_unpin(&mut cx)?,
+            Poll::Ready(Some(genesis_notification))
+        );
+        assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
+        assert_eq!(
+            notifications.try_poll_next_unpin(&mut cx)?,
+            Poll::Ready(Some(notification.clone()))
+        );
+        // WAL shouldn't contain the genesis notification, because it's finalized
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
             [notification.clone()]
         );
 
-        finalized_headers_tx.send(Some(genesis_block.header.clone()))?;
+        finalized_headers_tx.send(Some(block.header.clone()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
@@ -1249,7 +1275,7 @@ mod tests {
             .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
             .unwrap();
 
-        finalized_headers_tx.send(Some(genesis_block.header.clone()))?;
+        finalized_headers_tx.send(Some(block.header.clone()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
@@ -1259,12 +1285,12 @@ mod tests {
         );
 
         // Send a `FinishedHeight` event with a canonical block
-        events_tx.send(ExExEvent::FinishedHeight(genesis_block.num_hash())).unwrap();
+        events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
 
-        finalized_headers_tx.send(Some(genesis_block.header.clone()))?;
+        finalized_headers_tx.send(Some(block.header.clone()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL is finalized
-        assert!(exex_manager.wal.iter_notifications()?.next().is_none());
+        assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);
 
         Ok(())
     }
