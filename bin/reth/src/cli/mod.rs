@@ -15,8 +15,8 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::args::utils::EthereumChainSpecParser;
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -117,7 +117,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
+    /// use reth::cli::Cli;
+    /// use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
@@ -238,7 +239,7 @@ mod tests {
     use super::*;
     use crate::args::ColorMode;
     use clap::CommandFactory;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
 
     #[test]
     fn parse_color_mode() {

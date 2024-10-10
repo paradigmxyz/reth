@@ -23,7 +23,7 @@ use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
 use reth::{
-    args::utils::EthereumChainSpecParser, builder::NodeHandle, cli::Cli,
+    builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
     providers::CanonStateSubscriptions,
 };
 use reth_node_ethereum::EthereumNode;

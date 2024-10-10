@@ -365,7 +365,7 @@ pub enum RpcInvalidTransactionError {
     PrecompileOutOfGas(u64),
     /// An operand to an opcode was invalid or out of range.
     /// Contains the gas limit.
-    #[error("out of gas: invalid operand to an opcode; {0}")]
+    #[error("out of gas: invalid operand to an opcode: {0}")]
     InvalidOperandOutOfGas(u64),
     /// Thrown if executing a transaction failed during estimate/call
     #[error(transparent)]
@@ -488,8 +488,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock |
-            InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
+            InvalidTransaction::CallerGasLimitMoreThanBlock => {
+                // tx.gas > block.gas_limit
+                Self::GasTooHigh
+            }
+            InvalidTransaction::CallGasCostMoreThanGasLimit => {
+                // tx.gas < cost
+                Self::GasTooLow
+            }
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
                 Self::InsufficientFunds { cost: *fee, balance: *balance }

@@ -56,6 +56,3 @@ reth-testing-utils.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-
-[features]
-optimism = ["reth-primitives/optimism"]

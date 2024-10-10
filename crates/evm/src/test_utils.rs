@@ -1,7 +1,10 @@
 //! Helpers for testing.
 
-use crate::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+use crate::{
+    execute::{
+        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+    },
+    system_calls::OnStateHook,
 };
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
@@ -63,15 +66,26 @@ impl<DB> Executor<DB> for MockExecutorProvider {
         })
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         self,
-        _: Self::Input<'_>,
+        input: Self::Input<'_>,
         _: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
     {
-        unimplemented!()
+        <Self as Executor<DB>>::execute(self, input)
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        input: Self::Input<'_>,
+        _: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        <Self as Executor<DB>>::execute(self, input)
     }
 }
 

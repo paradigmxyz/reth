@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_rpc_types_engine::{
-    OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
-    OptimismPayloadAttributes,
+    OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
 };
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
@@ -21,7 +20,39 @@ use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilder
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OptimismEngineTypes;
+pub struct OptimismEngineTypes<T: PayloadTypes = OptimismPayloadTypes> {
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: PayloadTypes> PayloadTypes for OptimismEngineTypes<T> {
+    type BuiltPayload = T::BuiltPayload;
+    type PayloadAttributes = T::PayloadAttributes;
+    type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
+}
+
+impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
+where
+    T::BuiltPayload: TryInto<ExecutionPayloadV1>
+        + TryInto<ExecutionPayloadEnvelopeV2>
+        + TryInto<OpExecutionPayloadEnvelopeV3>
+        + TryInto<OpExecutionPayloadEnvelopeV4>,
+{
+    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadV3 = OpExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = OpExecutionPayloadEnvelopeV4;
+}
+
+/// A default payload type for [`OptimismEngineTypes`]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct OptimismPayloadTypes;
+
+impl PayloadTypes for OptimismPayloadTypes {
+    type BuiltPayload = OptimismBuiltPayload;
+    type PayloadAttributes = OpPayloadAttributes;
+    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
+}
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
@@ -34,19 +65,6 @@ impl OptimismEngineValidator {
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
-}
-
-impl PayloadTypes for OptimismEngineTypes {
-    type BuiltPayload = OptimismBuiltPayload;
-    type PayloadAttributes = OptimismPayloadAttributes;
-    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
-}
-
-impl EngineTypes for OptimismEngineTypes {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
 }
 
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
@@ -93,12 +111,12 @@ pub fn validate_withdrawals_presence(
 
 impl<Types> EngineValidator<Types> for OptimismEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OptimismPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, OptimismPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, OpPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
             &self.chain_spec,
@@ -119,7 +137,7 @@ where
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,
-        attributes: &OptimismPayloadAttributes,
+        attributes: &OpPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(&self.chain_spec, version, attributes.into())?;
 

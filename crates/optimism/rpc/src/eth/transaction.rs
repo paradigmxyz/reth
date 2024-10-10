@@ -38,7 +38,8 @@ where
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(tx.clone())?;
-        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        let pool_transaction =
+            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
@@ -107,7 +108,11 @@ impl OpTxBuilder {
     pub fn fill_with_spec(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo, chain_spec: Option<Arc<ChainSpec>>) -> <OpTxBuilder as TransactionCompat>::Transaction {
         let signed_tx = tx.clone().into_signed();
 
-        let inner = EthTxBuilder::fill(tx, tx_info).inner;
+        let mut inner = EthTxBuilder::fill(tx, tx_info).inner;
+
+        if signed_tx.is_deposit() {
+            inner.gas_price = Some(signed_tx.max_fee_per_gas())
+        }
 
         let deposit_receipt_version = if signed_tx.is_deposit() && tx_info.block_number.is_some() {
             chain_spec.as_ref().and_then(|spec| 

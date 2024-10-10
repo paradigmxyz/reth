@@ -18,6 +18,9 @@ pub struct TransactionsManagerConfig {
     pub transaction_fetcher_config: TransactionFetcherConfig,
     /// Max number of seen transactions to store for each peer.
     pub max_transactions_seen_by_peer_history: u32,
+    /// How new pending transactions are propagated.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub propagation_mode: TransactionPropagationMode,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -25,6 +28,31 @@ impl Default for TransactionsManagerConfig {
         Self {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            propagation_mode: TransactionPropagationMode::default(),
+        }
+    }
+}
+
+/// Determines how new pending transactions are propagated to other peers in full.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionPropagationMode {
+    /// Send full transactions to sqrt of current peers.
+    #[default]
+    Sqrt,
+    /// Always send transactions in full.
+    All,
+    /// Send full transactions to a maximum number of peers
+    Max(usize),
+}
+
+impl TransactionPropagationMode {
+    /// Returns the number of peers that should
+    pub(crate) fn full_peer_count(&self, peer_count: usize) -> usize {
+        match self {
+            Self::Sqrt => (peer_count as f64).sqrt().round() as usize,
+            Self::All => peer_count,
+            Self::Max(max) => peer_count.min(*max),
         }
     }
 }

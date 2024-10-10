@@ -212,13 +212,26 @@ where
     }
 }
 
-/// The type for specifying the kind of engine api
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The type for specifying the kind of engine api.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EngineApiKind {
     /// The chain contains Ethereum configuration.
+    #[default]
     Ethereum,
     /// The chain contains Optimism configuration.
     OpStack,
+}
+
+impl EngineApiKind {
+    /// Returns true if this is the ethereum variant
+    pub const fn is_ethereum(&self) -> bool {
+        matches!(self, Self::Ethereum)
+    }
+
+    /// Returns true if this is the ethereum variant
+    pub const fn is_opstack(&self) -> bool {
+        matches!(self, Self::OpStack)
+    }
 }
 
 /// The request variants that the engine API handler can receive.
