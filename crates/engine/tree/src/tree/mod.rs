@@ -2749,7 +2749,7 @@ mod tests {
             let last_executed_block = blocks.last().unwrap().clone();
             let pending = Some(BlockState::new(last_executed_block));
             self.tree.canonical_in_memory_state =
-                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None);
+                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None, None);
 
             self.blocks = blocks.clone();
             self.persist_blocks(
