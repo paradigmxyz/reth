@@ -14,7 +14,7 @@ use reth_evm::{
 use reth_primitives::{Header, Receipt, Request};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
-    Database, Evm, State,
+    Database, DatabaseCommit, Evm, State,
 };
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256};
 use std::sync::Arc;
@@ -96,6 +96,7 @@ where
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
 
+    #[allow(dead_code)]
     fn evm<'a>(
         &mut self,
         header: Header,
@@ -108,7 +109,7 @@ where
 
 impl<DB> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB>
 where
-    DB: Database,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Error = BlockExecutionError;
 
@@ -119,9 +120,13 @@ where
     fn execute_transactions(
         &mut self,
         block: &reth_primitives::BlockWithSenders,
+        total_difficulty: U256,
     ) -> Result<(Vec<Receipt>, u64), Self::Error> {
-        let mut evm = self.evm(block.header, total_diffculty);
-        let system_caller = SystemCaller::new(&self.evm_config, (*self.chain_spec).clone());
+        let env = self.evm_env_for_block(&block.header, total_difficulty);
+        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+
+        let evm_config = self.evm_config.clone();
+        let mut system_caller = SystemCaller::new(&evm_config, (*self.chain_spec).clone());
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.transactions.len());
         for (sender, transaction) in block.transactions_with_sender() {
