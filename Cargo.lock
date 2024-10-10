@@ -8367,6 +8367,8 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
+ "alloy-serde",
  "arbitrary",
  "bincode",
  "byteorder",

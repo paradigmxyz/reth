@@ -14,6 +14,7 @@ extern crate alloc;
 
 /// Common constants.
 pub mod constants;
+
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
@@ -55,3 +56,9 @@ pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 pub mod serde_bincode_compat {
     pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
+
+
+mod transaction;
+
+#[cfg(feature = "arbitrary")]
+pub use transaction::Transaction;

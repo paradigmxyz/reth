@@ -19,6 +19,8 @@ alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-serde = { workspace = true }
+alloy-rpc-types = { workspace = true }
 
 revm-primitives = { workspace = true, features = ["serde"] }
 
@@ -44,7 +46,6 @@ reth-testing-utils.workspace = true
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 
-arbitrary = { workspace = true, features = ["derive"] }
 bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -65,3 +66,4 @@ arbitrary = [
     "dep:proptest-arbitrary-interop",
 ]
 serde-bincode-compat = ["serde_with", "alloy-consensus/serde-bincode-compat"]
+optimism = []
