@@ -33,7 +33,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -162,17 +162,6 @@ impl OpChainSpecBuilder {
     /// [`Self::genesis`])
     pub fn build(self) -> OpChainSpec {
         OpChainSpec { inner: self.inner.build() }
-    }
-}
-
-impl From<&Arc<OpChainSpec>> for OpChainSpecBuilder {
-    fn from(value: &Arc<OpChainSpec>) -> Self {
-        let mut inner =
-            ChainSpecBuilder::default().chain(value.chain).genesis(value.genesis.clone());
-        let forks = value.hardforks.clone();
-        inner = inner.with_forks(forks);
-
-        Self { inner }
     }
 }
 

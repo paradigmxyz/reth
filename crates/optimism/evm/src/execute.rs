@@ -514,9 +514,7 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_optimism_chainspec::{
-        optimism_deposit_tx_signature, OpChainSpecBuilder, BASE_MAINNET,
-    };
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -573,8 +571,7 @@ mod tests {
         let account = Account { balance: U256::MAX, ..Account::default() };
         db.insert_account(addr, account, None, HashMap::default());
 
-        let chain_spec =
-            Arc::new(OpChainSpecBuilder::from(&BASE_MAINNET.clone()).regolith_activated().build());
+        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
@@ -654,8 +651,7 @@ mod tests {
 
         db.insert_account(addr, account, None, HashMap::default());
 
-        let chain_spec =
-            Arc::new(OpChainSpecBuilder::from(&BASE_MAINNET.clone()).canyon_activated().build());
+        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
