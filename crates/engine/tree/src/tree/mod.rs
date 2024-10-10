@@ -28,7 +28,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -2160,10 +2160,7 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
-        let output = self
-            .metrics
-            .executor
-            .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
+        let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
         if let Err(err) = self.consensus.validate_block_post_execution(
@@ -2227,7 +2224,7 @@ where
         }
 
         let root_elapsed = root_time.elapsed();
-        self.metrics.block_validation.record_state_root(root_elapsed.as_secs_f64());
+        self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, ?block_number, "Calculated state root");
 
         let executed = ExecutedBlock {
