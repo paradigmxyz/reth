@@ -38,16 +38,9 @@ pub struct RollupArgs {
     #[arg(long = "rollup.discovery.v4", default_value = "false")]
     pub discovery_v4: bool,
 
-    /// Enable the experimental engine features on reth binary
-    ///
-    /// DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy
-    /// functionality
-    #[arg(long = "engine.experimental", default_value = "true")]
+    /// Enable the engine2 experimental features on op-reth binary
+    #[arg(long = "engine.experimental", default_value = "false")]
     pub experimental: bool,
-
-    /// Enable the legacy engine on reth binary
-    #[arg(long = "engine.legacy", default_value = "false")]
-    pub legacy: bool,
 
     /// Configure persistence threshold for engine experimental.
     #[arg(long = "engine.persistence-threshold", requires = "experimental", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
@@ -66,8 +59,7 @@ impl Default for RollupArgs {
             enable_genesis_walkback: false,
             compute_pending_block: false,
             discovery_v4: false,
-            experimental: true,
-            legacy: false,
+            experimental: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
         }
