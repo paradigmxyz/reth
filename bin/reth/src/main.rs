@@ -24,8 +24,8 @@ pub struct EngineArgs {
     ///
     /// DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy
     /// functionality
-    #[arg(long = "engine.experimental", default_value = None)]
-    pub experimental: Option<bool>,
+    #[arg(long = "engine.experimental", default_value = "false")]
+    pub experimental: bool,
 
     /// Enable the legacy engine on reth binary
     #[arg(long = "engine.legacy", default_value = "false")]
@@ -43,7 +43,7 @@ pub struct EngineArgs {
 impl Default for EngineArgs {
     fn default() -> Self {
         Self {
-            experimental: None,
+            experimental: false,
             legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -61,7 +61,7 @@ fn main() {
 
     if let Err(err) =
         Cli::<EthereumChainSpecParser, EngineArgs>::parse().run(|builder, engine_args| async move {
-            if engine_args.experimental.is_some() {
+            if engine_args.experimental {
                 warn!(target: "reth::cli", "Experimental engine is default now, and the --engine.experimental flag is deprecated. To enable the legacy functionality, use --engine.legacy.");
             }
 
