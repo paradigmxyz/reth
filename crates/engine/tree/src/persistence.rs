@@ -4,7 +4,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
-    DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
+    DatabaseProviderFactory, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -92,6 +92,10 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
+                PersistenceAction::SaveFinalizedBlock(finalized_block) => self
+                    .provider
+                    .database_provider_rw()?
+                    .save_finalized_block_number(finalized_block)?,
             }
         }
         Ok(())
@@ -168,6 +172,9 @@ pub enum PersistenceAction {
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
     PruneBefore(u64, oneshot::Sender<PrunerOutput>),
+
+    /// Update the persisted finalized block on disk
+    SaveFinalizedBlock(u64),
 }
 
 /// A handle to the persistence service
@@ -233,6 +240,14 @@ impl PersistenceHandle {
         tx: oneshot::Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
+    }
+
+    /// Persists the finalized block number on disk.
+    pub fn save_finalized_block_number(
+        &self,
+        finalized_block: u64,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
