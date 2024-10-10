@@ -57,7 +57,6 @@ pub type EthApiBuilderCtx<N, Eth> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Evm,
     <N as FullNodeComponents>::Network,
-    TaskExecutor,
     <N as FullNodeTypes>::Provider,
     Eth,
 >;

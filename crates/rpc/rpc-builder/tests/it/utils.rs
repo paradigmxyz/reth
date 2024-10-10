@@ -121,7 +121,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     NoopProvider,
     TestPool,
     NoopNetwork,
-    TokioTaskExecutor,
     TestCanonStateSubscriptions,
     EthEvmConfig,
     EthExecutorProvider<EthEvmConfig>,
@@ -130,7 +129,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_events(TestCanonStateSubscriptions::default())
         .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
         .with_block_executor(EthExecutorProvider::ethereum(MAINNET.clone()))
