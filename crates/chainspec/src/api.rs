@@ -99,6 +99,6 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn is_optimism(&self) -> bool {
-        ChainSpec::is_optimism(self)
+        Self::is_optimism(self)
     }
 }
