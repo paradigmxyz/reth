@@ -317,7 +317,7 @@ mod tests {
             body: BlockBody { transactions: vec![l1_info_tx], ..Default::default() },
         };
 
-        let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
+        let l1_info: L1BlockInfo = extract_l1_info(&mock_block.body).unwrap();
         assert_eq!(l1_info.l1_base_fee, U256::from(652_114));
         assert_eq!(l1_info.l1_fee_overhead, Some(U256::from(2100)));
         assert_eq!(l1_info.l1_base_fee_scalar, U256::from(1_000_000));
@@ -357,7 +357,7 @@ mod tests {
 
         // test
 
-        let l1_block_info: L1BlockInfo = extract_l1_info(&block).unwrap();
+        let l1_block_info: L1BlockInfo = extract_l1_info(&block.body).unwrap();
 
         assert_eq!(l1_block_info.l1_base_fee, expected_l1_base_fee);
         assert_eq!(l1_block_info.l1_base_fee_scalar, expected_l1_base_fee_scalar);
