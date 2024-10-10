@@ -610,6 +610,14 @@ mod tests {
 
     #[test]
     fn latest_base_mainnet_fork_id() {
+        assert_eq!(
+            ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
+            BASE_MAINNET.latest_fork_id()
+        )
+    }
+
+    #[test]
+    fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
             ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
