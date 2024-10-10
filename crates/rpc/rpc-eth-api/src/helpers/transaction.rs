@@ -22,8 +22,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
 
 use super::{
-    Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
-    SpawnBlocking,
+    Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
 };
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -98,7 +97,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             // Note: this is mostly used to fetch pooled transactions so we check the pool first
             if let Some(tx) =
-                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
                 return Ok(Some(tx))
             }
@@ -344,7 +343,7 @@ pub trait EthTransactions: LoadTransaction {
         mut request: TransactionRequest,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + LoadFee + Call,
+        Self: EthApiSpec + LoadBlock + LoadPendingBlock + Call,
     {
         async move {
             let from = match request.from {
@@ -566,7 +565,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
                 .get_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
-            Ok(block.map(|block| (transaction, block.seal(block_hash))))
+            Ok(block.map(|block| (transaction, (*block).clone().seal(block_hash))))
         }
     }
 }

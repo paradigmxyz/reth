@@ -4,7 +4,7 @@ use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     Withdrawal,
 };
-use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::{SealedBlock, Withdrawals};
 use std::{future::Future, pin::Pin};
@@ -145,7 +145,7 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-impl PayloadAttributes for OptimismPayloadAttributes {
+impl PayloadAttributes for OpPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
     }

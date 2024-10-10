@@ -77,7 +77,7 @@ where
         }
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         self,
         input: Self::Input<'_>,
         witness: F,
@@ -86,8 +86,8 @@ where
         F: FnMut(&State<DB>),
     {
         match self {
-            Self::Left(a) => a.execute_with_state_witness(input, witness),
-            Self::Right(b) => b.execute_with_state_witness(input, witness),
+            Self::Left(a) => a.execute_with_state_closure(input, witness),
+            Self::Right(b) => b.execute_with_state_closure(input, witness),
         }
     }
 
