@@ -370,12 +370,9 @@ pub trait EthTransactions: LoadTransaction {
             let gas_limit = estimated_gas;
             request.set_gas_limit(gas_limit.to());
 
-            let signed_tx = self.sign_request(&from, request).await?;
+            let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
-            let recovered =
-                signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-
-            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered.into()).map_err(|_| EthApiError::TransactionConversionError)?;
+            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(transaction.into()).map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
             let hash = LoadTransaction::pool(self)
