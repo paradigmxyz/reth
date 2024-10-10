@@ -1,7 +1,7 @@
 [workspace.package]
 version = "1.0.8"
 edition = "2021"
-rust-version = "1.81"
+rust-version = "1.81.0"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
