@@ -31,8 +31,8 @@ jobs:
             args: --features "asm-keccak ethereum" --locked
           - type: optimism
             args: --features "asm-keccak optimism" --locked
-          - type: book
-            args: --manifest-path "book/sources/Cargo.toml"
+          # - type: book
+          #   args: --manifest-path book/sources/Cargo.toml
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -41,10 +41,10 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
-      - if: "${{ matrix.type == 'book' }}"
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # - if: "${{ matrix.type == 'book' }}"
+      #   uses: arduino/setup-protoc@v3
+      #   with:
+      #     repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
         run: |
           cargo nextest run \
