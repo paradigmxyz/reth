@@ -2358,7 +2358,14 @@ where
                 return Err(OnForkChoiceUpdated::invalid_state())
             }
             Ok(Some(finalized)) => {
-                self.canonical_in_memory_state.set_finalized(finalized);
+                if Some(finalized.num_hash()) !=
+                    self.canonical_in_memory_state.get_finalized_num_hash()
+                {
+                    // we're also persisting the finalized block on disk so we can reload it on
+                    // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
+                    let _ = self.persistence.save_finalized_block_number(finalized.number);
+                    self.canonical_in_memory_state.set_finalized(finalized);
+                }
             }
             Err(err) => {
                 error!(target: "engine::tree", %err, "Failed to fetch finalized block header");
