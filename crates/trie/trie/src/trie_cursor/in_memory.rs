@@ -50,7 +50,7 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
 pub struct InMemoryAccountTrieCursor<'a, C> {
-    /// The database cursor.
+    /// The underlying cursor.
     cursor: C,
     /// Forward-only in-memory cursor over storage trie nodes.
     in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>,
@@ -61,7 +61,9 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
 }
 
 impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
-    const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
+    /// Create new account trie cursor from underlying cursor and reference to
+    /// [`TrieUpdatesSorted`].
+    pub const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
         let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes);
         Self {
             cursor,
@@ -160,7 +162,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
 pub struct InMemoryStorageTrieCursor<'a, C> {
     /// The hashed address of the account that trie belongs to.
     hashed_address: B256,
-    /// The database cursor.
+    /// The underlying cursor.
     cursor: C,
     /// Forward-only in-memory cursor over storage trie nodes.
     in_memory_cursor: Option<ForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>>,
@@ -173,7 +175,13 @@ pub struct InMemoryStorageTrieCursor<'a, C> {
 }
 
 impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
-    fn new(hashed_address: B256, cursor: C, updates: Option<&'a StorageTrieUpdatesSorted>) -> Self {
+    /// Create new storage trie cursor from underlying cursor and reference to
+    /// [`StorageTrieUpdatesSorted`].
+    pub fn new(
+        hashed_address: B256,
+        cursor: C,
+        updates: Option<&'a StorageTrieUpdatesSorted>,
+    ) -> Self {
         let in_memory_cursor = updates.map(|u| ForwardInMemoryCursor::new(&u.storage_nodes));
         let removed_nodes = updates.map(|u| &u.removed_nodes);
         let storage_trie_cleared = updates.map_or(false, |u| u.is_deleted);
