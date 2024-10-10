@@ -426,6 +426,8 @@ mod tests {
 
     #[test]
     fn base_mainnet_forkids() {
+        let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
+        let _ = base_mainnet.genesis_hash.set(BASE_MAINNET.genesis_hash.get().copied().unwrap());
         test_fork_ids(
             &BASE_MAINNET,
             &[
@@ -513,6 +515,7 @@ mod tests {
     #[test]
     fn op_mainnet_forkids() {
         let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        let _ = op_mainnet.genesis_hash.set(OP_MAINNET.genesis_hash.get().copied().unwrap());
         test_fork_ids(
             &op_mainnet,
             &[
@@ -627,7 +630,7 @@ mod tests {
 
     #[test]
     fn is_bedrock_active() {
-        let op_mainnet = OpChainSpecBuilder::base_mainnet().build();
+        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
         assert!(!op_mainnet.is_bedrock_active_at_block(1))
     }
 
