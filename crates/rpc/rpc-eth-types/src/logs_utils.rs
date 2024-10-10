@@ -6,8 +6,9 @@ use alloy_primitives::TxHash;
 use alloy_rpc_types::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_primitives::{BlockNumHash, Receipt, SealedBlock};
+use reth_primitives::{BlockNumHash, Receipt, SealedBlockWithSenders};
 use reth_storage_api::BlockReader;
+use std::sync::Arc;
 
 /// Returns all matching of a block's receipts when the transaction hashes are known.
 pub fn matching_block_logs_with_tx_hashes<'a, I>(
@@ -50,8 +51,8 @@ where
 pub enum ProviderOrBlock<'a, P: BlockReader> {
     /// Provider
     Provider(&'a P),
-    /// [`SealedBlock`]
-    Block(SealedBlock),
+    /// [`SealedBlockWithSenders`]
+    Block(Arc<SealedBlockWithSenders>),
 }
 
 /// Appends all matching logs of a block's receipts.

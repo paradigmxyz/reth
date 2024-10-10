@@ -73,16 +73,16 @@ impl FeeHistoryCache {
     }
 
     /// Insert block data into the cache.
-    async fn insert_blocks<I>(&self, blocks: I)
+    async fn insert_blocks<'a, I>(&self, blocks: I)
     where
-        I: IntoIterator<Item = (SealedBlock, Arc<Vec<Receipt>>)>,
+        I: IntoIterator<Item = (&'a SealedBlock, Arc<Vec<Receipt>>)>,
     {
         let mut entries = self.inner.entries.write().await;
 
         let percentiles = self.predefined_percentiles();
         // Insert all new blocks and calculate approximated rewards
         for (block, receipts) in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(&block);
+            let mut fee_history_entry = FeeHistoryEntry::new(block);
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
                 fee_history_entry.gas_used,
@@ -237,7 +237,9 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
         tokio::select! {
             res = &mut fetch_missing_block =>  {
                 if let Ok(res) = res {
-                    fee_history_cache.insert_blocks(res.into_iter()).await;
+                    fee_history_cache.insert_blocks(res.as_ref()
+                        .map(|(b, r)| (&b.block, r.clone()))
+                        .into_iter()).await;
                 }
             }
             event = events.next() =>  {
@@ -245,11 +247,12 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
                      // the stream ended, we are done
                     break;
                 };
-                let (blocks, receipts): (Vec<_>, Vec<_>) = event
-                    .committed()
+
+                let committed = event .committed();
+                let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                     .blocks_and_receipts()
                     .map(|(block, receipts)| {
-                        (block.block.clone(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
+                        (&block.block, Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
                     })
                     .unzip();
                 fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;

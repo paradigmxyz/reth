@@ -1,16 +1,16 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
 
-use std::fmt::{self, Debug, Formatter};
-
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
+use itertools::Itertools;
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
 use reth_rpc_server_types::constants;
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -212,7 +212,7 @@ where
         limit: usize,
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
-        let mut block = match self.cache.get_block(block_hash).await? {
+        let block = match self.cache.get_sealed_block_with_senders(block_hash).await? {
             Some(block) => block,
             None => return Ok(None),
         };
@@ -221,11 +221,15 @@ where
         let parent_hash = block.parent_hash;
 
         // sort the functions by ascending effective tip first
-        block.body.transactions.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
+        let sorted_transactions = block
+            .body
+            .transactions
+            .iter()
+            .sorted_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in block.body.transactions() {
+        for tx in sorted_transactions {
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {

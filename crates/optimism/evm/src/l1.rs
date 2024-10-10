@@ -6,7 +6,7 @@ use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::Block;
+use reth_primitives::BlockBody;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
@@ -31,9 +31,8 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 /// transaction in the L2 block.
 ///
 /// Returns an error if the L1 info transaction is not found, if the block is empty.
-pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
-    let l1_info_tx_data = block
-        .body
+pub fn extract_l1_info(body: &BlockBody) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
+    let l1_info_tx_data = body
         .transactions
         .first()
         .ok_or_else(|| OptimismBlockExecutionError::L1BlockInfoError {
@@ -302,7 +301,7 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OptimismHardforks;
-    use reth_primitives::{BlockBody, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, TransactionSigned};
 
     use super::*;
 
@@ -318,7 +317,7 @@ mod tests {
             body: BlockBody { transactions: vec![l1_info_tx], ..Default::default() },
         };
 
-        let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
+        let l1_info: L1BlockInfo = extract_l1_info(&mock_block.body).unwrap();
         assert_eq!(l1_info.l1_base_fee, U256::from(652_114));
         assert_eq!(l1_info.l1_fee_overhead, Some(U256::from(2100)));
         assert_eq!(l1_info.l1_base_fee_scalar, U256::from(1_000_000));
@@ -358,7 +357,7 @@ mod tests {
 
         // test
 
-        let l1_block_info: L1BlockInfo = extract_l1_info(&block).unwrap();
+        let l1_block_info: L1BlockInfo = extract_l1_info(&block.body).unwrap();
 
         assert_eq!(l1_block_info.l1_base_fee, expected_l1_base_fee);
         assert_eq!(l1_block_info.l1_base_fee_scalar, expected_l1_base_fee_scalar);

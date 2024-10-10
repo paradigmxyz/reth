@@ -40,9 +40,8 @@ where
                 meta.block_hash.into(),
             )))?;
 
-        let block = block.unseal();
         let l1_block_info =
-            reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+            reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
 
         Ok(OpReceiptBuilder::new(
             &self.inner.provider().chain_spec(),
@@ -353,7 +352,7 @@ mod test {
         };
 
         let l1_block_info =
-            reth_optimism_evm::extract_l1_info(&block).expect("should extract l1 info");
+            reth_optimism_evm::extract_l1_info(&block.body).expect("should extract l1 info");
 
         // test
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
