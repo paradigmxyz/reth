@@ -6,7 +6,7 @@ use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::Block;
+use reth_primitives::BlockBody;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
@@ -31,9 +31,8 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 /// transaction in the L2 block.
 ///
 /// Returns an error if the L1 info transaction is not found, if the block is empty.
-pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
-    let l1_info_tx_data = block
-        .body
+pub fn extract_l1_info(body: &BlockBody) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
+    let l1_info_tx_data = body
         .transactions
         .first()
         .ok_or_else(|| OptimismBlockExecutionError::L1BlockInfoError {
