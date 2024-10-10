@@ -180,7 +180,7 @@ mod tests {
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker = ChainInfoTracker::new(header.clone(), None);
+        let tracker = ChainInfoTracker::new(header.clone(), None, None);
 
         // Fetch the chain information from the tracker
         let chain_info = tracker.chain_info();
@@ -197,7 +197,7 @@ mod tests {
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker = ChainInfoTracker::new(header, None);
+        let tracker = ChainInfoTracker::new(header, None, None);
 
         // Assert that there has been no forkchoice update yet (the timestamp is None)
         assert!(tracker.last_forkchoice_update_received_at().is_none());
@@ -216,7 +216,7 @@ mod tests {
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker = ChainInfoTracker::new(header, None);
+        let tracker = ChainInfoTracker::new(header, None, None);
 
         // Assert that there has been no transition configuration exchange yet (the timestamp is
         // None)
@@ -239,7 +239,7 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header
-        let tracker = ChainInfoTracker::new(header1, None);
+        let tracker = ChainInfoTracker::new(header1, None, None);
 
         // Set the second header as the canonical head of the tracker
         tracker.set_canonical_head(header2.clone());
@@ -260,7 +260,7 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header (header1)
-        let tracker = ChainInfoTracker::new(header1, None);
+        let tracker = ChainInfoTracker::new(header1, None, None);
 
         // Call the set_safe method with the second header (header2)
         tracker.set_safe(header2.clone());
@@ -306,7 +306,7 @@ mod tests {
         let header3 = random_header(&mut rng, 30, None);
 
         // Create a new chain info tracker with the first header
-        let tracker = ChainInfoTracker::new(header1, None);
+        let tracker = ChainInfoTracker::new(header1, None, None);
 
         // Initial state: finalize header should be None
         assert!(tracker.get_finalized_header().is_none());
@@ -344,7 +344,7 @@ mod tests {
 
         // Create a new chain info tracker with the finalized header
         let tracker =
-            ChainInfoTracker::new(finalized_header.clone(), Some(finalized_header.clone()));
+            ChainInfoTracker::new(finalized_header.clone(), Some(finalized_header.clone()), None);
 
         // Assert that the BlockNumHash returned matches the finalized header
         assert_eq!(tracker.get_finalized_num_hash(), Some(finalized_header.num_hash()));
@@ -357,7 +357,7 @@ mod tests {
         let safe_header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the safe header
-        let tracker = ChainInfoTracker::new(safe_header.clone(), None);
+        let tracker = ChainInfoTracker::new(safe_header.clone(), None, None);
         tracker.set_safe(safe_header.clone());
 
         // Assert that the BlockNumHash returned matches the safe header
