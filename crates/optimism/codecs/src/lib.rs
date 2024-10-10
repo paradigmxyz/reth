@@ -1,4 +1,4 @@
-//! Standalone crate for Optimism-Storage Reth.
+//! Standalone crate for Optimism-codecs for Reth storage.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
