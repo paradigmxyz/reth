@@ -146,8 +146,6 @@ where
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
             ))
         }
-        
-        println!("well_formed attributes: {:?}", attributes);
 
         if self.chain_spec.is_fork_active_at_timestamp(
             OptimismHardfork::Holocene,
@@ -177,22 +175,28 @@ where
 #[cfg(test)]
 mod test {
 
-    use alloy_primitives::{Address, B256};
+    use crate::engine;
+    use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_chainspec::ForkCondition;
     use reth_optimism_chainspec::BASE_SEPOLIA;
-    use crate::engine;
 
     use super::*;
 
-    fn pre_holocene_chainspec() -> Arc<OpChainSpec> {
-        let hardforks = OptimismHardfork::base_sepolia();
+    fn get_chainspec(is_holocene: bool) -> Arc<OpChainSpec> {
+        let mut hardforks = OptimismHardfork::base_sepolia();
+        if is_holocene {
+            hardforks
+                .insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        }
         Arc::new(OpChainSpec {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
                 genesis: BASE_SEPOLIA.inner.genesis.clone(),
                 genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
-                paris_block_and_final_difficulty: BASE_SEPOLIA.inner.paris_block_and_final_difficulty,
+                paris_block_and_final_difficulty: BASE_SEPOLIA
+                    .inner
+                    .paris_block_and_final_difficulty,
                 hardforks,
                 base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
                 max_gas_limit: BASE_SEPOLIA.inner.max_gas_limit,
@@ -202,44 +206,71 @@ mod test {
         })
     }
 
-
-    fn holocene_chainspec() -> Arc<OpChainSpec> {
-        let mut hardforks = OptimismHardfork::base_sepolia();
-        hardforks.insert(OptimismHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
-        Arc::new(OpChainSpec {
-            inner: ChainSpec {
-                chain: BASE_SEPOLIA.inner.chain,
-                genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
-                paris_block_and_final_difficulty: BASE_SEPOLIA.inner.paris_block_and_final_difficulty,
-                hardforks,
-                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                max_gas_limit: BASE_SEPOLIA.inner.max_gas_limit,
-                prune_delete_limit: 10000,
-                ..Default::default()
+    fn get_attributes(eip_1559_params: Option<B64>, timestamp: u64) -> OpPayloadAttributes {
+        OpPayloadAttributes {
+            gas_limit: Some(1000),
+            eip_1559_params,
+            transactions: None,
+            no_tx_pool: None,
+            payload_attributes: PayloadAttributes {
+                timestamp,
+                prev_randao: B256::ZERO,
+                suggested_fee_recipient: Address::ZERO,
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
             },
-        })
+        }
     }
 
     #[test]
     fn test_well_formed_attributes_pre_holocene() {
-        let validator = OptimismEngineValidator::new(pre_holocene_chainspec());
+        let validator = OptimismEngineValidator::new(get_chainspec(false));
+        let attributes = get_attributes(None, 1799999999);
 
-        let attributes = OpPayloadAttributes {
-            gas_limit: Some(1000),
-            eip_1559_params: None,
-            transactions: None,
-            no_tx_pool: None,
-            payload_attributes: PayloadAttributes {
-                timestamp: 0x1337,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: Address::ZERO,
-                withdrawals: Default::default(),
-                parent_beacon_block_root: Some(B256::ZERO),
-            },
-        };
+        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+            OptimismEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(result.is_ok());
+    }
 
-        // assert!(<engine::OptimismEngineValidator as reth_node_builder::EngineValidator<EngineTypes<PayloadAttributes = OpPayloadAttributes>>>::ensure_well_formed_attributes(&validator, EngineApiMessageVersion::V4, &attributes).is_ok());
-        // assert!(validator.ensure_well_formed_attributes(EngineApiMessageVersion::V4, &attributes).is_ok());
+    #[test]
+    fn test_well_formed_attributes_holocene_no_eip1559_params() {
+        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let attributes = get_attributes(None, 1800000000);
+
+        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+            OptimismEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(matches!(result, Err(EngineObjectValidationError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn test_well_formed_attributes_holocene_eip1559_params_zero_denominator() {
+        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let attributes = get_attributes(Some(b64!("0000000000000008")), 1800000000);
+
+        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+            OptimismEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(matches!(result, Err(EngineObjectValidationError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn test_well_formed_attributes_holocene_valid() {
+        let validator = OptimismEngineValidator::new(get_chainspec(true));
+        let attributes = get_attributes(Some(b64!("0000000800000008")), 1800000000);
+
+        let result = <engine::OptimismEngineValidator as reth_node_builder::EngineValidator<
+            OptimismEngineTypes,
+        >>::ensure_well_formed_attributes(
+            &validator, EngineApiMessageVersion::V3, &attributes
+        );
+        assert!(result.is_ok());
     }
 }
