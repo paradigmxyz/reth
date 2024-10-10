@@ -51,7 +51,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         self,
         _: Self::Input<'_>,
         _: F,

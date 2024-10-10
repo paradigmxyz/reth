@@ -275,7 +275,7 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered((&block, td).into(), |input| {
+            self.metrics.metered_one((&block, td).into(), |input| {
                 let sealed = block.header.clone().seal_slow();
                 let (header, seal) = sealed.into_parts();
 
