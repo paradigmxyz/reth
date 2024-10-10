@@ -109,7 +109,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
-    /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
+    /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
     fn tx_env(&self, transaction: &TransactionSigned, signer: Address) -> TxEnv {
         let mut tx_env = TxEnv::default();
         self.fill_tx_env(&mut tx_env, transaction, signer);
