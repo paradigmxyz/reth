@@ -24,7 +24,7 @@ pub struct EngineArgs {
     ///
     /// DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy
     /// functionality
-    #[arg(long = "engine.experimental")]
+    #[arg(long = "engine.experimental", default_value = None)]
     pub experimental: Option<bool>,
 
     /// Enable the legacy engine on reth binary
