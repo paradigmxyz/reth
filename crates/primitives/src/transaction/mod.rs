@@ -715,6 +715,7 @@ impl reth_codecs::Compact for Transaction {
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => {
+                let tx: reth_optimism_codecs::TxDepositEncode<'_> = tx.into();
                 tx.to_compact(buf);
             }
         }
@@ -763,8 +764,9 @@ impl reth_codecs::Compact for Transaction {
                     }
                     #[cfg(feature = "optimism")]
                     DEPOSIT_TX_TYPE_ID => {
-                        let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
-                        (Self::Deposit(tx), buf)
+                        let (tx, buf) =
+                            reth_optimism_codecs::TxDepositDecode::from_compact(buf, buf.len());
+                        (Self::Deposit(tx.into()), buf)
                     }
                     _ => unreachable!("Junk data in database: unknown Transaction variant"),
                 }

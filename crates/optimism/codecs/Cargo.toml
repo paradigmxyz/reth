@@ -1,0 +1,41 @@
+[package]
+name = "reth-optimism-codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs.workspace = true
+reth-codecs-derive.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+
+# op
+op-alloy-consensus.workspace = true
+
+# codec
+modular-bitfield.workspace = true
+bytes.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+## reth-primitives will be removed when optimism receipt moved out of 
+## primitives. circular dev dep will cause problem publishing crate.
+reth-primitives.workspace = true
+
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+arbitrary = { workspace = true, features = ["derive"] }
+test-fuzz.workspace = true
+
+[features]
+default = ["std"]
+std = ["alloy-primitives/std", "bytes/std", "reth-codecs/std", "op-alloy-consensus/std"]
+optimism = ["reth-primitives/optimism"]
