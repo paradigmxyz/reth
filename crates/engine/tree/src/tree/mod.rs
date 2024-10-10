@@ -2401,8 +2401,13 @@ where
                 // if the safe block is not known, we can't update the safe block
                 return Err(OnForkChoiceUpdated::invalid_state())
             }
-            Ok(Some(finalized)) => {
-                self.canonical_in_memory_state.set_safe(finalized);
+            Ok(Some(safe)) => {
+                if Some(safe.num_hash()) != self.canonical_in_memory_state.get_safe_num_hash() {
+                    // we're also persisting the safe block on disk so we can reload it on
+                    // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
+                    let _ = self.persistence.save_safe_block_number(safe.number);
+                    self.canonical_in_memory_state.set_safe(safe);
+                }
             }
             Err(err) => {
                 error!(target: "engine::tree", %err, "Failed to fetch safe block header");
@@ -2680,7 +2685,7 @@ mod tests {
             let (header, seal) = sealed.into_parts();
             let header = SealedHeader::new(header, seal);
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
-            let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
+            let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -2744,7 +2749,7 @@ mod tests {
             let last_executed_block = blocks.last().unwrap().clone();
             let pending = Some(BlockState::new(last_executed_block));
             self.tree.canonical_in_memory_state =
-                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None);
+                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None, None);
 
             self.blocks = blocks.clone();
             self.persist_blocks(

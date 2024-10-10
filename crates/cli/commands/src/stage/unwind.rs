@@ -17,7 +17,7 @@ use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{

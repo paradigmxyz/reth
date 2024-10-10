@@ -7,13 +7,14 @@ use crate::{
     },
     writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, DBProvider, EvmEnvProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
-    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
+    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
+    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    RequestsProvider, RevertsInit, StageCheckpointReader, StateChangeWriter, StateProviderBox,
+    StateReader, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
+    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -3596,7 +3597,7 @@ impl<TX: DbTx, Spec: Send + Sync> StatsReader for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> FinalizedBlockReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync> ChainStateBlockReader for DatabaseProvider<TX, Spec> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         let mut finalized_blocks = self
             .tx
@@ -3608,13 +3609,31 @@ impl<TX: DbTx, Spec: Send + Sync> FinalizedBlockReader for DatabaseProvider<TX, 
         let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
         Ok(last_finalized_block_number)
     }
+
+    fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
+        let mut finalized_blocks = self
+            .tx
+            .cursor_read::<tables::ChainState>()?
+            .walk(Some(tables::ChainStateKey::LastSafeBlockBlock))?
+            .take(1)
+            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
+
+        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
+        Ok(last_finalized_block_number)
+    }
 }
 
-impl<TX: DbTxMut, Spec: Send + Sync> FinalizedBlockWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut, Spec: Send + Sync> ChainStateBlockWriter for DatabaseProvider<TX, Spec> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+
+    fn save_safe_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        Ok(self
+            .tx
+            .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
     }
 }
 
