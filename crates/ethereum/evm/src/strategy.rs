@@ -7,14 +7,14 @@ use reth_evm::{
 use reth_primitives::Request;
 use reth_revm::{db::BundleState, State};
 
-/// Factory for [`EthStrategy`].
+/// Factory for [`EthExecutionStrategy`].
 #[derive(Clone, Debug)]
-pub struct EthStrategyFactory {}
+pub struct EthExecutionStrategyFactory {}
 
-impl BlockExecutionStrategyFactory for EthStrategyFactory {
+impl BlockExecutionStrategyFactory for EthExecutionStrategyFactory {
     type Strategy<
         DB: reth_revm::Database<Error: Into<reth_evm::execute::ProviderError> + core::fmt::Display>,
-    > = EthStrategy<DB>;
+    > = EthExecutionStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
@@ -22,24 +22,24 @@ impl BlockExecutionStrategyFactory for EthStrategyFactory {
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
-        EthStrategy::new(state)
+        EthExecutionStrategy::new(state)
     }
 }
 
 /// Block execution strategy for Ethereum.
 #[allow(missing_debug_implementations)]
-pub struct EthStrategy<DB> {
+pub struct EthExecutionStrategy<DB> {
     state: State<DB>,
 }
 
-impl<DB> EthStrategy<DB> {
-    /// Creates a new [`EthStrategy`]
+impl<DB> EthExecutionStrategy<DB> {
+    /// Creates a new [`EthExecutionStrategy`]
     pub const fn new(state: State<DB>) -> Self {
         Self { state }
     }
 }
 
-impl<DB> BlockExecutionStrategy<DB> for EthStrategy<DB> {
+impl<DB> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB> {
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
