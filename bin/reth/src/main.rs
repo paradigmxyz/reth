@@ -15,6 +15,7 @@ use reth_node_builder::{
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider2;
 use reth_tracing::tracing::warn;
+use tracing::info;
 
 /// Parameters for configuring the engine
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -87,6 +88,7 @@ fn main() {
                     handle.node_exit_future.await
                 }
                 true => {
+                    info!(target: "reth::cli", "Running with legacy engine");
                     let handle = builder.launch_node(EthereumNode::default()).await?;
                     handle.node_exit_future.await
                 }
