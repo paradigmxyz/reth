@@ -1,5 +1,3 @@
-#![cfg(feature = "optimism")]
-
 //! Encoding for deposit transaction for op-reth database
 
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
