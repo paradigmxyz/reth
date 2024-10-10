@@ -500,9 +500,7 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash)
-            .await?
-            .map(|tx| tx.into_transaction::<T::TransactionCompat>()))
+        Ok(EthTransactions::transaction_by_hash(self, hash)?)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
