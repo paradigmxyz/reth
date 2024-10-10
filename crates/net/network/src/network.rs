@@ -222,7 +222,7 @@ impl PeersInfo for NetworkHandle {
 
             let mut socket_addr = *self.inner.listener_address.lock();
             if let Some(ip) = external_ip {
-                // if able to resolve external ip, use it instead and also set the local addrress
+                // if able to resolve external ip, use it instead and also set the local address
                 socket_addr.set_ip(ip)
             } else if socket_addr.ip().is_unspecified() {
                 // zero address is invalid
