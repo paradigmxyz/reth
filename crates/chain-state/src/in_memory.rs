@@ -173,12 +173,13 @@ impl CanonicalInMemoryState {
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
         finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
             .head_state()
             .map_or_else(SealedHeader::default, |state| state.block_ref().block().header.clone());
-        let chain_info_tracker = ChainInfoTracker::new(header, finalized);
+        let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -193,13 +194,17 @@ impl CanonicalInMemoryState {
 
     /// Create an empty state.
     pub fn empty() -> Self {
-        Self::new(HashMap::default(), BTreeMap::new(), None, None)
+        Self::new(HashMap::default(), BTreeMap::new(), None, None, None)
     }
 
     /// Create a new in memory state with the given local head and finalized header
     /// if it exists.
-    pub fn with_head(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head, finalized);
+    pub fn with_head(
+        head: SealedHeader,
+        finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
+    ) -> Self {
+        let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
         let in_memory_state = InMemoryState::default();
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);

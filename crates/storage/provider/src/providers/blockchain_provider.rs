@@ -1,8 +1,8 @@
 use crate::{
     providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderRO, EvmEnvProvider, FinalizedBlockReader, HeaderProvider, ProviderError,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
@@ -93,9 +93,18 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
         Ok(Self {
             database,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),
+            canonical_in_memory_state: CanonicalInMemoryState::with_head(
+                latest,
+                finalized_header,
+                safe_header,
+            ),
         })
     }
 
