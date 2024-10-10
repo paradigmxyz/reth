@@ -238,7 +238,7 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header
-        let tracker = ChainInfoTracker::new(header1.clone(), None);
+        let tracker = ChainInfoTracker::new(header1, None);
 
         // Set the second header as the canonical head of the tracker
         tracker.set_canonical_head(header2.clone());
@@ -259,7 +259,7 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header (header1)
-        let tracker = ChainInfoTracker::new(header1.clone(), None);
+        let tracker = ChainInfoTracker::new(header1, None);
 
         // Call the set_safe method with the second header (header2)
         tracker.set_safe(header2.clone());
@@ -306,7 +306,7 @@ mod tests {
         let header4 = random_header(&mut rng, 15, None);
 
         // Create a new chain info tracker with the first header
-        let tracker = ChainInfoTracker::new(header1.clone(), None);
+        let tracker = ChainInfoTracker::new(header1, None);
 
         // Initial state: finalize header should be None
         assert!(tracker.get_finalized_header().is_none());
@@ -336,14 +336,14 @@ mod tests {
         assert_eq!(updated_finalized_header.unwrap(), header3);
 
         // Case 4: attempt to set a lower block number as finalized (header4)
-        tracker.set_finalized(header4.clone());
+        tracker.set_finalized(header4);
 
         // The finalized header should not change and should still be header3
         let final_header_after_lower_attempt = tracker.get_finalized_header();
         assert_eq!(final_header_after_lower_attempt.unwrap(), header3);
 
         // Case 5: Finalize back to header2 (which is lower than header3)
-        tracker.set_finalized(header2.clone());
+        tracker.set_finalized(header2);
 
         // The finalized header should still remain header3, as it has a higher block number
         let final_header_after_lower_finalization = tracker.get_finalized_header();
