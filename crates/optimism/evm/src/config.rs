@@ -1,5 +1,5 @@
-use reth_chainspec::ChainSpec;
 use reth_ethereum_forks::{EthereumHardfork, Head};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardfork;
 
 /// Returns the revm [`SpecId`](revm_primitives::SpecId) at the given timestamp.
@@ -9,7 +9,7 @@ use reth_optimism_forks::OptimismHardfork;
 /// This is only intended to be used after the Bedrock, when hardforks are activated by
 /// timestamp.
 pub fn revm_spec_by_timestamp_after_bedrock(
-    chain_spec: &ChainSpec,
+    chain_spec: &OpChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
     if chain_spec.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp) {
@@ -28,7 +28,7 @@ pub fn revm_spec_by_timestamp_after_bedrock(
 }
 
 /// Map the latest active hardfork at the given block to a revm [`SpecId`](revm_primitives::SpecId).
-pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecId {
+pub fn revm_spec(chain_spec: &OpChainSpec, block: &Head) -> revm_primitives::SpecId {
     if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
         revm_primitives::GRANITE
     } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(block) {
@@ -79,12 +79,13 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecI
 mod tests {
     use super::*;
     use reth_chainspec::ChainSpecBuilder;
+    use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 
     #[test]
     fn test_revm_spec_by_timestamp_after_merge() {
         #[inline(always)]
-        fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
+        fn op_cs(f: impl FnOnce(OpChainSpecBuilder) -> OpChainSpecBuilder) -> OpChainSpec {
+            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
             f(cs).build()
         }
         assert_eq!(
@@ -116,8 +117,8 @@ mod tests {
     #[test]
     fn test_to_revm_spec() {
         #[inline(always)]
-        fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
+        fn op_cs(f: impl FnOnce(OpChainSpecBuilder) -> OpChainSpecBuilder) -> OpChainSpec {
+            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
             f(cs).build()
         }
         assert_eq!(
