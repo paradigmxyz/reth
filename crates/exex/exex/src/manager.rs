@@ -223,6 +223,8 @@ pub struct ExExManager<P> {
 
     /// Write-Ahead Log for the [`ExExNotification`]s.
     wal: Wal,
+    /// Last finalized header.
+    last_finalized_header: Option<SealedHeader>,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader>,
 
@@ -280,6 +282,7 @@ impl<P> ExExManager<P> {
             finished_height: finished_height_tx,
 
             wal,
+            last_finalized_header: None,
             finalized_header_stream,
 
             handle: ExExManagerHandle {
@@ -329,7 +332,7 @@ where
     ///
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
-    fn finalize_wal(&self, finalized_header: SealedHeader) -> eyre::Result<()> {
+    fn finalize_wal(&self, finalized_header: &SealedHeader) -> eyre::Result<()> {
         debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
 
         // Check if all ExExes are on the canonical chain
@@ -418,13 +421,15 @@ where
             }
         }
 
-        // Drain the finalized header stream and finalize the WAL with the last header
+        // Drain the finalized header stream, finalize the WAL with the last header and update the
+        // `last_finalized_header` field.
         let mut last_finalized_header = None;
         while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
             last_finalized_header = finalized_header;
         }
         if let Some(header) = last_finalized_header {
-            this.finalize_wal(header)?;
+            this.finalize_wal(&header)?;
+            this.last_finalized_header = Some(header);
         }
 
         // Drain handle notifications
@@ -436,7 +441,22 @@ where
                     reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
                     "Received new notification"
                 );
-                this.wal.commit(&notification)?;
+
+                // Commit only notifications with unfinalized blocks to WAL. This prevents the WAL
+                // from growing when syncing using the pipeline, because the pipeline sync is always
+                // running towards the finalized header.
+                let is_unfinalized_notification = this
+                    .last_finalized_header
+                    .as_ref()
+                    .zip(notification.committed_chain())
+                    .map_or(true, |(finalized_header, committed_chain)| {
+                        // Check if the committed chain tip is unfinalized
+                        committed_chain.tip().number > finalized_header.number
+                    });
+                if is_unfinalized_notification {
+                    this.wal.commit(&notification)?;
+                }
+
                 this.push_notification(notification);
                 continue
             }
