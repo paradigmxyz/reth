@@ -47,6 +47,7 @@ rand = { workspace = true, optional = true }
 revm = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-consensus.workspace = true

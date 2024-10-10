@@ -6511,6 +6511,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-storage-api",
+ "reth-testing-utils",
  "reth-trie",
  "revm",
  "tokio",
