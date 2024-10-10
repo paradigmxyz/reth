@@ -26,6 +26,8 @@ bytes.workspace = true
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+## reth-primitives will be removed when optimism primitive types (e.g. receipt) moved out of 
+## primitives. circular dev dep will cause problem publishing crate.
 reth-primitives.workspace = true
 reth-codecs.workspace = true
 reth-db-api.workspace = true
