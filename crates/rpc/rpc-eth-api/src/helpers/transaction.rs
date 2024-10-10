@@ -80,7 +80,9 @@ pub trait EthTransactions: LoadTransaction {
         block: B256,
     ) -> impl Future<Output = Result<Option<Vec<TransactionSigned>>, Self::Error>> + Send {
         async move {
-            self.cache().get_block_transactions(block).await.map_err(Self::Error::from_eth_err)
+            self.cache().get_sealed_block_with_senders(block).await
+            .map(|b| b.map(|b| b.body.transactions.clone()))
+            .map_err(Self::Error::from_eth_err)
         }
     }
 

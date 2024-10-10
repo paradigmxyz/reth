@@ -141,18 +141,6 @@ impl EthStateCache {
         this
     }
 
-    /// Requests the transactions of the [`Block`]
-    ///
-    /// Returns `None` if the block does not exist.
-    pub async fn get_block_transactions(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetBlockTransactions { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
-    }
-
     /// Requests the  [`SealedBlockWithSenders`] for the block hash
     ///
     /// Returns `None` if the block does not exist.
@@ -394,36 +382,6 @@ where
                                 }));
                             }
                         }
-                        CacheAction::GetBlockTransactions { block_hash, response_tx } => {
-                            // check if block is cached
-                            if let Some(block) = this.full_block_cache.get(&block_hash) {
-                                let _ = response_tx.send(Ok(Some(block.body.transactions.clone())));
-                                continue
-                            }
-
-                            // block is not in the cache, request it if this is the first consumer
-                            if this.full_block_cache.queue(block_hash, Either::Right(response_tx)) {
-                                let provider = this.provider.clone();
-                                let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    // Only look in the database to prevent situations where we
-                                    // looking up the tree is blocking
-                                    let res = provider
-                                        .block_with_senders(
-                                            BlockHashOrNumber::Hash(block_hash),
-                                            TransactionVariant::WithHash,
-                                        )
-                                        .map(|b| b.map(|b| Arc::new(b.seal(block_hash))));
-                                    let _ = action_tx.send(CacheAction::BlockWithSendersResult {
-                                        block_hash,
-                                        res,
-                                    });
-                                }));
-                            }
-                        }
                         CacheAction::GetReceipts { block_hash, response_tx } => {
                             // check if block is cached
                             if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
@@ -554,10 +512,6 @@ enum CacheAction {
     GetBlockWithSenders {
         block_hash: B256,
         response_tx: BlockWithSendersResponseSender,
-    },
-    GetBlockTransactions {
-        block_hash: B256,
-        response_tx: BlockTransactionsResponseSender,
     },
     GetEnv {
         block_hash: B256,

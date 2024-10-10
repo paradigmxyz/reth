@@ -96,10 +96,10 @@ pub trait EthBlocks: LoadBlock {
 
             Ok(self
                 .cache()
-                .get_block_transactions(block_hash)
+                .get_sealed_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .map(|txs| txs.len()))
+                .map(|b| b.body.transactions.len()))
         }
     }
 
