@@ -51,7 +51,7 @@ where
 pub enum ProviderOrBlock<'a, P: BlockReader> {
     /// Provider
     Provider(&'a P),
-    /// [`SealedBlock`]
+    /// [`SealedBlockWithSenders`]
     Block(Arc<SealedBlockWithSenders>),
 }
 

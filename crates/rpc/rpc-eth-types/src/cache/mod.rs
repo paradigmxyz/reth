@@ -32,11 +32,11 @@ pub mod db;
 pub mod metrics;
 pub mod multi_consumer;
 
-/// The type that can send the response to a requested [`Block`]
+/// The type that can send the response to a requested [`SealedBlockWithSenders`]
 type BlockTransactionsResponseSender =
     oneshot::Sender<ProviderResult<Option<Vec<TransactionSigned>>>>;
 
-/// The type that can send the response to a requested [`BlockWithSenders`]
+/// The type that can send the response to a requested [`SealedBlockWithSenders`]
 type BlockWithSendersResponseSender =
     oneshot::Sender<ProviderResult<Option<Arc<SealedBlockWithSenders>>>>;
 
