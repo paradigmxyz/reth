@@ -67,8 +67,13 @@ pub trait EthTransactions: LoadTransaction {
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<TransactionSource>, Self::Error>> + Send {
-        LoadTransaction::transaction_by_hash(self, hash)
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
+    {
+        async move {
+            Ok(LoadTransaction::transaction_by_hash(self, hash)
+                .await?
+                .map(|tx| tx.into_transaction::<Self::TransactionCompat>()))
+        }
     }
 
     /// Get all transactions in the block with the given hash.

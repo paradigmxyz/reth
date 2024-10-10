@@ -2,14 +2,17 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
+use op_alloy_network::{Network, TransactionResponse};
 use op_alloy_rpc_types::Transaction;
+use reth_chainspec::ChainSpecProvider;
 use reth_node_api::FullNodeComponents;
+use reth_optimism_forks::{Hardforks, OptimismHardfork};
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, TransactionCompat,
+    FromEthApiError, FullEthApiTypes, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -18,7 +21,7 @@ use crate::{OpEthApi, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction,
+    Self: LoadTransaction<NetworkTypes: Network<TransactionResponse = Transaction>>,
     N: FullNodeComponents,
 {
     fn provider(&self) -> impl BlockReaderIdExt {
@@ -29,9 +32,30 @@ where
         self.inner.signers()
     }
 
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// Returns the hash of the transaction.
+    async fn transaction_by_hash(
+        &self,
+        hash: B256,
+    ) -> Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error> {
+        Ok(LoadTransaction::transaction_by_hash(self, hash).await?.map(|tx| {
+            let is_deposit = tx.as_recovered().is_deposit();
+            let mut tx = tx.into_transaction::<Self::TransactionCompat>();
+            // deposit receipt version for given transaction, if the block number is known
+            if is_deposit && tx.block_number().is_some() {
+                tx.deposit_receipt_version = self
+                    .inner
+                    .provider()
+                    .chain_spec()
+                    .is_fork_active_at_timestamp(
+                        OptimismHardfork::Canyon,
+                        tx.block_number().unwrap_or(0),
+                    )
+                    .then_some(1);
+            }
+
+            tx
+        }))
+    }
+
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(tx.clone())?;
         let pool_transaction =
