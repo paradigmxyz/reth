@@ -4,7 +4,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
-    DatabaseProviderFactory, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -97,6 +97,11 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                     provider.save_finalized_block_number(finalized_block)?;
                     provider.commit()?;
                 }
+                PersistenceAction::SaveSafeBlock(safe_block) => {
+                    let provider = self.provider.database_provider_rw()?;
+                    provider.save_safe_block_number(safe_block)?;
+                    provider.commit()?;
+                }
             }
         }
         Ok(())
@@ -176,6 +181,9 @@ pub enum PersistenceAction {
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
+
+    /// Update the persisted safe block on disk
+    SaveSafeBlock(u64),
 }
 
 /// A handle to the persistence service
@@ -249,6 +257,14 @@ impl PersistenceHandle {
         finalized_block: u64,
     ) -> Result<(), SendError<PersistenceAction>> {
         self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
+    }
+
+    /// Persists the finalized block number on disk.
+    pub fn save_safe_block_number(
+        &self,
+        safe_block: u64,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
