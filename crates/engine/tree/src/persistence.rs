@@ -92,10 +92,11 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => self
-                    .provider
-                    .database_provider_rw()?
-                    .save_finalized_block_number(finalized_block)?,
+                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                    let provider = self.provider.database_provider_rw()?;
+                    provider.save_finalized_block_number(finalized_block)?;
+                    provider.commit()?;
+                }
             }
         }
         Ok(())
