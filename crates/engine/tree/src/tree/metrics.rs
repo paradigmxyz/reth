@@ -4,6 +4,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -49,6 +50,8 @@ pub(crate) struct EngineMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "sync.block_validation")]
 pub(crate) struct BlockValidationMetrics {
+    /// Total number of storage tries updated in the state root calculation
+    pub(crate) state_root_storage_tries_updated_total: Counter,
     /// Histogram of state root duration
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
@@ -57,7 +60,9 @@ pub(crate) struct BlockValidationMetrics {
 
 impl BlockValidationMetrics {
     /// Records a new state root time, updating both the histogram and state root gauge
-    pub(crate) fn record_state_root(&self, elapsed_as_secs: f64) {
+    pub(crate) fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
+        self.state_root_storage_tries_updated_total
+            .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);
         self.state_root_histogram.record(elapsed_as_secs);
     }

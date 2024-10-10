@@ -612,7 +612,7 @@ where
                 let mut codes = HashMap::default();
 
                 let _ = block_executor
-                    .execute_with_state_witness(
+                    .execute_with_state_closure(
                         (&block.clone().unseal(), block.difficulty).into(),
                         |statedb| {
                             codes = statedb
