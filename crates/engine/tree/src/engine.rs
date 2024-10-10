@@ -225,12 +225,12 @@ pub enum EngineApiKind {
 impl EngineApiKind {
     /// Returns true if this is the ethereum variant
     pub const fn is_ethereum(&self) -> bool {
-        matches!(self, EngineApiKind::Ethereum)
+        matches!(self, Self::Ethereum)
     }
 
     /// Returns true if this is the ethereum variant
     pub const fn is_opstack(&self) -> bool {
-        matches!(self, EngineApiKind::OpStack)
+        matches!(self, Self::OpStack)
     }
 }
 
