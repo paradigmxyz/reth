@@ -50,6 +50,7 @@ derive_more.workspace = true
 paste.workspace = true
 rustc-hash = { workspace = true, optional = true }
 sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+parking_lot = { workspace = true, optional = true }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
@@ -61,6 +62,7 @@ rand.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 test-fuzz.workspace = true
+parking_lot.workspace = true
 
 pprof = { workspace = true, features = [
     "flamegraph",
@@ -88,7 +90,7 @@ mdbx = [
     "dep:strum",
     "dep:rustc-hash",
 ]
-test-utils = ["dep:tempfile", "arbitrary"]
+test-utils = ["dep:tempfile", "arbitrary", "parking_lot"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []

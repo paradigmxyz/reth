@@ -176,7 +176,7 @@ mod tests {
         missing_jwt_error().await;
         wrong_jwt_signature_error().await;
         invalid_issuance_timestamp_error().await;
-        jwt_decode_error().await;
+        jwt_decode_error().await
     }
 
     async fn valid_jwt() {

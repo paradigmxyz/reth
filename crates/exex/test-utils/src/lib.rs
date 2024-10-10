@@ -154,6 +154,10 @@ where
             .consensus(TestConsensusBuilder::default())
             .engine_validator(EthereumEngineValidatorBuilder::default())
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        EthereumAddOns::default()
+    }
 }
 
 /// A shared [`TempDatabase`] used for testing
@@ -267,6 +271,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+            .with_unused_discovery_port()
             .build(provider_factory.clone()),
     )
     .await?;

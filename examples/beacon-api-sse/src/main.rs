@@ -21,7 +21,7 @@ use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
-use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
+use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
 use reth_node_ethereum::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};

@@ -254,7 +254,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub auth_module: &'a mut AuthRpcModule,
 }
 
-impl<'a, Node, EthApi> RpcContext<'a, Node, EthApi>
+impl<Node, EthApi> RpcContext<'_, Node, EthApi>
 where
     Node: FullNodeComponents,
     EthApi: EthApiTypes,

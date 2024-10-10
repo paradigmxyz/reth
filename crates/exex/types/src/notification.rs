@@ -136,7 +136,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::ExExNotification> for ExExNotification<'a> {
+    impl SerializeAs<super::ExExNotification> for ExExNotification<'_> {
         fn serialize_as<S>(
             source: &super::ExExNotification,
             serializer: S,

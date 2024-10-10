@@ -51,6 +51,10 @@ use reth_optimism_node::OptimismNode;
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
+// This allows us to manually enable node metrics features, required for proper jemalloc metric
+// reporting
+use reth_node_metrics as _;
+
 /// The main op-reth cli interface.
 ///
 /// This is the entrypoint to the executable.
@@ -176,13 +180,14 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::chainspec::OpChainSpecParser;
     use clap::Parser;
-    use reth_cli_commands::NodeCommand;
+    use reth_cli_commands::{node::NoArgs, NodeCommand};
     use reth_optimism_chainspec::OP_DEV;
 
     #[test]
     fn parse_dev() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["op-reth", "--dev"]);
+        let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
         let chain = OP_DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
