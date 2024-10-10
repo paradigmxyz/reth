@@ -93,6 +93,10 @@ impl EthChainSpec for OpChainSpec {
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.inner.bootnodes()
     }
+
+    fn is_optimism(&self) -> bool {
+        true
+    }
 }
 
 impl Hardforks for OpChainSpec {

@@ -381,7 +381,7 @@ where
         })
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         mut self,
         input: Self::Input<'_>,
         mut witness: F,

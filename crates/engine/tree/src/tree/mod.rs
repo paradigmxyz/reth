@@ -28,7 +28,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -66,7 +66,10 @@ pub mod config;
 mod invalid_block_hook;
 mod metrics;
 mod persistence_state;
-use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
+use crate::{
+    engine::{EngineApiKind, EngineApiRequest},
+    tree::metrics::EngineApiMetrics,
+};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -498,6 +501,8 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     metrics: EngineApiMetrics,
     /// An invalid block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
+    /// The engine API variant of this handler
+    engine_kind: EngineApiKind,
 }
 
 impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
@@ -519,6 +524,7 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
             .field("config", &self.config)
             .field("metrics", &self.metrics)
             .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
+            .field("engine_kind", &self.engine_kind)
             .finish()
     }
 }
@@ -545,6 +551,7 @@ where
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
+        engine_kind: EngineApiKind,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
@@ -565,6 +572,7 @@ where
             metrics: Default::default(),
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
+            engine_kind,
         }
     }
 
@@ -589,6 +597,7 @@ where
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
+        kind: EngineApiKind,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -618,6 +627,7 @@ where
             persistence_state,
             payload_builder,
             config,
+            kind,
         );
         task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
@@ -1041,8 +1051,15 @@ where
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number, "fcu head block is already canonical");
 
-            // TODO(mattsse): for optimism we'd need to trigger a build job as well because on
-            // Optimism, the proposers are allowed to reorg their own chain at will.
+            // For OpStack the proposers are allowed to reorg their own chain at will, so we need to
+            // always trigger a new payload job if requested.
+            if self.engine_kind.is_opstack() {
+                if let Some(attr) = attrs {
+                    debug!(target: "engine::tree", head = canonical_header.number, "handling payload attributes for canonical head");
+                    let updated = self.process_payload_attributes(attr, &canonical_header, state);
+                    return Ok(TreeOutcome::new(updated))
+                }
+            }
 
             // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
             //    payload build process if `forkchoiceState.headBlockHash` references a `VALID`
@@ -2160,10 +2177,7 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
-        let output = self
-            .metrics
-            .executor
-            .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
+        let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
         if let Err(err) = self.consensus.validate_block_post_execution(
@@ -2227,7 +2241,7 @@ where
         }
 
         let root_elapsed = root_time.elapsed();
-        self.metrics.block_validation.record_state_root(root_elapsed.as_secs_f64());
+        self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, ?block_number, "Calculated state root");
 
         let executed = ExecutedBlock {
@@ -2683,6 +2697,7 @@ mod tests {
                 PersistenceState::default(),
                 payload_builder,
                 TreeConfig::default(),
+                EngineApiKind::Ethereum,
             );
 
             let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());

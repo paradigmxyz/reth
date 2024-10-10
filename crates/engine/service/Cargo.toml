@@ -24,6 +24,7 @@ reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-node-types.workspace = true
+reth-chainspec.workspace = true
 
 # async
 futures.workspace = true
