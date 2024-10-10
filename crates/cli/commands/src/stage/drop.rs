@@ -4,7 +4,7 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{static_file::iter_static_files, tables};
+use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, tables, DatabaseError};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
@@ -78,6 +78,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
                 tx.clear::<tables::Transactions>()?;
+                reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
+
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
@@ -91,16 +93,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
                 // Reset pruned numbers to not count them in the next rerun's stage progress
-                if let Some(mut prune_checkpoint) =
-                    tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?
-                {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::SenderRecovery,
-                        prune_checkpoint,
-                    )?;
-                }
+                reset_prune_checkpoint(tx, PruneSegment::SenderRecovery)?;
                 tx.put::<tables::StageCheckpoints>(
                     StageId::SenderRecovery.to_string(),
                     Default::default(),
@@ -113,6 +106,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::StorageChangeSets>()?;
                 tx.clear::<tables::Bytecodes>()?;
                 tx.clear::<tables::Receipts>()?;
+
+                reset_prune_checkpoint(tx, PruneSegment::Receipts)?;
                 tx.put::<tables::StageCheckpoints>(
                     StageId::Execution.to_string(),
                     Default::default(),
@@ -180,6 +175,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
+                reset_prune_checkpoint(tx, PruneSegment::TransactionLookup)?;
+
                 tx.put::<tables::StageCheckpoints>(
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
@@ -194,4 +191,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         Ok(())
     }
+}
+
+fn reset_prune_checkpoint(
+    tx: &Tx<reth_db::mdbx::RW>,
+    prune_segment: PruneSegment,
+) -> Result<(), DatabaseError> {
+    if let Some(mut prune_checkpoint) = tx.get::<tables::PruneCheckpoints>(prune_segment)? {
+        prune_checkpoint.block_number = None;
+        prune_checkpoint.tx_number = None;
+        tx.put::<tables::PruneCheckpoints>(prune_segment, prune_checkpoint)?;
+    }
+
+    Ok(())
 }
