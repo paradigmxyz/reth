@@ -40,7 +40,7 @@ where
                 meta.block_hash.into(),
             )))?;
 
-        let block = block.unseal();
+        let block = block.block.clone().unseal();
         let l1_block_info =
             reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
