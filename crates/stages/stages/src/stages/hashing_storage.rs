@@ -19,6 +19,7 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
+    time::{Duration, Instant},
 };
 use tracing::*;
 
@@ -118,15 +119,18 @@ where
             collect(&mut channels, &mut collector)?;
 
             let total_hashes = collector.len();
-            let interval = (total_hashes / 10).max(1);
+            let log_interval = Duration::from_secs(5);
+            let mut last_log = Instant::now();
             let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
             for (index, item) in collector.iter()?.enumerate() {
-                if index > 0 && index % interval == 0 {
+                let now = Instant::now();
+                if now.duration_since(last_log) >= log_interval {
                     info!(
                         target: "sync::stages::hashing_storage",
                         progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                         "Inserting hashes"
                     );
+                    last_log = now;
                 }
 
                 let (addr_key, value) = item?;

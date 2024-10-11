@@ -25,6 +25,7 @@ use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
+    time::{Duration, Instant},
 };
 use tokio::sync::watch;
 use tracing::*;
@@ -113,12 +114,15 @@ where
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-        let interval = (total_headers / 10).max(1);
+        let log_interval = Duration::from_secs(5);
+        let mut last_log = Instant::now();
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
 
-            if index > 0 && index % interval == 0 && total_headers > 100 {
+            let now = Instant::now();
+            if now.duration_since(last_log) >= log_interval {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
+                last_log = now;
             }
 
             let sealed_header: SealedHeader =
@@ -165,11 +169,14 @@ where
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
         // in order (further syncs).
+        last_log = Instant::now();
         for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
             let (hash, number) = hash_to_number?;
 
-            if index > 0 && index % interval == 0 && total_headers > 100 {
+            let now = Instant::now();
+            if now.duration_since(last_log) >= log_interval {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
+                last_log = now;
             }
 
             if first_sync {
