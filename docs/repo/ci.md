@@ -26,7 +26,6 @@ The CI runs a couple of workflows:
 
 ### Integration Testing
 
-- **[assertoor]**: Runs Assertoor tests on Reth pairs.
 - **[hive]**: Runs `ethereum/hive` tests.
 
 ### Linting and Checks
