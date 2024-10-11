@@ -192,8 +192,7 @@ mod tests {
 
         let handle = tokio::spawn(async move {
             let (incoming, _) = listener.accept().await.unwrap();
-            let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            stream
+            ECIESStream::incoming(incoming, server_key).await.unwrap()
         });
 
         let server_id = pk2id(&server_key.public_key(SECP256K1));
