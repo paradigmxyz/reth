@@ -48,7 +48,7 @@ The CI runs a couple of workflows:
 [dependencies]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/dependencies.yml
 [stale]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/stale.yml
 [docker]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/docker.yml
-[assertoor]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/assertoor.yml
+[kurtosis]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/kurtosis.yml
 [hive]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml
 [lint]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/lint.yml
 [lint-actions]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/lint-actions.yml
