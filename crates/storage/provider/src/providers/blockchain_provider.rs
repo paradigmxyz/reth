@@ -681,7 +681,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
             {
                 last_finalized_num_hash.number
             } else {
-                self.database.last_block_number()?
+                self.last_block_number()?
             }
         } else {
             // Otherwise, return what we have on disk for the input block
@@ -841,12 +841,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             id,
             |db_provider| db_provider.ommers(id),
             |block_state| {
-                if self
-                    .database
-                    .chain_spec()
-                    .final_paris_total_difficulty(block_state.number())
-                    .is_some()
-                {
+                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
                     return Ok(Some(Vec::new()))
                 }
 
@@ -1174,7 +1169,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
+        if !self.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
             return Ok(None)
         }
 
@@ -1210,7 +1205,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
+        if !self.chain_spec().is_prague_active_at_timestamp(timestamp) {
             return Ok(None)
         }
 
