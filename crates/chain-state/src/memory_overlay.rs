@@ -11,7 +11,8 @@ use reth_storage_api::{
     StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, TrieInput,
 };
 use std::sync::OnceLock;
 
@@ -218,7 +219,7 @@ impl StateProvider for MemoryOverlayStateProvider {
 #[derive(Clone, Default, Debug)]
 pub(crate) struct MemoryOverlayTrieState {
     /// The collection of aggregated in-memory trie updates.
-    pub(crate) nodes: TrieUpdates,
+    pub(crate) nodes: TrieUpdatesSorted,
     /// The collection of hashed state from in-memory blocks.
-    pub(crate) state: HashedPostState,
+    pub(crate) state: HashedPostStateSorted,
 }

@@ -41,6 +41,9 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
+# `arbitrary` feature
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
 # `serde` feature
 serde = { workspace = true, optional = true }
 
@@ -57,6 +60,7 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 triehash = "0.8"
 
 # misc
+arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 tokio = { workspace = true, default-features = false, features = [
@@ -73,6 +77,7 @@ metrics = ["reth-metrics", "dep:metrics"]
 serde = ["dep:serde"]
 serde-bincode-compat = ["serde_with"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
+arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary"]
 
 [[bench]]
 name = "prefix_set"

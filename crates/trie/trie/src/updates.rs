@@ -1,6 +1,9 @@
-use crate::{walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles};
+use crate::{extend_sorted, walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles};
 use alloy_primitives::B256;
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{hash_map, HashMap, HashSet},
+};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -357,6 +360,32 @@ impl TrieUpdatesSorted {
     pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
+
+    pub fn extend(&mut self, other: Self) {
+        extend_sorted(&mut self.account_nodes, other.account_nodes.into_iter().map(Cow::Owned));
+        self.removed_nodes.extend(other.removed_nodes);
+        for (hashed_address, storage_trie) in other.storage_tries {
+            match self.storage_tries.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(storage_trie);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage_trie);
+                }
+            };
+        }
+    }
+
+    pub fn extend_ref(&mut self, other: &Self) {
+        extend_sorted(&mut self.account_nodes, other.account_nodes.iter().map(Cow::Borrowed));
+        self.removed_nodes.extend(other.removed_nodes.iter().cloned());
+        for (hashed_address, storage_trie) in &other.storage_tries {
+            self.storage_tries
+                .entry(*hashed_address)
+                .or_insert_with(|| StorageTrieUpdatesSorted::new(false))
+                .extend_ref(storage_trie);
+        }
+    }
 }
 
 /// Sorted trie updates used for lookups and insertions.
@@ -368,6 +397,10 @@ pub struct StorageTrieUpdatesSorted {
 }
 
 impl StorageTrieUpdatesSorted {
+    pub fn new(is_deleted: bool) -> Self {
+        Self { is_deleted, storage_nodes: Vec::new(), removed_nodes: HashSet::default() }
+    }
+
     /// Returns `true` if the trie was deleted.
     pub const fn is_deleted(&self) -> bool {
         self.is_deleted
@@ -381,6 +414,18 @@ impl StorageTrieUpdatesSorted {
     /// Returns reference to removed storage nodes.
     pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
         &self.removed_nodes
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        self.is_deleted |= other.is_deleted;
+        extend_sorted(&mut self.storage_nodes, other.storage_nodes.into_iter().map(Cow::Owned));
+        self.removed_nodes.extend(other.removed_nodes);
+    }
+
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.is_deleted |= other.is_deleted;
+        extend_sorted(&mut self.storage_nodes, other.storage_nodes.iter().map(Cow::Borrowed));
+        self.removed_nodes.extend(other.removed_nodes.iter().cloned());
     }
 }
 

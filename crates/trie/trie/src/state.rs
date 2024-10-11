@@ -14,6 +14,7 @@ use std::{
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct HashedPostState {
     /// Mapping of hashed address to account info, `None` if destroyed.
     pub accounts: HashMap<B256, Option<Account>>,
@@ -200,6 +201,7 @@ impl HashedPostState {
 
 /// Representation of in-memory hashed storage.
 #[derive(PartialEq, Eq, Clone, Debug, Default)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
@@ -296,6 +298,30 @@ impl HashedPostStateSorted {
     pub const fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
         &self.storages
     }
+
+    pub fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        for (hashed_address, storage) in other.storages {
+            match self.storages.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(storage);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage);
+                }
+            };
+        }
+    }
+
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.accounts.extend_ref(&other.accounts);
+        for (hashed_address, storage) in &other.storages {
+            self.storages
+                .entry(*hashed_address)
+                .or_insert_with(|| HashedStorageSorted::new(false))
+                .extend_ref(storage);
+        }
+    }
 }
 
 /// Sorted account state optimized for iterating during state trie calculation.
@@ -316,20 +342,34 @@ impl HashedAccountsSorted {
             .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
             .sorted_by_key(|entry| *entry.0)
     }
+
+    pub fn extend(&mut self, other: Self) {
+        extend_sorted(&mut self.accounts, other.accounts.into_iter().map(Cow::Owned));
+        self.destroyed_accounts.extend(other.destroyed_accounts);
+    }
+
+    pub fn extend_ref(&mut self, other: &Self) {
+        extend_sorted(&mut self.accounts, other.accounts.iter().map(Cow::Borrowed));
+        self.destroyed_accounts.extend(other.destroyed_accounts.iter().copied());
+    }
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
+    /// Flag indicating whether the storage was wiped or not.
+    pub(crate) wiped: bool,
     /// Sorted hashed storage slots with non-zero value.
     pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
     pub(crate) zero_valued_slots: HashSet<B256>,
-    /// Flag indicating whether the storage was wiped or not.
-    pub(crate) wiped: bool,
 }
 
 impl HashedStorageSorted {
+    fn new(wiped: bool) -> Self {
+        Self { wiped, non_zero_valued_slots: Vec::new(), zero_valued_slots: HashSet::default() }
+    }
+
     /// Returns `true` if the account was wiped.
     pub const fn is_wiped(&self) -> bool {
         self.wiped
@@ -342,6 +382,43 @@ impl HashedStorageSorted {
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
             .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        self.wiped |= other.wiped;
+        extend_sorted(
+            &mut self.non_zero_valued_slots,
+            other.non_zero_valued_slots.into_iter().map(Cow::Owned),
+        );
+        self.zero_valued_slots.extend(other.zero_valued_slots);
+    }
+
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.wiped |= other.wiped;
+        extend_sorted(
+            &mut self.non_zero_valued_slots,
+            other.non_zero_valued_slots.iter().map(Cow::Borrowed),
+        );
+        self.zero_valued_slots.extend(other.zero_valued_slots.iter().copied());
+    }
+}
+
+pub fn extend_sorted<'a, K, V, I>(data: &mut Vec<(K, V)>, other: I)
+where
+    K: Ord + Clone + 'a,
+    V: Clone + 'a,
+    I: IntoIterator<Item = Cow<'a, (K, V)>>,
+    I::IntoIter: DoubleEndedIterator,
+{
+    let mut data_ref = &data[..];
+    let mut other = other.into_iter().rev();
+    while let Some(item) = other.next() {
+        let pos = match data_ref.binary_search_by(|acc| acc.0.cmp(&item.0)) {
+            Ok(pos) => pos,
+            Err(pos) => pos,
+        };
+        data.insert(pos, item.into_owned());
+        data_ref = &data[..pos];
     }
 }
 
@@ -421,5 +498,19 @@ mod tests {
             Some(&updated_slot_value)
         );
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+    }
+
+    #[cfg(feature = "arbitrary")]
+    proptest::proptest! {
+        #[test]
+        fn extend_sorted_roundtrip(init in proptest_arbitrary_interop::arb::<HashedPostState>(), update in proptest_arbitrary_interop::arb::<HashedPostState>()) {
+            let mut extended = init.clone();
+            extended.extend_ref(&update);
+            let expected = extended.into_sorted();
+
+            let mut sorted = init.into_sorted();
+            sorted.extend(update.into_sorted());
+            assert_eq!(sorted, expected);
+        }
     }
 }

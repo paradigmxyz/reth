@@ -15,7 +15,10 @@ use reth_primitives::{
     TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -735,9 +738,9 @@ pub struct ExecutedBlock {
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome>,
     /// Block's hashedst state.
-    pub hashed_state: Arc<HashedPostState>,
+    pub hashed_state: Arc<HashedPostStateSorted>,
     /// Trie updates that result of applying the block.
-    pub trie: Arc<TrieUpdates>,
+    pub trie: Arc<TrieUpdatesSorted>,
 }
 
 impl ExecutedBlock {
@@ -746,8 +749,8 @@ impl ExecutedBlock {
         block: Arc<SealedBlock>,
         senders: Arc<Vec<Address>>,
         execution_output: Arc<ExecutionOutcome>,
-        hashed_state: Arc<HashedPostState>,
-        trie: Arc<TrieUpdates>,
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie: Arc<TrieUpdatesSorted>,
     ) -> Self {
         Self { block, senders, execution_output, hashed_state, trie }
     }
