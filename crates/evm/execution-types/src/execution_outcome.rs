@@ -167,7 +167,7 @@ impl ExecutionOutcome {
     }
 
     /// Transform block number to the index of block.
-    fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+    pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
             return None
         }
