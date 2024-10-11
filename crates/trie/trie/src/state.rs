@@ -384,6 +384,19 @@ impl HashedStorageSorted {
             .sorted_by_key(|entry| *entry.0)
     }
 
+    /// Construct [`PrefixSetMut`] from sorted hashed storage.
+    pub fn construct_prefix_set(&self) -> PrefixSetMut {
+        if self.wiped {
+            PrefixSetMut::all()
+        } else {
+            let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
+            for hashed_slot in self.storage.keys() {
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
+            }
+            prefix_set
+        }
+    }
+
     pub fn extend(&mut self, other: Self) {
         self.wiped |= other.wiped;
         extend_sorted(
