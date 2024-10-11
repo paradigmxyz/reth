@@ -284,15 +284,15 @@ pub trait LoadFee: LoadBlock {
     /// Returns the EIP-1559 fees if they are set, otherwise fetches a suggested gas price for
     /// EIP-1559 transactions.
     ///
-    /// Returns (`max_fee`, `priority_fee`)
+    /// Returns (`base_fee`, `priority_fee`)
     fn eip1559_fees(
         &self,
-        max_fee_per_gas: Option<U256>,
+        base_fee: Option<U256>,
         max_priority_fee_per_gas: Option<U256>,
     ) -> impl Future<Output = Result<(U256, U256), Self::Error>> + Send {
         async move {
-            let max_fee_per_gas = match max_fee_per_gas {
-                Some(max_fee_per_gas) => max_fee_per_gas,
+            let base_fee = match base_fee {
+                Some(base_fee) => base_fee,
                 None => {
                     // fetch pending base fee
                     let base_fee = self
@@ -311,7 +311,7 @@ pub trait LoadFee: LoadBlock {
                 Some(max_priority_fee_per_gas) => max_priority_fee_per_gas,
                 None => self.suggested_priority_fee().await?,
             };
-            Ok((max_fee_per_gas, max_priority_fee_per_gas))
+            Ok((base_fee, max_priority_fee_per_gas))
         }
     }
 
