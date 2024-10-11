@@ -2914,10 +2914,10 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
                 map
             });
 
-        let hashed_storage_keys =
-            HashMap::from_iter(hashed_storages.iter().map(|(hashed_address, entries)| {
-                (*hashed_address, BTreeSet::from_iter(entries.keys().copied()))
-            }));
+        let hashed_storage_keys = hashed_storages
+            .iter()
+            .map(|(hashed_address, entries)| (*hashed_address, entries.keys().copied().collect()))
+            .collect();
 
         let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
         // Hash the address and key and apply them to HashedStorage (if Storage is None
