@@ -1,4 +1,4 @@
-use futures_util::StreamExt;
+use futures_util::TryStreamExt;
 use remote_exex::proto::{
     self,
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
@@ -48,8 +48,7 @@ async fn remote_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
-    while let Some(result) = ctx.notifications.next().await {
-        let notification = result?;
+    while let Some(notification) = ctx.notifications.try_next().await? {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
         }

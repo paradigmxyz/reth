@@ -4,7 +4,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use futures_util::StreamExt;
+use futures_util::{FutureExt, TryStreamExt};
 use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
@@ -20,8 +20,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        while let Some(result) = ready!(this.ctx.notifications.poll_next_unpin(cx)) {
-            let notification = result?;
+        while let Some(notification) = ready!(this.ctx.notifications.try_next().poll_unpin(cx))? {
             match &notification {
                 ExExNotification::ChainCommitted { new } => {
                     info!(committed_chain = ?new.range(), "Received commit");
