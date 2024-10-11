@@ -23,6 +23,22 @@ use tracing::info;
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 
+/// Log progress at a regular interval.
+#[macro_export]
+macro_rules! log_progress {
+    ($target:expr, $index:expr, $total:expr, $last_log:expr, $interval:expr, $message:expr) => {
+        let now = std::time::Instant::now();
+        if now.duration_since($last_log) >= $interval {
+            info!(
+                target: $target,
+                progress = %format!("{:.2}%", ($index as f64 / $total as f64) * 100.0),
+                $message
+            );
+            $last_log = now;
+        }
+    }
+}
+
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
 ///
@@ -70,21 +86,24 @@ where
     };
 
     // observability
-    let total_changesets = provider.tx_ref().entries::<CS>()?;
-    let log_interval = Duration::from_secs(5);
+    let total = provider.tx_ref().entries::<CS>()?;
+    let interval = Duration::from_secs(5);
     let mut last_log = Instant::now();
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
-    for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
+    for (index, entry) in changeset_cursor.walk_range(range)?.enumerate() {
         let (block_number, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(block_number);
 
-        let now = Instant::now();
-        if now.duration_since(last_log) >= log_interval {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
-            last_log = now;
-        }
+        log_progress!(
+            "sync::stages::index_history",
+            index,
+            total,
+            last_log,
+            interval,
+            "Collecting indices"
+        );
 
         // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
         if current_block_number != block_number {
@@ -128,8 +147,8 @@ where
     let mut current_list = Vec::<u64>::new();
 
     // observability
-    let total_entries = collector.len();
-    let log_interval = Duration::from_secs(5);
+    let total = collector.len();
+    let interval = Duration::from_secs(5);
     let mut last_log = Instant::now();
 
     for (index, element) in collector.iter()?.enumerate() {
@@ -137,11 +156,14 @@ where
         let sharded_key = decode_key(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        let now = Instant::now();
-        if now.duration_since(last_log) >= log_interval {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
-            last_log = now;
-        }
+        log_progress!(
+            "sync::stages::index_history",
+            index,
+            total,
+            last_log,
+            interval,
+            "Writing indices"
+        );
 
         // AccountsHistory: `Address`.
         // StorageHistory: `Address.StorageKey`.

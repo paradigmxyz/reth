@@ -1,3 +1,4 @@
+use crate::log_progress;
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
@@ -187,19 +188,18 @@ where
             let mut hashed_account_cursor =
                 tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
-            let total_hashes = collector.len();
-            let log_interval = Duration::from_secs(5);
+            let total = collector.len();
+            let interval = Duration::from_secs(5);
             let mut last_log = Instant::now();
             for (index, item) in collector.iter()?.enumerate() {
-                let now = Instant::now();
-                if now.duration_since(last_log) >= log_interval {
-                    info!(
-                        target: "sync::stages::hashing_account",
-                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
-                        "Inserting hashes"
-                    );
-                    last_log = now;
-                }
+                log_progress!(
+                    "sync::stages::hashing_account",
+                    index,
+                    total,
+                    last_log,
+                    interval,
+                    "Inserting hashes"
+                );
 
                 let (key, value) = item?;
                 hashed_account_cursor

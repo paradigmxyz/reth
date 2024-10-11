@@ -1,3 +1,4 @@
+use crate::log_progress;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
@@ -96,9 +97,9 @@ where
         provider: &impl DBProvider<Tx: DbTxMut>,
         static_file_provider: StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
-        let total_headers = self.header_collector.len();
+        let total = self.header_collector.len();
 
-        info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
+        info!(target: "sync::stages::headers", total, "Writing headers");
 
         // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
         // when poll_execute_ready is polled.
@@ -114,16 +115,19 @@ where
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-        let log_interval = Duration::from_secs(5);
+        let interval = Duration::from_secs(5);
         let mut last_log = Instant::now();
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
 
-            let now = Instant::now();
-            if now.duration_since(last_log) >= log_interval {
-                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
-                last_log = now;
-            }
+            log_progress!(
+                "sync::stages::headers",
+                index,
+                total,
+                last_log,
+                interval,
+                "Writing headers"
+            );
 
             let sealed_header: SealedHeader =
                 bincode::deserialize::<serde_bincode_compat::SealedHeader<'_>>(&header_buf)
@@ -151,7 +155,7 @@ where
             writer.append_header(&header, td, &header_hash)?;
         }
 
-        info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
+        info!(target: "sync::stages::headers", total, "Writing headers hash index");
 
         let mut cursor_header_numbers =
             provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
@@ -173,11 +177,14 @@ where
         for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
             let (hash, number) = hash_to_number?;
 
-            let now = Instant::now();
-            if now.duration_since(last_log) >= log_interval {
-                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
-                last_log = now;
-            }
+            log_progress!(
+                "sync::stages::headers",
+                index,
+                total,
+                last_log,
+                interval,
+                "Writing headers hash index"
+            );
 
             if first_sync {
                 cursor_header_numbers.append(
