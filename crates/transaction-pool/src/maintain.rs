@@ -454,12 +454,12 @@ impl FinalizedBlockTracker {
 
     /// Updates the tracked finalized block and returns the new finalized block if it changed
     fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
-        if let Some(finalized) = finalized_block {
-            if self.last_finalized_block.replace(finalized).map_or(true, |last| last < finalized) {
-                return Some(finalized);
-            }
+        let finalized = finalized_block?;
+        if self.last_finalized_block.replace(finalized).map_or(true, |last| last < finalized) {
+            Some(finalized)
+        } else {
+            None
         }
-        None
     }
 }
 
