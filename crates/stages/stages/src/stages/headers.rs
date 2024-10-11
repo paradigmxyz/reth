@@ -26,7 +26,7 @@ use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::watch;
 use tracing::*;
@@ -115,19 +115,11 @@ where
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-        let interval = Duration::from_secs(5);
         let mut last_log = Instant::now();
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
 
-            log_progress!(
-                "sync::stages::headers",
-                index,
-                total,
-                last_log,
-                interval,
-                "Writing headers"
-            );
+            log_progress!("sync::stages::headers", index, total, last_log, "Writing headers");
 
             let sealed_header: SealedHeader =
                 bincode::deserialize::<serde_bincode_compat::SealedHeader<'_>>(&header_buf)
@@ -181,7 +173,6 @@ where
                 index,
                 total,
                 last_log,
-                interval,
                 "Writing headers hash index"
             );
 

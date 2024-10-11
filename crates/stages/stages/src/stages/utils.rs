@@ -23,12 +23,15 @@ use tracing::info;
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 
+/// Log interval for progress.
+pub(crate) const LOG_INTERVAL: Duration = Duration::from_secs(5);
+
 /// Log progress at a regular interval.
 #[macro_export]
 macro_rules! log_progress {
-    ($target:expr, $index:expr, $total:expr, $last_log:expr, $interval:expr, $message:expr) => {
+    ($target:expr, $index:expr, $total:expr, $last_log:expr, $message:expr) => {
         let now = std::time::Instant::now();
-        if now.duration_since($last_log) >= $interval {
+        if now.duration_since($last_log) >= $crate::stages::utils::LOG_INTERVAL {
             info!(
                 target: $target,
                 progress = %format!("{:.2}%", ($index as f64 / $total as f64) * 100.0),
@@ -87,7 +90,6 @@ where
 
     // observability
     let total = provider.tx_ref().entries::<CS>()?;
-    let interval = Duration::from_secs(5);
     let mut last_log = Instant::now();
 
     let mut flush_counter = 0;
@@ -96,14 +98,7 @@ where
         let (block_number, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(block_number);
 
-        log_progress!(
-            "sync::stages::index_history",
-            index,
-            total,
-            last_log,
-            interval,
-            "Collecting indices"
-        );
+        log_progress!("sync::stages::index_history", index, total, last_log, "Collecting indices");
 
         // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
         if current_block_number != block_number {
@@ -148,7 +143,6 @@ where
 
     // observability
     let total = collector.len();
-    let interval = Duration::from_secs(5);
     let mut last_log = Instant::now();
 
     for (index, element) in collector.iter()?.enumerate() {
@@ -156,14 +150,7 @@ where
         let sharded_key = decode_key(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        log_progress!(
-            "sync::stages::index_history",
-            index,
-            total,
-            last_log,
-            interval,
-            "Writing indices"
-        );
+        log_progress!("sync::stages::index_history", index, total, last_log, "Writing indices");
 
         // AccountsHistory: `Address`.
         // StorageHistory: `Address.StorageKey`.

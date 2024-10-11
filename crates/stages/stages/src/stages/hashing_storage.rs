@@ -20,7 +20,7 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::*;
 
@@ -120,7 +120,6 @@ where
             collect(&mut channels, &mut collector)?;
 
             let total = collector.len();
-            let interval = Duration::from_secs(5);
             let mut last_log = Instant::now();
             let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
             for (index, item) in collector.iter()?.enumerate() {
@@ -129,7 +128,6 @@ where
                     index,
                     total,
                     last_log,
-                    interval,
                     "Inserting hashes"
                 );
 

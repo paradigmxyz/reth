@@ -19,7 +19,7 @@ use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
     sync::mpsc::{self, Receiver},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::*;
 
@@ -189,7 +189,6 @@ where
                 tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
             let total = collector.len();
-            let interval = Duration::from_secs(5);
             let mut last_log = Instant::now();
             for (index, item) in collector.iter()?.enumerate() {
                 log_progress!(
@@ -197,7 +196,6 @@ where
                     index,
                     total,
                     last_log,
-                    interval,
                     "Inserting hashes"
                 );
 
