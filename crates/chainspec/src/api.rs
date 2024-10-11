@@ -90,7 +90,10 @@ impl EthChainSpec for ChainSpec {
         self.genesis()
     }
 
-    fn max_gas_limit(&self, block_number: u64) -> u64 {        
+    fn max_gas_limit(&self, block_number: u64) -> u64 {      
+        if self.max_gas_limit != 0 {
+            return self.max_gas_limit
+        }  
         if block_number < self.eip7783_start_block {
             return self.eip7783_initial_gas
         } 

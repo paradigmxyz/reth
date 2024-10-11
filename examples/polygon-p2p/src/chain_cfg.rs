@@ -31,6 +31,10 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         max_gas_limit: 30_000_000,
         prune_delete_limit: 0,
+        eip7783_gas_limit_cap: 30_000_000,
+        eip7783_increase_rate: 0,
+        eip7783_initial_gas: 30_000_000,
+        eip7783_start_block: 0,
     }
     .into()
 }
