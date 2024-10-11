@@ -612,14 +612,14 @@ where
                 let mut codes = HashMap::default();
 
                 let _ = block_executor
-                    .execute_with_state_witness(
+                    .execute_with_state_closure(
                         (&block.clone().unseal(), block.difficulty).into(),
                         |statedb| {
                             codes = statedb
                                 .cache
                                 .contracts
                                 .iter()
-                                .map(|(hash, code)| (*hash, code.bytes()))
+                                .map(|(hash, code)| (*hash, code.original_bytes()))
                                 .collect();
 
                             for (address, account) in &statedb.cache.accounts {
