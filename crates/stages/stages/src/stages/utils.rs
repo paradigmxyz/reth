@@ -82,7 +82,7 @@ where
 
         let now = Instant::now();
         if now.duration_since(last_log) >= log_interval {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
             last_log = now;
         }
 
