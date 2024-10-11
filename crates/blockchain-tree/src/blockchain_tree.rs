@@ -1605,7 +1605,7 @@ mod tests {
                 number,
                 parent_hash: parent.unwrap_or_default(),
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: chain_spec.eip7783_initial_gas,
                 mix_hash: B256::random(),
                 base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                 transactions_root,

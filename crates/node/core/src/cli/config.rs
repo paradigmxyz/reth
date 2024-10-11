@@ -27,6 +27,18 @@ pub trait PayloadBuilderConfig {
     /// Target gas ceiling for built blocks.
     fn max_gas_limit(&self) -> u64;
 
+    /// EIP-7783 initial block gas limit.
+    fn eip7783_initial_gas(&self) -> u64;
+
+    /// EIP-7783 increase rate per block.
+    fn eip7783_increase_rate(&self) -> u64;
+
+    /// EIP-7783 start block number.
+    fn eip7783_start_block(&self) -> u64;
+
+    /// EIP-7783 gas limit cap.
+    fn eip7783_gas_limit_cap(&self) -> u64;
+
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
 }

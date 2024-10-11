@@ -31,8 +31,24 @@ pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
 /// The default block nonce in the beacon consensus
 pub const BEACON_NONCE: u64 = 0u64;
 
-/// The default Ethereum block gas limit.
+
+/// The default Ethereum block gas limit (disabled)
 pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
+
+/// EIP7783 initial block gas limit
+pub const EIP7783_INITIAL_BLOCK_GAS_LIMIT: u64 = 30_000_000;
+
+/// EIP7783 increase rate
+pub const EIP7783_INCREASE_RATE: u64 = 6;
+
+/// EIP7783 start block
+pub const EIP7783_START_BLOCK: u64 = 4_294_967_296;
+
+/// EIP7783 gas limit cap
+pub const EIP7783_GAS_LIMIT_CAP: u64 = 60_000_000;
+
+
+
 
 /// The minimum tx fee below which the txpool will reject the transaction.
 ///

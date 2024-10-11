@@ -414,7 +414,7 @@ mod tests {
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 
-        let gas_cap = provider.chain_spec().max_gas_limit();
+        let gas_cap = provider.chain_spec().eip7783_initial_gas;
         EthApi::new(
             provider.clone(),
             testing_pool(),

@@ -5,7 +5,7 @@ use clap::{
 };
 use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
 use reth_primitives::constants::{
-    ETHEREUM_BLOCK_GAS_LIMIT, MAXIMUM_EXTRA_DATA_SIZE, SLOT_DURATION,
+    EIP7783_GAS_LIMIT_CAP, EIP7783_INCREASE_RATE, EIP7783_INITIAL_BLOCK_GAS_LIMIT, EIP7783_START_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT, MAXIMUM_EXTRA_DATA_SIZE, SLOT_DURATION
 };
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
@@ -18,8 +18,24 @@ pub struct PayloadBuilderArgs {
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
-    #[arg(long = "builder.gaslimit", default_value = "30000000", value_name = "GAS_LIMIT")]
+    #[arg(long = "builder.gaslimit", value_name = "GAS_LIMIT")]
     pub max_gas_limit: u64,
+
+    /// EIP-7783 initial block gas limit.
+    #[arg(long = "eip7783.increase-rate", default_value = "6", value_name = "EIP7783_GAS_RATE")]
+    pub eip7783_increase_rate: u64,
+
+    /// EIP-7783 increase rate per block.
+    #[arg(long = "eip7783.start-block", default_value = "4294967296", value_name = "EIP7783_START_BLOCK")]
+    pub eip7783_start_block: u64,
+
+    /// EIP-7783 start block number.
+    #[arg(long = "eip7783.initial-gas", default_value = "30000000", value_name = "EIP7783_INITIAL_GAS")]
+    pub eip7783_initial_gas: u64,
+
+    /// EIP-7783 gas limit cap.
+    #[arg(long = "eip7783.gas-limit-cap", default_value = "60000000", value_name = "EIP7783_GAS_LIMIT_CAP")]
+    pub eip7783_gas_limit_cap: u64,
 
     /// The interval at which the job should build a new payload after the last.
     ///
@@ -46,6 +62,10 @@ impl Default for PayloadBuilderArgs {
             interval: Duration::from_secs(1),
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            eip7783_initial_gas: EIP7783_INITIAL_BLOCK_GAS_LIMIT,
+            eip7783_increase_rate: EIP7783_INCREASE_RATE,
+            eip7783_start_block: EIP7783_START_BLOCK,
+            eip7783_gas_limit_cap: EIP7783_GAS_LIMIT_CAP,
         }
     }
 }
@@ -69,6 +89,22 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
 
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
+    }
+
+    fn eip7783_initial_gas(&self) -> u64 {
+        self.eip7783_initial_gas
+    }
+
+    fn eip7783_increase_rate(&self) -> u64 {
+        self.eip7783_increase_rate
+    }
+
+    fn eip7783_start_block(&self) -> u64 {
+        self.eip7783_start_block
+    }
+
+    fn eip7783_gas_limit_cap(&self) -> u64 {
+        self.eip7783_gas_limit_cap
     }
 }
 
