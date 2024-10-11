@@ -189,7 +189,11 @@ where
         ))
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
-        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+        .with_additional_tasks(
+            pool_config_overrides
+                .additional_validation_tasks
+                .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
+        )
         .build_with_tasks(ctx.provider().clone(), ctx.task_executor().clone(), blob_store.clone())
         .map(|validator| {
             OpTransactionValidator::new(validator)
