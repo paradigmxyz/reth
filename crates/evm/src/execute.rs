@@ -297,14 +297,13 @@ where
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
     }
 
-    fn execute_with_state_witness<W>(
+    fn execute_with_state_closure<F>(
         self,
         input: Self::Input<'_>,
-        mut witness: W,
+        mut state: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        DB: Database,
-        W: FnMut(&State<DB>),
+        F: FnMut(&State<DB>),
     {
         let BlockExecutionInput { block, total_difficulty: _ } = input;
 
@@ -314,7 +313,7 @@ where
         let (receipts, gas_used) = strategy.execute_transactions(block)?;
         let requests = strategy.apply_post_execution_changes()?;
 
-        witness(strategy.state_ref());
+        state(strategy.state_ref());
 
         let state = strategy.finish();
 
