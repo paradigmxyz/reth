@@ -203,13 +203,13 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there
     // is no instance of any event that matches the filter in the header.
-    if FilteredParams::matches_address(bloom, &address_filter)
-        && FilteredParams::matches_topics(bloom, &topics_filter)
+    if FilteredParams::matches_address(bloom, &address_filter) &&
+        FilteredParams::matches_topics(bloom, &topics_filter)
     {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(&log.address)
-                && filter_params.filter_topics(log.topics())
+            if filter_params.filter_address(&log.address) &&
+                filter_params.filter_topics(log.topics())
             {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
