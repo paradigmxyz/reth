@@ -59,7 +59,6 @@ pub trait EthBlocks: LoadBlock {
             }
 
             let block = from_block::<Self::TransactionCompat>(
-                // TODO(joshie): make compat take references instead
                 (*block).clone().unseal(),
                 total_difficulty.unwrap_or_default(),
                 full.into(),

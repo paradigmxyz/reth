@@ -208,7 +208,6 @@ pub trait EthTransactions: LoadTransaction {
                         index: Some(index as u64),
                     };
 
-                    // TODO(joshie) rpc compat should accept a reference
                     return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
                         tx.clone().with_signer(*signer),
                         tx_info,
@@ -288,7 +287,6 @@ pub trait EthTransactions: LoadTransaction {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            // TODO(joshie) rpc compat should accept a reference
                             from_recovered_with_block_context::<Self::TransactionCompat>(
                                 tx.clone().with_signer(*signer),
                                 tx_info,
