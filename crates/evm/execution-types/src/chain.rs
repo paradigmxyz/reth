@@ -52,7 +52,7 @@ impl Chain {
         execution_outcome: ExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        let blocks = BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b)));
+        let blocks = blocks.into_iter().map(|b| (b.number, b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
         Self { blocks, execution_outcome, trie_updates }
