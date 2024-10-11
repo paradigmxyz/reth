@@ -26,7 +26,8 @@ use tracing::{instrument, trace};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// `ECIES` stream over TCP exchanging raw bytes
+/// A unified Stream and Sink interface to an underlying I/ O object, using `ECIES` Encoder and
+/// Decoder traits to encode and decode raw bytes.
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct ECIESStream<Io> {
@@ -153,7 +154,9 @@ where
     type Error = io::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().stream.poll_ready(cx)
+        // NOTE: we always flush here, this prevents any backpressure buffer in the underlying
+        // `Framed` impl that could cause stalled sends if the caller only relies on poll_ready
+        self.project().stream.poll_flush(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
@@ -173,9 +176,48 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use reth_network_peers::pk2id;
     use secp256k1::SECP256K1;
+    use std::future::poll_fn;
     use tokio::net::{TcpListener, TcpStream};
+
+    #[tokio::test]
+    async fn ecies_sink() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::thread_rng());
+
+        // roughly based off of the design of tokio::net::TcpListener
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
+            stream
+        });
+
+        let server_id = pk2id(&server_key.public_key(SECP256K1));
+
+        let client_key = SecretKey::new(&mut rand::thread_rng());
+        let outgoing = TcpStream::connect(addr).await.unwrap();
+        let mut sink = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+
+        let mut stream = handle.await.unwrap();
+
+        let val = Bytes::from("hello");
+        poll_fn(|cx| {
+            assert!(stream.poll_next_unpin(cx).is_pending());
+
+            assert!(sink.poll_ready_unpin(cx).is_ready());
+            assert!(sink.start_send_unpin(val.clone()).is_ok());
+            sink.poll_ready_unpin(cx)
+        })
+        .await
+        .unwrap();
+
+        let value = stream.next().await.unwrap().unwrap();
+        assert_eq!(val, value);
+    }
 
     #[tokio::test]
     async fn can_write_and_read() {
