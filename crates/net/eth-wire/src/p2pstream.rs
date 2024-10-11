@@ -553,7 +553,14 @@ where
             Poll::Pending => {}
             Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
             Poll::Ready(Ok(())) => {
+                let outgoing_len = this.outgoing_messages.len();
+                if outgoing_len > 0 {
+                    trace!(target: "net::session", outgoing_len, "Polling flush");
+                }
                 let flushed = this.poll_flush(cx);
+                if outgoing_len > 0 {
+                    trace!(target: "net::session", outgoing_len = self.as_mut().outgoing_messages.len(), "Polled flush");
+                }
                 if flushed.is_ready() {
                     return flushed
                 }

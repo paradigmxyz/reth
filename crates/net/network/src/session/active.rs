@@ -550,9 +550,11 @@ impl Future for ActiveSession {
             }
 
             // Send messages by advancing the sink and queuing in buffered messages
+            trace!(target: "net::session", "Polling ready connection");
             while this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
+                    trace!(target: "net::session", ?msg, remote_peer_id=?this.remote_peer_id, "sending message");
                     let res = match msg {
                         OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
@@ -594,7 +596,9 @@ impl Future for ActiveSession {
                     };
                 }
 
-                match this.conn.poll_next_unpin(cx) {
+                let next = this.conn.poll_next_unpin(cx);
+                trace!(target: "net::session", ?next, "Polled connection");
+                match next {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
                         if this.is_disconnecting() {
@@ -728,6 +732,7 @@ enum RequestState {
 }
 
 /// Outgoing messages that can be sent over the wire.
+#[derive(Debug)]
 pub(crate) enum OutgoingMessage {
     /// A message that is owned.
     Eth(EthMessage),
@@ -761,11 +766,14 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+    use alloy_primitives::B256;
+    use futures::stream::FuturesUnordered;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
-        UnauthedEthStream, UnauthedP2PStream,
+        EthStream, GetBlockBodies, GetBlockHeaders, HelloMessageWithProtocols,
+        NewPooledTransactionHashes68, P2PStream, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -903,7 +911,7 @@ mod tests {
 
     impl Default for SessionBuilder {
         fn default() -> Self {
-            let (active_session_tx, active_session_rx) = mpsc::channel(100);
+            let (active_session_tx, active_session_rx) = mpsc::channel(10);
 
             let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand::thread_rng());
             let local_peer_id = pk2id(&pk);
@@ -1135,6 +1143,133 @@ mod tests {
             } => {}
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn t() {
+        reth_tracing::init_test_tracing();
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let received_total = Arc::new(AtomicU64::new(0));
+        let total = received_total.clone();
+        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+            let mut interval = tokio::time::interval(Duration::from_micros(50));
+
+            let mut i = 0;
+            loop {
+                tokio::select! {
+                    Some(msg) = client_stream.next() => {
+                        // println!("got stuff {msg:?}");
+                        total.fetch_add(1, Ordering::SeqCst);
+                    }
+                    _ = interval.tick() => {
+                        // println!("sending stuff {i}");
+                        i += 1;
+                        client_stream
+                            .send(
+                                EthMessage::GetBlockHeaders(RequestPair {
+                                    message: GetBlockHeaders {
+                                        limit: 10,
+                                        direction: reth_eth_wire::HeadersDirection::Falling,
+                                        skip: 1,
+                                        start_block: 12312312.into(),
+                                    },
+                                    request_id: 123123,
+                                })
+                            )
+                            .await
+                            .unwrap();
+                    }
+                }
+            }
+        });
+        tokio::task::spawn(fut);
+
+        let (incoming, _) = listener.accept().await.unwrap();
+        let session = builder.connect_incoming(incoming).await;
+        let (tx, rx) = oneshot::channel();
+        tokio::task::spawn(async move {
+            let _ = tx.send(session.await);
+        });
+
+        for _ in 0..10 {
+            let mut futs = FuturesUnordered::default();
+            for _ in 0..2 {
+                let hash = B256::random();
+                // println!("sending {hash}");
+                futs.push(builder.to_sessions.first().unwrap().send(SessionCommand::Message(
+                    PeerMessage::PooledTransactions(
+                        reth_eth_wire::NewPooledTransactionHashes::Eth68(
+                            NewPooledTransactionHashes68 {
+                                types: Vec::from([2, 2, 2, 2, 2]),
+                                sizes: Vec::from([123, 123, 123, 123, 123]),
+                                hashes: Vec::from([hash, hash, hash, hash, hash]),
+                                // types: Vec::from([2]),
+                                // sizes: Vec::from([123]),
+                                // hashes: Vec::from([hash]),
+                            },
+                        ),
+                    ),
+                )));
+            }
+            while futs.next().await.is_some() {}
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        println!("rx await {:?}", tokio::time::timeout(Duration::from_secs(3), rx).await);
+        println!("received total {}", received_total.load(Ordering::SeqCst));
+
+        // fill the entire message buffer with an unrelated message
+        // let mut num_fill_messages = 0;
+        // loop {
+        //     let hash = B256::random();
+        //     println!("sending {hash}");
+        //     if builder
+        //         .active_session_tx
+        //         .try_send(ActiveSessionMessage::ValidMessage {
+        //             peer_id: PeerId::random(),
+        //             message: PeerMessage::PooledTransactions(
+        //                 reth_eth_wire::NewPooledTransactionHashes::Eth66(
+        //                     NewPooledTransactionHashes66(Vec::from([hash])),
+        //                 ),
+        //             ),
+        //         })
+        //         .is_err()
+        //     {
+        //         break
+        //     }
+        //     num_fill_messages += 1;
+        // }
+
+        // tokio::task::spawn(async move {
+        //     session.await;
+        // });
+
+        // tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // for _ in 0..num_fill_messages {
+        //     let message = builder.active_session_rx.next().await.unwrap();
+        //     match message {
+        //         ActiveSessionMessage::ValidMessage { message, .. } => {
+        //             println!("received message {message:?}");
+        //         }
+        //         ev => unreachable!("{ev:?}"),
+        //     }
+        // }
+
+        // let message = builder.active_session_rx.next().await.unwrap();
+        // match message {
+        //     ActiveSessionMessage::ValidMessage {
+        //         message: PeerMessage::PooledTransactions(_),
+        //         ..
+        //     } => {}
+        //     _ => unreachable!(),
+        // }
     }
 
     #[test]
