@@ -616,7 +616,13 @@ where
         let mut this = self.project();
         loop {
             match ready!(this.inner.as_mut().poll_flush(cx)) {
-                Err(err) => return Poll::Ready(Err(err.into())),
+                Err(err) => {
+                    trace!(target: "net::p2p",
+                        %err,
+                        "error flushing p2p stream"
+                    );
+                    return Poll::Ready(Err(err.into()))
+                }
                 Ok(()) => {
                     let Some(message) = this.outgoing_messages.pop_front() else {
                         return Poll::Ready(Ok(()))
