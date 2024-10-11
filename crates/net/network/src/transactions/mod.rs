@@ -12,7 +12,7 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
+pub use config::{TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
@@ -153,6 +153,14 @@ impl TransactionsHandle {
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
 
+    /// Manually propagate the given transactions to all peers.
+    ///
+    /// It's up to the [`TransactionsManager`] whether the transactions are sent as hashes or in
+    /// full.
+    pub fn propagate_transactions(&self, transactions: Vec<TxHash>) {
+        self.send(TransactionsCommand::PropagateTransactions(transactions))
+    }
+
     /// Request the transaction hashes known by specific peers.
     pub async fn get_transaction_hashes(
         &self,
@@ -246,8 +254,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
-    /// Max number of seen transactions to store for each peer.
-    max_transactions_seen_by_peer_history: u32,
+    /// How the `TransactionsManager` is configured.
+    config: TransactionsManagerConfig,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -298,8 +306,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
-            max_transactions_seen_by_peer_history: transactions_manager_config
-                .max_transactions_seen_by_peer_history,
+            config: transactions_manager_config,
             metrics,
         }
     }
@@ -399,8 +406,14 @@ where
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
 
-        // This fetches all transaction from the pool, including the 4844 blob transactions but
-        // __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
+        self.propagate_all(hashes);
+    }
+
+    /// Propagates the given transactions to the peers
+    ///
+    /// This fetches all transaction from the pool, including the 4844 blob transactions but
+    /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
+    fn propagate_all(&mut self, hashes: Vec<TxHash>) {
         let propagated = self.propagate_transactions(
             self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect(),
         );
@@ -424,9 +437,8 @@ where
             return propagated
         }
 
-        // send full transactions to a fraction of the connected peers (square root of the total
-        // number of connected peers)
-        let max_num_full = (self.peers.len() as f64).sqrt().round() as usize;
+        // send full transactions to a set of the connected peers based on the configured mode
+        let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
@@ -874,11 +886,12 @@ where
                 let peers = self.peers.keys().copied().collect::<HashSet<_>>();
                 tx.send(peers).ok();
             }
-            TransactionsCommand::PropagateTransactionsTo(txs, _peer) => {
-                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, _peer) {
+            TransactionsCommand::PropagateTransactionsTo(txs, peer) => {
+                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, peer) {
                     self.pool.on_propagated(propagated);
                 }
             }
+            TransactionsCommand::PropagateTransactions(txs) => self.propagate_all(txs),
             TransactionsCommand::GetTransactionHashes { peers, tx } => {
                 let mut res = HashMap::with_capacity(peers.len());
                 for peer_id in peers {
@@ -904,6 +917,7 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
+                self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::SessionEstablished {
                 peer_id, client_version, messages, version, ..
@@ -913,7 +927,7 @@ where
                     messages,
                     version,
                     client_version,
-                    self.max_transactions_seen_by_peer_history,
+                    self.config.max_transactions_seen_by_peer_history,
                 );
                 let peer = match self.peers.entry(peer_id) {
                     Entry::Occupied(mut entry) => {
@@ -1654,6 +1668,8 @@ enum TransactionsCommand {
     GetActivePeers(oneshot::Sender<HashSet<PeerId>>),
     /// Propagate a collection of full transactions to a specific peer.
     PropagateTransactionsTo(Vec<TxHash>, PeerId),
+    /// Propagate a collection of full transactions to all peers.
+    PropagateTransactions(Vec<TxHash>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
     GetTransactionHashes {
         peers: Vec<PeerId>,

@@ -61,6 +61,14 @@ impl NatResolver {
     pub async fn external_addr(self) -> Option<IpAddr> {
         external_addr_with(self).await
     }
+
+    /// Returns the external ip, if it is [`NatResolver::ExternalIp`]
+    pub const fn as_external_ip(self) -> Option<IpAddr> {
+        match self {
+            Self::ExternalIp(ip) => Some(ip),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for NatResolver {
