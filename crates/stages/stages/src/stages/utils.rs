@@ -12,7 +12,12 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_provider::DBProvider;
 use reth_stages_api::StageError;
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    ops::RangeBounds,
+    time::{Duration, Instant},
+};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
@@ -66,7 +71,8 @@ where
 
     // observability
     let total_changesets = provider.tx_ref().entries::<CS>()?;
-    let interval = (total_changesets / 1000).max(1);
+    let log_interval = Duration::from_secs(5);
+    let mut last_log = Instant::now();
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
@@ -74,8 +80,10 @@ where
         let (block_number, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(block_number);
 
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+        let now = Instant::now();
+        if now.duration_since(last_log) >= log_interval {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+            last_log = now;
         }
 
         // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
