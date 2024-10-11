@@ -409,7 +409,7 @@ where
         self.propagate_all(hashes);
     }
 
-    /// Propagates the transaction to the peers
+    /// Propagates the given transactions to the peers
     ///
     /// This fetches all transaction from the pool, including the 4844 blob transactions but
     /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
