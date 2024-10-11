@@ -70,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
                 reset_prune_checkpoint(tx, PruneSegment::Headers)?;
-                
+
                 insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Bodies => {
@@ -83,7 +83,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::BlockWithdrawals>()?;
                 tx.clear::<tables::BlockRequests>()?;
                 reset_stage_checkpoint(tx, StageId::Bodies)?;
-    
+
                 insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Senders => {
@@ -110,23 +110,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
                 reset_stage_checkpoint(tx, StageId::AccountHashing)?;
-
             }
             StageEnum::StorageHashing => {
                 tx.clear::<tables::HashedStorages>()?;
                 reset_stage_checkpoint(tx, StageId::StorageHashing)?;
-
             }
             StageEnum::Hashing => {
                 // Clear hashed accounts
                 tx.clear::<tables::HashedAccounts>()?;
                 reset_stage_checkpoint(tx, StageId::AccountHashing)?;
 
-
                 // Clear hashed storages
                 tx.clear::<tables::HashedStorages>()?;
                 reset_stage_checkpoint(tx, StageId::StorageHashing)?;
-
             }
             StageEnum::Merkle => {
                 tx.clear::<tables::AccountsTrie>()?;
@@ -144,9 +140,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::AccountsHistory>()?;
                 tx.clear::<tables::StoragesHistory>()?;
 
-                reset_stage_checkpoint(tx,StageId::IndexAccountHistory)?;
-                reset_stage_checkpoint(tx,StageId::IndexStorageHistory)?;
-               
+                reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
+                reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
+
                 insert_genesis_history(&provider_rw.0, self.env.chain.genesis().alloc.iter())?;
             }
             StageEnum::TxLookup => {
@@ -182,10 +178,7 @@ fn reset_stage_checkpoint(
     tx: &Tx<reth_db::mdbx::RW>,
     stage_id: StageId,
 ) -> Result<(), DatabaseError> {
-    tx.put::<tables::StageCheckpoints>(
-        stage_id.to_string(),
-        Default::default(),
-    )?;
+    tx.put::<tables::StageCheckpoints>(stage_id.to_string(), Default::default())?;
 
     Ok(())
 }
