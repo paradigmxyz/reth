@@ -153,7 +153,7 @@ impl TransactionsHandle {
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
 
-    /// Manually propagate the transactions to all peers.
+    /// Manually propagate the given transactions to all peers.
     ///
     /// It's up to the [`TransactionsManager`] whether the transactions are sent as hashes or in
     /// full.
