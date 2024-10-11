@@ -95,14 +95,12 @@ impl ChainInfoTracker {
 
     /// Returns the safe header of the chain.
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.safe_block.borrow();
-        h.as_ref().map(|h| h.num_hash())
+        self.inner.safe_block.borrow().as_ref().map(SealedHeader::num_hash)
     }
 
     /// Returns the finalized header of the chain.
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.finalized_block.borrow();
-        h.as_ref().map(|h| h.num_hash())
+        self.inner.finalized_block.borrow().as_ref().map(SealedHeader::num_hash)
     }
 
     /// Sets the canonical head of the chain.
@@ -168,4 +166,201 @@ struct ChainInfoInner {
     safe_block: watch::Sender<Option<SealedHeader>>,
     /// The block that the beacon node considers finalized.
     finalized_block: watch::Sender<Option<SealedHeader>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_testing_utils::{generators, generators::random_header};
+
+    #[test]
+    fn test_chain_info() {
+        // Create a random header
+        let mut rng = generators::rng();
+        let header = random_header(&mut rng, 10, None);
+
+        // Create a new chain info tracker with the header
+        let tracker = ChainInfoTracker::new(header.clone(), None, None);
+
+        // Fetch the chain information from the tracker
+        let chain_info = tracker.chain_info();
+
+        // Verify that the chain information matches the header
+        assert_eq!(chain_info.best_number, header.number);
+        assert_eq!(chain_info.best_hash, header.hash());
+    }
+
+    #[test]
+    fn test_on_forkchoice_update_received() {
+        // Create a random block header
+        let mut rng = generators::rng();
+        let header = random_header(&mut rng, 10, None);
+
+        // Create a new chain info tracker with the header
+        let tracker = ChainInfoTracker::new(header, None, None);
+
+        // Assert that there has been no forkchoice update yet (the timestamp is None)
+        assert!(tracker.last_forkchoice_update_received_at().is_none());
+
+        // Call the method to record the receipt of a forkchoice update
+        tracker.on_forkchoice_update_received();
+
+        // Assert that there is now a timestamp indicating when the forkchoice update was received
+        assert!(tracker.last_forkchoice_update_received_at().is_some());
+    }
+
+    #[test]
+    fn test_on_transition_configuration_exchanged() {
+        // Create a random header
+        let mut rng = generators::rng();
+        let header = random_header(&mut rng, 10, None);
+
+        // Create a new chain info tracker with the header
+        let tracker = ChainInfoTracker::new(header, None, None);
+
+        // Assert that there has been no transition configuration exchange yet (the timestamp is
+        // None)
+        assert!(tracker.last_transition_configuration_exchanged_at().is_none());
+
+        // Call the method to record the transition configuration exchange
+        tracker.on_transition_configuration_exchanged();
+
+        // Assert that there is now a timestamp indicating when the transition configuration
+        // exchange occurred
+        assert!(tracker.last_transition_configuration_exchanged_at().is_some());
+    }
+
+    #[test]
+    fn test_set_canonical_head() {
+        // Create a random number generator
+        let mut rng = generators::rng();
+        // Generate two random headers for testing
+        let header1 = random_header(&mut rng, 10, None);
+        let header2 = random_header(&mut rng, 20, None);
+
+        // Create a new chain info tracker with the first header
+        let tracker = ChainInfoTracker::new(header1, None, None);
+
+        // Set the second header as the canonical head of the tracker
+        tracker.set_canonical_head(header2.clone());
+
+        // Assert that the tracker now uses the second header as its canonical head
+        let canonical_head = tracker.get_canonical_head();
+        assert_eq!(canonical_head, header2);
+    }
+
+    #[test]
+    fn test_set_safe() {
+        // Create a random number generator
+        let mut rng = generators::rng();
+
+        // Case 1: basic test
+        // Generate two random headers for the test
+        let header1 = random_header(&mut rng, 10, None);
+        let header2 = random_header(&mut rng, 20, None);
+
+        // Create a new chain info tracker with the first header (header1)
+        let tracker = ChainInfoTracker::new(header1, None, None);
+
+        // Call the set_safe method with the second header (header2)
+        tracker.set_safe(header2.clone());
+
+        // Verify that the tracker now has header2 as the safe block
+        let safe_header = tracker.get_safe_header();
+        assert!(safe_header.is_some()); // Ensure a safe header is present
+        let safe_header = safe_header.unwrap();
+        assert_eq!(safe_header, header2);
+
+        // Case 2: call with the same header as the current safe block
+        // Call set_safe again with the same header (header2)
+        tracker.set_safe(header2.clone());
+
+        // Verify that nothing changes and the safe header remains the same
+        let same_safe_header = tracker.get_safe_header();
+        assert!(same_safe_header.is_some());
+        let same_safe_header = same_safe_header.unwrap();
+        assert_eq!(same_safe_header, header2);
+
+        // Case 3: call with a different (new) header
+        // Generate a third header with a higher block number
+        let header3 = random_header(&mut rng, 30, None);
+
+        // Call set_safe with this new header (header3)
+        tracker.set_safe(header3.clone());
+
+        // Verify that the safe header is updated with the new header
+        let updated_safe_header = tracker.get_safe_header();
+        assert!(updated_safe_header.is_some());
+        let updated_safe_header = updated_safe_header.unwrap();
+        assert_eq!(updated_safe_header, header3);
+    }
+
+    #[test]
+    fn test_set_finalized() {
+        // Create a random number generator
+        let mut rng = generators::rng();
+
+        // Generate random headers for testing
+        let header1 = random_header(&mut rng, 10, None);
+        let header2 = random_header(&mut rng, 20, None);
+        let header3 = random_header(&mut rng, 30, None);
+
+        // Create a new chain info tracker with the first header
+        let tracker = ChainInfoTracker::new(header1, None, None);
+
+        // Initial state: finalize header should be None
+        assert!(tracker.get_finalized_header().is_none());
+
+        // Set the second header as the finalized header
+        tracker.set_finalized(header2.clone());
+
+        // Assert that the tracker now uses the second header as its finalized block
+        let finalized_header = tracker.get_finalized_header();
+        assert!(finalized_header.is_some());
+        let finalized_header = finalized_header.unwrap();
+        assert_eq!(finalized_header, header2);
+
+        // Case 2: attempt to set the same finalized header again
+        tracker.set_finalized(header2.clone());
+
+        // The finalized header should remain unchanged
+        let unchanged_finalized_header = tracker.get_finalized_header();
+        assert_eq!(unchanged_finalized_header.unwrap(), header2); // Should still be header2
+
+        // Case 3: set a higher block number as finalized
+        tracker.set_finalized(header3.clone());
+
+        // The finalized header should now be updated to header3
+        let updated_finalized_header = tracker.get_finalized_header();
+        assert!(updated_finalized_header.is_some());
+        assert_eq!(updated_finalized_header.unwrap(), header3);
+    }
+
+    #[test]
+    fn test_get_finalized_num_hash() {
+        // Create a random header
+        let mut rng = generators::rng();
+        let finalized_header = random_header(&mut rng, 10, None);
+
+        // Create a new chain info tracker with the finalized header
+        let tracker =
+            ChainInfoTracker::new(finalized_header.clone(), Some(finalized_header.clone()), None);
+
+        // Assert that the BlockNumHash returned matches the finalized header
+        assert_eq!(tracker.get_finalized_num_hash(), Some(finalized_header.num_hash()));
+    }
+
+    #[test]
+    fn test_get_safe_num_hash() {
+        // Create a random header
+        let mut rng = generators::rng();
+        let safe_header = random_header(&mut rng, 10, None);
+
+        // Create a new chain info tracker with the safe header
+        let tracker = ChainInfoTracker::new(safe_header.clone(), None, None);
+        tracker.set_safe(safe_header.clone());
+
+        // Assert that the BlockNumHash returned matches the safe header
+        assert_eq!(tracker.get_safe_num_hash(), Some(safe_header.num_hash()));
+    }
 }
