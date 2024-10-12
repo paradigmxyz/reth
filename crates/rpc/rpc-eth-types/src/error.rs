@@ -94,6 +94,9 @@ pub enum EthApiError {
     /// Thrown when a requested transaction is not found
     #[error("transaction not found")]
     TransactionNotFound,
+    /// Thrown when a bundle is invalid
+    #[error("invalid bundle")]
+    InvalidBundle,
     /// Some feature is unsupported
     #[error("unsupported")]
     Unsupported(&'static str),
@@ -161,6 +164,7 @@ impl EthApiError {
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
+            EthApiError::InvalidBundle => internal_rpc_err("invalid bundle".to_string()),
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
