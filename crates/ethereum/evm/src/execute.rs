@@ -141,10 +141,12 @@ where
     where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
-        let mut system_caller =
-            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
+        let mut system_caller = SystemCaller::new(self.evm_config.clone(), &self.chain_spec);
+        if let Some(hook) = state_hook {
+            system_caller.with_state_hook(Some(Box::new(hook) as Box<dyn OnStateHook>));
+        }
 
         system_caller.apply_pre_execution_changes(block, &mut evm)?;
 
@@ -290,7 +292,7 @@ where
         state_hook: Option<F>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
@@ -396,7 +398,7 @@ where
         state_hook: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } = self

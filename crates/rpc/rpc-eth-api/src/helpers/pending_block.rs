@@ -260,8 +260,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let chain_spec = self.provider().chain_spec();
 
-        let evm_config = self.evm_config().clone();
-        let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+        let mut system_caller = SystemCaller::new(self.evm_config().clone(), chain_spec.clone());
 
         let parent_beacon_block_root = if origin.is_actual_pending() {
             // apply eip-4788 pre block contract call if we got the block from the CL with the real
