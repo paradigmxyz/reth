@@ -221,6 +221,7 @@ pub struct StaticFileProviderInner {
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
+        #[allow(clippy::if_then_some_else_none)] // can't use ? in closure
         let _lock_file = if access.is_read_write() {
             Some(StorageLock::try_acquire(path.as_ref())?)
         } else {
