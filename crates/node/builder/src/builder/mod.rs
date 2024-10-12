@@ -162,6 +162,14 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
         Self { config, database: () }
     }
+
+    /// Apply a function to the builder
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
 }
 
 impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
