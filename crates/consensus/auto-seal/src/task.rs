@@ -139,11 +139,6 @@ where
                         &executor,
                     ) {
                         Ok((new_header, _bundle_state)) => {
-                            // clear all transactions from pool
-                            pool.remove_transactions(
-                                transactions.iter().map(|tx| tx.hash()).collect(),
-                            );
-
                             let state = ForkchoiceState {
                                 head_block_hash: new_header.hash(),
                                 finalized_block_hash: new_header.hash(),
@@ -167,7 +162,16 @@ where
                                 match rx.await.unwrap() {
                                     Ok(fcu_response) => {
                                         match fcu_response.forkchoice_status() {
-                                            ForkchoiceStatus::Valid => break,
+                                            ForkchoiceStatus::Valid => {
+                                                // clear all transactions from pool
+                                                pool.remove_transactions(
+                                                    transactions
+                                                        .iter()
+                                                        .map(|tx| tx.hash())
+                                                        .collect(),
+                                                );
+                                                break
+                                            }
                                             ForkchoiceStatus::Invalid => {
                                                 error!(target: "consensus::auto", ?fcu_response, "Forkchoice update returned invalid response");
                                                 return None
