@@ -113,7 +113,6 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
-                let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let executor = this.block_executor.clone();
 
@@ -162,16 +161,7 @@ where
                                 match rx.await.unwrap() {
                                     Ok(fcu_response) => {
                                         match fcu_response.forkchoice_status() {
-                                            ForkchoiceStatus::Valid => {
-                                                // clear all transactions from pool
-                                                pool.remove_transactions(
-                                                    transactions
-                                                        .iter()
-                                                        .map(|tx| tx.hash())
-                                                        .collect(),
-                                                );
-                                                break
-                                            }
+                                            ForkchoiceStatus::Valid => break,
                                             ForkchoiceStatus::Invalid => {
                                                 error!(target: "consensus::auto", ?fcu_response, "Forkchoice update returned invalid response");
                                                 return None
