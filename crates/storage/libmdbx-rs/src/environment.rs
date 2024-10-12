@@ -355,16 +355,6 @@ impl Stat {
     }
 }
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct GeometryInfo(ffi::MDBX_envinfo__bindgen_ty_1);
-
-impl GeometryInfo {
-    pub const fn min(&self) -> u64 {
-        self.0.lower
-    }
-}
-
 /// Environment information.
 ///
 /// Contains environment information about the map size, readers, last txn id etc.
@@ -373,10 +363,6 @@ impl GeometryInfo {
 pub struct Info(ffi::MDBX_envinfo);
 
 impl Info {
-    pub const fn geometry(&self) -> GeometryInfo {
-        GeometryInfo(self.0.mi_geo)
-    }
-
     /// Size of memory map.
     #[inline]
     pub const fn map_size(&self) -> usize {
@@ -406,25 +392,6 @@ impl Info {
     pub const fn num_readers(&self) -> usize {
         self.0.mi_numreaders as usize
     }
-
-    /// Return the internal page ops metrics
-    #[inline]
-    pub const fn page_ops(&self) -> PageOps {
-        PageOps {
-            newly: self.0.mi_pgop_stat.newly,
-            cow: self.0.mi_pgop_stat.cow,
-            clone: self.0.mi_pgop_stat.clone,
-            split: self.0.mi_pgop_stat.split,
-            merge: self.0.mi_pgop_stat.merge,
-            spill: self.0.mi_pgop_stat.spill,
-            unspill: self.0.mi_pgop_stat.unspill,
-            wops: self.0.mi_pgop_stat.wops,
-            prefault: self.0.mi_pgop_stat.prefault,
-            mincore: self.0.mi_pgop_stat.mincore,
-            msync: self.0.mi_pgop_stat.msync,
-            fsync: self.0.mi_pgop_stat.fsync,
-        }
-    }
 }
 
 impl fmt::Debug for Environment {
@@ -441,35 +408,6 @@ impl fmt::Debug for Environment {
 pub enum PageSize {
     MinimalAcceptable,
     Set(usize),
-}
-
-/// Statistics of page operations overall of all (running, completed and aborted) transactions
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PageOps {
-    /// Quantity of a new pages added
-    pub newly: u64,
-    /// Quantity of pages copied for update
-    pub cow: u64,
-    /// Quantity of parent's dirty pages clones for nested transactions
-    pub clone: u64,
-    /// Page splits
-    pub split: u64,
-    /// Page merges
-    pub merge: u64,
-    /// Quantity of spilled dirty pages
-    pub spill: u64,
-    /// Quantity of unspilled/reloaded pages
-    pub unspill: u64,
-    /// Number of explicit write operations (not a pages) to a disk
-    pub wops: u64,
-    /// Number of explicit msync/flush-to-disk operations
-    pub msync: u64,
-    /// Number of explicit fsync/flush-to-disk operations
-    pub fsync: u64,
-    /// Number of prefault write operations
-    pub prefault: u64,
-    /// Number of `mincore()` calls
-    pub mincore: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
