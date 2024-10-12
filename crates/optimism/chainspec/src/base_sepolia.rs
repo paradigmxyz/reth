@@ -1,6 +1,6 @@
 //! Chain specification for the Base Sepolia testnet network.
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
