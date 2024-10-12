@@ -540,22 +540,20 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
 
                 // If we are past shanghai, then all blocks should have a withdrawal list,
                 // even if empty
-                #[allow(clippy::if_then_some_else_none)] // can't use ? in closure
                 let withdrawals =
                     if self.chain_spec.is_shanghai_active_at_timestamp(header_ref.timestamp) {
-                        Some(
-                            withdrawals_cursor
-                                .seek_exact(header_ref.number)?
-                                .map(|(_, w)| w.withdrawals)
-                                .unwrap_or_default(),
-                        )
+                        withdrawals_cursor
+                            .seek_exact(header_ref.number)?
+                            .map(|(_, w)| w.withdrawals)
+                            .unwrap_or_default()
+                            .into()
                     } else {
                         None
                     };
-                #[allow(clippy::if_then_some_else_none)] // can't use ? in closure
                 let requests =
                     if self.chain_spec.is_prague_active_at_timestamp(header_ref.timestamp) {
-                        Some(requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                        (requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                            .into()
                     } else {
                         None
                     };

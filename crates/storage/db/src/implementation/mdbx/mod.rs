@@ -255,12 +255,10 @@ impl DatabaseEnv {
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
     ) -> Result<Self, DatabaseError> {
-        #[allow(clippy::if_then_some_else_none)] // can't use ? in closure
         let _lock_file = if kind.is_rw() {
-            Some(
-                StorageLock::try_acquire(path)
-                    .map_err(|err| DatabaseError::Other(err.to_string()))?,
-            )
+            StorageLock::try_acquire(path)
+                .map_err(|err| DatabaseError::Other(err.to_string()))?
+                .into()
         } else {
             None
         };
