@@ -4,15 +4,14 @@ use alloc::sync::Arc;
 
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use once_cell::sync::Lazy;
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OptimismHardfork;
 
-use crate::OpChainSpec;
+use crate::{OpChainSpec, LazyLock};
 
 /// The Base mainnet spec
-pub static BASE_MAINNET: Lazy<Arc<OpChainSpec>> = Lazy::new(|| {
+pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     OpChainSpec {
         inner: ChainSpec {
             chain: Chain::base_mainnet(),
