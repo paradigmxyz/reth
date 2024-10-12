@@ -16,7 +16,7 @@ use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
-type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, E>;
+pub type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, E>;
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
