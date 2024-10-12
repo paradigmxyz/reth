@@ -8409,7 +8409,6 @@ dependencies = [
  "itertools 0.13.0",
  "metrics",
  "notify",
- "once_cell",
  "parking_lot 0.12.3",
  "rand 0.8.5",
  "rayon",

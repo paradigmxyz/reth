@@ -11,11 +11,11 @@
 
 extern crate alloc;
 
-#[cfg(feature = "std")]
-pub(crate) use std::sync::{LazyLock, OnceLock};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 pub(crate) use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
+#[cfg(feature = "std")]
+pub(crate) use std::sync::{LazyLock, OnceLock};
 
 /// Chain specific constants
 pub(crate) mod constants;

@@ -64,7 +64,6 @@ dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils
-once_cell = { workspace = true, optional = true }
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
 alloy-consensus = { workspace = true, optional = true }
 
@@ -97,7 +96,6 @@ test-utils = [
     "reth-nippy-jar/test-utils",
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
-    "once_cell",
     "reth-ethereum-engine-primitives",
     "alloy-consensus",
 ]
