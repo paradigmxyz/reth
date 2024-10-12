@@ -415,7 +415,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
-            if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+            (cfg.handler_cfg.spec_id >= SpecId::CANCUN).then_some(sum_blob_gas_used);
 
         // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
         // set these to empty
