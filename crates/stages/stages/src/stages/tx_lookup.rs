@@ -1,3 +1,4 @@
+use super::utils::LOG_INTERVAL;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
@@ -17,7 +18,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderError;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -148,12 +149,11 @@ where
                     .cursor_write::<tables::RawTable<tables::TransactionHashNumbers>>()?;
 
                 let total_hashes = hash_collector.len();
-                let log_interval = Duration::from_secs(5);
                 let mut last_log = Instant::now();
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
                     let now = Instant::now();
-                    if now.duration_since(last_log) >= log_interval {
+                    if now.duration_since(last_log) >= LOG_INTERVAL {
                         info!(
                             target: "sync::stages::transaction_lookup",
                             ?append_only,
