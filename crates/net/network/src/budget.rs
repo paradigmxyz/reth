@@ -55,7 +55,7 @@ macro_rules! poll_nested_stream_with_budget {
                         let mut f = $on_ready_some;
                         f(item);
 
-                        budget = budget.saturating_sub(1);
+                        budget -= 1;
                         if budget == 0 {
                             break true
                         }
