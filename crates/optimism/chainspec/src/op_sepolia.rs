@@ -9,7 +9,7 @@ use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives_traits::constants::ETHEREUM_BLOCK_GAS_LIMIT;
 
-use crate::{OpChainSpec, LazyLock};
+use crate::{LazyLock, OpChainSpec};
 
 /// The OP Sepolia spec
 pub static OP_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {

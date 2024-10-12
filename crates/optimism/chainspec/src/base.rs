@@ -8,7 +8,7 @@ use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec}
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OptimismHardfork;
 
-use crate::{OpChainSpec, LazyLock};
+use crate::{LazyLock, OpChainSpec};
 
 /// The Base mainnet spec
 pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {

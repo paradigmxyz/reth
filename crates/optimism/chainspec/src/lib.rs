@@ -23,6 +23,8 @@ pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
+#[cfg(not(feature = "std"))]
+pub(crate) use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
@@ -35,8 +37,6 @@ use reth_primitives_traits::Header;
 use std::fmt::Display;
 #[cfg(feature = "std")]
 pub(crate) use std::sync::{LazyLock, OnceLock};
-#[cfg(not(feature = "std"))]
-pub(crate) use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]

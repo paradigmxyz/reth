@@ -24,7 +24,7 @@ use reth_primitives_traits::{
 };
 use reth_trie_common::root::state_root_ref_unhashed;
 
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, OnceLock, LazyLock, EthChainSpec};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {

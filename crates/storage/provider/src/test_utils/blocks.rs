@@ -14,8 +14,7 @@ use reth_primitives::{
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{db::BundleState, primitives::AccountInfo};
-use std::str::FromStr;
-use std::sync::LazyLock;
+use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(

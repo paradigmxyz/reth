@@ -8,7 +8,7 @@ use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec}
 use reth_optimism_forks::DEV_HARDFORKS;
 use reth_primitives_traits::constants::DEV_GENESIS_HASH;
 
-use crate::{OpChainSpec, LazyLock};
+use crate::{LazyLock, OpChainSpec};
 
 /// OP dev testnet specification
 ///

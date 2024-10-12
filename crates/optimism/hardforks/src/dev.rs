@@ -1,10 +1,10 @@
 use alloy_primitives::U256;
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 
-#[cfg(feature = "std")]
-use std::sync::LazyLock;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {

@@ -13,13 +13,14 @@ use alloy_primitives::{Bytes, TxHash};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
+use once_cell as _;
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::Lazy as LazyLock;
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
