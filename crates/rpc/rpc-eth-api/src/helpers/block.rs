@@ -14,7 +14,7 @@ use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
 /// Result type of the fetched block receipts.
-type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
+pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, E>;
 
