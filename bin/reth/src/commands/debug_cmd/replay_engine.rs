@@ -1,5 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
-
+use crate::args::NetworkArgs;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -7,6 +6,8 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeacon
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -17,6 +18,8 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -26,18 +29,17 @@ use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tracing::*;
-
-use crate::{args::NetworkArgs, macros::block_executor};
 
 /// `reth debug replay-engine` command
 /// This script will read stored engine API messages and replay them by the timestamp.
 /// It does not require
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -51,12 +53,12 @@ pub struct Command {
     interval: u64,
 }
 
-impl Command {
-    async fn build_network(
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -74,22 +76,24 @@ impl Command {
     }
 
     /// Execute `debug replay-engine` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<
+        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
+    >(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(
-            tree_externals,
-            BlockchainTreeConfig::default(),
-            PruneModes::none(),
-        )?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
@@ -109,13 +113,8 @@ impl Command {
             .await?;
 
         // Set up payload builder
-        #[cfg(not(feature = "optimism"))]
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
-
-        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
         );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
@@ -123,21 +122,11 @@ impl Command {
             NoopTransactionPool::default(),
             ctx.task_executor.clone(),
             BasicPayloadJobGeneratorConfig::default(),
-            provider_factory.chain_spec(),
             payload_builder,
         );
 
-        #[cfg(feature = "optimism")]
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
-
-        #[cfg(not(feature = "optimism"))]
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+        let (payload_service, payload_builder): (_, PayloadBuilderHandle<EthEngineTypes>) =
+            PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
@@ -145,7 +134,7 @@ impl Command {
         let network_client = network.fetch_client().await?;
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::new(
             network_client,
-            Pipeline::builder().build(
+            Pipeline::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::builder().build(
                 provider_factory.clone(),
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
             ),

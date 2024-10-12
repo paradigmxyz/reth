@@ -10,8 +10,7 @@ macro_rules! impl_fixed_arbitrary {
                 fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
                     let mut buffer = vec![0; $size];
                     u.fill_buffer(buffer.as_mut_slice())?;
-
-                    Decode::decode(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
+                    Decode::decode_owned(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
                 }
             }
 
@@ -26,7 +25,7 @@ macro_rules! impl_fixed_arbitrary {
                 fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
                     use proptest::strategy::Strategy;
                     proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), $size)
-                        .prop_map(move |vec| Decode::decode(vec).unwrap())
+                        .prop_map(move |vec| Decode::decode_owned(vec).unwrap())
                 }
             }
         )+

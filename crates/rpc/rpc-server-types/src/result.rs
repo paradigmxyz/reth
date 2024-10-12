@@ -1,16 +1,18 @@
 //! Additional helpers for converting errors.
 
-use std::fmt::Display;
+use std::fmt;
 
+use alloy_rpc_types_engine::PayloadError;
 use jsonrpsee_core::RpcResult;
-use reth_rpc_types::engine::PayloadError;
+use reth_primitives::BlockId;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
-    /// Converts the error of the [Result] to an [`RpcResult`] via the `Err` [Display] impl.
+    /// Converts result to [`RpcResult`] by converting error variant to
+    /// [`jsonrpsee_types::error::ErrorObject`]
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
-        Err: Display,
+        Err: fmt::Display,
     {
         self.map_internal_err(|err| err.to_string())
     }
@@ -142,10 +144,25 @@ pub fn rpc_err(
         code,
         msg.into(),
         data.map(|data| {
-            jsonrpsee_core::to_json_raw_value(&reth_primitives::hex::encode_prefixed(data))
+            jsonrpsee_core::to_json_raw_value(&alloy_primitives::hex::encode_prefixed(data))
                 .expect("serializing String can't fail")
         }),
     )
+}
+
+/// Formats a [`BlockId`] into an error message.
+pub fn block_id_to_str(id: BlockId) -> String {
+    match id {
+        BlockId::Hash(h) => {
+            if h.require_canonical == Some(true) {
+                format!("canonical hash {}", h.block_hash)
+            } else {
+                format!("hash {}", h.block_hash)
+            }
+        }
+        BlockId::Number(n) if n.is_number() => format!("number {n}"),
+        BlockId::Number(n) => format!("{n}"),
+    }
 }
 
 #[cfg(test)]

@@ -1,25 +1,22 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
     writer::static_file::StaticFileWriter,
-    BlockExecutionWriter, BlockWriter, DatabaseProvider, DatabaseProviderRW, HistoryWriter,
-    StateChangeWriter, StateWriter, TrieWriter,
+    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
+use alloy_primitives::{BlockNumber, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
     cursor::DbCursorRO,
     models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
-    Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256,
-};
+use reth_primitives::{Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockNumReader, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
+    DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
 };
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
@@ -38,37 +35,43 @@ enum StorageType<C = (), S = ()> {
 /// [`UnifiedStorageWriter`] is responsible for managing the writing to storage with both database
 /// and static file providers.
 #[derive(Debug)]
-pub struct UnifiedStorageWriter<'a, TX, SF> {
-    database: &'a DatabaseProvider<TX>,
-    static_file: Option<SF>,
+pub struct UnifiedStorageWriter<'a, ProviderDB, ProviderSF> {
+    database: &'a ProviderDB,
+    static_file: Option<ProviderSF>,
 }
 
-impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
+impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF> {
     /// Creates a new instance of [`UnifiedStorageWriter`].
     ///
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub const fn new(database: &'a DatabaseProvider<TX>, static_file: Option<SF>) -> Self {
+    pub const fn new(database: &'a ProviderDB, static_file: Option<ProviderSF>) -> Self {
         Self { database, static_file }
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider and a static
     /// file instance.
-    pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
-        Self::new(database, Some(static_file))
+    pub fn from<P>(database: &'a P, static_file: ProviderSF) -> Self
+    where
+        P: AsRef<ProviderDB>,
+    {
+        Self::new(database.as_ref(), Some(static_file))
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider.
-    pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
-        Self::new(database, None)
+    pub fn from_database<P>(database: &'a P) -> Self
+    where
+        P: AsRef<ProviderDB>,
+    {
+        Self::new(database.as_ref(), None)
     }
 
     /// Returns a reference to the database writer.
     ///
     /// # Panics
     /// If the database provider is not set.
-    const fn database(&self) -> &DatabaseProvider<TX> {
+    const fn database(&self) -> &ProviderDB {
         self.database
     }
 
@@ -76,7 +79,7 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file(&self) -> &SF {
+    fn static_file(&self) -> &ProviderSF {
         self.static_file.as_ref().expect("should exist")
     }
 
@@ -84,7 +87,7 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file_mut(&mut self) -> &mut SF {
+    fn static_file_mut(&mut self) -> &mut ProviderSF {
         self.static_file.as_mut().expect("should exist")
     }
 
@@ -111,12 +114,15 @@ impl UnifiedStorageWriter<'_, (), ()> {
     /// start-up.
     ///
     /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
-    pub fn commit<DB: Database>(
-        database: DatabaseProviderRW<DB>,
+    pub fn commit<P>(
+        database: impl Into<P> + AsRef<P>,
         static_file: StaticFileProvider,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<()>
+    where
+        P: DBProvider<Tx: DbTxMut>,
+    {
         static_file.commit()?;
-        database.commit()?;
+        database.into().into_tx().commit()?;
         Ok(())
     }
 
@@ -128,19 +134,30 @@ impl UnifiedStorageWriter<'_, (), ()> {
     /// checkpoints on the next start-up.
     ///
     /// NOTE: Should only be used after unwinding data from storage!
-    pub fn commit_unwind<DB: Database>(
-        database: DatabaseProviderRW<DB>,
+    pub fn commit_unwind<P>(
+        database: impl Into<P> + AsRef<P>,
         static_file: StaticFileProvider,
-    ) -> ProviderResult<()> {
-        database.commit()?;
+    ) -> ProviderResult<()>
+    where
+        P: DBProvider<Tx: DbTxMut>,
+    {
+        database.into().into_tx().commit()?;
         static_file.commit()?;
         Ok(())
     }
 }
 
-impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, &'b StaticFileProvider>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider>
 where
-    TX: DbTxMut + DbTx,
+    ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
+        + BlockWriter
+        + TransactionsProviderExt
+        + StateChangeWriter
+        + TrieWriter
+        + HistoryWriter
+        + StageCheckpointWriter
+        + BlockExecutionWriter
+        + AsRef<ProviderDB>,
 {
     /// Writes executed blocks and receipts to storage.
     pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
@@ -235,8 +252,13 @@ where
                 self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
             let mut storage_writer =
                 UnifiedStorageWriter::from(self.database(), transactions_writer);
-            let no_hash_transactions =
-                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
+            let no_hash_transactions = block
+                .body
+                .transactions
+                .clone()
+                .into_iter()
+                .map(TransactionSignedNoHash::from)
+                .collect();
             storage_writer.append_transactions_from_blocks(
                 block.header().number,
                 std::iter::once(&no_hash_transactions),
@@ -260,16 +282,23 @@ where
 
         // Get the total txs for the block range, so we have the correct number of columns for
         // receipts and transactions
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         let tx_range = self
             .database()
-            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
+            .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
         let total_txs = tx_range.end().saturating_sub(*tx_range.start());
 
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
         self.database().remove_block_and_execution_range(
-            block_number..=self.database().last_block_number()?,
+            block_number + 1..=self.database().last_block_number()?,
         )?;
 
+        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
+        // we remove only what is ABOVE the block.
+        //
+        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+        // will have three blocks to remove, which will be block 8, 7, and 6.
         debug!(target: "provider::storage_writer", ?block_number, "Removing static file blocks above block_number");
         self.static_file()
             .get_writer(block_number, StaticFileSegment::Headers)?
@@ -289,9 +318,9 @@ where
     }
 }
 
-impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
-    TX: DbTx,
+    ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider,
 {
     /// Ensures that the static file writer is set and of the right [`StaticFileSegment`] variant.
     ///
@@ -384,7 +413,7 @@ where
 
             let mut tx_index = first_tx_index
                 .or(last_tx_idx)
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             for tx in transactions.borrow() {
                 self.static_file_mut().append_transaction(tx_index, tx)?;
@@ -400,9 +429,9 @@ where
     }
 }
 
-impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
-    TX: DbTxMut + DbTx,
+    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider,
 {
     /// Appends receipts block by block.
     ///
@@ -454,7 +483,7 @@ where
 
             let first_tx_index = first_tx_index
                 .or(last_tx_idx)
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             // update for empty blocks
             last_tx_idx = Some(first_tx_index);
@@ -481,9 +510,10 @@ where
     }
 }
 
-impl<'a, 'b, TX> StateWriter for UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> StateWriter
+    for UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
-    TX: DbTxMut + DbTx,
+    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + StateChangeWriter + HeaderProvider,
 {
     /// Write the data and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
@@ -514,15 +544,15 @@ mod tests {
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
+    use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
     use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives::{
-        keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
+    use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -540,10 +570,7 @@ mod tests {
         },
         DatabaseCommit, State,
     };
-    use std::{
-        collections::{BTreeMap, HashMap},
-        str::FromStr,
-    };
+    use std::{collections::BTreeMap, str::FromStr};
 
     #[test]
     fn wiped_entries_are_removed() {
@@ -614,7 +641,7 @@ mod tests {
         state.insert_account(address_b, account_b.clone());
 
         // 0x00.. is created
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address_a,
             RevmAccount {
                 info: account_a.clone(),
@@ -624,7 +651,7 @@ mod tests {
         )]));
 
         // 0xff.. is changed (balance + 1, nonce + 1)
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address_b,
             RevmAccount {
                 info: account_b_changed.clone(),
@@ -682,7 +709,7 @@ mod tests {
         state.insert_account(address_b, account_b_changed.clone());
 
         // 0xff.. is destroyed
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address_b,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -729,7 +756,7 @@ mod tests {
     #[test]
     fn write_to_db_storage() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address_a = Address::ZERO;
         let address_b = Address::repeat_byte(0xff);
@@ -741,10 +768,10 @@ mod tests {
         state.insert_account_with_storage(
             address_b,
             account_b.clone(),
-            HashMap::from([(U256::from(1), U256::from(1))]),
+            HashMap::from_iter([(U256::from(1), U256::from(1))]),
         );
 
-        state.commit(HashMap::from([
+        state.commit(HashMap::from_iter([
             (
                 address_a,
                 RevmAccount {
@@ -752,7 +779,7 @@ mod tests {
                     info: RevmAccountInfo::default(),
                     // 0x00 => 0 => 1
                     // 0x01 => 0 => 2
-                    storage: HashMap::from([
+                    storage: HashMap::from_iter([
                         (
                             U256::from(0),
                             EvmStorageSlot { present_value: U256::from(1), ..Default::default() },
@@ -770,7 +797,7 @@ mod tests {
                     status: AccountStatus::Touched,
                     info: account_b,
                     // 0x01 => 1 => 2
-                    storage: HashMap::from([(
+                    storage: HashMap::from_iter([(
                         U256::from(1),
                         EvmStorageSlot {
                             present_value: U256::from(2),
@@ -875,7 +902,7 @@ mod tests {
         let mut state = State::builder().with_bundle_update().build();
         state.insert_account(address_a, RevmAccountInfo::default());
 
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address_a,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -924,7 +951,7 @@ mod tests {
     #[test]
     fn write_to_db_multiple_selfdestructs() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address1 = Address::random();
         let account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
@@ -932,14 +959,14 @@ mod tests {
         // Block #0: initial state.
         let mut init_state = State::builder().with_bundle_update().build();
         init_state.insert_not_existing(address1);
-        init_state.commit(HashMap::from([(
+        init_state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 info: account_info.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
                 // 0x01 => 0 => 2
-                storage: HashMap::from([
+                storage: HashMap::from_iter([
                     (
                         U256::ZERO,
                         EvmStorageSlot { present_value: U256::from(1), ..Default::default() },
@@ -964,17 +991,17 @@ mod tests {
         state.insert_account_with_storage(
             address1,
             account_info.clone(),
-            HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
+            HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
         // Block #1: change storage.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info.clone(),
                 // 0x00 => 1 => 2
-                storage: HashMap::from([(
+                storage: HashMap::from_iter([(
                     U256::ZERO,
                     EvmStorageSlot {
                         original_value: U256::from(1),
@@ -987,7 +1014,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         // Block #2: destroy account.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -998,7 +1025,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         // Block #3: re-create account and change storage.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
@@ -1009,7 +1036,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         // Block #4: change storage.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
@@ -1017,7 +1044,7 @@ mod tests {
                 // 0x00 => 0 => 2
                 // 0x02 => 0 => 4
                 // 0x06 => 0 => 6
-                storage: HashMap::from([
+                storage: HashMap::from_iter([
                     (
                         U256::ZERO,
                         EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
@@ -1036,7 +1063,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         // Block #5: Destroy account again.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -1047,7 +1074,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         // Block #6: Create, change, destroy and re-create in the same block.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
@@ -1055,19 +1082,19 @@ mod tests {
                 storage: HashMap::default(),
             },
         )]));
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info.clone(),
                 // 0x00 => 0 => 2
-                storage: HashMap::from([(
+                storage: HashMap::from_iter([(
                     U256::ZERO,
                     EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                 )]),
             },
         )]));
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -1075,7 +1102,7 @@ mod tests {
                 storage: HashMap::default(),
             },
         )]));
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
@@ -1086,13 +1113,13 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         // Block #7: Change storage.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info,
                 // 0x00 => 0 => 9
-                storage: HashMap::from([(
+                storage: HashMap::from_iter([(
                     U256::ZERO,
                     EvmStorageSlot { present_value: U256::from(9), ..Default::default() },
                 )]),
@@ -1239,7 +1266,7 @@ mod tests {
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address1 = Address::random();
         let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
@@ -1247,14 +1274,14 @@ mod tests {
         // Block #0: initial state.
         let mut init_state = State::builder().with_bundle_update().build();
         init_state.insert_not_existing(address1);
-        init_state.commit(HashMap::from([(
+        init_state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 info: account1.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
                 // 0x01 => 0 => 2
-                storage: HashMap::from([
+                storage: HashMap::from_iter([
                     (
                         U256::ZERO,
                         EvmStorageSlot { present_value: U256::from(1), ..Default::default() },
@@ -1278,11 +1305,11 @@ mod tests {
         state.insert_account_with_storage(
             address1,
             account1.clone(),
-            HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
+            HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
         // Block #1: Destroy, re-create, change storage.
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -1291,7 +1318,7 @@ mod tests {
             },
         )]));
 
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
@@ -1300,13 +1327,13 @@ mod tests {
             },
         )]));
 
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
                 info: account1,
                 // 0x01 => 0 => 5
-                storage: HashMap::from([(
+                storage: HashMap::from_iter([(
                     U256::from(1),
                     EvmStorageSlot { present_value: U256::from(5), ..Default::default() },
                 )]),
@@ -1389,7 +1416,7 @@ mod tests {
             .collect();
 
         let provider_factory = create_test_provider_factory();
-        let provider_rw = provider_factory.provider_rw().unwrap();
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
 
         // insert initial state to the database
         let tx = provider_rw.tx_ref();
@@ -1438,7 +1465,7 @@ mod tests {
         let address1 = Address::with_last_byte(1);
         let account1_old = prestate.remove(&address1).unwrap();
         state.insert_account(address1, account1_old.0.into());
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
@@ -1458,12 +1485,12 @@ mod tests {
         state.insert_account_with_storage(
             address2,
             account2.0.into(),
-            HashMap::from([(slot2, account2_slot2_old_value)]),
+            HashMap::from_iter([(slot2, account2_slot2_old_value)]),
         );
 
         let account2_slot2_new_value = U256::from(100);
         account2.1.insert(slot2_key, account2_slot2_new_value);
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address2,
             RevmAccount {
                 status: AccountStatus::Touched,
@@ -1483,7 +1510,7 @@ mod tests {
         state.insert_account(address3, account3.0.into());
 
         account3.0.balance = U256::from(24);
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address3,
             RevmAccount {
                 status: AccountStatus::Touched,
@@ -1500,7 +1527,7 @@ mod tests {
         state.insert_account(address4, account4.0.into());
 
         account4.0.nonce = 128;
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address4,
             RevmAccount {
                 status: AccountStatus::Touched,
@@ -1515,7 +1542,7 @@ mod tests {
         let account1_new =
             Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(B256::random()) };
         prestate.insert(address1, (account1_new, BTreeMap::default()));
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
@@ -1531,7 +1558,7 @@ mod tests {
         let slot20_key = B256::from(slot20);
         let account1_slot20_value = U256::from(12345);
         prestate.get_mut(&address1).unwrap().1.insert(slot20_key, account1_slot20_value);
-        state.commit(HashMap::from([(
+        state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,

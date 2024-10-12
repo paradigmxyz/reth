@@ -14,18 +14,19 @@ workspace = true
 
 [dependencies]
 # reth
-reth-provider = { workspace = true }
 reth-cli-runner.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-cli-util.workspace = true
 reth-node-core.workspace = true
 reth-node-api.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-primitives = { workspace = true, features = ["alloy-compat"] }
 reth-tracing.workspace = true
 
 # alloy
-alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
+alloy-provider = { workspace = true, features = [
+    "engine-api",
+    "reqwest-rustls-tls",
+], default-features = false }
 alloy-rpc-types-engine.workspace = true
 alloy-transport.workspace = true
 alloy-transport-http.workspace = true
@@ -34,8 +35,8 @@ alloy-transport-ipc.workspace = true
 alloy-pubsub.workspace = true
 alloy-json-rpc.workspace = true
 alloy-rpc-client.workspace = true
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-primitives.workspace = true
 
 # reqwest
 reqwest = { workspace = true, default-features = false, features = [
@@ -50,7 +51,6 @@ tracing.workspace = true
 
 # io
 serde.workspace = true
-serde_json.workspace = true
 
 # async
 tokio = { workspace = true, features = [
@@ -59,7 +59,6 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
-tokio-util.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 
@@ -71,10 +70,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 # for writing data
 csv = "1.3.0"
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5.0", optional = true }
-libc = "0.2"
-
 [dev-dependencies]
 reth-tracing.workspace = true
 
@@ -83,8 +78,9 @@ default = ["jemalloc"]
 
 asm-keccak = ["reth-primitives/asm-keccak"]
 
-jemalloc = ["dep:tikv-jemallocator"]
-jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+jemalloc = ["reth-cli-util/jemalloc"]
+jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
@@ -92,11 +88,7 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-node-core/optimism",
-]
+optimism = ["reth-primitives/optimism", "reth-node-core/optimism"]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

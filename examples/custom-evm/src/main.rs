@@ -3,40 +3,56 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
+use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    primitives::{
-        address,
-        revm_primitives::{Env, PrecompileResult},
-        Bytes,
+    builder::{
+        components::{ExecutorBuilder, PayloadServiceBuilder},
+        BuilderContext, NodeBuilder,
     },
+    payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
+    primitives::revm_primitives::{Env, PrecompileResult},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
+        primitives::BlockEnv,
         ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
+    rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
+    transaction_pool::TransactionPool,
 };
-use reth_chainspec::{Chain, ChainSpec, Head};
+use reth_chainspec::{Chain, ChainSpec};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
+use reth_node_api::{
+    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
+    NodeTypesWithEngine, PayloadTypes,
+};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
     EthExecutorProvider, EthereumNode,
 };
 use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, Header, TransactionSigned, U256,
+    revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
+    Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
 /// Custom EVM configuration
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct MyEvmConfig;
+pub struct MyEvmConfig {
+    /// Wrapper around mainnet configuration
+    inner: EthEvmConfig,
+}
+
+impl MyEvmConfig {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: EthEvmConfig::new(chain_spec) }
+    }
+}
 
 impl MyEvmConfig {
     /// Sets the precompiles to the EVM handler
@@ -70,32 +86,10 @@ impl MyEvmConfig {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
-        header: &Header,
-        total_difficulty: U256,
-    ) {
-        let spec_id = reth_evm_ethereum::revm_spec(
-            chain_spec,
-            &Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                hash: Default::default(),
-            },
-        );
-
-        cfg_env.chain_id = chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
-
-        cfg_env.handler_cfg.spec_id = spec_id;
-    }
+    type Header = Header;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
+        self.inner.fill_tx_env(tx_env, transaction, sender);
     }
 
     fn fill_tx_env_system_contract_call(
@@ -105,7 +99,24 @@ impl ConfigureEvmEnv for MyEvmConfig {
         contract: Address,
         data: Bytes,
     ) {
-        EthEvmConfig::default().fill_tx_env_system_contract_call(env, caller, contract, data)
+        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
+    }
+
+    fn fill_cfg_env(
+        &self,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
+        header: &Self::Header,
+        total_difficulty: U256,
+    ) {
+        self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
+    }
+
+    fn next_cfg_and_block_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
 
@@ -144,7 +155,7 @@ pub struct MyExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type EVM = MyEvmConfig;
     type Executor = EthExecutorProvider<Self::EVM>;
@@ -154,12 +165,38 @@ where
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         Ok((
-            MyEvmConfig::default(),
-            EthExecutorProvider::new(ctx.chain_spec(), MyEvmConfig::default()),
+            MyEvmConfig::new(ctx.chain_spec()),
+            EthExecutorProvider::new(ctx.chain_spec(), MyEvmConfig::new(ctx.chain_spec())),
         ))
     }
 }
 
+/// Builds a regular ethereum block executor that uses the custom EVM.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct MyPayloadBuilder {
+    inner: EthereumPayloadBuilder,
+}
+
+impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for MyPayloadBuilder
+where
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
+    Pool: TransactionPool + Unpin + 'static,
+    Types::Engine: PayloadTypes<
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = PayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<reth::payload::PayloadBuilderHandle<Types::Engine>> {
+        self.inner.spawn(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    }
+}
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
@@ -187,9 +224,9 @@ async fn main() -> eyre::Result<()> {
         .with_components(
             EthereumNode::components()
                 .executor(MyExecutorBuilder::default())
-                .payload(EthereumPayloadBuilder::new(MyEvmConfig::default())),
+                .payload(MyPayloadBuilder::default()),
         )
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .launch()
         .await
         .unwrap();

@@ -22,6 +22,10 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+alloy-genesis.workspace = true
+
 # codecs
 modular-bitfield.workspace = true
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
@@ -41,26 +45,15 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 
 rand.workspace = true
 
 test-fuzz.workspace = true
 
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
-criterion.workspace = true
-iai-callgrind.workspace = true
-
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-
-
-assert_matches.workspace = true
 
 [features]
 test-utils = ["arbitrary"]

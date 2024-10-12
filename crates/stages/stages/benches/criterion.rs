@@ -2,17 +2,19 @@
 use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
 #[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
+use reth_chainspec::ChainSpec;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 
-use reth_primitives::BlockNumber;
+use alloy_primitives::BlockNumber;
+use reth_provider::{DatabaseProvider, DatabaseProviderFactory};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
     StageCheckpoint,
 };
 use reth_stages_api::{ExecInput, Stage, StageExt, UnwindInput};
-use std::{ops::RangeInclusive, sync::Arc};
+use std::ops::RangeInclusive;
 use tokio::runtime::Runtime;
 
 mod setup;
@@ -146,7 +148,7 @@ fn measure_stage<F, S>(
     block_interval: RangeInclusive<BlockNumber>,
     label: String,
 ) where
-    S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>,
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
     F: Fn(S, &TestStageDB, StageRange),
 {
     let stage_range = (
@@ -170,7 +172,7 @@ fn measure_stage<F, S>(
             },
             |_| async {
                 let mut stage = stage.clone();
-                let provider = db.factory.provider_rw().unwrap();
+                let provider = db.factory.database_provider_rw().unwrap();
                 stage
                     .execute_ready(input)
                     .await

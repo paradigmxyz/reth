@@ -1,21 +1,23 @@
 //! Command that initializes the node from a genesis file.
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use alloy_primitives::B256;
 use clap::Parser;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
-use reth_db_api::database::Database;
 use reth_db_common::init::init_from_state_dump;
-use reth_primitives::B256;
-use reth_provider::ProviderFactory;
+use reth_node_builder::NodeTypesWithEngine;
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct InitStateCommand {
+pub struct InitStateCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    pub env: EnvironmentArgs<C>,
 
     /// JSONL file with state dump.
     ///
@@ -35,15 +37,17 @@ pub struct InitStateCommand {
     /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
     /// and including the non-genesis block to init chain at. See 'import' command.
     #[arg(value_name = "STATE_DUMP_FILE", verbatim_doc_comment)]
-    state: PathBuf,
+    pub state: PathBuf,
 }
 
-impl InitStateCommand {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateCommand<C> {
     /// Execute the `init` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         info!(target: "reth::cli", "Initiating state dump");
 
@@ -55,9 +59,9 @@ impl InitStateCommand {
 }
 
 /// Initialize chain with state at specific block, from a file with state dump.
-pub fn init_at_state<DB: Database>(
+pub fn init_at_state<N: ProviderNodeTypes>(
     state_dump_path: PathBuf,
-    factory: ProviderFactory<DB>,
+    factory: ProviderFactory<N>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     info!(target: "reth::cli",
@@ -67,5 +71,9 @@ pub fn init_at_state<DB: Database>(
     let file = File::open(state_dump_path)?;
     let reader = BufReader::new(file);
 
-    init_from_state_dump(reader, factory, etl_config)
+    let provider_rw = factory.provider_rw()?;
+    let hash = init_from_state_dump(reader, &provider_rw.0, etl_config)?;
+    provider_rw.commit()?;
+
+    Ok(hash)
 }

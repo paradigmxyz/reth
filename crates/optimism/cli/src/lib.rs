@@ -18,39 +18,52 @@ pub mod commands;
 ///
 /// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
 ///
-/// Currently configured to use codec [`HackReceipt`](file_codec_ovm_receipt::HackReceipt) based on
+/// Currently configured to use codec [`HackReceipt`](receipt_file_codec::HackReceipt) based on
 /// export of below Bedrock data using <https://github.com/testinprod-io/op-geth/pull/1>. Codec can
 /// be replaced with regular encoding of receipts for export.
 ///
 /// NOTE: receipts can be exported using regular op-geth encoding for `Receipt` type, to fit
 /// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `HackReceipt` type (originally
 /// made for op-erigon's import needs).
-pub mod file_codec_ovm_receipt;
+pub mod receipt_file_codec;
 
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
+use reth_optimism_chainspec::OpChainSpec;
 
 use std::{ffi::OsString, fmt, sync::Arc};
 
 use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
-use reth_chainspec::ChainSpec;
+use futures_util::Future;
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
+use reth_cli_runner::CliRunner;
+use reth_db::DatabaseEnv;
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{utils::chain_help, LogArgs},
+    args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
+use reth_optimism_evm::OpExecutorProvider;
+use reth_optimism_node::OptimismNode;
+use reth_tracing::FileWorkerGuard;
+use tracing::info;
 
-/// The main reth cli interface.
+// This allows us to manually enable node metrics features, required for proper jemalloc metric
+// reporting
+use reth_node_metrics as _;
+
+/// The main op-reth cli interface.
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Ext>,
+    command: Commands<Spec, Ext>,
 
     /// The chain this node is running.
     ///
@@ -58,12 +71,12 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = OpChainSpecParser::SUPPORTED_CHAINS[0],
-        value_parser = OpChainSpecParser::default(),
+        long_help = Spec::help_message(),
+        default_value = Spec::SUPPORTED_CHAINS[0],
+        value_parser = Spec::parser(),
         global = true,
     )]
-    chain: Arc<ChainSpec>,
+    chain: Arc<Spec::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -98,5 +111,95 @@ impl Cli {
         T: Into<OsString> + Clone,
     {
         Self::try_parse_from(itr)
+    }
+}
+
+impl<C, Ext> Cli<C, Ext>
+where
+    C: ChainSpecParser<ChainSpec = OpChainSpec>,
+    Ext: clap::Args + fmt::Debug,
+{
+    /// Execute the configured cli command.
+    ///
+    /// This accepts a closure that is used to launch the node via the
+    /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
+    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        // add network name to logs dir
+        self.logs.log_file_directory =
+            self.logs.log_file_directory.join(self.chain.chain().to_string());
+
+        let _guard = self.init_tracing()?;
+        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
+        let runner = CliRunner::default();
+        match self.command {
+            Commands::Node(command) => {
+                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
+            }
+            Commands::Init(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+            }
+            Commands::InitState(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+            }
+            Commands::ImportOp(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+            }
+            Commands::ImportReceiptsOp(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+            }
+            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+            }
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
+                command.execute::<OptimismNode, _, _>(ctx, OpExecutorProvider::optimism)
+            }),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Recover(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<OptimismNode>(ctx))
+            }
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OptimismNode>()),
+        }
+    }
+
+    /// Initializes tracing with the configured options.
+    ///
+    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
+    /// that all logs are flushed to disk.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        let guard = self.logs.init_tracing()?;
+        Ok(guard)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::chainspec::OpChainSpecParser;
+    use clap::Parser;
+    use reth_cli_commands::{node::NoArgs, NodeCommand};
+    use reth_optimism_chainspec::OP_DEV;
+
+    #[test]
+    fn parse_dev() {
+        let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
+        let chain = OP_DEV.clone();
+        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
+        assert_eq!(cmd.chain.hardforks, chain.hardforks);
+
+        assert!(cmd.rpc.http);
+        assert!(cmd.network.discovery.disable_discovery);
+
+        assert!(cmd.dev.dev);
     }
 }

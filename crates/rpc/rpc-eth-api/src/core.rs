@@ -1,41 +1,45 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
-
 use alloy_dyn_abi::TypedData;
+use alloy_eips::eip2930::AccessListResult;
 use alloy_json_rpc::RpcObject;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, types::ErrorObjectOwned};
-use reth_primitives::{
-    transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
-};
-use reth_rpc_eth_types::{utils::binary_search, EthApiError};
-use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
-use reth_rpc_types::{
+use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
+use alloy_rpc_types::{
     serde_helpers::JsonStorageKey,
-    simulate::{SimBlock, SimulatedBlock},
+    simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AnyTransactionReceipt, BlockOverrides, BlockTransactions, Bundle, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
+    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
+    Index, StateContext, SyncStatus, Work,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use alloy_rpc_types_eth::transaction::TransactionRequest;
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_primitives::{BlockId, BlockNumberOrTag};
+use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
 
 use crate::{
-    helpers::{
-        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi, LoadState,
-    },
-    RpcBlock, RpcTransaction,
+    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    RpcBlock, RpcReceipt, RpcTransaction,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
 pub trait FullEthApiServer:
-    EthApiServer<RpcTransaction<Self::NetworkTypes>, RpcBlock<Self::NetworkTypes>> + FullEthApi + Clone
+    EthApiServer<
+        RpcTransaction<Self::NetworkTypes>,
+        RpcBlock<Self::NetworkTypes>,
+        RpcReceipt<Self::NetworkTypes>,
+    > + FullEthApi
+    + Clone
 {
 }
 
 impl<T> FullEthApiServer for T where
-    T: EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>>
-        + FullEthApi
+    T: EthApiServer<
+            RpcTransaction<T::NetworkTypes>,
+            RpcBlock<T::NetworkTypes>,
+            RpcReceipt<T::NetworkTypes>,
+        > + FullEthApi
         + Clone
 {
 }
@@ -43,7 +47,7 @@ impl<T> FullEthApiServer for T where
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<T: RpcObject, B: RpcObject> {
+pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -100,10 +104,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
-    async fn block_receipts(
-        &self,
-        block_id: BlockId,
-    ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>>;
+    async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<R>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
@@ -171,7 +172,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
-    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<R>>;
 
     /// Returns the balance of the account of given address.
     #[method(name = "getBalance")]
@@ -211,9 +212,9 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
     #[method(name = "simulateV1")]
     async fn simulate_v1(
         &self,
-        opts: SimBlock,
+        opts: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>>;
+    ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
@@ -276,7 +277,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<reth_rpc_types::Account>>;
+    ) -> RpcResult<Option<alloy_rpc_types::Account>>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -361,7 +362,12 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 }
 
 #[async_trait::async_trait]
-impl<T> EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>> for T
+impl<T>
+    EthApiServer<
+        RpcTransaction<T::NetworkTypes>,
+        RpcBlock<T::NetworkTypes>,
+        RpcReceipt<T::NetworkTypes>,
+    > for T
 where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
@@ -457,7 +463,7 @@ where
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>> {
+    ) -> RpcResult<Option<Vec<RpcReceipt<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
         Ok(EthBlocks::block_receipts(self, block_id).await?)
     }
@@ -494,7 +500,9 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+        Ok(EthTransactions::transaction_by_hash(self, hash)
+            .await?
+            .map(|tx| tx.into_transaction::<T::TransactionCompat>()))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
@@ -552,59 +560,15 @@ where
         nonce: U64,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
-        let nonce = nonce.to::<u64>();
-
-        // Check the pool first
-        if let Some(tx) = LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce) {
-            let transaction = tx.transaction.clone().into_consensus();
-            return Ok(Some(reth_rpc_types_compat::transaction::from_recovered(transaction)))
-        }
-
-        // Check if the sender is a contract
-        if self.get_code(sender, None).await?.len() > 0 {
-            return Ok(None)
-        }
-
-        let highest = EthState::transaction_count(self, sender, None).await?.saturating_to::<u64>();
-
-        // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
-        // exists.
-        if nonce >= highest {
-            return Ok(None)
-        }
-
-        // perform a binary search over the block range to find the block in which the sender's
-        // nonce reached the requested nonce.
-        let num = binary_search::<_, _, ErrorObjectOwned>(
-            1,
-            self.block_number()?.saturating_to(),
-            |mid| {
-                async move {
-                    let mid_nonce = EthState::transaction_count(self, sender, Some(mid.into()))
-                        .await?
-                        .saturating_to::<u64>();
-
-                    // The `transaction_count` returns the `nonce` after the transaction was
-                    // executed, which is the state of the account after the block, and we need to
-                    // find the transaction whose nonce is the pre-state, so
-                    // need to compare with `nonce`(no equal).
-                    Ok(mid_nonce > nonce)
-                }
-            },
-        )
-        .await?;
-
-        let Some(BlockTransactions::Full(transactions)) =
-            self.block_by_number(num.into(), true).await?.map(|block| block.transactions)
-        else {
-            return Err(EthApiError::UnknownBlockNumber.into());
-        };
-
-        Ok(transactions.into_iter().find(|tx| *tx.from == *sender && tx.nonce == nonce))
+        Ok(EthTransactions::get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true)
+            .await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>> {
+    async fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<RpcReceipt<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
         Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
@@ -657,11 +621,11 @@ where
     /// Handler for: `eth_simulateV1`
     async fn simulate_v1(
         &self,
-        opts: SimBlock,
+        payload: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>> {
+    ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
-        Ok(EthCall::simulate_v1(self, opts, block_number).await?)
+        Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
     /// Handler for: `eth_call`
@@ -731,7 +695,7 @@ where
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<reth_rpc_types::Account>> {
+    ) -> RpcResult<Option<alloy_rpc_types::Account>> {
         trace!(target: "rpc::eth", "Serving eth_getAccount");
         Ok(EthState::get_account(self, address, block).await?)
     }

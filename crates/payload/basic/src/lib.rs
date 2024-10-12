@@ -9,17 +9,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
-    PayloadJobGenerator,
+    database::CachedReads, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
 };
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -27,10 +27,7 @@ use reth_provider::{
 use reth_revm::state_change::post_block_withdrawals_balance_increments;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::{
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Database, State,
-};
+use revm::{Database, State};
 use std::{
     fmt,
     future::Future,
@@ -61,8 +58,6 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     config: BasicPayloadJobGeneratorConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
-    /// The chain spec.
-    chain_spec: Arc<ChainSpec>,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -81,7 +76,6 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
-        chain_spec: Arc<ChainSpec>,
         builder: Builder,
     ) -> Self {
         Self {
@@ -90,7 +84,6 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             executor,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
-            chain_spec,
             builder,
             pre_cached: None,
         }
@@ -166,12 +159,8 @@ where
             block.seal(attributes.parent())
         };
 
-        let config = PayloadConfig::new(
-            Arc::new(parent_block),
-            self.config.extradata.clone(),
-            attributes,
-            Arc::clone(&self.chain_spec),
-        );
+        let config =
+            PayloadConfig::new(Arc::new(parent_block), self.config.extradata.clone(), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -362,7 +351,7 @@ where
 {
     /// Spawns a new payload build task.
     fn spawn_build_job(&mut self) {
-        trace!(target: "payload_builder", "spawn new payload build task");
+        trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let client = self.client.clone();
         let pool = self.pool.clone();
@@ -673,18 +662,12 @@ impl Drop for Cancelled {
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
 pub struct PayloadConfig<Attributes> {
-    /// Pre-configured block environment.
-    pub initialized_block_env: BlockEnv,
-    /// Configuration for the environment.
-    pub initialized_cfg: CfgEnvWithHandlerCfg,
     /// The parent block.
     pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
     pub extra_data: Bytes,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
-    /// The chain spec.
-    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl<Attributes> PayloadConfig<Attributes> {
@@ -699,24 +682,12 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub fn new(
+    pub const fn new(
         parent_block: Arc<SealedBlock>,
         extra_data: Bytes,
         attributes: Attributes,
-        chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
-            attributes.cfg_and_block_env(&chain_spec, &parent_block);
-
-        Self {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            extra_data,
-            attributes,
-            chain_spec,
-        }
+        Self { parent_block, extra_data, attributes }
     }
 
     /// Returns the payload id.
@@ -746,6 +717,31 @@ pub enum BuildOutcome<Payload> {
     Cancelled,
 }
 
+impl<Payload> BuildOutcome<Payload> {
+    /// Consumes the type and returns the payload if the outcome is `Better`.
+    pub fn into_payload(self) -> Option<Payload> {
+        match self {
+            Self::Better { payload, .. } => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// Returns true if the outcome is `Better`.
+    pub const fn is_better(&self) -> bool {
+        matches!(self, Self::Better { .. })
+    }
+
+    /// Returns true if the outcome is `Aborted`.
+    pub const fn is_aborted(&self) -> bool {
+        matches!(self, Self::Aborted { .. })
+    }
+
+    /// Returns true if the outcome is `Cancelled`.
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+}
+
 /// A collection of arguments used for building payloads.
 ///
 /// This struct encapsulates the essential components and configuration required for the payload
@@ -756,6 +752,8 @@ pub struct BuildArguments<Pool, Client, Attributes, Payload> {
     /// How to interact with the chain.
     pub client: Client,
     /// The transaction pool.
+    ///
+    /// Or the type that provides the transactions to build the payload.
     pub pool: Pool,
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
@@ -778,6 +776,18 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
         best_payload: Option<Payload>,
     ) -> Self {
         Self { client, pool, cached_reads, config, cancel, best_payload }
+    }
+
+    /// Maps the transaction pool to a new type.
+    pub fn with_pool<P>(self, pool: P) -> BuildArguments<P, Client, Attributes, Payload> {
+        BuildArguments {
+            client: self.client,
+            pool,
+            cached_reads: self.cached_reads,
+            config: self.config,
+            cancel: self.cancel,
+            best_payload: self.best_payload,
+        }
     }
 }
 

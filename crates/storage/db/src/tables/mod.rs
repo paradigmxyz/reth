@@ -19,19 +19,19 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 #[cfg(feature = "mdbx")]
 pub(crate) mod utils;
 
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_db_api::{
     models::{
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
-        client_version::ClientVersion,
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
+        AccountBeforeTx, ClientVersion, CompactU256, ShardedKey, StoredBlockBodyIndices,
+        StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, Receipt, Requests, StorageEntry,
-    TransactionSignedNoHash, TxHash, TxNumber, B256,
+    Account, Bytecode, Header, Receipt, Requests, StorageEntry, TransactionSignedNoHash,
 };
 use reth_primitives_traits::IntegerList;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -416,6 +416,8 @@ tables! {
 pub enum ChainStateKey {
     /// Last finalized block key
     LastFinalizedBlock,
+    /// Last finalized block key
+    LastSafeBlockBlock,
 }
 
 impl Encode for ChainStateKey {
@@ -424,16 +426,17 @@ impl Encode for ChainStateKey {
     fn encode(self) -> Self::Encoded {
         match self {
             Self::LastFinalizedBlock => [0],
+            Self::LastSafeBlockBlock => [1],
         }
     }
 }
 
 impl Decode for ChainStateKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
-        if value.as_ref() == [0] {
-            Ok(Self::LastFinalizedBlock)
-        } else {
-            Err(reth_db_api::DatabaseError::Decode)
+    fn decode(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
+        match value {
+            [0] => Ok(Self::LastFinalizedBlock),
+            [1] => Ok(Self::LastSafeBlockBlock),
+            _ => Err(reth_db_api::DatabaseError::Decode),
         }
     }
 }

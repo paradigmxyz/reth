@@ -1,6 +1,6 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 
 /// Noop trie cursor factory.

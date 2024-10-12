@@ -4,13 +4,15 @@ use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
+use reth_chainspec::EthereumHardforks;
 use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables};
 use reth_db_api::database::Database;
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::providers::StaticFileProvider;
-use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
+use reth_provider::providers::{ProviderNodeTypes, StaticFileProvider};
+use reth_static_file_types::SegmentRangeInclusive;
 use std::{sync::Arc, time::Duration};
 
 #[derive(Parser, Debug)]
@@ -36,10 +38,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `db stats` command
-    pub fn execute(
+    pub fn execute<N: NodeTypesWithEngine<ChainSpec: EthereumHardforks>>(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<Arc<DatabaseEnv>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -58,7 +60,10 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
+    fn db_stats_table<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>>(
+        &self,
+        tool: &DbTool<N>,
+    ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header([
@@ -168,7 +173,7 @@ impl Command {
         }
 
         let static_files = iter_static_files(data_dir.static_files())?;
-        let static_file_provider = StaticFileProvider::read_only(data_dir.static_files())?;
+        let static_file_provider = StaticFileProvider::read_only(data_dir.static_files(), false)?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;
@@ -186,7 +191,7 @@ impl Command {
             ) = (0, 0, 0, 0, 0, 0);
 
             for (block_range, tx_range) in &ranges {
-                let fixed_block_range = find_fixed_range(block_range.start());
+                let fixed_block_range = static_file_provider.find_fixed_range(block_range.start());
                 let jar_provider = static_file_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .ok_or_else(|| {
@@ -244,6 +249,12 @@ impl Command {
                 total_index_size += index_size;
                 total_offsets_size += offsets_size;
                 total_config_size += config_size;
+
+                // Manually drop provider, otherwise removal from cache will deadlock.
+                drop(jar_provider);
+
+                // Removes from cache, since if we have many files, it may hit ulimit limits
+                static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
             }
 
             if !self.detailed_segments {
@@ -252,10 +263,18 @@ impl Command {
 
                 let block_range =
                     SegmentRangeInclusive::new(first_ranges.0.start(), last_ranges.0.end());
-                let tx_range = first_ranges
-                    .1
-                    .zip(last_ranges.1)
-                    .map(|(first, last)| SegmentRangeInclusive::new(first.start(), last.end()));
+
+                // Transaction ranges can be empty, so we need to find the first and last which are
+                // not.
+                let tx_range = {
+                    let start = ranges
+                        .iter()
+                        .find_map(|(_, tx_range)| tx_range.map(|r| r.start()))
+                        .unwrap_or_default();
+                    let end =
+                        ranges.iter().rev().find_map(|(_, tx_range)| tx_range.map(|r| r.end()));
+                    end.map(|end| SegmentRangeInclusive::new(start, end))
+                };
 
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
@@ -306,7 +325,7 @@ impl Command {
         Ok(table)
     }
 
-    fn checksum_report(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
+    fn checksum_report<N: ProviderNodeTypes>(&self, tool: &DbTool<N>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use alloy_primitives::B256;
 use auto_impl::auto_impl;
-use reth_primitives::B256;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::updates::{StorageTrieUpdates, TrieUpdates};
 

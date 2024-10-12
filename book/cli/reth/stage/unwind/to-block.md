@@ -4,6 +4,8 @@ Unwinds the database from the latest block, until the given block number or hash
 
 ```bash
 $ reth stage unwind to-block --help
+```
+```txt
 Usage: reth stage unwind to-block [OPTIONS] <TARGET>
 
 Arguments:

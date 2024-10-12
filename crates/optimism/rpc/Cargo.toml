@@ -13,14 +13,12 @@ workspace = true
 
 [dependencies]
 # reth
-reth-evm-optimism.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
-reth-rpc-types.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
@@ -29,9 +27,20 @@ reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 
+# op-reth
+reth-optimism-chainspec.workspace = true
+reth-optimism-consensus.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-forks.workspace = true
+
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
 op-alloy-network.workspace = true
+op-alloy-rpc-types.workspace = true
+op-alloy-consensus.workspace = true
 revm.workspace = true
 
 # async
@@ -46,12 +55,15 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+derive_more.workspace = true
+
+[dev-dependencies]
+reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = [
-    "reth-evm-optimism/optimism",
+    "reth-optimism-evm/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "reth-rpc-eth-api/optimism",
     "revm/optimism",
 ]

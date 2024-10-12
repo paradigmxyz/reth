@@ -1,20 +1,20 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_primitives::{Bytes, B256};
-
-use reth_evm_optimism::RethL1BlockInfo;
+use alloy_rpc_types::TransactionInfo;
+use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::TransactionSigned;
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, FromEthApiError,
+    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    FromEthApiError, FullEthApiTypes, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
-use revm::L1BlockInfo;
 
-use crate::{eth::rpc::SequencerClient, OpEthApi, OpEthApiError};
+use crate::{OpEthApi, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
@@ -34,7 +34,8 @@ where
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(tx.clone())?;
-        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        let pool_transaction =
+            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered.into());
 
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
@@ -58,7 +59,7 @@ where
 
 impl<N> LoadTransaction for OpEthApi<N>
 where
-    Self: SpawnBlocking,
+    Self: SpawnBlocking + FullEthApiTypes,
     N: FullNodeComponents,
 {
     type Pool = N::Pool;
@@ -76,78 +77,56 @@ where
     }
 }
 
-/// L1 fee and data gas for a transaction, along with the L1 block info.
-#[derive(Debug, Default, Clone)]
-pub struct OptimismTxMeta {
-    /// The L1 block info.
-    pub l1_block_info: Option<L1BlockInfo>,
-    /// The L1 fee for the block.
-    pub l1_fee: Option<u128>,
-    /// The L1 data gas for the block.
-    pub l1_data_gas: Option<u128>,
-}
-
-impl OptimismTxMeta {
-    /// Creates a new [`OptimismTxMeta`].
-    pub const fn new(
-        l1_block_info: Option<L1BlockInfo>,
-        l1_fee: Option<u128>,
-        l1_data_gas: Option<u128>,
-    ) -> Self {
-        Self { l1_block_info, l1_fee, l1_data_gas }
-    }
-}
-
 impl<N> OpEthApi<N>
 where
-    Self: EthApiSpec + LoadTransaction,
-    <Self as EthApiTypes>::Error: From<OpEthApiError>,
     N: FullNodeComponents,
 {
-    /// Builds [`OptimismTxMeta`] object using the provided [`TransactionSigned`], L1 block
-    /// info and block timestamp. The [`L1BlockInfo`] is used to calculate the l1 fee and l1 data
-    /// gas for the transaction. If the [`L1BlockInfo`] is not provided, the meta info will be
-    /// empty.
-    pub fn build_op_tx_meta(
+    /// Sets a [`SequencerClient`] for `eth_sendRawTransaction` to forward transactions to.
+    pub fn set_sequencer_client(
         &self,
-        tx: &TransactionSigned,
-        l1_block_info: Option<L1BlockInfo>,
-        block_timestamp: u64,
-    ) -> Result<OptimismTxMeta, <Self as EthApiTypes>::Error> {
-        let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
+        sequencer_client: SequencerClient,
+    ) -> Result<(), tokio::sync::SetError<SequencerClient>> {
+        self.sequencer_client.set(sequencer_client)
+    }
 
-        let (l1_fee, l1_data_gas) = if tx.is_deposit() {
-            (None, None)
-        } else {
-            let envelope_buf = tx.envelope_encoded();
-
-            let inner_l1_fee = l1_block_info
-                .l1_tx_data_fee(&self.chain_spec(), block_timestamp, &envelope_buf, tx.is_deposit())
-                .map_err(|_| OpEthApiError::L1BlockFeeError)?;
-            let inner_l1_data_gas = l1_block_info
-                .l1_data_gas(&self.chain_spec(), block_timestamp, &envelope_buf)
-                .map_err(|_| OpEthApiError::L1BlockGasError)?;
-            (
-                Some(inner_l1_fee.saturating_to::<u128>()),
-                Some(inner_l1_data_gas.saturating_to::<u128>()),
-            )
-        };
-
-        Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+    /// Returns the [`SequencerClient`] if one is set.
+    pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
+        self.sequencer_client.get().cloned()
     }
 }
 
-impl<N> OpEthApi<N>
-where
-    N: FullNodeComponents,
-{
-    /// Sets a `SequencerClient` for `eth_sendRawTransaction` to forward transactions to.
-    pub fn set_sequencer_client(&self, sequencer_client: SequencerClient) {
-        *self.sequencer_client.write() = Some(sequencer_client);
+/// Builds OP transaction response type.
+#[derive(Clone, Debug, Copy)]
+pub struct OpTxBuilder;
+
+impl TransactionCompat for OpTxBuilder {
+    type Transaction = Transaction;
+
+    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+        let signed_tx = tx.clone().into_signed();
+
+        let mut inner = EthTxBuilder::fill(tx, tx_info).inner;
+
+        if signed_tx.is_deposit() {
+            inner.gas_price = Some(signed_tx.max_fee_per_gas())
+        }
+
+        Transaction {
+            inner,
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint(),
+            // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
+            is_system_tx: (signed_tx.is_deposit() && signed_tx.is_system_transaction())
+                .then_some(true),
+            deposit_receipt_version: None, // todo: how to fill this field?
+        }
     }
 
-    /// Returns the `SequencerClient` if one is set.
-    pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.read().clone()
+    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
+        tx.inner.input = tx.inner.input.slice(..4);
+    }
+
+    fn tx_type(tx: &Self::Transaction) -> u8 {
+        tx.inner.transaction_type.unwrap_or_default()
     }
 }

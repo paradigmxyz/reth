@@ -5,15 +5,16 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
+use alloy_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    hex,
+};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
 use reth_metrics::metrics::counter;
-use reth_primitives::{
-    bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex, GotExpected,
-};
+use reth_primitives::GotExpected;
 use std::{
     collections::VecDeque,
     io,
@@ -613,24 +614,25 @@ where
     /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
-        let poll_res = loop {
-            match this.inner.as_mut().poll_ready(cx) {
-                Poll::Pending => break Poll::Pending,
-                Poll::Ready(Err(err)) => break Poll::Ready(Err(err.into())),
-                Poll::Ready(Ok(())) => {
+        loop {
+            match ready!(this.inner.as_mut().poll_flush(cx)) {
+                Err(err) => {
+                    trace!(target: "net::p2p",
+                        %err,
+                        "error flushing p2p stream"
+                    );
+                    return Poll::Ready(Err(err.into()))
+                }
+                Ok(()) => {
                     let Some(message) = this.outgoing_messages.pop_front() else {
-                        break Poll::Ready(Ok(()))
+                        return Poll::Ready(Ok(()))
                     };
                     if let Err(err) = this.inner.as_mut().start_send(message) {
-                        break Poll::Ready(Err(err.into()))
+                        return Poll::Ready(Err(err.into()))
                     }
                 }
             }
-        };
-
-        ready!(this.inner.as_mut().poll_flush(cx))?;
-
-        poll_res
+        }
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

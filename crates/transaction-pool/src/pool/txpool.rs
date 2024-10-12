@@ -18,11 +18,13 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
+use alloy_primitives::{Address, TxHash, B256};
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
     },
-    Address, TxHash, B256,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -134,6 +136,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns the currently tracked block values
     pub const fn block_info(&self) -> BlockInfo {
         BlockInfo {
+            block_gas_limit: self.all_transactions.block_gas_limit,
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
             pending_basefee: self.all_transactions.pending_fees.base_fee,
@@ -238,6 +241,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will also apply updates to the pool based on the new base fee
     pub fn set_block_info(&mut self, info: BlockInfo) {
         let BlockInfo {
+            block_gas_limit,
             last_seen_block_hash,
             last_seen_block_number,
             pending_basefee,
@@ -246,6 +250,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.last_seen_block_hash = last_seen_block_hash;
         self.all_transactions.last_seen_block_number = last_seen_block_number;
         let basefee_ordering = self.update_basefee(pending_basefee);
+
+        self.all_transactions.block_gas_limit = block_gas_limit;
 
         if let Some(blob_fee) = pending_blob_fee {
             self.update_blob_fee(blob_fee, basefee_ordering)
@@ -427,6 +433,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
+        self.update_transaction_type_metrics();
         self.metrics.performed_state_updates.increment(1);
 
         OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
@@ -444,6 +451,32 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.blob_pool_transactions.set(stats.blob as f64);
         self.metrics.blob_pool_size_bytes.set(stats.blob_size as f64);
         self.metrics.total_transactions.set(stats.total as f64);
+    }
+
+    /// Updates transaction type metrics for the entire pool.
+    pub(crate) fn update_transaction_type_metrics(&self) {
+        let mut legacy_count = 0;
+        let mut eip2930_count = 0;
+        let mut eip1559_count = 0;
+        let mut eip4844_count = 0;
+        let mut eip7702_count = 0;
+
+        for tx in self.all_transactions.transactions_iter() {
+            match tx.transaction.tx_type() {
+                LEGACY_TX_TYPE_ID => legacy_count += 1,
+                EIP2930_TX_TYPE_ID => eip2930_count += 1,
+                EIP1559_TX_TYPE_ID => eip1559_count += 1,
+                EIP4844_TX_TYPE_ID => eip4844_count += 1,
+                EIP7702_TX_TYPE_ID => eip7702_count += 1,
+                _ => {} // Ignore other types
+            }
+        }
+
+        self.metrics.total_legacy_transactions.set(legacy_count as f64);
+        self.metrics.total_eip2930_transactions.set(eip2930_count as f64);
+        self.metrics.total_eip1559_transactions.set(eip1559_count as f64);
+        self.metrics.total_eip4844_transactions.set(eip4844_count as f64);
+        self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
     }
 
     /// Adds the transaction into the pool.
@@ -555,7 +588,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                     )),
                     InsertErr::Overdraft { transaction } => Err(PoolError::new(
                         *transaction.hash(),
-                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft),
+                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft {
+                            cost: transaction.cost(),
+                            balance: on_chain_balance,
+                        }),
                     )),
                     InsertErr::TxTypeConflict { transaction } => Err(PoolError::new(
                         *transaction.hash(),
@@ -947,6 +983,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             max_account_slots: config.max_account_slots,
             price_bumps: config.price_bumps,
             local_transactions_config: config.local_transactions_config.clone(),
+            minimal_protocol_basefee: config.minimal_protocol_basefee,
+            block_gas_limit: config.gas_limit,
             ..Default::default()
         }
     }
@@ -998,6 +1036,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Updates the block specific info
     fn set_block_info(&mut self, block_info: BlockInfo) {
         let BlockInfo {
+            block_gas_limit,
             last_seen_block_hash,
             last_seen_block_number,
             pending_basefee,
@@ -1008,6 +1047,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         self.pending_fees.base_fee = pending_basefee;
         self.metrics.base_fee.set(pending_basefee as f64);
+
+        self.block_gas_limit = block_gas_limit;
 
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_fees.blob_fee = pending_blob_fee;
@@ -1235,7 +1276,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
         self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1246,7 +1287,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_inclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
         self.txs.range(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1257,7 +1298,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1848,7 +1889,8 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{address, TxType};
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
 
     use super::*;
     use crate::{
@@ -2697,7 +2739,7 @@ mod tests {
 
         assert_eq!(pool.pending_pool.len(), 2);
 
-        let mut changed_senders = HashMap::new();
+        let mut changed_senders = HashMap::default();
         changed_senders.insert(
             id.sender,
             SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
@@ -2881,7 +2923,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::new();
+        let mut updated_accounts = HashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),
@@ -2956,7 +2998,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::new();
+        let mut updated_accounts = HashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),

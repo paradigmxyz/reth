@@ -1,13 +1,11 @@
 //! EIP-6110 deposit requests parsing
+use alloc::{string::ToString, vec::Vec};
 use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
+use alloy_primitives::Log;
 use alloy_sol_types::{sol, SolEvent};
 use reth_chainspec::ChainSpec;
 use reth_evm::execute::BlockValidationError;
 use reth_primitives::{Receipt, Request};
-use revm_primitives::Log;
-
-#[cfg(not(feature = "std"))]
-use alloc::{string::ToString, vec::Vec};
 
 sol! {
     #[allow(missing_docs)]

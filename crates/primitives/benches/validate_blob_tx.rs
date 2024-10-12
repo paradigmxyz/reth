@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
-use alloy_eips::eip4844::env_settings::EnvKzgSettings;
+use alloy_consensus::TxEip4844;
+use alloy_eips::eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK};
 use alloy_primitives::hex;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
@@ -11,8 +12,7 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
-use reth_primitives::{BlobTransactionSidecar, TxEip4844};
-use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
+use reth_primitives::BlobTransactionSidecar;
 
 // constant seed to use for the rng
 const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
@@ -21,9 +21,9 @@ const SEED: [u8; 32] = hex!("133713371337133713371337133713371337133713371337133
 fn blob_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob Transaction KZG validation");
 
-    for num_blobs in 1..=MAX_BLOB_NUMBER_PER_BLOCK {
+    for num_blobs in 1..=MAX_BLOBS_PER_BLOCK {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
-        validate_blob_tx(&mut group, "ValidateBlob", num_blobs, EnvKzgSettings::Default);
+        validate_blob_tx(&mut group, "ValidateBlob", num_blobs as u64, EnvKzgSettings::Default);
     }
 }
 

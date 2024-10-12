@@ -1,8 +1,9 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
+use alloy_primitives::Address;
 use clap::Args;
-use reth_primitives::Address;
+use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
@@ -44,6 +45,14 @@ pub struct TxPoolArgs {
     /// Price bump (in %) for the transaction pool underpriced check.
     #[arg(long = "txpool.pricebump", default_value_t = DEFAULT_PRICE_BUMP)]
     pub price_bump: u128,
+
+    /// Minimum base fee required by the protocol.
+    #[arg(long = "txpool.minimal-protocol-fee", default_value_t = MIN_PROTOCOL_BASE_FEE)]
+    pub minimal_protocol_basefee: u64,
+
+    /// The default enforced gas limit for transactions entering the pool
+    #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT)]
+    pub gas_limit: u64,
 
     /// Price bump percentage to replace an already existing blob transaction
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
@@ -90,6 +99,8 @@ impl Default for TxPoolArgs {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
+            minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,
@@ -133,6 +144,8 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 default_price_bump: self.price_bump,
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
+            minimal_protocol_basefee: self.minimal_protocol_basefee,
+            gas_limit: self.gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
         }
@@ -156,5 +169,16 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn txpool_parse_locals() {
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .args;
+        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 }

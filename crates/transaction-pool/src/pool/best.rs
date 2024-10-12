@@ -2,8 +2,8 @@ use crate::{
     identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
     TransactionOrdering, ValidPoolTransaction,
 };
+use alloy_primitives::B256 as TxHash;
 use core::fmt;
-use reth_primitives::B256 as TxHash;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
@@ -132,9 +132,8 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// created and inserts them
     fn add_new_transactions(&mut self) {
         while let Some(pending_tx) = self.try_recv() {
-            let tx = pending_tx.transaction.clone();
             //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-            let tx_id = *tx.id();
+            let tx_id = *pending_tx.transaction.id();
             if self.ancestor(&tx_id).is_none() {
                 self.independent.insert(pending_tx.clone());
             }
@@ -268,7 +267,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         Priority,
     };
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
 
     #[test]
     fn test_best_iter() {

@@ -1,14 +1,14 @@
 use crate::job::EmptyBlockPayloadJob;
+use alloy_primitives::Bytes;
 use reth::{
     providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
-use reth_chainspec::ChainSpec;
 use reth_node_api::PayloadBuilderAttributes;
-use reth_payload_builder::{error::PayloadBuilderError, PayloadJobGenerator};
-use reth_primitives::{BlockNumberOrTag, Bytes};
+use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
+use reth_primitives::BlockNumberOrTag;
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
@@ -22,8 +22,6 @@ pub struct EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     executor: Tasks,
     /// The configuration for the job generator.
     _config: BasicPayloadJobGeneratorConfig,
-    /// The chain spec.
-    chain_spec: Arc<ChainSpec>,
     /// The type responsible for building payloads.
     ///
     /// See [PayloadBuilder]
@@ -40,10 +38,9 @@ impl<Client, Pool, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Pool, T
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
-        chain_spec: Arc<ChainSpec>,
         builder: Builder,
     ) -> Self {
-        Self { client, pool, executor, _config: config, builder, chain_spec }
+        Self { client, pool, executor, _config: config, builder }
     }
 }
 
@@ -80,12 +77,7 @@ where
             // we already know the hash, so we can seal it
             block.seal(attributes.parent())
         };
-        let config = PayloadConfig::new(
-            Arc::new(parent_block),
-            Bytes::default(),
-            attributes,
-            Arc::clone(&self.chain_spec),
-        );
+        let config = PayloadConfig::new(Arc::new(parent_block), Bytes::default(), attributes);
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),
             _pool: self.pool.clone(),

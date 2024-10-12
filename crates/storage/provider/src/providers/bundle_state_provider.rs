@@ -1,15 +1,16 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
-use reth_storage_api::StateProofProvider;
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, B256,
+};
+use reth_primitives::{Account, Bytecode};
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use revm::db::BundleState;
-use std::collections::HashMap;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
 /// or an underlying state provider.
@@ -29,6 +30,20 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BundleStateProvider<SP, EDP>
     /// Create new bundle state provider
     pub const fn new(state_provider: SP, block_execution_data_provider: EDP) -> Self {
         Self { state_provider, block_execution_data_provider }
+    }
+
+    /// Retrieve hashed storage for target address.
+    fn get_hashed_storage(&self, address: Address) -> HashedStorage {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        bundle_state
+            .account(&address)
+            .map(|account| {
+                HashedStorage::from_plain_storage(
+                    account.status,
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            })
+            .unwrap_or_else(|| HashedStorage::new(false))
     }
 }
 
@@ -69,109 +84,94 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStat
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        let mut state = self.block_execution_data_provider.execution_outcome().state().clone();
-        state.extend(bundle_state.clone());
-        self.state_provider.state_root(&state)
-    }
-
-    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.hashed_state_root(state)
+        self.state_provider.state_root(state)
     }
 
-    fn hashed_state_root_from_nodes(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         unimplemented!()
     }
 
     fn state_root_with_updates(
         &self,
-        bundle_state: &BundleState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut state = self.block_execution_data_provider.execution_outcome().state().clone();
-        state.extend(bundle_state.clone());
-        self.state_provider.state_root_with_updates(&state)
-    }
-
-    fn hashed_state_root_with_updates(
-        &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.hashed_state_root_with_updates(state)
+        self.state_provider.state_root_with_updates(state)
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        let mut state_prefix_sets = state.construct_prefix_sets();
-        state.extend(hashed_state);
-        state_prefix_sets.extend(prefix_sets);
-        self.state_provider.hashed_state_root_from_nodes_with_updates(
-            nodes,
-            state,
-            state_prefix_sets,
-        )
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.state_root_from_nodes_with_updates(input)
     }
+}
 
-    fn hashed_storage_root(
+impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
+    for BundleStateProvider<SP, EDP>
+{
+    fn storage_root(
         &self,
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut storage = bundle_state
-            .account(&address)
-            .map(|account| {
-                HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                )
-            })
-            .unwrap_or_else(|| HashedStorage::new(false));
+        let mut storage = self.get_hashed_storage(address);
         storage.extend(&hashed_storage);
-        self.state_provider.hashed_storage_root(address, storage)
+        self.state_provider.storage_root(address, storage)
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let mut storage = self.get_hashed_storage(address);
+        storage.extend(&hashed_storage);
+        self.state_provider.storage_proof(address, slot, storage)
     }
 }
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn hashed_proof(
+    fn proof(
         &self,
-        hashed_state: HashedPostState,
+        mut input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state);
-        self.state_provider.hashed_proof(state, address, slots)
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.proof(input, address, slots)
+    }
+
+    fn multiproof(
+        &self,
+        mut input: reth_trie::TrieInput,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.multiproof(input, targets)
     }
 
     fn witness(
         &self,
-        overlay: HashedPostState,
+        mut input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(overlay);
-        self.state_provider.witness(state, target)
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.witness(input, target)
     }
 }
 
@@ -179,8 +179,8 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProvider for BundleStat
     fn storage(
         &self,
         account: Address,
-        storage_key: reth_primitives::StorageKey,
-    ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
+        storage_key: alloy_primitives::StorageKey,
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         let u256_storage_key = storage_key.into();
         if let Some(value) = self
             .block_execution_data_provider

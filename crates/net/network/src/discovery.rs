@@ -196,6 +196,11 @@ impl Discovery {
         }
     }
 
+    /// Returns discv5 handle.
+    pub fn discv5(&self) -> Option<Discv5> {
+        self.discv5.clone()
+    }
+
     /// Add a node to the discv4 table.
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {

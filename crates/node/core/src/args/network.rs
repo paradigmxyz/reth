@@ -4,23 +4,22 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
-    sync::Arc,
 };
 
 use clap::Args;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
-use reth_net_nat::NatResolver;
+use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
         constants::{
             tx_fetcher::{
-                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+                DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
@@ -35,6 +34,7 @@ use reth_network::{
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
+use tracing::error;
 
 use crate::version::P2P_CLIENT_VERSION;
 
@@ -144,9 +144,40 @@ pub struct NetworkArgs {
     /// Default is 128 KiB.
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+
+    /// Max capacity of cache of hashes for transactions pending fetch.
+    #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, verbatim_doc_comment)]
+    pub max_capacity_cache_txns_pending_fetch: u32,
+
+    /// Name of network interface used to communicate with peers.
+    ///
+    /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+    #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
+    pub net_if: Option<String>,
 }
 
 impl NetworkArgs {
+    /// Returns the resolved IP address.
+    pub fn resolved_addr(&self) -> IpAddr {
+        if let Some(ref if_name) = self.net_if {
+            let if_name = if if_name.is_empty() { DEFAULT_NET_IF_NAME } else { if_name };
+            return match reth_net_nat::net_if::resolve_net_if_ip(if_name) {
+                Ok(addr) => addr,
+                Err(err) => {
+                    error!(target: "reth::cli",
+                        if_name,
+                        %err,
+                        "Failed to read network interface IP"
+                    );
+
+                    DEFAULT_DISCOVERY_ADDR
+                }
+            };
+        }
+
+        self.addr
+    }
+
     /// Returns the resolved bootnodes if any are provided.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.bootnodes.clone().map(|bootnodes| {
@@ -154,8 +185,8 @@ impl NetworkArgs {
         })
     }
 
-    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
-    /// values in this option struct.
+    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
+    /// the values in this option struct.
     ///
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
@@ -168,10 +199,11 @@ impl NetworkArgs {
     pub fn network_config(
         &self,
         config: &Config,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
+        let addr = self.resolved_addr();
         let chain_bootnodes = self
             .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
@@ -191,8 +223,10 @@ impl NetworkArgs {
                 self.max_concurrent_tx_requests_per_peer,
                 self.soft_limit_byte_size_pooled_transactions_response,
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+                self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            propagation_mode: Default::default(),
         };
 
         // Configure basic network stack
@@ -206,7 +240,6 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
             .apply(|builder| {
@@ -219,11 +252,11 @@ impl NetworkArgs {
             })
             // apply discovery settings
             .apply(|builder| {
-                let rlpx_socket = (self.addr, self.port).into();
+                let rlpx_socket = (addr, self.port).into();
                 self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
             .listener_addr(SocketAddr::new(
-                self.addr, // set discovery port based on instance number
+                addr, // set discovery port based on instance number
                 self.port,
             ))
             .discovery_addr(SocketAddr::new(
@@ -297,6 +330,8 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            net_if: None,
         }
     }
 }
@@ -319,6 +354,10 @@ pub struct DiscoveryArgs {
     /// Enable Discv5 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
     pub enable_discv5_discovery: bool,
+
+    /// Disable Nat discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_nat: bool,
 
     /// The UDP address to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
@@ -381,6 +420,10 @@ impl DiscoveryArgs {
 
         if self.disable_discovery || self.disable_discv4_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
+        }
+
+        if self.disable_discovery || self.disable_nat {
+            network_config_builder = network_config_builder.disable_nat();
         }
 
         if !self.disable_discovery && self.enable_discv5_discovery {
@@ -459,6 +502,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,

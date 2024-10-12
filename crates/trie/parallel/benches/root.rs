@@ -1,19 +1,19 @@
 #![allow(missing_docs, unreachable_pub)]
+use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use rayon::ThreadPoolBuilder;
-use reth_primitives::{Account, B256, U256};
+use reth_primitives::Account;
 use reth_provider::{
     providers::ConsistentDbView, test_utils::create_test_provider_factory, StateChangeWriter,
     TrieWriter,
 };
-use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
+    TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
-use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
+use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::collections::HashMap;
 
 pub fn calculate_state_root(c: &mut Criterion) {
@@ -21,7 +21,6 @@ pub fn calculate_state_root(c: &mut Criterion) {
     group.sample_size(20);
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let blocking_pool = BlockingTaskPool::new(ThreadPoolBuilder::default().build().unwrap());
 
     for size in [1_000, 3_000, 5_000, 10_000] {
         let (db_state, updated_state) = generate_test_data(size);
@@ -62,16 +61,13 @@ pub fn calculate_state_root(c: &mut Criterion) {
         // parallel root
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
             b.to_async(&runtime).iter_with_setup(
-                || ParallelStateRoot::new(view.clone(), updated_state.clone()),
+                || {
+                    ParallelStateRoot::new(
+                        view.clone(),
+                        TrieInput::from_state(updated_state.clone()),
+                    )
+                },
                 |calculator| async { calculator.incremental_root() },
-            );
-        });
-
-        // async root
-        group.bench_function(BenchmarkId::new("async root", size), |b| {
-            b.to_async(&runtime).iter_with_setup(
-                || AsyncStateRoot::new(view.clone(), blocking_pool.clone(), updated_state.clone()),
-                |calculator| calculator.incremental_root(),
             );
         });
     }

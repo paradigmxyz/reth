@@ -14,8 +14,13 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-trace.workspace = true
 
 # async
 futures.workspace = true
@@ -31,3 +36,4 @@ similar-asserts.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }
 reth-rpc-eth-api.workspace = true
 jsonrpsee-http-client.workspace = true
+alloy-rpc-types-trace.workspace = true

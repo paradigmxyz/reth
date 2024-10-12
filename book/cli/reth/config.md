@@ -4,6 +4,8 @@ Write config to stdout
 
 ```bash
 $ reth config --help
+```
+```txt
 Usage: reth config [OPTIONS]
 
 Options:

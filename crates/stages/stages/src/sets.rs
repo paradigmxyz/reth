@@ -16,7 +16,7 @@
 //! # use reth_prune_types::PruneModes;
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::StaticFileProviderFactory;
-//! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
@@ -27,7 +27,7 @@
 //! let static_file_producer =
 //!     StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 //! // Build a pipeline with all offline stages.
-//! let pipeline = Pipeline::builder()
+//! let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
 //!     .add_stages(OfflineStages::new(exec, StageConfig::default(), PruneModes::default()))
 //!     .build(provider_factory, static_file_producer);
 //!
@@ -41,14 +41,14 @@ use crate::{
     },
     StageSet, StageSetBuilder,
 };
+use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::Consensus;
-use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
-use reth_primitives::B256;
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
+use reth_stages_api::Stage;
 use std::{ops::Not, sync::Arc};
 use tokio::sync::watch;
 
@@ -119,17 +119,20 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
     }
 }
 
-impl<Provider, H, B, E> DefaultStages<Provider, H, B, E>
+impl<P, H, B, E> DefaultStages<P, H, B, E>
 where
     E: BlockExecutorProvider,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
-    pub fn add_offline_stages<DB: Database + 'static>(
-        default_offline: StageSetBuilder<DB>,
+    pub fn add_offline_stages<Provider>(
+        default_offline: StageSetBuilder<Provider>,
         executor_factory: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
-    ) -> StageSetBuilder<DB> {
+    ) -> StageSetBuilder<Provider>
+    where
+        OfflineStages<E>: StageSet<Provider>,
+    {
         StageSetBuilder::default()
             .add_set(default_offline)
             .add_set(OfflineStages::new(executor_factory, stages_config, prune_modes))
@@ -137,15 +140,16 @@ where
     }
 }
 
-impl<Provider, H, B, E, DB> StageSet<DB> for DefaultStages<Provider, H, B, E>
+impl<P, H, B, E, Provider> StageSet<Provider> for DefaultStages<P, H, B, E>
 where
-    Provider: HeaderSyncGapProvider + 'static,
+    P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     E: BlockExecutorProvider,
-    DB: Database + 'static,
+    OnlineStages<P, H, B>: StageSet<Provider>,
+    OfflineStages<E>: StageSet<Provider>,
 {
-    fn builder(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<Provider> {
         Self::add_offline_stages(
             self.online.builder(),
             self.executor_factory,
@@ -189,29 +193,37 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
     }
 }
 
-impl<Provider, H, B> OnlineStages<Provider, H, B>
+impl<P, H, B> OnlineStages<P, H, B>
 where
-    Provider: HeaderSyncGapProvider + 'static,
+    P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
 {
     /// Create a new builder using the given headers stage.
-    pub fn builder_with_headers<DB: Database>(
-        headers: HeaderStage<Provider, H>,
+    pub fn builder_with_headers<Provider>(
+        headers: HeaderStage<P, H>,
         body_downloader: B,
-    ) -> StageSetBuilder<DB> {
+    ) -> StageSetBuilder<Provider>
+    where
+        HeaderStage<P, H>: Stage<Provider>,
+        BodyStage<B>: Stage<Provider>,
+    {
         StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
     }
 
     /// Create a new builder using the given bodies stage.
-    pub fn builder_with_bodies<DB: Database>(
+    pub fn builder_with_bodies<Provider>(
         bodies: BodyStage<B>,
-        provider: Provider,
+        provider: P,
         tip: watch::Receiver<B256>,
         header_downloader: H,
         consensus: Arc<dyn Consensus>,
         stages_config: StageConfig,
-    ) -> StageSetBuilder<DB> {
+    ) -> StageSetBuilder<Provider>
+    where
+        BodyStage<B>: Stage<Provider>,
+        HeaderStage<P, H>: Stage<Provider>,
+    {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
                 provider,
@@ -224,14 +236,15 @@ where
     }
 }
 
-impl<DB, Provider, H, B> StageSet<DB> for OnlineStages<Provider, H, B>
+impl<Provider, P, H, B> StageSet<Provider> for OnlineStages<P, H, B>
 where
-    DB: Database,
-    Provider: HeaderSyncGapProvider + 'static,
+    P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
+    HeaderStage<P, H>: Stage<Provider>,
+    BodyStage<B>: Stage<Provider>,
 {
-    fn builder(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
                 self.provider,
@@ -275,12 +288,16 @@ impl<EF> OfflineStages<EF> {
     }
 }
 
-impl<E, DB> StageSet<DB> for OfflineStages<E>
+impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
     E: BlockExecutorProvider,
-    DB: Database + 'static,
+    ExecutionStages<E>: StageSet<Provider>,
+    PruneSenderRecoveryStage: Stage<Provider>,
+    HashingStages: StageSet<Provider>,
+    HistoryIndexingStages: StageSet<Provider>,
+    PruneStage: Stage<Provider>,
 {
-    fn builder(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<Provider> {
         ExecutionStages::new(
             self.executor_factory,
             self.stages_config.clone(),
@@ -328,12 +345,13 @@ impl<E> ExecutionStages<E> {
     }
 }
 
-impl<E, DB> StageSet<DB> for ExecutionStages<E>
+impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
-    DB: Database,
     E: BlockExecutorProvider,
+    SenderRecoveryStage: Stage<Provider>,
+    ExecutionStage<E>: Stage<Provider>,
 {
-    fn builder(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
             .add_stage(ExecutionStage::from_config(
@@ -353,8 +371,13 @@ pub struct HashingStages {
     stages_config: StageConfig,
 }
 
-impl<DB: Database> StageSet<DB> for HashingStages {
-    fn builder(self) -> StageSetBuilder<DB> {
+impl<Provider> StageSet<Provider> for HashingStages
+where
+    MerkleStage: Stage<Provider>,
+    AccountHashingStage: Stage<Provider>,
+    StorageHashingStage: Stage<Provider>,
+{
+    fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
             .add_stage(AccountHashingStage::new(
@@ -379,8 +402,13 @@ pub struct HistoryIndexingStages {
     prune_modes: PruneModes,
 }
 
-impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
-    fn builder(self) -> StageSetBuilder<DB> {
+impl<Provider> StageSet<Provider> for HistoryIndexingStages
+where
+    TransactionLookupStage: Stage<Provider>,
+    IndexStorageHistoryStage: Stage<Provider>,
+    IndexAccountHistoryStage: Stage<Provider>,
+{
+    fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
             .add_stage(TransactionLookupStage::new(
                 self.stages_config.transaction_lookup,

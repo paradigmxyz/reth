@@ -1,4 +1,4 @@
-use derive_more::Display;
+use derive_more::{Display, Error};
 use reth_consensus::ConsensusError;
 use reth_primitives::SealedHeader;
 
@@ -6,7 +6,7 @@ use reth_primitives::SealedHeader;
 pub type HeadersDownloaderResult<T> = Result<T, HeadersDownloaderError>;
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, Clone, Eq, PartialEq, Display)]
+#[derive(Debug, Clone, Eq, PartialEq, Display, Error)]
 pub enum HeadersDownloaderError {
     /// The downloaded header cannot be attached to the local head,
     /// but is valid otherwise.
@@ -17,15 +17,7 @@ pub enum HeadersDownloaderError {
         /// The header we attempted to attach.
         header: Box<SealedHeader>,
         /// The error that occurred when attempting to attach the header.
+        #[error(source)]
         error: Box<ConsensusError>,
     },
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for HeadersDownloaderError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::DetachedHead { error, .. } => Some(error),
-        }
-    }
 }

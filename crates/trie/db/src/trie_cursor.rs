@@ -1,3 +1,4 @@
+use alloy_primitives::B256;
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRW},
     tables,
@@ -6,7 +7,6 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
@@ -19,7 +19,7 @@ use reth_trie_common::StorageTrieEntry;
 #[derive(Debug)]
 pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
 
-impl<'a, TX> Clone for DatabaseTrieCursorFactory<'a, TX> {
+impl<TX> Clone for DatabaseTrieCursorFactory<'_, TX> {
     fn clone(&self) -> Self {
         Self(self.0)
     }
@@ -33,7 +33,7 @@ impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
 }
 
 /// Implementation of the trie cursor factory for a database transaction.
-impl<'a, TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'a, TX> {
+impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
@@ -209,8 +209,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
-    use reth_primitives::hex_literal::hex;
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]

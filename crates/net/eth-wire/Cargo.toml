@@ -21,6 +21,9 @@ alloy-rlp = { workspace = true, features = ["derive"] }
 reth-eth-wire-types.workspace = true
 reth-network-peers.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # metrics
 reth-metrics.workspace = true
 
@@ -59,6 +62,7 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 async-stream.workspace = true
 serde.workspace = true
+alloy-eips.workspace = true
 
 [features]
 arbitrary = [

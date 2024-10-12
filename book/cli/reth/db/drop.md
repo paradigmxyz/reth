@@ -4,6 +4,8 @@ Deletes all database entries
 
 ```bash
 $ reth db drop --help
+```
+```txt
 Usage: reth db drop [OPTIONS]
 
 Options:

@@ -1,9 +1,10 @@
 use std::{
     io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
 };
 
-use reth_discv4::Discv4Config;
+use reth_chainspec::MAINNET;
+use reth_discv4::{Discv4Config, NatResolver};
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
@@ -74,7 +75,7 @@ async fn test_tcp_port_node_record_no_discovery() {
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
         .disable_discovery()
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
     let network = NetworkManager::new(config).await.unwrap();
 
     let local_addr = network.local_addr();
@@ -93,7 +94,7 @@ async fn test_tcp_port_node_record_discovery() {
         .listener_port(0)
         .discovery_port(0)
         .disable_dns_discovery()
-        .build_with_noop_provider();
+        .build_with_noop_provider(MAINNET.clone());
     let network = NetworkManager::new(config).await.unwrap();
 
     let local_addr = network.local_addr();
@@ -103,4 +104,33 @@ async fn test_tcp_port_node_record_discovery() {
     let record = network.handle().local_node_record();
     assert_eq!(record.tcp_port, local_addr.port());
     assert_ne!(record.udp_port, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_node_record_address_with_nat() {
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let config = NetworkConfigBuilder::new(secret_key)
+        .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
+        .disable_discv4_discovery()
+        .disable_dns_discovery()
+        .build_with_noop_provider(MAINNET.clone());
+
+    let network = NetworkManager::new(config).await.unwrap();
+    let record = network.handle().local_node_record();
+
+    assert_eq!(record.address, IpAddr::V4(Ipv4Addr::new(10, 1, 1, 1)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_node_record_address_with_nat_disable_discovery() {
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let config = NetworkConfigBuilder::new(secret_key)
+        .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
+        .disable_discovery()
+        .build_with_noop_provider(MAINNET.clone());
+
+    let network = NetworkManager::new(config).await.unwrap();
+    let record = network.handle().local_node_record();
+
+    assert_eq!(record.address, IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
 }

@@ -95,28 +95,37 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 
     /// Creates reorgs with specified frequency.
-    fn reorg<Provider, Evm>(
+    fn reorg<Provider, Evm, Spec>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         frequency: usize,
-    ) -> EngineReorg<Self, Engine, Provider, Evm>
+        depth: Option<usize>,
+    ) -> EngineReorg<Self, Engine, Provider, Evm, Spec>
     where
         Self: Sized,
     {
-        EngineReorg::new(self, provider, evm_config, payload_validator, frequency)
+        EngineReorg::new(
+            self,
+            provider,
+            evm_config,
+            payload_validator,
+            frequency,
+            depth.unwrap_or_default(),
+        )
     }
 
     /// If frequency is [Some], returns the stream that creates reorgs with
     /// specified frequency. Otherwise, returns `Self`.
-    fn maybe_reorg<Provider, Evm>(
+    fn maybe_reorg<Provider, Evm, Spec>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         frequency: Option<usize>,
-    ) -> Either<EngineReorg<Self, Engine, Provider, Evm>, Self>
+        depth: Option<usize>,
+    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Spec>, Self>
     where
         Self: Sized,
     {
@@ -127,6 +136,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
                 evm_config,
                 payload_validator,
                 frequency,
+                depth.unwrap_or_default(),
             ))
         } else {
             Either::Right(self)

@@ -3,7 +3,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use reth::{
+    api::NodeTypes,
     builder::{components::PoolBuilder, BuilderContext, FullNodeTypes},
+    chainspec::ChainSpec,
     cli::Cli,
     providers::CanonStateSubscriptions,
     transaction_pool::{
@@ -23,7 +25,7 @@ fn main() {
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
                 .with_components(EthereumNode::components().pool(CustomPoolBuilder::default()))
-                .with_add_ons::<EthereumAddOns>()
+                .with_add_ons(EthereumAddOns::default())
                 .launch()
                 .await?;
 
@@ -45,7 +47,7 @@ pub struct CustomPoolBuilder {
 /// This will be used to build the transaction pool and its maintenance tasks during launch.
 impl<Node> PoolBuilder<Node> for CustomPoolBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
 

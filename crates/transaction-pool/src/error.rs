@@ -1,6 +1,7 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, BlobTransactionValidationError, InvalidTransactionError, TxHash};
+use alloy_primitives::{Address, TxHash, U256};
+use reth_primitives::{BlobTransactionValidationError, InvalidTransactionError};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -9,7 +10,7 @@ pub type PoolResult<T> = Result<T, PoolError>;
 ///
 /// For example during validation
 /// [`TransactionValidator::validate_transaction`](crate::validate::TransactionValidator::validate_transaction)
-pub trait PoolTransactionError: std::error::Error + Send + Sync {
+pub trait PoolTransactionError: core::error::Error + Send + Sync {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
@@ -18,8 +19,8 @@ pub trait PoolTransactionError: std::error::Error + Send + Sync {
 }
 
 // Needed for `#[error(transparent)]`
-impl std::error::Error for Box<dyn PoolTransactionError> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for Box<dyn PoolTransactionError> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         (**self).source()
     }
 }
@@ -62,7 +63,7 @@ pub enum PoolErrorKind {
     /// Any other error that occurred while inserting/validating a transaction. e.g. IO database
     /// error
     #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 // === impl PoolError ===
@@ -74,7 +75,10 @@ impl PoolError {
     }
 
     /// Creates a new pool error with the `Other` kind.
-    pub fn other(hash: TxHash, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+    pub fn other(
+        hash: TxHash,
+        error: impl Into<Box<dyn core::error::Error + Send + Sync>>,
+    ) -> Self {
         Self { hash, kind: PoolErrorKind::Other(error.into()) }
     }
 
@@ -104,7 +108,7 @@ impl PoolError {
             }
             PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => {
                 // fee cap of the tx below the technical minimum determined by the protocol, see
-                // [MINIMUM_PROTOCOL_FEE_CAP](reth_primitives::constants::MIN_PROTOCOL_BASE_FEE)
+                // [MINIMUM_PROTOCOL_FEE_CAP](alloy_primitives::constants::MIN_PROTOCOL_BASE_FEE)
                 // although this transaction will always be invalid, we do not want to penalize the
                 // sender because this check simply could not be implemented by the client
                 false
@@ -168,6 +172,15 @@ pub enum Eip4844PoolTransactionError {
     Eip4844NonceGap,
 }
 
+/// Represents all errors that can happen when validating transactions for the pool for EIP-7702
+/// transactions
+#[derive(Debug, thiserror::Error)]
+pub enum Eip7702PoolTransactionError {
+    /// Thrown if the transaction has no items in its authorization list
+    #[error("no items in authorization list for EIP7702 transaction")]
+    MissingEip7702AuthorizationList,
+}
+
 /// Represents errors that can happen when validating transactions for the pool
 ///
 /// See [`TransactionValidator`](crate::TransactionValidator).
@@ -193,11 +206,19 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction underpriced")]
     Underpriced,
     /// Thrown if the transaction's would require an account to be overdrawn
-    #[error("transaction overdraws from account")]
-    Overdraft,
-    /// Eip-4844 related errors
+    #[error("transaction overdraws from account, balance: {balance}, cost: {cost}")]
+    Overdraft {
+        /// Cost transaction is allowed to consume. See `reth_transaction_pool::PoolTransaction`.
+        cost: U256,
+        /// Balance of account.
+        balance: U256,
+    },
+    /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
+    /// EIP-7702 related errors
+    #[error(transparent)]
+    Eip7702(#[from] Eip7702PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error(transparent)]
     Other(Box<dyn PoolTransactionError>),
@@ -225,7 +246,7 @@ impl InvalidPoolTransactionError {
                 // intentionally caused by the sender
                 match err {
                     InvalidTransactionError::InsufficientFunds { .. } |
-                    InvalidTransactionError::NonceNotConsistent => {
+                    InvalidTransactionError::NonceNotConsistent { .. } => {
                         // transaction could just have arrived late/early
                         false
                     }
@@ -261,7 +282,7 @@ impl InvalidPoolTransactionError {
                 false
             }
             Self::IntrinsicGasTooLow => true,
-            Self::Overdraft => false,
+            Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {
@@ -289,12 +310,15 @@ impl InvalidPoolTransactionError {
                     }
                 }
             }
+            Self::Eip7702(eip7702_err) => match eip7702_err {
+                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => false,
+            },
         }
     }
 
     /// Returns `true` if an import failed due to nonce gap.
     pub const fn is_nonce_gap(&self) -> bool {
-        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent)) ||
+        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||
             matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
     }
 }

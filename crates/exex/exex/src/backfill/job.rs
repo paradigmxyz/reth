@@ -4,10 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alloy_primitives::BlockNumber;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{Block, BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{Block, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -16,6 +17,8 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
+
+pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 
 /// Backfill job started for a specific range.
 ///
@@ -36,7 +39,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<Chain, BlockExecutionError>;
+    type Item = BackfillJobResult<Chain>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
@@ -62,7 +65,13 @@ where
         self.into()
     }
 
-    fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
+    fn execute_range(&mut self) -> BackfillJobResult<Chain> {
+        debug!(
+            target: "exex::backfill",
+            range = ?self.range,
+            "Executing block range"
+        );
+
         let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
             self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
         ));
@@ -94,7 +103,7 @@ where
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions.len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
@@ -102,14 +111,8 @@ where
             // Unseal the block for execution
             let (block, senders) = block.into_components();
             let (unsealed_header, hash) = block.header.split();
-            let block = Block {
-                header: unsealed_header,
-                body: block.body,
-                ommers: block.ommers,
-                withdrawals: block.withdrawals,
-                requests: block.requests,
-            }
-            .with_senders_unchecked(senders);
+            let block =
+                Block { header: unsealed_header, body: block.body }.with_senders_unchecked(senders);
 
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
@@ -164,7 +167,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    type Item = Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError>;
+    type Item = BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range.next().map(|block_number| self.execute_block(block_number))
@@ -186,7 +189,7 @@ where
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
-    ) -> Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError> {
+    ) -> BackfillJobResult<(BlockWithSenders, BlockExecutionOutput<Receipt>)> {
         let td = self
             .provider
             .header_td_by_number(block_number)?
@@ -203,7 +206,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.transactions.len(), "Executing block");
 
         let block_execution_output = executor.execute((&block_with_senders, td).into())?;
 
@@ -252,7 +255,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),
@@ -291,7 +294,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),

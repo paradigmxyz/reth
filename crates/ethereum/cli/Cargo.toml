@@ -11,13 +11,13 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# reth
 reth-cli.workspace = true
 reth-chainspec.workspace = true
 
-alloy-genesis.workspace = true
-
+# misc
 eyre.workspace = true
 
-shellexpand.workspace = true
-serde_json.workspace = true
-clap = { workspace = true, features = ["derive", "env"] }
+[dev-dependencies]
+clap.workspace = true
+reth-cli-commands.workspace = true

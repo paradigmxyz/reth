@@ -80,14 +80,14 @@ Essentially, the full node is the same as following configuration for the pruned
 [prune]
 block_interval = 5
 
-[prune.parts]
+[prune.segments]
 sender_recovery = "full"
 # transaction_lookup is not pruned
 receipts = { before = 11052984 } # Beacon Deposit Contract deployment block: https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
 account_history = { distance = 10_064 }
 storage_history = { distance = 10_064 }
 
-[prune.parts.receipts_log_filter]
+[prune.segments.receipts_log_filter]
 # Prune all receipts, leaving only those which contain logs from address `0x00000000219ab540356cbb839cbe05303d7705fa`,
 # starting from the block 11052984. This leaves receipts with the logs from the Beacon Deposit Contract.
 "0x00000000219ab540356cbb839cbe05303d7705fa" = { before = 11052984 }

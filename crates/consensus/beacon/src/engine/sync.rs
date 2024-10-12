@@ -4,14 +4,14 @@ use crate::{
     engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
+use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
-use reth_chainspec::ChainSpec;
-use reth_db_api::database::Database;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{BlockNumber, SealedBlock, B256};
+use reth_primitives::SealedBlock;
+use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
@@ -31,9 +31,9 @@ use tracing::trace;
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
 /// [`EngineSyncEvent::FetchedFullBlock`] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
-pub(crate) struct EngineSyncController<DB, Client>
+pub(crate) struct EngineSyncController<N, Client>
 where
-    DB: Database,
+    N: ProviderNodeTypes,
     Client: BlockClient,
 {
     /// A downloader that can download full blocks from the network.
@@ -42,7 +42,7 @@ where
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
-    pipeline_state: PipelineState<DB>,
+    pipeline_state: PipelineState<N>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<PipelineTarget>,
     /// In-flight full block requests in progress.
@@ -61,18 +61,18 @@ where
     metrics: EngineSyncMetrics,
 }
 
-impl<DB, Client> EngineSyncController<DB, Client>
+impl<N, Client> EngineSyncController<N, Client>
 where
-    DB: Database + 'static,
+    N: ProviderNodeTypes,
     Client: BlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
-        pipeline: Pipeline<DB>,
+        pipeline: Pipeline<N>,
         client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: Arc<N::ChainSpec>,
         event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
@@ -393,14 +393,14 @@ pub(crate) enum EngineSyncEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PipelineState<DB: Database> {
+enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<DB>>),
+    Idle(Option<Pipeline<N>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<DB>>),
+    Running(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
-impl<DB: Database> PipelineState<DB> {
+impl<N: ProviderNodeTypes> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
@@ -410,14 +410,15 @@ impl<DB: Database> PipelineState<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Sealable;
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{BlockBody, Header, SealedHeader};
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        ExecutionOutcome,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
@@ -467,12 +468,12 @@ mod tests {
         }
 
         /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
+        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
             reth_tracing::init_test_tracing();
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
-            let mut pipeline = Pipeline::builder()
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
                 .with_tip_sender(tip_tx);
 
@@ -514,13 +515,13 @@ mod tests {
         }
 
         /// Builds the sync controller.
-        fn build<DB>(
+        fn build<N>(
             self,
-            pipeline: Pipeline<DB>,
-            chain_spec: Arc<ChainSpec>,
-        ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
+            pipeline: Pipeline<N>,
+            chain_spec: Arc<N::ChainSpec>,
+        ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
-            DB: Database + 'static,
+            N: ProviderNodeTypes,
             Client: BlockClient + 'static,
         {
             let client = self
@@ -598,7 +599,9 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
             header.timestamp += 1;
-            sealed_header = header.seal_slow();
+            let sealed = header.seal_slow();
+            let (header, seal) = sealed.into_parts();
+            sealed_header = SealedHeader::new(header, seal);
             client.insert(sealed_header.clone(), body.clone());
         }
     }
@@ -614,12 +617,14 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let header = Header {
+        let sealed = Header {
             base_fee_per_gas: Some(7),
             gas_limit: chain_spec.max_gas_limit,
             ..Default::default()
         }
         .seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let header = SealedHeader::new(header, seal);
         insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline

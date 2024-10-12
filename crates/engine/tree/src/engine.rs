@@ -5,13 +5,15 @@ use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
+use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineTypes;
-use reth_primitives::{SealedBlockWithSenders, B256};
+use reth_primitives::SealedBlockWithSenders;
 use std::{
     collections::HashSet,
+    fmt::Display,
     sync::mpsc::Sender,
     task::{ready, Context, Poll},
 };
@@ -210,13 +212,26 @@ where
     }
 }
 
-/// The type for specifying the kind of engine api
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The type for specifying the kind of engine api.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EngineApiKind {
     /// The chain contains Ethereum configuration.
+    #[default]
     Ethereum,
     /// The chain contains Optimism configuration.
     OpStack,
+}
+
+impl EngineApiKind {
+    /// Returns true if this is the ethereum variant
+    pub const fn is_ethereum(&self) -> bool {
+        matches!(self, Self::Ethereum)
+    }
+
+    /// Returns true if this is the ethereum variant
+    pub const fn is_opstack(&self) -> bool {
+        matches!(self, Self::OpStack)
+    }
 }
 
 /// The request variants that the engine API handler can receive.
@@ -226,6 +241,17 @@ pub enum EngineApiRequest<T: EngineTypes> {
     Beacon(BeaconEngineMessage<T>),
     /// Request to insert an already executed block, e.g. via payload building.
     InsertExecutedBlock(ExecutedBlock),
+}
+
+impl<T: EngineTypes> Display for EngineApiRequest<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Beacon(msg) => msg.fmt(f),
+            Self::InsertExecutedBlock(block) => {
+                write!(f, "InsertExecutedBlock({:?})", block.block().num_hash())
+            }
+        }
+    }
 }
 
 impl<T: EngineTypes> From<BeaconEngineMessage<T>> for EngineApiRequest<T> {
@@ -274,6 +300,18 @@ pub enum FromEngine<Req> {
     Request(Req),
     /// Downloaded blocks from the network.
     DownloadedBlocks(Vec<SealedBlockWithSenders>),
+}
+
+impl<Req: Display> Display for FromEngine<Req> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Event(ev) => write!(f, "Event({ev:?})"),
+            Self::Request(req) => write!(f, "Request({req})"),
+            Self::DownloadedBlocks(blocks) => {
+                write!(f, "DownloadedBlocks({} blocks)", blocks.len())
+            }
+        }
+    }
 }
 
 impl<Req> From<FromOrchestrator> for FromEngine<Req> {

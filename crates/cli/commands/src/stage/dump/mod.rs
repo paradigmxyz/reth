@@ -1,7 +1,8 @@
 //! Database debugging tool
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
@@ -9,6 +10,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     args::DatadirArgs,
     dirs::{DataDirPath, PlatformPath},
@@ -30,9 +32,9 @@ use merkle::dump_merkle_stage;
 
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(subcommand)]
     command: Stages,
@@ -73,25 +75,28 @@ pub struct StageCommand {
 macro_rules! handle_stage {
     ($stage_fn:ident, $tool:expr, $command:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
-        let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
+        let output_datadir =
+            output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
     }};
 
     ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
-        let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
+        let output_datadir =
+            output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor).await?
     }};
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `dump-stage` command
-    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
-        F: FnOnce(Arc<ChainSpec>) -> E,
+        F: FnOnce(Arc<C::ChainSpec>) -> E,
     {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;
 
         match &self.command {
@@ -110,11 +115,11 @@ impl Command {
 
 /// Sets up the database and initial state on [`tables::BlockBodyIndices`]. Also returns the tip
 /// block number.
-pub(crate) fn setup<DB: Database>(
+pub(crate) fn setup<N: NodeTypesWithDB>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
-    db_tool: &DbTool<DB>,
+    db_tool: &DbTool<N>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 

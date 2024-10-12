@@ -17,8 +17,7 @@ reth-blockchain-tree.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-chain-state.workspace = true
 reth-consensus.workspace = true
-reth-db.workspace = true
-reth-db-api.workspace = true
+reth-chainspec.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
@@ -30,10 +29,15 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
-reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie.workspace = true
+reth-trie-parallel.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # common
 futures.workspace = true
@@ -48,7 +52,6 @@ reth-metrics = { workspace = true, features = ["common"] }
 tracing.workspace = true
 
 # optional deps for test-utils
-reth-chainspec = { workspace = true, optional = true }
 reth-prune-types = { workspace = true, optional = true }
 reth-stages = { workspace = true, optional = true }
 reth-static-file = { workspace = true, optional = true }
@@ -57,7 +60,6 @@ reth-tracing = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-chainspec.workspace = true
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
@@ -69,6 +71,7 @@ reth-rpc-types-compat.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-tracing.workspace = true
+reth-chainspec.workspace = true
 
 alloy-rlp.workspace = true
 
@@ -79,10 +82,9 @@ rand.workspace = true
 test-utils = [
   "reth-db/test-utils",
   "reth-chain-state/test-utils",
-  "reth-chainspec",
   "reth-network-p2p/test-utils",
   "reth-prune-types",
   "reth-stages/test-utils",
   "reth-static-file",
-  "reth-tracing",
+  "reth-tracing"
 ]

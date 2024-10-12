@@ -16,6 +16,7 @@ reth-cli-commands.workspace = true
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
+reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
@@ -23,9 +24,13 @@ reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-execution-types.workspace = true
 reth-node-core.workspace = true
+reth-optimism-node.workspace = true
 reth-primitives.workspace = true
 
-## optimisim
+# so jemalloc metrics can be included
+reth-node-metrics.workspace = true
+
+## optimism
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 
@@ -35,13 +40,15 @@ reth-node-events.workspace = true
 reth-network-p2p.workspace = true
 reth-errors.workspace = true
 reth-config.workspace = true
-reth-evm-optimism.workspace = true
+reth-optimism-evm.workspace = true
 reth-cli.workspace = true
+reth-cli-runner.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
 
 # eth
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-
 
 # misc
 futures-util.workspace = true
@@ -62,10 +69,25 @@ eyre.workspace = true
 tempfile.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
+reth-cli-commands.workspace = true
 
-[features] 
- optimism = [ 
+[features]
+optimism = [
     "reth-primitives/optimism",
-    "reth-evm-optimism/optimism",
+    "reth-optimism-evm/optimism",
     "reth-provider/optimism",
- ] 
+    "reth-node-core/optimism",
+    "reth-optimism-node/optimism",
+]
+asm-keccak = [
+    "alloy-primitives/asm-keccak",
+    "reth-node-core/asm-keccak",
+    "reth-optimism-node/asm-keccak",
+    "reth-primitives/asm-keccak",
+]
+
+# Jemalloc feature for vergen to generate correct env vars
+jemalloc = [
+    "reth-node-core/jemalloc",
+    "reth-node-metrics/jemalloc"
+]

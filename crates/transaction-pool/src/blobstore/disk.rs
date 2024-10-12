@@ -1,9 +1,11 @@
 //! A simple diskstore for blobs
 
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_primitives::{TxHash, B256};
 use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{BlobTransactionSidecar, TxHash, B256};
+use reth_primitives::BlobTransactionSidecar;
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
@@ -125,6 +127,31 @@ impl BlobStore for DiskFileBlobStore {
             return Ok(Vec::new())
         }
         self.inner.get_exact(txs)
+    }
+
+    fn get_by_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        let mut result = vec![None; versioned_hashes.len()];
+        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
+            for (i, blob_versioned_hash) in blob_sidecar.versioned_hashes().enumerate() {
+                for (j, target_versioned_hash) in versioned_hashes.iter().enumerate() {
+                    if blob_versioned_hash == *target_versioned_hash {
+                        result[j].get_or_insert_with(|| BlobAndProofV1 {
+                            blob: Box::new(blob_sidecar.blobs[i]),
+                            proof: blob_sidecar.proofs[i],
+                        });
+                    }
+                }
+            }
+
+            // Return early if all blobs are found.
+            if result.iter().all(|blob| blob.is_some()) {
+                break;
+            }
+        }
+        Ok(result)
     }
 
     fn data_size_hint(&self) -> Option<usize> {

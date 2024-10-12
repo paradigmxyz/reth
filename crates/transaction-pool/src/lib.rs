@@ -79,12 +79,12 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_chainspec::{MAINNET, ChainSpecProvider};
-//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+//! use reth_chainspec::MAINNET;
+//! use reth_storage_api::StateProviderFactory;
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! async fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static{
+//! async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
@@ -151,10 +151,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
+use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
+use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -278,7 +280,7 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + reth_storage_api::BlockReaderIdExt + Clone + 'static,
+    Client: StateProviderFactory + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
@@ -288,12 +290,12 @@ where
     ///
     /// ```
     /// use reth_chainspec::MAINNET;
-    /// use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+    /// use reth_storage_api::StateProviderFactory;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
     /// };
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static {
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
     /// let blob_store = InMemoryBlobStore::default();
     /// let pool = Pool::eth_pool(
     ///     TransactionValidationTaskExecutor::eth(
@@ -322,6 +324,7 @@ where
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
@@ -486,6 +489,13 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_highest_transaction_by_sender(sender)
+    }
+
     fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
@@ -501,6 +511,14 @@ where
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_origin(origin)
+    }
+
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transactions_by_origin(origin)
     }
 
     fn unique_senders(&self) -> HashSet<Address> {
@@ -525,18 +543,18 @@ where
         self.pool.blob_store().get_exact(tx_hashes)
     }
 
-    /// Returns all pending transactions filtered by [`TransactionOrigin`]
-    fn get_pending_transactions_by_origin(
+    fn get_blobs_for_versioned_hashes(
         &self,
-        origin: TransactionOrigin,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_pending_transactions_by_origin(origin)
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
     }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {

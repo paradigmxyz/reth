@@ -1,10 +1,11 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use reth_primitives::{Address, Receipt, TransactionMeta, TransactionSigned, TxKind};
-use reth_rpc_types::{
-    AnyReceiptEnvelope, AnyTransactionReceipt, Log, OtherFields, ReceiptWithBloom,
-    TransactionReceipt, WithOtherFields,
+use alloy_primitives::{Address, TxKind};
+use alloy_rpc_types::{
+    AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,
 };
+use alloy_serde::{OtherFields, WithOtherFields};
+use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use revm_primitives::calc_blob_gasprice;
 
 use super::{EthApiError, EthResult};
@@ -13,9 +14,9 @@ use super::{EthApiError, EthResult};
 #[derive(Debug)]
 pub struct ReceiptBuilder {
     /// The base response body, contains L1 fields.
-    base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
+    pub base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
     /// Additional L2 fields.
-    other: OtherFields,
+    pub other: OtherFields,
 }
 
 impl ReceiptBuilder {
@@ -74,7 +75,7 @@ impl ReceiptBuilder {
             })
             .collect();
 
-        let rpc_receipt = reth_rpc_types::Receipt {
+        let rpc_receipt = alloy_rpc_types::Receipt {
             status: receipt.success.into(),
             cumulative_gas_used: receipt.cumulative_gas_used as u128,
             logs,

@@ -19,12 +19,14 @@ pub mod helpers;
 pub mod pubsub;
 pub mod types;
 
+pub use reth_rpc_types_compat::TransactionCompat;
+
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
 pub use helpers::error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 pub use pubsub::EthPubSubApiServer;
-pub use types::{EthApiTypes, RpcBlock, RpcTransaction};
+pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 
 #[cfg(feature = "client")]
 pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};

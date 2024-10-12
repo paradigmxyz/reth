@@ -33,8 +33,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Build op-reth
-        run: |
-          cargo install --features asm-keccak,jemalloc,optimism --bin op-reth --path bin/reth
+        run: make install-op
       - name: Run sync
         # https://basescan.org/block/10000
         run: |

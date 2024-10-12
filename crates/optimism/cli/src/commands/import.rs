@@ -1,6 +1,7 @@
 //! Command that initializes the node by importing OP Mainnet chain segment below Bedrock, from a
 //! file.
 use clap::Parser;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_consensus::noop::NoopConsensus;
 use reth_db::tables;
@@ -8,8 +9,10 @@ use reth_db_api::transaction::DbTx;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
-use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_primitives::bedrock::is_dup_tx;
 use reth_provider::StageCheckpointReader;
 use reth_prune::PruneModes;
 use reth_stages::StageId;
@@ -21,9 +24,9 @@ use crate::commands::build_pipeline::build_import_pipeline;
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
-pub struct ImportOpCommand {
+pub struct ImportOpCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -37,9 +40,11 @@ pub struct ImportOpCommand {
     path: PathBuf,
 }
 
-impl ImportOpCommand {
+impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         info!(target: "reth::cli",
@@ -51,7 +56,7 @@ impl ImportOpCommand {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         // we use noop here because we expect the inputs to be valid
         let consensus = Arc::new(NoopConsensus::default());

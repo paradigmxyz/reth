@@ -1,9 +1,8 @@
+use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::MAINNET;
 use reth_db::{
     tables,
-    test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
-    },
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
 };
 use reth_db_api::{
@@ -16,22 +15,22 @@ use reth_db_api::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
-    StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, U256,
+    Account, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
+    test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
-    pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+    pub factory: ProviderFactory<MockNodeTypesWithDB>,
     pub temp_static_files_dir: TempDir,
 }
 
@@ -253,10 +252,10 @@ impl TestStageDB {
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
-                    tx_count: block.body.len() as u64,
+                    tx_count: block.body.transactions.len() as u64,
                 };
 
-                if !block.body.is_empty() {
+                if !block.body.transactions.is_empty() {
                     tx.put::<tables::TransactionBlocks>(
                         block_body_indices.last_tx_num(),
                         block.number,
@@ -264,7 +263,7 @@ impl TestStageDB {
                 }
                 tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-                let res = block.body.iter().try_for_each(|body_tx| {
+                let res = block.body.transactions.iter().try_for_each(|body_tx| {
                     if let Some(txs_writer) = &mut txs_writer {
                         txs_writer.append_transaction(next_tx_num, &body_tx.clone().into())?;
                     } else {

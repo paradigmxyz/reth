@@ -4,10 +4,13 @@ use crate::{
     engine::hooks::{EngineHook, EngineHookContext, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
+use alloy_primitives::BlockNumber;
 use futures::FutureExt;
-use reth_db_api::database::Database;
 use reth_errors::RethResult;
-use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
+use reth_primitives::static_file::HighestStaticFiles;
+use reth_provider::{
+    BlockReader, DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+};
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -18,17 +21,22 @@ use tracing::trace;
 ///
 /// This type controls the [`StaticFileProducer`].
 #[derive(Debug)]
-pub struct StaticFileHook<DB> {
+pub struct StaticFileHook<Provider> {
     /// The current state of the `static_file_producer`.
-    state: StaticFileProducerState<DB>,
+    state: StaticFileProducerState<Provider>,
     /// The type that can spawn the `static_file_producer` task.
     task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl<DB: Database + 'static> StaticFileHook<DB> {
+impl<Provider> StaticFileHook<Provider>
+where
+    Provider: StaticFileProviderFactory
+        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>
+        + 'static,
+{
     /// Create a new instance
     pub fn new(
-        static_file_producer: StaticFileProducer<DB>,
+        static_file_producer: StaticFileProducer<Provider>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self { state: StaticFileProducerState::Idle(Some(static_file_producer)), task_spawner }
@@ -126,7 +134,12 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     }
 }
 
-impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
+impl<Provider> EngineHook for StaticFileHook<Provider>
+where
+    Provider: StaticFileProviderFactory
+        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>
+        + 'static,
+{
     fn name(&self) -> &'static str {
         "StaticFile"
     }
@@ -162,9 +175,9 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
 /// [`StaticFileProducerState::Idle`] means that the static file producer is currently idle.
 /// [`StaticFileProducerState::Running`] means that the static file producer is currently running.
 #[derive(Debug)]
-enum StaticFileProducerState<DB> {
+enum StaticFileProducerState<Provider> {
     /// [`StaticFileProducer`] is idle.
-    Idle(Option<StaticFileProducer<DB>>),
+    Idle(Option<StaticFileProducer<Provider>>),
     /// [`StaticFileProducer`] is running and waiting for a response
-    Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
+    Running(oneshot::Receiver<StaticFileProducerWithResult<Provider>>),
 }

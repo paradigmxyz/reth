@@ -18,6 +18,7 @@ pub mod logs_utils;
 pub mod pending_block;
 pub mod receipt;
 pub mod revm_utils;
+pub mod simulate;
 pub mod transaction;
 pub mod utils;
 
@@ -35,7 +36,6 @@ pub use gas_oracle::{
     GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult, RPC_DEFAULT_GAS_CAP,
 };
 pub use id_provider::EthSubscriptionIdProvider;
-pub use logs_utils::EthFilterError;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 pub use receipt::ReceiptBuilder;
 pub use transaction::TransactionSource;

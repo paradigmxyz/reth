@@ -21,6 +21,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Key len and Value len encode use [`usize::to_be_bytes()`] the length is 8.
+const KV_LEN: usize = 8;
+
 use rayon::prelude::*;
 use reth_db_api::table::{Compress, Encode, Key, Value};
 use tempfile::{NamedTempFile, TempDir};
@@ -187,14 +190,14 @@ pub struct EtlIter<'a> {
     files: &'a mut Vec<EtlFile>,
 }
 
-impl<'a> EtlIter<'a> {
+impl EtlIter<'_> {
     /// Peeks into the next element
     pub fn peek(&self) -> Option<&(Vec<u8>, Vec<u8>)> {
         self.heap.peek().map(|(Reverse(entry), _)| entry)
     }
 }
 
-impl<'a> Iterator for EtlIter<'a> {
+impl Iterator for EtlIter<'_> {
     type Item = std::io::Result<(Vec<u8>, Vec<u8>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -256,8 +259,8 @@ impl EtlFile {
             return Ok(None)
         }
 
-        let mut buffer_key_length = [0; 8];
-        let mut buffer_value_length = [0; 8];
+        let mut buffer_key_length = [0; KV_LEN];
+        let mut buffer_value_length = [0; KV_LEN];
 
         self.file.read_exact(&mut buffer_key_length)?;
         self.file.read_exact(&mut buffer_value_length)?;

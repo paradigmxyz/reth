@@ -10,8 +10,11 @@ repository.workspace = true
 [lints]
 
 [dependencies]
+# reth
 reth-beacon-consensus.workspace = true
 reth-chainspec.workspace = true
+reth-cli.workspace = true
+reth-ethereum-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-config.workspace = true
@@ -36,10 +39,14 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages.workspace = true
-reth-static-file-types.workspace = true
+reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
 
 itertools.workspace = true
 futures.workspace = true
@@ -54,7 +61,11 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 backon.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # io
 fdlimit.workspace = true
@@ -62,8 +73,8 @@ toml = { workspace = true, features = ["display"] }
 
 # tui
 comfy-table = "7.0"
-crossterm = "0.27.0"
-ratatui = { version = "0.27", default-features = false, features = [
+crossterm = "0.28.0"
+ratatui = { version = "0.28", default-features = false, features = [
     "crossterm",
 ] }
 
@@ -82,5 +93,5 @@ dev = [
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
     "reth-primitives/arbitrary",
-    "reth-db-api/arbitrary"
+    "reth-db-api/arbitrary",
 ]

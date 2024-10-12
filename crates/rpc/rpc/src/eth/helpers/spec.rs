@@ -1,6 +1,6 @@
-use reth_chainspec::ChainSpec;
+use alloy_primitives::U256;
+use reth_chainspec::EthereumHardforks;
 use reth_network_api::NetworkInfo;
-use reth_primitives::U256;
 use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
 use reth_rpc_eth_api::helpers::EthApiSpec;
 use reth_transaction_pool::TransactionPool;
@@ -10,14 +10,16 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthApiSpec for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + 'static,
-    Provider:
-        ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader + 'static,
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + BlockNumReader
+        + StageCheckpointReader
+        + 'static,
     Network: NetworkInfo + 'static,
     EvmConfig: Send + Sync,
 {
     fn provider(
         &self,
-    ) -> impl ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader
+    ) -> impl ChainSpecProvider<ChainSpec: EthereumHardforks> + BlockNumReader + StageCheckpointReader
     {
         self.inner.provider()
     }

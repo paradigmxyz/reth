@@ -25,6 +25,7 @@ reth-execution-types.workspace = true
 revm-primitives.workspace = true
 
 # Alloy
+alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 
@@ -34,6 +35,8 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["secp256k1"] }
 secp256k1.workspace = true
 serde_json.workspace = true
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = ["std"]

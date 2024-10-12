@@ -40,7 +40,7 @@ pub use discv5::{self, IpMode};
 
 pub use config::{
     BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_LISTEN_CONFIG, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
@@ -148,9 +148,11 @@ impl Discv5 {
     /// Returns the [`NodeRecord`] of the local node.
     ///
     /// This includes the currently tracked external IP address of the node.
-    pub fn node_record(&self) -> NodeRecord {
+    ///
+    /// Returns `None` if the local ENR does not contain the required fields.
+    pub fn node_record(&self) -> Option<NodeRecord> {
         let enr: Enr<_> = EnrCombinedKeyWrapper(self.discv5.local_enr()).into();
-        (&enr).try_into().unwrap()
+        enr.try_into().ok()
     }
 
     /// Spawns [`discv5::Discv5`]. Returns [`discv5::Discv5`] handle in reth compatible wrapper type
@@ -664,7 +666,7 @@ mod test {
                 discv5::Discv5::new(
                     Enr::empty(&sk).unwrap(),
                     sk,
-                    discv5::ConfigBuilder::new(ListenConfig::default()).build(),
+                    discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build(),
                 )
                 .unwrap(),
             ),

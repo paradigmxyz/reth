@@ -1,10 +1,11 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{
-    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
+    transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned,
 };
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -76,11 +77,11 @@ impl FromIterator<PooledTransactionsElement> for PooledTransactions {
 #[cfg(test)]
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
+    use alloy_consensus::{TxEip1559, TxLegacy};
+    use alloy_primitives::{hex, Parity, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{
-        hex, PooledTransactionsElement, Signature, Transaction, TransactionSigned, TxEip1559,
-        TxKind, TxLegacy, U256,
-    };
+    use reth_chainspec::MIN_TRANSACTION_GAS;
+    use reth_primitives::{PooledTransactionsElement, Signature, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -127,44 +128,44 @@ mod tests {
                     chain_id: Some(1),
                     nonce: 0x8u64,
                     gas_price: 0x4a817c808,
-                    gas_limit: 0x2e248u64,
+                    gas_limit: 0x2e248,
                     to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x200u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(false),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(1),
                     nonce: 0x09u64,
                     gas_price: 0x4a817c809,
-                    gas_limit: 0x33450u64,
+                    gas_limit: 0x33450,
                     to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x2d9u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(false),
+                ),
             ),
         ];
         let message: Vec<PooledTransactionsElement> = txs
@@ -193,44 +194,44 @@ mod tests {
                     chain_id: Some(1),
                     nonce: 0x8u64,
                     gas_price: 0x4a817c808,
-                    gas_limit: 0x2e248u64,
+                    gas_limit: 0x2e248,
                     to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x200u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
                     )
                     .unwrap(),
-                },
+                    Parity::Eip155(37),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(1),
                     nonce: 0x09u64,
                     gas_price: 0x4a817c809,
-                    gas_limit: 0x33450u64,
+                    gas_limit: 0x33450,
                     to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x2d9u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
                     )
                     .unwrap(),
-                },
+                    Parity::Eip155(37),
+                ),
             ),
         ];
         let message: Vec<PooledTransactionsElement> = txs
@@ -260,22 +261,22 @@ mod tests {
                     chain_id: Some(4),
                     nonce: 15u64,
                     gas_price: 2200000000,
-                    gas_limit: 34811u64,
+                    gas_limit: 34811,
                     to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: true,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                },
+                    Parity::Eip155(44),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Eip1559(TxEip1559 {
@@ -283,89 +284,89 @@ mod tests {
                     nonce: 26u64,
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
-                    gas_limit: 21000u64,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: true,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(true),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(4),
                     nonce: 3u64,
                     gas_price: 2000000000,
-                    gas_limit: 10000000u64,
+                    gas_limit: 10000000,
                     to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                },
+                    Parity::Eip155(43),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(4),
                     nonce: 1u64,
                     gas_price: 1000000000,
-                    gas_limit: 100000u64,
+                    gas_limit: 100000,
                     to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(693361000000000u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                },
+                    Parity::Eip155(43),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(4),
                     nonce: 2u64,
                     gas_price: 1000000000,
-                    gas_limit: 100000u64,
+                    gas_limit: 100000,
                     to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                },
+                    Parity::Eip155(43),
+                ),
             ),
         ];
         let message: Vec<PooledTransactionsElement> = txs
@@ -399,22 +400,22 @@ mod tests {
                     chain_id: Some(4),
                     nonce: 15u64,
                     gas_price: 2200000000,
-                    gas_limit: 34811u64,
+                    gas_limit: 34811,
                     to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: true,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(true),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Eip1559(TxEip1559 {
@@ -422,89 +423,89 @@ mod tests {
                     nonce: 26u64,
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
-                    gas_limit: 21000u64,
+                    gas_limit: MIN_TRANSACTION_GAS,
                     to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: true,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(true),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(4),
                     nonce: 3u64,
                     gas_price: 2000000000,
-                    gas_limit: 10000000u64,
+                    gas_limit: 10000000,
                     to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(false),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(4),
                     nonce: 1u64,
                     gas_price: 1000000000,
-                    gas_limit: 100000u64,
+                    gas_limit: 100000,
                     to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(693361000000000u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(false),
+                ),
             ),
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(4),
                     nonce: 2u64,
                     gas_price: 1000000000,
-                    gas_limit: 100000u64,
+                    gas_limit: 100000,
                     to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
-                Signature {
-                    odd_y_parity: false,
-                    r: U256::from_str(
+                Signature::new(
+                    U256::from_str(
                         "0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae",
                     )
                     .unwrap(),
-                    s: U256::from_str(
+                    U256::from_str(
                         "0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18",
                     )
                     .unwrap(),
-                },
+                    Parity::Parity(false),
+                ),
             ),
         ];
         let message: Vec<PooledTransactionsElement> = txs

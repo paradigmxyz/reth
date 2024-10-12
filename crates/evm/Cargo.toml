@@ -15,15 +15,22 @@ workspace = true
 reth-chainspec.workspace = true
 reth-execution-errors.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 revm-primitives.workspace = true
 reth-prune-types.workspace = true
+reth-metrics = { workspace = true, optional = true }
 reth-storage-errors.workspace = true
 reth-execution-types.workspace = true
 
 revm.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
 alloy-eips.workspace = true
+
 auto_impl.workspace = true
 futures-util.workspace = true
+metrics = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -31,5 +38,5 @@ parking_lot.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = ["dep:metrics", "dep:reth-metrics"]
 test-utils = ["dep:parking_lot"]

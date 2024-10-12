@@ -1,14 +1,9 @@
-#[cfg(feature = "std")]
-use std::{fmt, fmt::Display, str::FromStr, string::String};
-
-#[cfg(not(feature = "std"))]
 use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
 };
-#[cfg(not(feature = "std"))]
 use core::{
     fmt,
     fmt::{Debug, Display},
@@ -55,11 +50,10 @@ pub enum DatabaseError {
     Other(String),
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for DatabaseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for DatabaseError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::Write(err) => std::error::Error::source(err),
+            Self::Write(err) => core::error::Error::source(err),
             _ => Option::None,
         }
     }
@@ -111,15 +105,14 @@ impl fmt::Display for DatabaseWriteError {
             f,
             "write operation {:?} failed for key \"{}\" in table {}: {}",
             self.operation,
-            reth_primitives::hex::encode(&self.key),
+            alloy_primitives::hex::encode(&self.key),
             self.table_name,
             self.info
         )
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for DatabaseWriteError {}
+impl core::error::Error for DatabaseWriteError {}
 
 /// Database write operation type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

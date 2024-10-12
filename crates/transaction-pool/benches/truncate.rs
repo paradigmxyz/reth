@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+use alloy_primitives::{hex_literal::hex, Address};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -8,7 +9,6 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
-use reth_primitives::{hex_literal::hex, Address};
 use reth_transaction_pool::{
     pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},

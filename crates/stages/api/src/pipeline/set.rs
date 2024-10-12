@@ -1,5 +1,4 @@
 use crate::{Stage, StageId};
-use reth_db_api::database::Database;
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -11,26 +10,26 @@ use std::{
 /// individual stage sets to determine what kind of configuration they expose.
 ///
 /// Individual stages in the set can be added, removed and overridden using [`StageSetBuilder`].
-pub trait StageSet<DB: Database>: Sized {
+pub trait StageSet<Provider>: Sized {
     /// Configures the stages in the set.
-    fn builder(self) -> StageSetBuilder<DB>;
+    fn builder(self) -> StageSetBuilder<Provider>;
 
     /// Overrides the given [`Stage`], if it is in this set.
     ///
     /// # Panics
     ///
     /// Panics if the [`Stage`] is not in this set.
-    fn set<S: Stage<DB> + 'static>(self, stage: S) -> StageSetBuilder<DB> {
+    fn set<S: Stage<Provider> + 'static>(self, stage: S) -> StageSetBuilder<Provider> {
         self.builder().set(stage)
     }
 }
 
-struct StageEntry<DB> {
-    stage: Box<dyn Stage<DB>>,
+struct StageEntry<Provider> {
+    stage: Box<dyn Stage<Provider>>,
     enabled: bool,
 }
 
-impl<DB: Database> Debug for StageEntry<DB> {
+impl<Provider> Debug for StageEntry<Provider> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StageEntry")
             .field("stage", &self.stage.id())
@@ -45,18 +44,18 @@ impl<DB: Database> Debug for StageEntry<DB> {
 /// to the final sync pipeline before/after their dependencies.
 ///
 /// Stages inside the set can be disabled, enabled, overridden and reordered.
-pub struct StageSetBuilder<DB> {
-    stages: HashMap<StageId, StageEntry<DB>>,
+pub struct StageSetBuilder<Provider> {
+    stages: HashMap<StageId, StageEntry<Provider>>,
     order: Vec<StageId>,
 }
 
-impl<DB: Database> Default for StageSetBuilder<DB> {
+impl<Provider> Default for StageSetBuilder<Provider> {
     fn default() -> Self {
-        Self { stages: HashMap::new(), order: Vec::new() }
+        Self { stages: HashMap::default(), order: Vec::new() }
     }
 }
 
-impl<DB: Database> Debug for StageSetBuilder<DB> {
+impl<Provider> Debug for StageSetBuilder<Provider> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StageSetBuilder")
             .field("stages", &self.stages)
@@ -65,17 +64,14 @@ impl<DB: Database> Debug for StageSetBuilder<DB> {
     }
 }
 
-impl<DB> StageSetBuilder<DB>
-where
-    DB: Database,
-{
+impl<Provider> StageSetBuilder<Provider> {
     fn index_of(&self, stage_id: StageId) -> usize {
         let index = self.order.iter().position(|&id| id == stage_id);
 
         index.unwrap_or_else(|| panic!("Stage does not exist in set: {stage_id}"))
     }
 
-    fn upsert_stage_state(&mut self, stage: Box<dyn Stage<DB>>, added_at_index: usize) {
+    fn upsert_stage_state(&mut self, stage: Box<dyn Stage<Provider>>, added_at_index: usize) {
         let stage_id = stage.id();
         if self.stages.insert(stage.id(), StageEntry { stage, enabled: true }).is_some() {
             if let Some(to_remove) = self
@@ -95,7 +91,7 @@ where
     /// # Panics
     ///
     /// Panics if the [`Stage`] is not in this set.
-    pub fn set<S: Stage<DB> + 'static>(mut self, stage: S) -> Self {
+    pub fn set<S: Stage<Provider> + 'static>(mut self, stage: S) -> Self {
         let entry = self
             .stages
             .get_mut(&stage.id())
@@ -107,7 +103,7 @@ where
     /// Adds the given [`Stage`] at the end of this set.
     ///
     /// If the stage was already in the group, it is removed from its previous place.
-    pub fn add_stage<S: Stage<DB> + 'static>(mut self, stage: S) -> Self {
+    pub fn add_stage<S: Stage<Provider> + 'static>(mut self, stage: S) -> Self {
         let target_index = self.order.len();
         self.order.push(stage.id());
         self.upsert_stage_state(Box::new(stage), target_index);
@@ -117,7 +113,7 @@ where
     /// Adds the given [`Stage`] at the end of this set if it's [`Some`].
     ///
     /// If the stage was already in the group, it is removed from its previous place.
-    pub fn add_stage_opt<S: Stage<DB> + 'static>(self, stage: Option<S>) -> Self {
+    pub fn add_stage_opt<S: Stage<Provider> + 'static>(self, stage: Option<S>) -> Self {
         if let Some(stage) = stage {
             self.add_stage(stage)
         } else {
@@ -129,7 +125,7 @@ where
     ///
     /// If a stage is in both sets, it is removed from its previous place in this set. Because of
     /// this, it is advisable to merge sets first and re-order stages after if needed.
-    pub fn add_set<Set: StageSet<DB>>(mut self, set: Set) -> Self {
+    pub fn add_set<Set: StageSet<Provider>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
             let target_index = self.order.len();
             self.order.push(stage.id());
@@ -145,7 +141,7 @@ where
     /// # Panics
     ///
     /// Panics if the dependency stage is not in this set.
-    pub fn add_before<S: Stage<DB> + 'static>(mut self, stage: S, before: StageId) -> Self {
+    pub fn add_before<S: Stage<Provider> + 'static>(mut self, stage: S, before: StageId) -> Self {
         let target_index = self.index_of(before);
         self.order.insert(target_index, stage.id());
         self.upsert_stage_state(Box::new(stage), target_index);
@@ -159,7 +155,7 @@ where
     /// # Panics
     ///
     /// Panics if the dependency stage is not in this set.
-    pub fn add_after<S: Stage<DB> + 'static>(mut self, stage: S, after: StageId) -> Self {
+    pub fn add_after<S: Stage<Provider> + 'static>(mut self, stage: S, after: StageId) -> Self {
         let target_index = self.index_of(after) + 1;
         self.order.insert(target_index, stage.id());
         self.upsert_stage_state(Box::new(stage), target_index);
@@ -240,7 +236,7 @@ where
     }
 
     /// Consumes the builder and returns the contained [`Stage`]s in the order specified.
-    pub fn build(mut self) -> Vec<Box<dyn Stage<DB>>> {
+    pub fn build(mut self) -> Vec<Box<dyn Stage<Provider>>> {
         let mut stages = Vec::new();
         for id in &self.order {
             if let Some(entry) = self.stages.remove(id) {
@@ -253,7 +249,7 @@ where
     }
 }
 
-impl<DB: Database> StageSet<DB> for StageSetBuilder<DB> {
+impl<Provider> StageSet<Provider> for StageSetBuilder<Provider> {
     fn builder(self) -> Self {
         self
     }

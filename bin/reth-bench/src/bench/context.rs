@@ -3,10 +3,7 @@
 
 use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
 use alloy_eips::BlockNumberOrTag;
-use alloy_provider::{
-    network::{AnyNetwork, Ethereum},
-    Provider, ProviderBuilder, RootProvider,
-};
+use alloy_provider::{network::AnyNetwork, Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::BoxTransport;
@@ -24,7 +21,7 @@ pub(crate) struct BenchContext {
     /// The auth provider used for engine API queries.
     pub(crate) auth_provider: RootProvider<BoxTransport, AnyNetwork>,
     /// The block provider used for block queries.
-    pub(crate) block_provider: RootProvider<Http<Client>, Ethereum>,
+    pub(crate) block_provider: RootProvider<Http<Client>, AnyNetwork>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
     pub(crate) benchmark_mode: BenchMode,
@@ -46,16 +43,18 @@ impl BenchContext {
         }
 
         // set up alloy client for blocks
-        let block_provider = ProviderBuilder::new().on_http(rpc_url.parse()?);
+        let block_provider =
+            ProviderBuilder::new().network::<AnyNetwork>().on_http(rpc_url.parse()?);
 
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.
         let mut benchmark_mode = BenchMode::new(bench_args.from, bench_args.to)?;
 
         // construct the authenticated provider
-        let auth_jwt = bench_args.auth_jwtsecret.clone().ok_or_else(|| {
-            eyre::eyre!("--auth-jwtsecret must be provided for authenticated RPC")
-        })?;
+        let auth_jwt = bench_args
+            .auth_jwtsecret
+            .clone()
+            .ok_or_else(|| eyre::eyre!("--jwtsecret must be provided for authenticated RPC"))?;
 
         // fetch jwt from file
         //
@@ -95,17 +94,7 @@ impl BenchContext {
             }
         };
 
-        let next_block = match first_block.header.number {
-            Some(number) => {
-                // fetch next block
-                number + 1
-            }
-            None => {
-                // this should never happen
-                return Err(eyre::eyre!("First block number is None"));
-            }
-        };
-
+        let next_block = first_block.header.number + 1;
         Ok(Self { auth_provider, block_provider, benchmark_mode, next_block })
     }
 }

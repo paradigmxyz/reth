@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
-reth-rpc-types.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
@@ -36,19 +35,30 @@ reth-node-api.workspace = true
 reth-network-types.workspace = true
 reth-trie.workspace = true
 
-# eth
+# ethereum
+alloy-consensus.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-eips.workspace = true
 alloy-dyn-abi.workspace = true
-alloy-rlp.workspace = true
-alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-eth = { workspace = true, features = ["jsonrpsee-types"] }
+alloy-rpc-types-debug.workspace = true
+alloy-rpc-types-trace.workspace = true
+alloy-rpc-types-mev.workspace = true
+alloy-rpc-types-txpool.workspace = true
+alloy-rpc-types-admin.workspace = true
+alloy-serde.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",
     "optional_no_base_fee",
 ] }
 revm-primitives = { workspace = true, features = ["serde"] }
-secp256k1.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
@@ -81,6 +91,8 @@ reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 
+alloy-consensus.workspace = true
+
 jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 
@@ -88,8 +100,6 @@ jsonrpsee = { workspace = true, features = ["client"] }
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 optimism = [
     "reth-primitives/optimism",
-    "reth-rpc-types-compat/optimism",
     "reth-provider/optimism",
-    "reth-rpc-eth-api/optimism",
     "reth-revm/optimism",
 ]

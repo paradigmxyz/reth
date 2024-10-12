@@ -1,14 +1,13 @@
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use alloy_primitives::{Bloom, B256};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
-};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt, Request};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution(
+pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
@@ -98,4 +97,97 @@ fn compare_receipts_root_and_logs_bloom(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::hex;
+
+    use super::*;
+
+    #[test]
+    fn test_verify_receipts_success() {
+        // Create a vector of 5 default Receipt instances
+        let receipts = vec![Receipt::default(); 5];
+
+        // Compare against expected values
+        assert!(verify_receipts(
+            B256::from(hex!("61353b4fb714dc1fccacbf7eafc4273e62f3d1eed716fe41b2a0cd2e12c63ebc")),
+            Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+            &receipts
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_verify_receipts_incorrect_root() {
+        // Generate random expected values to produce a failure
+        let expected_receipts_root = B256::random();
+        let expected_logs_bloom = Bloom::random();
+
+        // Create a vector of 5 random Receipt instances
+        let receipts = vec![Receipt::default(); 5];
+
+        assert!(verify_receipts(expected_receipts_root, expected_logs_bloom, &receipts).is_err());
+    }
+
+    #[test]
+    fn test_compare_receipts_root_and_logs_bloom_success() {
+        let calculated_receipts_root = B256::random();
+        let calculated_logs_bloom = Bloom::random();
+
+        let expected_receipts_root = calculated_receipts_root;
+        let expected_logs_bloom = calculated_logs_bloom;
+
+        assert!(compare_receipts_root_and_logs_bloom(
+            calculated_receipts_root,
+            calculated_logs_bloom,
+            expected_receipts_root,
+            expected_logs_bloom
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_compare_receipts_root_failure() {
+        let calculated_receipts_root = B256::random();
+        let calculated_logs_bloom = Bloom::random();
+
+        let expected_receipts_root = B256::random();
+        let expected_logs_bloom = calculated_logs_bloom;
+
+        assert_eq!(
+            compare_receipts_root_and_logs_bloom(
+                calculated_receipts_root,
+                calculated_logs_bloom,
+                expected_receipts_root,
+                expected_logs_bloom
+            ),
+            Err(ConsensusError::BodyReceiptRootDiff(
+                GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }
+                    .into()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_compare_log_bloom_failure() {
+        let calculated_receipts_root = B256::random();
+        let calculated_logs_bloom = Bloom::random();
+
+        let expected_receipts_root = calculated_receipts_root;
+        let expected_logs_bloom = Bloom::random();
+
+        assert_eq!(
+            compare_receipts_root_and_logs_bloom(
+                calculated_receipts_root,
+                calculated_logs_bloom,
+                expected_receipts_root,
+                expected_logs_bloom
+            ),
+            Err(ConsensusError::BodyBloomLogDiff(
+                GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into()
+            ))
+        );
+    }
 }

@@ -14,19 +14,27 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec = { workspace = true, features = ["optimism"] }
-reth-ethereum-forks = { workspace = true, features = ["optimism"] }
+reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
+reth-network-peers.workspace = true
+
+# op-reth
+reth-optimism-forks.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+
+# op
+op-alloy-rpc-types.workspace = true
 
 # io
 serde_json.workspace = true
 
 # misc
-once_cell.workspace = true
 derive_more.workspace = true
+once_cell.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }

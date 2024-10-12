@@ -1,13 +1,15 @@
-use crate::{compression::Compression, ColumnResult, NippyJar, NippyJarError, NippyJarHeader};
+use crate::{
+    compression::Compression, ColumnResult, NippyJar, NippyJarChecker, NippyJarError,
+    NippyJarHeader,
+};
 use std::{
-    cmp::Ordering,
     fs::{File, OpenOptions},
     io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
 /// Size of one offset in bytes.
-const OFFSET_SIZE_BYTES: u8 = 8;
+pub(crate) const OFFSET_SIZE_BYTES: u8 = 8;
 
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
@@ -46,22 +48,32 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// If `read_only` is set to `true`, any inconsistency issue won't be healed, and will return
-    /// [`NippyJarError::InconsistentState`] instead.
-    pub fn new(
-        jar: NippyJar<H>,
-        check_mode: ConsistencyFailStrategy,
-    ) -> Result<Self, NippyJarError> {
+    /// If will  **always** attempt to heal any inconsistent state when called.
+    pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
-        // Makes sure we don't have dangling data and offset files
-        jar.freeze_config()?;
+        let (jar, data_file, offsets_file) = if is_created {
+            // Makes sure we don't have dangling data and offset files when we just created the file
+            jar.freeze_config()?;
+
+            (jar, BufWriter::new(data_file), BufWriter::new(offsets_file))
+        } else {
+            // If we are opening a previously created jar, we need to check its consistency, and
+            // make changes if necessary.
+            let mut checker = NippyJarChecker::new(jar);
+            checker.ensure_consistency()?;
+
+            let NippyJarChecker { jar, data_file, offsets_file } = checker;
+
+            // Calling ensure_consistency, will fill data_file and offsets_file
+            (jar, data_file.expect("qed"), offsets_file.expect("qed"))
+        };
 
         let mut writer = Self {
             jar,
-            data_file: BufWriter::new(data_file),
-            offsets_file: BufWriter::new(offsets_file),
+            data_file,
+            offsets_file,
             tmp_buf: Vec::with_capacity(1_000_000),
             uncompressed_row_size: 0,
             offsets: Vec::with_capacity(1_000_000),
@@ -69,13 +81,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             dirty: false,
         };
 
-        // If we are opening a previously created jar, we need to check its consistency, and make
-        // changes if necessary.
         if !is_created {
-            writer.ensure_file_consistency(check_mode)?;
-            if check_mode.should_heal() {
-                writer.commit()?;
-            }
+            // Commit any potential heals done above.
+            writer.commit()?;
         }
 
         Ok(writer)
@@ -98,6 +106,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Returns whether there are changes that need to be committed.
     pub const fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// Sets writer as dirty.
+    pub fn set_dirty(&mut self) {
+        self.dirty = true
     }
 
     /// Gets total writer rows in jar.
@@ -145,107 +158,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         }
 
         Ok((data_file, offsets_file, is_created))
-    }
-
-    /// Performs consistency checks on the [`NippyJar`] file and might self-heal or throw an error
-    /// according to [`ConsistencyFailStrategy`].
-    /// * Is the offsets file size expected?
-    /// * Is the data file size expected?
-    ///
-    /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one
-    /// to be updated when something is written, as by the `commit()` function shows.
-    pub fn ensure_file_consistency(
-        &mut self,
-        check_mode: ConsistencyFailStrategy,
-    ) -> Result<(), NippyJarError> {
-        let reader = self.jar.open_data_reader()?;
-
-        // When an offset size is smaller than the initial (8), we are dealing with immutable
-        // data.
-        if reader.offset_size() != OFFSET_SIZE_BYTES {
-            return Err(NippyJarError::FrozenJar)
-        }
-
-        let expected_offsets_file_size: u64 = (1 + // first byte is the size of one offset
-            OFFSET_SIZE_BYTES as usize* self.jar.rows * self.jar.columns + // `offset size * num rows * num columns`
-            OFFSET_SIZE_BYTES as usize) as u64; // expected size of the data file
-        let actual_offsets_file_size = self.offsets_file.get_ref().metadata()?.len();
-
-        if check_mode.should_err() &&
-            expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
-        {
-            return Err(NippyJarError::InconsistentState)
-        }
-
-        // Offsets configuration wasn't properly committed
-        match expected_offsets_file_size.cmp(&actual_offsets_file_size) {
-            Ordering::Less => {
-                // Happened during an appending job
-                // TODO: ideally we could truncate until the last offset of the last column of the
-                //  last row inserted
-                self.offsets_file.get_mut().set_len(expected_offsets_file_size)?;
-            }
-            Ordering::Greater => {
-                // Happened during a pruning job
-                // `num rows = (file size - 1 - size of one offset) / num columns`
-                self.jar.rows = ((actual_offsets_file_size.
-                    saturating_sub(1). // first byte is the size of one offset
-                    saturating_sub(OFFSET_SIZE_BYTES as u64) / // expected size of the data file
-                    (self.jar.columns as u64)) /
-                    OFFSET_SIZE_BYTES as u64) as usize;
-
-                // Freeze row count changed
-                self.jar.freeze_config()?;
-            }
-            Ordering::Equal => {}
-        }
-
-        // last offset should match the data_file_len
-        let last_offset = reader.reverse_offset(0)?;
-        let data_file_len = self.data_file.get_ref().metadata()?.len();
-
-        if check_mode.should_err() && last_offset.cmp(&data_file_len) != Ordering::Equal {
-            return Err(NippyJarError::InconsistentState)
-        }
-
-        // Offset list wasn't properly committed
-        match last_offset.cmp(&data_file_len) {
-            Ordering::Less => {
-                // Happened during an appending job, so we need to truncate the data, since there's
-                // no way to recover it.
-                self.data_file.get_mut().set_len(last_offset)?;
-            }
-            Ordering::Greater => {
-                // Happened during a pruning job, so we need to reverse iterate offsets until we
-                // find the matching one.
-                for index in 0..reader.offsets_count()? {
-                    let offset = reader.reverse_offset(index + 1)?;
-                    // It would only be equal if the previous row was fully pruned.
-                    if offset <= data_file_len {
-                        let new_len = self
-                            .offsets_file
-                            .get_ref()
-                            .metadata()?
-                            .len()
-                            .saturating_sub(OFFSET_SIZE_BYTES as u64 * (index as u64 + 1));
-                        self.offsets_file.get_mut().set_len(new_len)?;
-
-                        drop(reader);
-
-                        // Since we decrease the offset list, we need to check the consistency of
-                        // `self.jar.rows` again
-                        self.ensure_file_consistency(ConsistencyFailStrategy::Heal)?;
-                        break
-                    }
-                }
-            }
-            Ordering::Equal => {}
-        }
-
-        self.offsets_file.seek(SeekFrom::End(0))?;
-        self.data_file.seek(SeekFrom::End(0))?;
-
-        Ok(())
     }
 
     /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to
@@ -538,26 +450,5 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     #[cfg(any(test, feature = "test-utils"))]
     pub const fn jar(&self) -> &NippyJar<H> {
         &self.jar
-    }
-}
-
-/// Strategy on encountering an inconsistent state when creating a [`NippyJarWriter`].
-#[derive(Debug, Copy, Clone)]
-pub enum ConsistencyFailStrategy {
-    /// Writer should heal.
-    Heal,
-    /// Writer should throw an error.
-    ThrowError,
-}
-
-impl ConsistencyFailStrategy {
-    /// Whether writer should heal.
-    const fn should_heal(&self) -> bool {
-        matches!(self, Self::Heal)
-    }
-
-    /// Whether writer should throw an error.
-    const fn should_err(&self) -> bool {
-        matches!(self, Self::ThrowError)
     }
 }

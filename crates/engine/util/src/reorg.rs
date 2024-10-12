@@ -1,16 +1,18 @@
 //! Stream wrapper that simulates reorgs.
 
+use alloy_primitives::U256;
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
+};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{system_calls::apply_beacon_root_contract_call, ConfigureEvm};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, Header, Receipt, Receipts, U256,
-};
+use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -18,12 +20,11 @@ use reth_revm::{
     state_change::post_block_withdrawals_balance_increments,
     DatabaseCommit,
 };
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState, PayloadStatus},
-    ExecutionPayload,
-};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg};
+use reth_trie::HashedPostState;
+use revm_primitives::{
+    calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
+};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -49,7 +50,7 @@ type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
+pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Spec> {
     /// Underlying stream
     #[pin]
     stream: S,
@@ -58,9 +59,11 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     /// Evm configuration.
     evm_config: Evm,
     /// Payload validator.
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<Spec>,
     /// The frequency of reorgs.
     frequency: usize,
+    /// The depth of reorgs.
+    depth: usize,
     /// The number of forwarded forkchoice states.
     /// This is reset after a reorg.
     forkchoice_states_forwarded: usize,
@@ -72,14 +75,15 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
-impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm> {
+impl<S, Engine: EngineTypes, Provider, Evm, Spec> EngineReorg<S, Engine, Provider, Evm, Spec> {
     /// Creates new [`EngineReorg`] stream wrapper.
     pub fn new(
         stream: S,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         frequency: usize,
+        depth: usize,
     ) -> Self {
         Self {
             stream,
@@ -87,6 +91,7 @@ impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm
             evm_config,
             payload_validator,
             frequency,
+            depth,
             state: EngineReorgState::Forward,
             forkchoice_states_forwarded: 0,
             last_forkchoice_state: None,
@@ -95,12 +100,13 @@ impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm
     }
 }
 
-impl<S, Engine, Provider, Evm> Stream for EngineReorg<S, Engine, Provider, Evm>
+impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider, Evm, Spec>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
+    Spec: EthereumHardforks,
 {
     type Item = S::Item;
 
@@ -138,80 +144,76 @@ where
             }
 
             let next = ready!(this.stream.poll_next_unpin(cx));
-            let item = match next {
-                Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }) => {
-                    if this.forkchoice_states_forwarded > this.frequency {
-                        if let Some(last_forkchoice_state) = this
-                            .last_forkchoice_state
-                            // Only enter reorg state if new payload attaches to current head.
-                            .filter(|state| state.head_block_hash == payload.parent_hash())
-                        {
-                            // Enter the reorg state.
-                            // The current payload will be immediately forwarded by being in front
-                            // of the queue. Then we attempt to reorg the current head by generating
-                            // a payload that attaches to the head's parent and is based on the
-                            // non-conflicting transactions (txs from block `n + 1` that are valid
-                            // at block `n` according to consensus checks) from the current payload
-                            // as well as the corresponding forkchoice state. We will rely on CL to
-                            // reorg us back to canonical chain.
-                            // TODO: This is an expensive blocking operation, ideally it's spawned
-                            // as a task so that the stream could yield the control back.
-                            let (reorg_payload, reorg_cancun_fields) = match create_reorg_head(
-                                this.provider,
-                                this.evm_config,
-                                this.payload_validator,
-                                payload.clone(),
-                                cancun_fields.clone(),
-                            ) {
-                                Ok(result) => result,
-                                Err(error) => {
-                                    error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
-                                    // Forward the payload and attempt to create reorg on top of the
-                                    // next one
-                                    return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
-                                        payload,
-                                        cancun_fields,
-                                        tx,
-                                    }))
-                                }
-                            };
-                            let reorg_forkchoice_state = ForkchoiceState {
-                                finalized_block_hash: last_forkchoice_state.finalized_block_hash,
-                                safe_block_hash: last_forkchoice_state.safe_block_hash,
-                                head_block_hash: reorg_payload.block_hash(),
-                            };
-
-                            let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
-                            let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
-                            this.reorg_responses.extend([
-                                Box::pin(reorg_payload_rx.map_ok(Either::Left)) as ReorgResponseFut,
-                                Box::pin(reorg_fcu_rx.map_ok(Either::Right)) as ReorgResponseFut,
-                            ]);
-
-                            *this.state = EngineReorgState::Reorg {
-                                queue: VecDeque::from([
-                                    // Current payload
-                                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx },
-                                    // Reorg payload
-                                    BeaconEngineMessage::NewPayload {
-                                        payload: reorg_payload,
-                                        cancun_fields: reorg_cancun_fields,
-                                        tx: reorg_payload_tx,
-                                    },
-                                    // Reorg forkchoice state
-                                    BeaconEngineMessage::ForkchoiceUpdated {
-                                        state: reorg_forkchoice_state,
-                                        payload_attrs: None,
-                                        tx: reorg_fcu_tx,
-                                    },
-                                ]),
-                            };
-                            continue
+            let item = match (next, &this.last_forkchoice_state) {
+                (
+                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }),
+                    Some(last_forkchoice_state),
+                ) if this.forkchoice_states_forwarded > this.frequency &&
+                        // Only enter reorg state if new payload attaches to current head.
+                        last_forkchoice_state.head_block_hash == payload.parent_hash() =>
+                {
+                    // Enter the reorg state.
+                    // The current payload will be immediately forwarded by being in front of the
+                    // queue. Then we attempt to reorg the current head by generating a payload that
+                    // attaches to the head's parent and is based on the non-conflicting
+                    // transactions (txs from block `n + 1` that are valid at block `n` according to
+                    // consensus checks) from the current payload as well as the corresponding
+                    // forkchoice state. We will rely on CL to reorg us back to canonical chain.
+                    // TODO: This is an expensive blocking operation, ideally it's spawned as a task
+                    // so that the stream could yield the control back.
+                    let (reorg_payload, reorg_cancun_fields) = match create_reorg_head(
+                        this.provider,
+                        this.evm_config,
+                        this.payload_validator,
+                        *this.depth,
+                        payload.clone(),
+                        cancun_fields.clone(),
+                    ) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
+                            // Forward the payload and attempt to create reorg on top of
+                            // the next one
+                            return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
+                                payload,
+                                cancun_fields,
+                                tx,
+                            }))
                         }
-                    }
-                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx })
+                    };
+                    let reorg_forkchoice_state = ForkchoiceState {
+                        finalized_block_hash: last_forkchoice_state.finalized_block_hash,
+                        safe_block_hash: last_forkchoice_state.safe_block_hash,
+                        head_block_hash: reorg_payload.block_hash(),
+                    };
+
+                    let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
+                    let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
+                    this.reorg_responses.extend([
+                        Box::pin(reorg_payload_rx.map_ok(Either::Left)) as ReorgResponseFut,
+                        Box::pin(reorg_fcu_rx.map_ok(Either::Right)) as ReorgResponseFut,
+                    ]);
+
+                    let queue = VecDeque::from([
+                        // Current payload
+                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx },
+                        // Reorg payload
+                        BeaconEngineMessage::NewPayload {
+                            payload: reorg_payload,
+                            cancun_fields: reorg_cancun_fields,
+                            tx: reorg_payload_tx,
+                        },
+                        // Reorg forkchoice state
+                        BeaconEngineMessage::ForkchoiceUpdated {
+                            state: reorg_forkchoice_state,
+                            payload_attrs: None,
+                            tx: reorg_fcu_tx,
+                        },
+                    ]);
+                    *this.state = EngineReorgState::Reorg { queue };
+                    continue
                 }
-                Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }) => {
+                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
@@ -219,23 +221,25 @@ where
                     *this.forkchoice_states_forwarded += 1;
                     Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
-                item => item,
+                (item, _) => item,
             };
             return Poll::Ready(item)
         }
     }
 }
 
-fn create_reorg_head<Provider, Evm>(
+fn create_reorg_head<Provider, Evm, Spec>(
     provider: &Provider,
     evm_config: &Evm,
-    payload_validator: &ExecutionPayloadValidator,
+    payload_validator: &ExecutionPayloadValidator<Spec>,
+    mut depth: usize,
     next_payload: ExecutionPayload,
     next_cancun_fields: Option<CancunPayloadFields>,
 ) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
 where
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
+    Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
 
@@ -244,13 +248,28 @@ where
         .ensure_well_formed_payload(next_payload, next_cancun_fields.into())
         .map_err(RethError::msg)?;
 
-    // Fetch reorg target block and its parent
-    let reorg_target = provider
-        .block_by_hash(next_block.parent_hash)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(next_block.parent_hash.into()))?;
+    // Fetch reorg target block depending on its depth and its parent.
+    let mut previous_hash = next_block.parent_hash;
+    let mut candidate_transactions = next_block.body.transactions;
+    let reorg_target = 'target: {
+        loop {
+            let reorg_target = provider
+                .block_by_hash(previous_hash)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
+            if depth == 0 {
+                break 'target reorg_target
+            }
+
+            depth -= 1;
+            previous_hash = reorg_target.parent_hash;
+            candidate_transactions = reorg_target.body.transactions;
+        }
+    };
     let reorg_target_parent = provider
         .block_by_hash(reorg_target.parent_hash)?
         .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.parent_hash.into()))?;
+
+    debug!(target: "engine::stream::reorg", number = reorg_target.number, hash = %previous_hash, "Selected reorg target");
 
     // Configure state
     let state_provider = provider.state_by_block_hash(reorg_target.parent_hash)?;
@@ -262,20 +281,14 @@ where
     // Configure environments
     let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
     let mut block_env = BlockEnv::default();
-    evm_config.fill_cfg_and_block_env(
-        &mut cfg,
-        &mut block_env,
-        chain_spec,
-        &reorg_target.header,
-        U256::MAX,
-    );
+    evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, &reorg_target.header, U256::MAX);
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    apply_beacon_root_contract_call(
-        evm_config,
-        chain_spec,
+    let mut system_caller = SystemCaller::new(evm_config, chain_spec);
+
+    system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
         reorg_target.number,
         reorg_target.parent_beacon_block_root,
@@ -287,7 +300,7 @@ where
     let mut transactions = Vec::new();
     let mut receipts = Vec::new();
     let mut versioned_hashes = Vec::new();
-    for tx in next_block.body {
+    for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
             continue
@@ -333,7 +346,7 @@ where
     }
     drop(evm);
 
-    if let Some(withdrawals) = &reorg_target.withdrawals {
+    if let Some(withdrawals) = &reorg_target.body.withdrawals {
         state.increment_balances(post_block_withdrawals_balance_increments(
             chain_spec,
             reorg_target.timestamp,
@@ -351,12 +364,13 @@ where
         reorg_target.number,
         Default::default(),
     );
+    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
             (
                 Some(sum_blob_gas_used),
-                Some(calculate_excess_blob_gas(
+                Some(calc_excess_blob_gas(
                     reorg_target_parent.excess_blob_gas.unwrap_or_default(),
                     reorg_target_parent.blob_gas_used.unwrap_or_default(),
                 )),
@@ -388,14 +402,16 @@ where
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
             requests_root: None, // TODO(prague)
             gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas,
-            state_root: state_provider.state_root(outcome.state())?,
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: excess_blob_gas.map(Into::into),
+            state_root: state_provider.state_root(hashed_state)?,
         },
-        body: transactions,
-        ommers: reorg_target.ommers,
-        withdrawals: reorg_target.withdrawals,
-        requests: None, // TODO(prague)
+        body: BlockBody {
+            transactions,
+            ommers: reorg_target.body.ommers,
+            withdrawals: reorg_target.body.withdrawals,
+            requests: None, // TODO(prague)
+        },
     }
     .seal_slow();
 

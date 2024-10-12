@@ -87,8 +87,9 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, Header, B256, U256};
+    use reth_primitives::Header;
     use std::str::FromStr;
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -98,8 +99,8 @@ mod tests {
         let header = Header {
             difficulty: U256::from(0x8ae_u64),
             number: 0xd05_u64,
-            gas_limit: 0x115c_u64,
-            gas_used: 0x15b3_u64,
+            gas_limit: 0x115c,
+            gas_used: 0x15b3,
             timestamp: 0x1a0a_u64,
             extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: B256::ZERO,
@@ -130,13 +131,13 @@ mod tests {
             logs_bloom: bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
             difficulty: U256::from(0x020000),
             number: 0x01_u64,
-            gas_limit: 0x016345785d8a0000_u64,
-            gas_used: 0x015534_u64,
+            gas_limit: 0x016345785d8a0000,
+            gas_used: 0x015534,
             timestamp: 0x079e,
             extra_data: bytes!("42"),
             mix_hash: b256!("0000000000000000000000000000000000000000000000000000000000000000"),
-            nonce: 0,
-            base_fee_per_gas: Some(0x036b_u64),
+            nonce: 0u64.into()  ,
+            base_fee_per_gas: Some(0x036b),
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
@@ -153,8 +154,8 @@ mod tests {
         let expected = Header {
             difficulty: U256::from(0x8aeu64),
             number: 0xd05u64,
-            gas_limit: 0x115cu64,
-            gas_used: 0x15b3u64,
+            gas_limit: 0x115c,
+            gas_used: 0x15b3,
             timestamp: 0x1a0au64,
             extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: B256::ZERO,
@@ -257,7 +258,7 @@ mod tests {
                 "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
             )
             .unwrap(),
-            nonce: 0,
+            nonce: 0u64.into(),
             base_fee_per_gas: Some(9),
             withdrawals_root: Some(
                 B256::from_str("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -304,7 +305,7 @@ mod tests {
             timestamp: 0x64c40d54,
             extra_data: bytes!("d883010c01846765746888676f312e32302e35856c696e7578"),
             mix_hash: b256!("70ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f2325"),
-            nonce: 0,
+            nonce: 0u64.into(),
             base_fee_per_gas: Some(7),
             withdrawals_root: Some(b256!(
                 "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
@@ -342,13 +343,5 @@ mod tests {
         let direction = HeadersDirection::Rising;
         direction.encode(&mut buf);
         assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
-    }
-
-    #[test]
-    fn test_decode_block_header_with_invalid_blob_gas_used() {
-        // This should error because the blob_gas_used is too large
-        let data = hex!("f90242a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421891122334455667788998401600000");
-        Header::decode(&mut data.as_slice())
-            .expect_err("blob_gas_used size should make this header decoding fail");
     }
 }

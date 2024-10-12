@@ -12,17 +12,23 @@ mod error;
 
 pub use error::{EngineObjectValidationError, PayloadBuilderError, VersionSpecificValidationError};
 
+mod events;
+pub use crate::events::{Events, PayloadEvents};
+
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
-pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{
+    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilder,
+    PayloadBuilderAttributes,
+};
 
 mod payload;
 pub use payload::PayloadOrAttributes;
 
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 /// The types that are used by the engine API.
-pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone {
+pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
     /// The built payload type.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 
@@ -43,7 +49,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone {
 ///
 /// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(
-    chain_spec: &ChainSpec,
+    chain_spec: impl EthereumHardforks,
     version: EngineApiMessageVersion,
     timestamp: u64,
 ) -> Result<(), EngineObjectValidationError> {

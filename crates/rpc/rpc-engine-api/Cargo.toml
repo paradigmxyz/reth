@@ -16,7 +16,6 @@ workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-rpc-api.workspace = true
-reth-rpc-types.workspace = true
 reth-storage-api.workspace = true
 reth-beacon-consensus.workspace = true
 reth-payload-builder.workspace = true
@@ -25,6 +24,12 @@ reth-tasks.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
+reth-transaction-pool.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -51,6 +56,3 @@ reth-testing-utils.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-
-[features]
-optimism = ["reth-primitives/optimism"]

@@ -4,6 +4,8 @@ Merkle stage
 
 ```bash
 $ reth stage dump merkle --help
+```
+```txt
 Usage: reth stage dump merkle [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:

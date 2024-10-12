@@ -37,8 +37,6 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-test-fuzz.workspace = true
-toml.workspace = true
 hash-db = "=0.15.2"
 plain_hasher = "0.2"
 

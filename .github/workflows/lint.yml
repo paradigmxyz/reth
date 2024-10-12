@@ -11,23 +11,36 @@ env:
 
 jobs:
   clippy-binaries:
-    name: clippy / ${{ matrix.network }}
+    name: clippy binaries / ${{ matrix.type }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
         include:
-          - binary: reth
-            network: ethereum
-          - binary: op-reth
-            network: optimism
+          - type: ethereum
+            args: --bin reth --workspace
+            features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: optimism
+            args: --bin op-reth --workspace
+            features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: book
+            args: --manifest-path book/sources/Cargo.toml --workspace --bins
+            features: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
+        with:
+          toolchain: nightly-2024-09-25
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }} asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+      - if: "${{ matrix.type == 'book' }}"
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run clippy on binaries
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
         env:
           RUSTFLAGS: -D warnings
 
@@ -37,7 +50,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@clippy
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-09-25
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -71,7 +87,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo hack check
+      - run: cargo hack check --workspace --exclude op-reth
+      - run: cargo check -p op-reth --features "optimism"
 
   msrv:
     name: MSRV / ${{ matrix.network }}
@@ -88,7 +105,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.80" # MSRV
+          toolchain: "1.81" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -121,7 +138,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      - name: Run fmt
+        run: cargo fmt --all --check
+      - name: Run fmt on book sources
+        run: cargo fmt --manifest-path book/sources/Cargo.toml --all --check
+
+  udeps:
+    name: udeps
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@cargo-udeps
+      - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
 
   book:
     name: book
@@ -129,9 +162,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.80" # MSRV
+          toolchain: "1.81" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -198,6 +232,7 @@ jobs:
       - crate-checks
       - docs
       - fmt
+      - udeps
       - book
       - codespell
       - grafana

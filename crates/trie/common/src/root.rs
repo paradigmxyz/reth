@@ -28,6 +28,10 @@ pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
     F: FnMut(&T, &mut Vec<u8>),
 {
+    if items.is_empty() {
+        return alloy_trie::EMPTY_ROOT_HASH;
+    }
+
     let mut value_buffer = Vec::new();
 
     let mut hb = HashBuilder::default();
@@ -71,7 +75,7 @@ pub fn state_root_unhashed<A: Into<TrieAccount>>(
 pub fn state_root_unsorted<A: Into<TrieAccount>>(
     state: impl IntoIterator<Item = (B256, A)>,
 ) -> B256 {
-    state_root(state.into_iter().sorted_by_key(|(key, _)| *key))
+    state_root(state.into_iter().sorted_unstable_by_key(|(key, _)| *key))
 }
 
 /// Calculates the root hash of the state represented as MPT.
@@ -101,7 +105,7 @@ pub fn storage_root_unhashed(storage: impl IntoIterator<Item = (B256, U256)>) ->
 /// Sorts and calculates the root hash of account storage trie.
 /// See [`storage_root`] for more info.
 pub fn storage_root_unsorted(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    storage_root(storage.into_iter().sorted_by_key(|(key, _)| *key))
+    storage_root(storage.into_iter().sorted_unstable_by_key(|(key, _)| *key))
 }
 
 /// Calculates the root hash of account storage trie.

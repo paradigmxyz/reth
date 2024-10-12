@@ -14,12 +14,12 @@
 
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth::cli::Cli;
+use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
 use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
 
 fn main() {
-    Cli::<RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             let handle = builder
                 .node(EthereumNode::default())

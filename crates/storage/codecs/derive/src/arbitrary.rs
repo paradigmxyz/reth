@@ -27,7 +27,7 @@ pub fn maybe_generate_tests(
                     let mut buf = vec![];
                     let len = field.clone().to_compact(&mut buf);
                     let (decoded, _): (super::#type_ident, _) = Compact::from_compact(&buf, len);
-                    assert!(field == decoded, "maybe_generate_tests::compact");
+                    assert_eq!(field, decoded, "maybe_generate_tests::compact");
                 }
             });
         } else if arg.to_string() == "rlp" {
