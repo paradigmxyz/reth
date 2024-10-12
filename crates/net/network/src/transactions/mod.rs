@@ -1255,29 +1255,6 @@ where
         // yield back control to tokio. See `NetworkManager` for more context on the design
         // pattern.
 
-        // Advance pool imports (flush txns to pool).
-        //
-        // Note, this is done in batches. A batch is filled from one `Transactions`
-        // broadcast messages or one `PooledTransactions` response at a time. The
-        // minimum batch size is 1 transaction (and might often be the case with blob
-        // transactions).
-        //
-        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-        // (2 MiB / 10 bytes > 200k transactions).
-        //
-        // Since transactions aren't validated until they are inserted into the pool,
-        // this can potentially validate >200k transactions. More if the message size
-        // is bigger than the soft limit on a `PooledTransactions` response which is
-        // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
-        let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
-            poll_durations.acc_pending_imports,
-            "net::tx",
-            "Batched pool imports stream",
-            DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
-            this.pool_imports.poll_next_unpin(cx),
-            |batch_results| this.on_batch_import_result(batch_results)
-        );
-
         // Advance network/peer related events (update peers map).
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_network_events,
@@ -1349,6 +1326,29 @@ where
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
             this.transaction_events.poll_next_unpin(cx),
             |event| this.on_network_tx_event(event),
+        );
+
+        // Advance pool imports (flush txns to pool).
+        //
+        // Note, this is done in batches. A batch is filled from one `Transactions`
+        // broadcast messages or one `PooledTransactions` response at a time. The
+        // minimum batch size is 1 transaction (and might often be the case with blob
+        // transactions).
+        //
+        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+        // (2 MiB / 10 bytes > 200k transactions).
+        //
+        // Since transactions aren't validated until they are inserted into the pool,
+        // this can potentially validate >200k transactions. More if the message size
+        // is bigger than the soft limit on a `PooledTransactions` response which is
+        // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
+        let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
+            poll_durations.acc_pending_imports,
+            "net::tx",
+            "Batched pool imports stream",
+            DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+            this.pool_imports.poll_next_unpin(cx),
+            |batch_results| this.on_batch_import_result(batch_results)
         );
 
         // Tries to drain hashes pending fetch cache if the tx manager currently has
