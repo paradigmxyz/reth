@@ -1,10 +1,10 @@
+use std::sync::Arc;
+
 use alloy_primitives::{b256, B256};
 use reth_chainspec::{
-    once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
+    once_lock_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
 };
 use reth_network_peers::NodeRecord;
-
-use std::sync::Arc;
 
 pub const SHANGHAI_TIME: u64 = 1705996800;
 
@@ -14,7 +14,7 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
     ChainSpec {
         chain: Chain::from_id(56),
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
-        genesis_hash: once_cell_set(GENESIS),
+        genesis_hash: once_lock_set(GENESIS),
         genesis_header: Default::default(),
         paris_block_and_final_difficulty: None,
         hardforks: ChainHardforks::new(vec![(

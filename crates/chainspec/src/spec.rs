@@ -1,3 +1,5 @@
+use std::sync::{LazyLock, OnceLock};
+
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
@@ -6,7 +8,6 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
-use once_cell::sync::{Lazy, OnceCell};
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
@@ -24,15 +25,15 @@ use reth_primitives_traits::{
 };
 use reth_trie_common::root::state_root_ref_unhashed;
 
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_lock_set, EthChainSpec};
 
 /// The Ethereum mainnet spec
-pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let mut spec = ChainSpec {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: once_cell_set(MAINNET_GENESIS_HASH),
+        genesis_hash: once_lock_set(MAINNET_GENESIS_HASH),
         genesis_header: Default::default(),
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
@@ -55,12 +56,12 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 });
 
 /// The Sepolia spec
-pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let mut spec = ChainSpec {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
-        genesis_hash: once_cell_set(SEPOLIA_GENESIS_HASH),
+        genesis_hash: once_lock_set(SEPOLIA_GENESIS_HASH),
         genesis_header: Default::default(),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
@@ -80,12 +81,12 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 });
 
 /// The Holesky spec
-pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let mut spec = ChainSpec {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
-        genesis_hash: once_cell_set(HOLESKY_GENESIS_HASH),
+        genesis_hash: once_lock_set(HOLESKY_GENESIS_HASH),
         genesis_header: Default::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         hardforks: EthereumHardfork::holesky().into(),
@@ -106,12 +107,12 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 ///
 /// Includes 20 prefunded accounts with `10_000` ETH each derived from mnemonic "test test test test
 /// test test test test test test test junk".
-pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
-        genesis_hash: once_cell_set(DEV_GENESIS_HASH),
+        genesis_hash: once_lock_set(DEV_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: DEV_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
@@ -180,15 +181,15 @@ pub struct ChainSpec {
 
     /// The hash of the genesis block.
     ///
-    /// This is either stored at construction time if it is known using [`once_cell_set`], or
+    /// This is either stored at construction time if it is known using [`once_lock_set`], or
     /// computed once on the first access.
-    pub genesis_hash: OnceCell<B256>,
+    pub genesis_hash: OnceLock<B256>,
 
     /// The header corresponding to the genesis block.
     ///
-    /// This is either stored at construction time if it is known using [`once_cell_set`], or
+    /// This is either stored at construction time if it is known using [`once_lock_set`], or
     /// computed once on the first access.
-    pub genesis_header: OnceCell<Header>,
+    pub genesis_header: OnceLock<Header>,
 
     /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at
     /// this block.
@@ -668,7 +669,7 @@ impl From<Genesis> for ChainSpec {
         Self {
             chain: genesis.config.chain_id.into(),
             genesis,
-            genesis_hash: OnceCell::new(),
+            genesis_hash: OnceLock::new(),
             hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
@@ -952,7 +953,7 @@ impl ChainSpecBuilder {
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
-            genesis_hash: OnceCell::new(),
+            genesis_hash: OnceLock::new(),
             hardforks: self.hardforks,
             paris_block_and_final_difficulty,
             deposit_contract: None,
@@ -2271,7 +2272,7 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec {
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
-            genesis_hash: OnceCell::new(),
+            genesis_hash: OnceLock::new(),
             hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Frontier.boxed(),
                 ForkCondition::Never,
@@ -2289,7 +2290,7 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec {
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
-            genesis_hash: OnceCell::new(),
+            genesis_hash: OnceLock::new(),
             hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Shanghai.boxed(),
                 ForkCondition::Never,

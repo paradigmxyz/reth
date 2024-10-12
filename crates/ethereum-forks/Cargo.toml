@@ -16,7 +16,6 @@ workspace = true
 alloy-chains.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
-once_cell.workspace = true
 
 # used for forkid
 crc = "3"

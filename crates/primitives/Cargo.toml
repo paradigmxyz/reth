@@ -51,7 +51,6 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 bytes.workspace = true
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
-once_cell.workspace = true
 rand = { workspace = true, optional = true }
 rayon.workspace = true
 serde.workspace = true

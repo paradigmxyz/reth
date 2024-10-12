@@ -16,7 +16,7 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use std::fmt::Display;
+use std::{fmt::Display, sync::OnceLock};
 
 use alloy_genesis::Genesis;
 use alloy_primitives::{Parity, Signature, B256, U256};
@@ -27,7 +27,6 @@ pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
 use derive_more::{Constructor, Deref, Into};
-use once_cell::sync::OnceCell;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, DepositContract, EthChainSpec, EthereumHardforks,
     ForkFilter, ForkId, Hardforks, Head,
@@ -216,7 +215,7 @@ impl From<Genesis> for OpChainSpec {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
                 genesis,
-                genesis_hash: OnceCell::new(),
+                genesis_hash: OnceLock::new(),
                 hardforks: ChainHardforks::new(ordered_hardforks),
                 paris_block_and_final_difficulty,
                 base_fee_params: optimism_genesis_info.base_fee_params,

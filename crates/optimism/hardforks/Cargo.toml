@@ -22,9 +22,6 @@ alloy-primitives.workspace = true
 # io
 serde = { workspace = true, optional = true }
 
-# misc
-once_cell.workspace = true
-
 [features]
 default = ["std"]
 std = []

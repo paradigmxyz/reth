@@ -12,8 +12,8 @@ use alloy_eips::{
 use alloy_primitives::{Bytes, TxHash};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
+use std::sync::LazyLock;
 use derive_more::{AsRef, Deref};
-use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
@@ -72,8 +72,8 @@ pub type TxHashOrNumber = BlockHashOrNumber;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
-pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
-    Lazy::new(|| match rayon::current_num_threads() {
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+    LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
         _ => 5,

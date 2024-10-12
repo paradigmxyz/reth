@@ -1,9 +1,10 @@
+use std::sync::LazyLock;
+
 use alloy_primitives::U256;
-use once_cell::sync::Lazy;
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 
 /// Dev hardforks
-pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
+pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),

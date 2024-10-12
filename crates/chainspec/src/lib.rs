@@ -34,9 +34,9 @@ pub use spec::{
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
 };
 
-/// Simple utility to create a `OnceCell` with a value set.
-pub fn once_cell_set<T>(value: T) -> once_cell::sync::OnceCell<T> {
-    let once = once_cell::sync::OnceCell::new();
+/// Simple utility to create a `OnceLock` with a value set.
+pub fn once_lock_set<T>(value: T) -> std::sync::OnceLock<T> {
+    let once = std::sync::OnceLock::new();
     let _ = once.set(value);
     once
 }
