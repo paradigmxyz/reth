@@ -1,3 +1,4 @@
+use crate::log_progress;
 use alloy_primitives::{bytes::BufMut, keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
@@ -19,6 +20,7 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
+    time::Instant,
 };
 use tracing::*;
 
@@ -117,17 +119,17 @@ where
 
             collect(&mut channels, &mut collector)?;
 
-            let total_hashes = collector.len();
-            let interval = (total_hashes / 10).max(1);
+            let total = collector.len();
+            let mut last_log = Instant::now();
             let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
             for (index, item) in collector.iter()?.enumerate() {
-                if index > 0 && index % interval == 0 {
-                    info!(
-                        target: "sync::stages::hashing_storage",
-                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
-                        "Inserting hashes"
-                    );
-                }
+                log_progress!(
+                    "sync::stages::hashing_storage",
+                    index,
+                    total,
+                    last_log,
+                    "Inserting hashes"
+                );
 
                 let (addr_key, value) = item?;
                 cursor.append_dup(
