@@ -4,8 +4,6 @@ Gets the content of a database table for the given key
 
 ```bash
 $ reth db get mdbx --help
-```
-```txt
 Usage: reth db get mdbx [OPTIONS] <TABLE> <KEY> [SUBKEY]
 
 Arguments:

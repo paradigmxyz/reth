@@ -4,8 +4,6 @@ Various debug routines
 
 ```bash
 $ reth debug --help
-```
-```txt
 Usage: reth debug [OPTIONS] <COMMAND>
 
 Commands:

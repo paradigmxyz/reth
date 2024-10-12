@@ -2,36 +2,30 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
-use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_db_api::transaction::DbTxMut;
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
     DbTool,
 };
-use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
 use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
-use reth_prune::PruneSegment;
 use reth_stages::StageId;
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
-pub struct Command<C: ChainSpecParser> {
+pub struct Command {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 
     stage: StageEnum,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl Command {
     /// Execute `db` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+    pub async fn execute(self) -> eyre::Result<()> {
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
         let static_file_provider = provider_factory.static_file_provider();
 
@@ -55,7 +49,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     .sorted_by_key(|(block_range, _)| block_range.start())
                     .rev()
                 {
-                    static_file_provider.delete_jar(static_file_segment, block_range.start())?;
+                    static_file_provider
+                        .delete_jar(static_file_segment, find_fixed_range(block_range.start()))?;
                 }
             }
         }
@@ -73,7 +68,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -86,21 +81,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
-                // Reset pruned numbers to not count them in the next rerun's stage progress
-                if let Some(mut prune_checkpoint) =
-                    tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?
-                {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::SenderRecovery,
-                        prune_checkpoint,
-                    )?;
-                }
                 tx.put::<tables::StageCheckpoints>(
                     StageId::SenderRecovery.to_string(),
                     Default::default(),
@@ -118,7 +102,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     Default::default(),
                 )?;
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state(&provider_rw.0, alloc.iter())?;
+                insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
@@ -176,7 +160,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     StageId::IndexStorageHistory.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_history(&provider_rw.0, self.env.chain.genesis().alloc.iter())?;
+                insert_genesis_history(&provider_rw, self.env.chain.genesis.alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
@@ -184,7 +168,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
             }
         }
 

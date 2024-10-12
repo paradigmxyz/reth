@@ -1,26 +1,21 @@
 //! Command that runs pruning without any limits.
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
-use reth_node_builder::NodeTypesWithEngine;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use tracing::info;
 
 /// Prunes according to the configuration without any limits
 #[derive(Debug, Parser)]
-pub struct PruneCommand<C: ChainSpecParser> {
+pub struct PruneCommand {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
+impl PruneCommand {
     /// Execute the `prune` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
-        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+    pub async fn execute(self) -> eyre::Result<()> {
+        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
         let prune_config = config.prune.unwrap_or_default();
 
         // Copy data from database to static files

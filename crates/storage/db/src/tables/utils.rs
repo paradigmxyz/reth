@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 /// Helper function to decode a `(key, value)` pair.
 pub(crate) fn decoder<'a, T>(
-    (k, v): (Cow<'a, [u8]>, Cow<'a, [u8]>),
+    kv: (Cow<'a, [u8]>, Cow<'a, [u8]>),
 ) -> Result<TableRow<T>, DatabaseError>
 where
     T: Table,
@@ -14,11 +14,11 @@ where
     T::Value: Decompress,
 {
     Ok((
-        match k {
+        match kv.0 {
             Cow::Borrowed(k) => Decode::decode(k)?,
-            Cow::Owned(k) => Decode::decode_owned(k)?,
+            Cow::Owned(k) => Decode::decode(k)?,
         },
-        match v {
+        match kv.1 {
             Cow::Borrowed(v) => Decompress::decompress(v)?,
             Cow::Owned(v) => Decompress::decompress_owned(v)?,
         },

@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 #![cfg(feature = "ef-tests")]
 
 use ef_tests::{cases::blockchain_test::BlockchainTests, suite::Suite};
@@ -12,7 +11,6 @@ macro_rules! general_state_test {
     };
 }
 
-#[allow(missing_docs)]
 mod general_state_tests {
     use super::*;
 

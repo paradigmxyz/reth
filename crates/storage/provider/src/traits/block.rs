@@ -1,7 +1,6 @@
-use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::{BlockNumber, SealedBlockWithSenders};
 use reth_storage_api::BlockReader;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
@@ -23,7 +22,7 @@ pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
     ) -> ProviderResult<()>;
 }
 
-/// BlockExecution Reader
+/// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionReader: BlockReader + Send + Sync {
     /// Get range of blocks and its execution result
@@ -31,13 +30,6 @@ pub trait BlockExecutionReader: BlockReader + Send + Sync {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
-}
-
-/// This just receives state, or [`ExecutionOutcome`], from the provider
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait StateReader: Send + Sync {
-    /// Get the [`ExecutionOutcome`] for the given block
-    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>>;
 }
 
 /// Block Writer

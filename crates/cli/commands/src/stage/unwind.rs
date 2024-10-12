@@ -1,23 +1,19 @@
 //! Unwinding a certain block range
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::DatabaseEnv;
+use reth_db_api::database::Database;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
+use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
+    FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -32,9 +28,9 @@ use tracing::info;
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
-pub struct Command<C: ChainSpecParser> {
+pub struct Command {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -48,12 +44,10 @@ pub struct Command<C: ChainSpecParser> {
     offline: bool,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl Command {
     /// Execute `db stage unwind` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+    pub async fn execute(self) -> eyre::Result<()> {
+        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
@@ -116,11 +110,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    fn build_pipeline<DB: Database + 'static>(
         self,
         config: Config,
-        provider_factory: ProviderFactory<N>,
-    ) -> Result<Pipeline<N>, eyre::Error> {
+        provider_factory: ProviderFactory<Arc<DB>>,
+    ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let stage_conf = &config.stages;
@@ -132,13 +126,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let executor = NoopBlockExecutorProvider::default();
 
         let builder = if self.offline {
-            Pipeline::<N>::builder().add_stages(
+            Pipeline::builder().add_stages(
                 OfflineStages::new(executor, config.stages, PruneModes::default())
                     .builder()
                     .disable(reth_stages::StageId::SenderRecovery),
             )
         } else {
-            Pipeline::<N>::builder().with_tip_sender(tip_tx).add_stages(
+            Pipeline::builder().with_tip_sender(tip_tx).add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
@@ -189,9 +183,9 @@ impl Subcommands {
     /// Returns the block range to unwind.
     ///
     /// This returns an inclusive range: [target..=latest]
-    fn unwind_range<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+    fn unwind_range<DB: Database>(
         &self,
-        factory: ProviderFactory<N>,
+        factory: ProviderFactory<DB>,
     ) -> eyre::Result<RangeInclusive<u64>> {
         let provider = factory.provider()?;
         let last = provider.last_block_number()?;
@@ -213,28 +207,14 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
-    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-
     use super::*;
 
     #[test]
     fn parse_unwind() {
-        let cmd = Command::<EthereumChainSpecParser>::parse_from([
-            "reth",
-            "--datadir",
-            "dir",
-            "to-block",
-            "100",
-        ]);
+        let cmd = Command::parse_from(["reth", "--datadir", "dir", "to-block", "100"]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
 
-        let cmd = Command::<EthereumChainSpecParser>::parse_from([
-            "reth",
-            "--datadir",
-            "dir",
-            "num-blocks",
-            "100",
-        ]);
+        let cmd = Command::parse_from(["reth", "--datadir", "dir", "num-blocks", "100"]);
         assert_eq!(cmd.command, Subcommands::NumBlocks { amount: 100 });
     }
 }

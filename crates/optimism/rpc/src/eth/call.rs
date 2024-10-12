@@ -1,24 +1,22 @@
-use alloy_primitives::{Bytes, TxKind, U256};
-use alloy_rpc_types_eth::transaction::TransactionRequest;
-use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::FullNodeComponents;
 use reth_primitives::{
     revm_primitives::{BlockEnv, OptimismFields, TxEnv},
-    Header,
+    Bytes, TxKind, U256,
 };
 use reth_rpc_eth_api::{
     helpers::{Call, EthCall, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
+use reth_rpc_types::TransactionRequest;
 
 use crate::{OpEthApi, OpEthApiError};
 
 impl<N> EthCall for OpEthApi<N>
 where
     Self: Call,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: FullNodeComponents,
 {
 }
 
@@ -34,12 +32,7 @@ where
     }
 
     #[inline]
-    fn max_simulate_blocks(&self) -> u64 {
-        self.inner.max_simulate_blocks()
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
+    fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
     }
 
@@ -67,7 +60,7 @@ where
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
-            authorization_list,
+            // authorization_list,
             ..
         } = request;
 
@@ -86,7 +79,10 @@ where
 
         #[allow(clippy::needless_update)]
         let env = TxEnv {
-            gas_limit,
+            gas_limit: gas_limit
+                .try_into()
+                .map_err(|_| RpcInvalidTransactionError::GasUintOverflow)
+                .map_err(Self::Error::from_eth_err)?,
             nonce,
             caller: from.unwrap_or_default(),
             gas_price,
@@ -102,7 +98,7 @@ where
             // EIP-4844 fields
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
-            authorization_list: authorization_list.map(Into::into),
+            authorization_list: Default::default(),
             optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };
 

@@ -81,6 +81,3 @@ mod scale;
 mod utils;
 
 pub use database::Database;
-
-mod unwind;
-pub use unwind::DbTxUnwindExt;

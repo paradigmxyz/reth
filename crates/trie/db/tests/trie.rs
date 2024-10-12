@@ -1,6 +1,3 @@
-#![allow(missing_docs)]
-
-use alloy_primitives::{hex_literal::hex, keccak256, Address, B256, U256};
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
@@ -8,7 +5,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     transaction::DbTxMut,
 };
-use reth_primitives::{constants::EMPTY_ROOT_HASH, Account, StorageEntry};
+use reth_primitives::{hex_literal::hex, Account, StorageEntry, U256};
 use reth_provider::{
     test_utils::create_test_provider_factory, DatabaseProviderRW, StorageTrieWriter, TrieWriter,
 };
@@ -28,6 +25,7 @@ use std::{
 
 use alloy_rlp::Encodable;
 use reth_db_api::transaction::DbTx;
+use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use reth_trie::{
     prefix_set::TriePrefixSets, updates::StorageTrieUpdates, HashBuilder,
     IntermediateStateRootState, Nibbles, StateRootProgress, TrieAccount,
@@ -692,8 +690,8 @@ fn storage_trie_around_extension_node() {
     assert_trie_updates(updates.storage_nodes_ref());
 }
 
-fn extension_node_storage_trie<Spec: Send + Sync>(
-    tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, Spec>,
+fn extension_node_storage_trie(
+    tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>,
     hashed_address: B256,
 ) -> (B256, StorageTrieUpdates) {
     let value = U256::from(1);
@@ -720,9 +718,7 @@ fn extension_node_storage_trie<Spec: Send + Sync>(
     (root, trie_updates)
 }
 
-fn extension_node_trie<Spec: Send + Sync>(
-    tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, Spec>,
-) -> B256 {
+fn extension_node_trie(tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>) -> B256 {
     let a = Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
     let val = encode_account(a, None);
 

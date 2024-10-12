@@ -4,8 +4,6 @@ This syncs RLP encoded blocks from a file
 
 ```bash
 $ reth import --help
-```
-```txt
 Usage: reth import [OPTIONS] <IMPORT_PATH>
 
 Options:
@@ -35,7 +33,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static-files <PATH>
+      --datadir.static_files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

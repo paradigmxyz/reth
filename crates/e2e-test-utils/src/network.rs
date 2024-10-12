@@ -1,6 +1,9 @@
 use futures_util::StreamExt;
-use reth::network::{NetworkEvent, NetworkEventListenerProvider, PeersHandleProvider, PeersInfo};
-use reth_network_peers::{NodeRecord, PeerId};
+use reth::{
+    network::{NetworkEvent, NetworkEventListenerProvider, PeersHandleProvider, PeersInfo},
+    rpc::types::PeerId,
+};
+use reth_network_peers::NodeRecord;
 use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
 

@@ -1,15 +1,11 @@
-use alloy_primitives::{Address, Sealable, B256};
-use alloy_rpc_types::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::{open_db_read_only, DatabaseEnv};
-use reth_node_ethereum::EthereumNode;
-use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::SealedHeader;
+use reth_primitives::{Address, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
 };
-use std::{path::Path, sync::Arc};
+use reth_rpc_types::{Filter, FilteredParams};
+use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
@@ -21,16 +17,16 @@ fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
-    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
-        db.into(),
+    let factory = ProviderFactory::new_with_database_path(
+        db_path,
         spec.into(),
-        StaticFileProvider::read_only(db_path.join("static_files"), true)?,
-    );
+        Default::default(),
+        StaticFileProvider::read_only(db_path.join("static_files"))?,
+    )?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
@@ -63,9 +59,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
-    let sealed = header.seal_slow();
-    let (header, seal) = sealed.into_parts();
-    let sealed_header = SealedHeader::new(header, seal);
+    let sealed_header = header.seal_slow();
 
     // Can also query the header by hash!
     let header_by_hash =

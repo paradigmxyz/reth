@@ -1,10 +1,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
-use reth_node_builder::NodeTypesWithEngine;
 use std::io::{self, Write};
 
 mod checksum;
@@ -18,9 +15,9 @@ mod tui;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
-pub struct Command<C: ChainSpecParser> {
+pub struct Command {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 
     #[command(subcommand)]
     command: Subcommands,
@@ -55,20 +52,18 @@ pub enum Subcommands {
 
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
-    ($env:expr, $tool:ident, $N:ident, $command:block) => {
-        let Environment { provider_factory, .. } = $env.init::<$N>(AccessRights::RO)?;
+    ($env:expr, $tool:ident, $command:block) => {
+        let Environment { provider_factory, .. } = $env.init(AccessRights::RO)?;
 
         let $tool = DbTool::new(provider_factory.clone())?;
         $command;
     };
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl Command {
     /// Execute `db` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
-        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+    pub async fn execute(self) -> eyre::Result<()> {
+        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain);
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
 
@@ -85,27 +80,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                db_ro_exec!(self.env, tool, N, {
+                db_ro_exec!(self.env, tool, {
                     command.execute(data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
-                db_ro_exec!(self.env, tool, N, {
+                db_ro_exec!(self.env, tool, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Checksum(command) => {
-                db_ro_exec!(self.env, tool, N, {
+                db_ro_exec!(self.env, tool, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Diff(command) => {
-                db_ro_exec!(self.env, tool, N, {
+                db_ro_exec!(self.env, tool, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Get(command) => {
-                db_ro_exec!(self.env, tool, N, {
+                db_ro_exec!(self.env, tool, {
                     command.execute(&tool)?;
                 });
             }
@@ -125,12 +120,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     }
                 }
 
-                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
                 let tool = DbTool::new(provider_factory)?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
-                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {
@@ -160,19 +155,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
+    use reth_node_core::args::utils::SUPPORTED_CHAINS;
     use std::path::Path;
 
     #[test]
     fn parse_stats_globals() {
         let path = format!("../{}", SUPPORTED_CHAINS[0]);
-        let cmd = Command::<EthereumChainSpecParser>::try_parse_from([
-            "reth",
-            "--datadir",
-            &path,
-            "stats",
-        ])
-        .unwrap();
+        let cmd = Command::try_parse_from(["reth", "--datadir", &path, "stats"]).unwrap();
         assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
     }
 }

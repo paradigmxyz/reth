@@ -1,14 +1,12 @@
 //! Blockchain tree externals.
 
-use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::Consensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-use reth_node_types::NodeTypesWithDB;
-use reth_primitives::StaticFileSegment;
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{
-    providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory,
-    StaticFileProviderFactory, StatsReader,
+    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -23,19 +21,19 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - The executor factory to execute blocks with
 /// - The chain spec
 #[derive(Debug)]
-pub struct TreeExternals<N: NodeTypesWithDB, E> {
+pub struct TreeExternals<DB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
-    pub(crate) provider_factory: ProviderFactory<N>,
+    pub(crate) provider_factory: ProviderFactory<DB>,
     /// The consensus engine.
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
 }
 
-impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
+impl<DB, E> TreeExternals<DB, E> {
     /// Create new tree externals.
     pub fn new(
-        provider_factory: ProviderFactory<N>,
+        provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
     ) -> Self {
@@ -43,7 +41,7 @@ impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
     }
 }
 
-impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
+impl<DB: Database, E> TreeExternals<DB, E> {
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers

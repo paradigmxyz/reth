@@ -3,9 +3,10 @@
 
 use futures::Future;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_types::AnyTransactionReceipt;
 
-use crate::{EthApiTypes, RpcReceipt};
+use crate::{EthApiTypes, FromEthApiError};
 
 /// Assembles transaction receipt data w.r.t to network.
 ///
@@ -22,5 +23,17 @@ pub trait LoadReceipt: EthApiTypes + Send + Sync {
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<AnyTransactionReceipt, Self::Error>> + Send {
+        async move {
+            // get all receipts for the block
+            let all_receipts = self
+                .cache()
+                .get_receipts(meta.block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+            Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
+        }
+    }
 }

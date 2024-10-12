@@ -10,7 +10,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod builder;
-mod db_ext;
 mod error;
 mod event;
 mod metrics;
@@ -21,7 +20,7 @@ use crate::metrics::Metrics;
 pub use builder::PrunerBuilder;
 pub use error::PrunerError;
 pub use event::PrunerEvent;
-pub use pruner::{Pruner, PrunerResult, PrunerWithFactory, PrunerWithResult};
+pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
 
 // Re-export prune types
 #[doc(inline)]

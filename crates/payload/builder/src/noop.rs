@@ -13,17 +13,17 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A service task that does not build any payloads.
 #[derive(Debug)]
-pub struct NoopPayloadBuilderService<T: PayloadTypes> {
+pub struct NoopPayloadBuilderService<Engine: PayloadTypes> {
     /// Receiver half of the command channel.
-    command_rx: UnboundedReceiverStream<PayloadServiceCommand<T>>,
+    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Engine>>,
 }
 
-impl<T> NoopPayloadBuilderService<T>
+impl<Engine> NoopPayloadBuilderService<Engine>
 where
-    T: PayloadTypes,
+    Engine: PayloadTypes + 'static,
 {
     /// Creates a new [`NoopPayloadBuilderService`].
-    pub fn new() -> (Self, PayloadBuilderHandle<T>) {
+    pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         (
             Self { command_rx: UnboundedReceiverStream::new(command_rx) },
@@ -32,9 +32,9 @@ where
     }
 }
 
-impl<T> Future for NoopPayloadBuilderService<T>
+impl<Engine> Future for NoopPayloadBuilderService<Engine>
 where
-    T: PayloadTypes,
+    Engine: PayloadTypes,
 {
     type Output = ();
 

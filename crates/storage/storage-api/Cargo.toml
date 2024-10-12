@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-db-models.workspace = true
-reth-db-api.workspace = true
 reth-execution-types.workspace = true
 reth-primitives.workspace = true
 reth-prune-types.workspace = true
@@ -23,8 +22,6 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie.workspace = true
 
-# ethereum
-alloy-eips.workspace = true
-alloy-primitives.workspace = true
+revm.workspace = true
 
 auto_impl.workspace = true

@@ -1,9 +1,8 @@
 use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
-use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
 use reth_db_api::table::Decompress;
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
-use reth_primitives::static_file::SegmentHeader;
+use reth_primitives::{static_file::SegmentHeader, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::sync::Arc;
 
@@ -40,7 +39,7 @@ impl<'a> StaticFileCursor<'a> {
         }
 
         let row = match key_or_num {
-            KeyOrNumber::Key(_) => unimplemented!(),
+            KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {
@@ -115,7 +114,7 @@ impl<'a> From<&'a B256> for KeyOrNumber<'a> {
     }
 }
 
-impl From<u64> for KeyOrNumber<'_> {
+impl<'a> From<u64> for KeyOrNumber<'a> {
     fn from(value: u64) -> Self {
         KeyOrNumber::Number(value)
     }

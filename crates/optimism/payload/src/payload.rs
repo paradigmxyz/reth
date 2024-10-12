@@ -2,25 +2,29 @@
 
 //! Optimism builder support
 
-use alloy_eips::eip2718::Decodable2718;
-use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
-/// Re-export for use in downstream arguments.
-pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
-use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::EthereumHardforks;
-use reth_optimism_chainspec::OpChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
-    transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
+    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    transaction::WithEncoded,
+    Address, BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals, B256,
+    U256,
+};
+/// Re-export for use in downstream arguments.
+pub use reth_rpc_types::engine::OptimismPayloadAttributes;
+use reth_rpc_types::engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
+    OptimismExecutionPayloadEnvelopeV4, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
     convert_block_to_payload_field_v2,
 };
+use revm::primitives::HandlerCfg;
 use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
@@ -38,13 +42,13 @@ pub struct OptimismPayloadBuilderAttributes {
 }
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
-    type RpcPayloadAttributes = OpPayloadAttributes;
+    type RpcPayloadAttributes = OptimismPayloadAttributes;
     type Error = alloy_rlp::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: OpPayloadAttributes) -> Result<Self, Self::Error> {
+    fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, Self::Error> {
         let id = payload_id_optimism(&parent, &attributes);
 
         let transactions = attributes
@@ -52,15 +56,8 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                let mut buf = data.as_ref();
-                let tx =
-                    TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
-
-                if !buf.is_empty() {
-                    return Err(alloy_rlp::Error::UnexpectedLength);
-                }
-
-                Ok(WithEncoded::new(data, tx))
+                TransactionSigned::decode_enveloped(&mut data.as_ref())
+                    .map(|tx| WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;
 
@@ -109,6 +106,59 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
     }
+
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id = revm_spec_by_timestamp_after_bedrock(chain_spec, self.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id.is_enabled_in(SpecId::CANCUN) {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: self.suggested_fee_recipient(),
+            timestamp: U256::from(self.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(self.prev_randao()),
+            gas_limit: U256::from(parent.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()))
+                    .unwrap_or_default(),
+            ),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        let cfg_with_handler_cfg;
+        {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: HandlerCfg { spec_id, is_optimism: true },
+            };
+        }
+
+        (cfg_with_handler_cfg, block_env)
+    }
 }
 
 /// Contains the built payload.
@@ -126,7 +176,7 @@ pub struct OptimismBuiltPayload {
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
     /// The rollup's chainspec.
-    pub(crate) chain_spec: Arc<OpChainSpec>,
+    pub(crate) chain_spec: Arc<ChainSpec>,
     /// The payload attributes.
     pub(crate) attributes: OptimismPayloadBuilderAttributes,
 }
@@ -139,7 +189,7 @@ impl OptimismBuiltPayload {
         id: PayloadId,
         block: SealedBlock,
         fees: U256,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<ChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
     ) -> Self {
@@ -181,7 +231,7 @@ impl BuiltPayload for OptimismBuiltPayload {
     }
 }
 
-impl BuiltPayload for &OptimismBuiltPayload {
+impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -211,7 +261,7 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
+impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
@@ -238,7 +288,7 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
         }
     }
 }
-impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
+impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
@@ -266,10 +316,13 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
     }
 }
 
-/// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
+/// Generates the payload id for the configured payload from the [`OptimismPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id_optimism(
+    parent: &B256,
+    attributes: &OptimismPayloadAttributes,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());

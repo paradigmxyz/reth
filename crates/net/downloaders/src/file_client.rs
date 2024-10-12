@@ -1,7 +1,4 @@
-use std::{collections::HashMap, io, path::Path};
-
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
+use super::file_codec::BlockFileCodec;
 use futures::Future;
 use itertools::Either;
 use reth_network_p2p::{
@@ -12,16 +9,15 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, Header, SealedHeader};
+use reth_primitives::{
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
+};
+use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{debug, trace, warn};
-
-use crate::receipt_file_client::FromReceiptReader;
-
-use super::file_codec::BlockFileCodec;
 
 /// Default byte length of chunk to read from chain file.
 ///
@@ -89,7 +85,7 @@ impl FileClient {
         let mut reader = vec![];
         file.read_to_end(&mut reader).await?;
 
-        Ok(Self::from_reader(&reader[..], file_len).await?.file_client)
+        Ok(Self::from_reader(&reader[..], file_len).await?.0)
     }
 
     /// Get the tip hash of the chain.
@@ -115,11 +111,7 @@ impl FileClient {
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.max_block()?).map(|h| {
-            let sealed = h.clone().seal_slow();
-            let (header, seal) = sealed.into_parts();
-            SealedHeader::new(header, seal)
-        })
+        self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
     }
 
     /// Returns true if all blocks are canonical (no gaps)
@@ -192,13 +184,13 @@ impl FromReader for FileClient {
     fn from_reader<B>(
         reader: B,
         num_bytes: u64,
-    ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
+    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut headers = HashMap::default();
-        let mut hash_to_number = HashMap::default();
-        let mut bodies = HashMap::default();
+        let mut headers = HashMap::new();
+        let mut hash_to_number = HashMap::new();
+        let mut bodies = HashMap::new();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
@@ -255,11 +247,7 @@ impl FromReader for FileClient {
 
             trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
 
-            Ok(DecodedFileChunk {
-                file_client: Self { headers, hash_to_number, bodies },
-                remaining_bytes,
-                highest_block: None,
-            })
+            Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
         }
     }
 }
@@ -361,9 +349,6 @@ pub struct ChunkedFileReader {
     chunk: Vec<u8>,
     /// Max bytes per chunk.
     chunk_byte_len: u64,
-    /// Optionally, tracks highest decoded block number. Needed when decoding data that maps * to 1
-    /// with block number
-    highest_block: Option<u64>,
 }
 
 impl ChunkedFileReader {
@@ -390,7 +375,7 @@ impl ChunkedFileReader {
         let metadata = file.metadata().await?;
         let file_byte_len = metadata.len();
 
-        Ok(Self { file, file_byte_len, chunk: vec![], chunk_byte_len, highest_block: None })
+        Ok(Self { file, file_byte_len, chunk: vec![], chunk_byte_len })
     }
 
     /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
@@ -407,10 +392,13 @@ impl ChunkedFileReader {
         }
     }
 
-    /// Reads bytes from file and buffers as next chunk to decode. Returns byte length of next
-    /// chunk to read.
-    async fn read_next_chunk(&mut self) -> Result<Option<u64>, io::Error> {
+    /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
+    pub async fn next_chunk<T>(&mut self) -> Result<Option<T>, T::Error>
+    where
+        T: FromReader,
+    {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
+            dbg!(self.chunk.is_empty());
             // eof
             return Ok(None)
         }
@@ -443,42 +431,12 @@ impl ChunkedFileReader {
             "new bytes were read from file"
         );
 
-        Ok(Some(next_chunk_byte_len as u64))
-    }
-
-    /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    pub async fn next_chunk<T>(&mut self) -> Result<Option<T>, T::Error>
-    where
-        T: FromReader,
-    {
-        let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
-
         // make new file client from chunk
-        let DecodedFileChunk { file_client, remaining_bytes, .. } =
-            T::from_reader(&self.chunk[..], next_chunk_byte_len).await?;
+        let (file_client, bytes) =
+            T::from_reader(&self.chunk[..], next_chunk_byte_len as u64).await?;
 
         // save left over bytes
-        self.chunk = remaining_bytes;
-
-        Ok(Some(file_client))
-    }
-
-    /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    pub async fn next_receipts_chunk<T, D>(&mut self) -> Result<Option<T>, T::Error>
-    where
-        T: FromReceiptReader<D>,
-    {
-        let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
-
-        // make new file client from chunk
-        let DecodedFileChunk { file_client, remaining_bytes, highest_block } =
-            T::from_receipt_reader(&self.chunk[..], next_chunk_byte_len, self.highest_block)
-                .await?;
-
-        // save left over bytes
-        self.chunk = remaining_bytes;
-        // update highest block
-        self.highest_block = highest_block;
+        self.chunk = bytes;
 
         Ok(Some(file_client))
     }
@@ -488,27 +446,14 @@ impl ChunkedFileReader {
 pub trait FromReader {
     /// Error returned by file client type.
     type Error: From<io::Error>;
-
     /// Returns a file client
     fn from_reader<B>(
         reader: B,
         num_bytes: u64,
-    ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
+    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
     where
         Self: Sized,
         B: AsyncReadExt + Unpin;
-}
-
-/// Output from decoding a file chunk with [`FromReader::from_reader`].
-#[derive(Debug)]
-pub struct DecodedFileChunk<T> {
-    /// File client, i.e. the decoded part of chunk.
-    pub file_client: T,
-    /// Remaining bytes that have not been decoded, e.g. a partial block or a partial receipt.
-    pub remaining_bytes: Vec<u8>,
-    /// Highest block of decoded chunk. This is needed when decoding data that maps * to 1 with
-    /// block number, like receipts.
-    pub highest_block: Option<u64>,
 }
 
 #[cfg(test)]

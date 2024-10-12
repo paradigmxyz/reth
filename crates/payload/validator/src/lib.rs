@@ -8,20 +8,20 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_rpc_types::engine::{ExecutionPayload, MaybeCancunPayloadFields, PayloadError};
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::SealedBlock;
+use reth_rpc_types::{engine::MaybeCancunPayloadFields, ExecutionPayload, PayloadError};
 use reth_rpc_types_compat::engine::payload::try_into_block;
 use std::sync::Arc;
 
 /// Execution payload validator.
 #[derive(Clone, Debug)]
-pub struct ExecutionPayloadValidator<ChainSpec> {
+pub struct ExecutionPayloadValidator {
     /// Chain spec to validate against.
     chain_spec: Arc<ChainSpec>,
 }
 
-impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
+impl ExecutionPayloadValidator {
     /// Create a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
@@ -102,7 +102,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     ///
     /// If the cancun fields are provided this also validates that the versioned hashes in the block
     /// match the versioned hashes passed in the
-    /// [`CancunPayloadFields`](alloy_rpc_types::engine::CancunPayloadFields), if the cancun payload
+    /// [`CancunPayloadFields`](reth_rpc_types::engine::CancunPayloadFields), if the cancun payload
     /// fields are provided. If the payload fields are not provided, but versioned hashes exist
     /// in the block, this is considered an error: [`PayloadError::InvalidVersionedHashes`].
     ///
@@ -160,7 +160,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
-        if !shanghai_active && sealed_block.body.withdrawals.is_some() {
+        if !shanghai_active && sealed_block.withdrawals.is_some() {
             // shanghai not active but withdrawals present
             return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
         }

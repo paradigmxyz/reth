@@ -2,12 +2,13 @@ use alloy_primitives::BlockNumber;
 use reth_db::{BlockNumberList, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
     models::ShardedKey,
     table::Table,
     transaction::DbTxMut,
     DatabaseError,
 };
-use reth_provider::DBProvider;
+use reth_provider::DatabaseProviderRW;
 
 enum PruneShardOutcome {
     Deleted,
@@ -25,13 +26,13 @@ pub(crate) struct PrunedIndices {
 /// Prune history indices according to the provided list of highest sharded keys.
 ///
 /// Returns total number of deleted, updated and unchanged entities.
-pub(crate) fn prune_history_indices<Provider, T, SK>(
-    provider: &Provider,
+pub(crate) fn prune_history_indices<DB, T, SK>(
+    provider: &DatabaseProviderRW<DB>,
     highest_sharded_keys: impl IntoIterator<Item = T::Key>,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
 ) -> Result<PrunedIndices, DatabaseError>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    DB: Database,
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
 {

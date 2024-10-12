@@ -4,8 +4,6 @@ Deletes all database table entries
 
 ```bash
 $ reth db clear mdbx --help
-```
-```txt
 Usage: reth db clear mdbx [OPTIONS] <TABLE>
 
 Arguments:

@@ -1,11 +1,10 @@
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::{
-    logs_bloom, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    EIP7702_TX_TYPE_ID,
+    logs_bloom, Bloom, Bytes, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
-use alloc::{vec, vec::Vec};
-use alloy_primitives::{Bloom, Bytes, Log, B256};
+use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
@@ -13,6 +12,9 @@ use derive_more::{DerefMut, From, IntoIterator};
 #[cfg(feature = "reth-codec")]
 use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
 #[derive(
@@ -100,11 +102,26 @@ impl Receipts {
         self.receipt_vec.push(receipts);
     }
 
-    /// Retrieves all recorded receipts from index and calculates the root using the given closure.
-    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
-        let receipts =
-            self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
-        Some(f(receipts.as_slice()))
+    /// Retrieves the receipt root for all recorded receipts from index.
+    pub fn root_slow(&self, index: usize) -> Option<B256> {
+        Some(crate::proofs::calculate_receipt_root_no_memo(
+            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+        ))
+    }
+
+    /// Retrieves the receipt root for all recorded receipts from index.
+    #[cfg(feature = "optimism")]
+    pub fn optimism_root_slow(
+        &self,
+        index: usize,
+        chain_spec: &reth_chainspec::ChainSpec,
+        timestamp: u64,
+    ) -> Option<B256> {
+        Some(crate::proofs::calculate_receipt_root_no_memo_optimism(
+            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+            chain_spec,
+            timestamp,
+        ))
     }
 }
 
@@ -332,7 +349,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    crate::transaction::DEPOSIT_TX_TYPE_ID => {
+                    crate::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -373,7 +390,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
     }
 }
 
-impl Encodable for ReceiptWithBloomRef<'_> {
+impl<'a> Encodable for ReceiptWithBloomRef<'a> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.as_encoder().encode_inner(out, true)
     }
@@ -394,7 +411,7 @@ struct ReceiptWithBloomEncoder<'a> {
     receipt: &'a Receipt,
 }
 
-impl ReceiptWithBloomEncoder<'_> {
+impl<'a> ReceiptWithBloomEncoder<'a> {
     /// Returns the rlp header for the receipt payload.
     fn receipt_rlp_header(&self) -> alloy_rlp::Header {
         let mut rlp_head = alloy_rlp::Header { list: true, payload_length: 0 };
@@ -468,7 +485,7 @@ impl ReceiptWithBloomEncoder<'_> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(crate::transaction::DEPOSIT_TX_TYPE_ID);
+                out.put_u8(crate::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
@@ -481,7 +498,7 @@ impl ReceiptWithBloomEncoder<'_> {
     }
 }
 
-impl Encodable for ReceiptWithBloomEncoder<'_> {
+impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, true)
     }
@@ -501,14 +518,15 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, bytes, hex_literal::hex};
+    use crate::hex_literal::hex;
+    use alloy_primitives::{address, b256, bytes};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
         let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
-        let mut data = Vec::with_capacity(expected.length());
+        let mut data = vec![];
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
@@ -589,7 +607,7 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
 
-        let mut buf = Vec::with_capacity(data.len());
+        let mut buf = Vec::new();
         receipt.encode_inner(&mut buf, false);
         assert_eq!(buf, &data[..]);
     }
@@ -615,7 +633,7 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
 
-        let mut buf = Vec::with_capacity(data.len());
+        let mut buf = Vec::new();
         expected.encode_inner(&mut buf, false);
         assert_eq!(buf, &data[..]);
     }

@@ -1,7 +1,6 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
-use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_primitives::Account;
+use reth_primitives::{Account, Address, B256, U256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
     db::DatabaseRef,
@@ -9,26 +8,26 @@ use revm::{
     Database,
 };
 
-/// A helper trait responsible for providing state necessary for EVM execution.
+/// A helper trait responsible for providing that necessary state for the EVM execution.
 ///
-/// This serves as the data layer for [`Database`].
+/// This servers as the data layer for [Database].
 pub trait EvmStateProvider: Send + Sync {
     /// Get basic account information.
     ///
-    /// Returns [`None`] if the account doesn't exist.
+    /// Returns `None` if the account doesn't exist.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
 
-    /// Get the hash of the block with the given number. Returns [`None`] if no block with this
-    /// number exists.
+    /// Get the hash of the block with the given number. Returns `None` if no block with this number
+    /// exists.
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
 
-    /// Get account code by hash.
+    /// Get account code by its hash
     fn bytecode_by_hash(
         &self,
         code_hash: B256,
     ) -> ProviderResult<Option<reth_primitives::Bytecode>>;
 
-    /// Get storage of the given account.
+    /// Get storage of given account.
     fn storage(
         &self,
         account: Address,

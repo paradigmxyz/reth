@@ -4,8 +4,6 @@
 
 ```bash
 $ reth stage dump account-hashing --help
-```
-```txt
 Usage: reth stage dump account-hashing [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:

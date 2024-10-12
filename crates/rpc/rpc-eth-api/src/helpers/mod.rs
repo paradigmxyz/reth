@@ -39,7 +39,7 @@ pub use state::{EthState, LoadState};
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
-use crate::FullEthApiTypes;
+use crate::EthApiTypes;
 
 /// Extension trait that bundles traits needed for tracing transactions.
 pub trait TraceExt:
@@ -53,7 +53,7 @@ impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + LoadPendingBlock +
 ///
 /// This trait is automatically implemented for any type that implements all the `Eth` traits.
 pub trait FullEthApi:
-    FullEthApiTypes
+    EthApiTypes
     + EthApiSpec
     + EthTransactions
     + EthBlocks
@@ -66,7 +66,7 @@ pub trait FullEthApi:
 }
 
 impl<T> FullEthApi for T where
-    T: FullEthApiTypes
+    T: EthApiTypes
         + EthApiSpec
         + EthTransactions
         + EthBlocks

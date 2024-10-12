@@ -1,14 +1,16 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
-use reth_chainspec::EthChainSpec;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_chainspec::ChainSpec;
 use reth_consensus::Consensus;
+use reth_db_api::database::Database;
+use reth_engine_primitives::EngineTypes;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
-    engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
+    engine::{EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
+    tree::{EngineApiTreeHandler, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -16,12 +18,11 @@ pub use reth_engine_tree::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::BlockClient;
-use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
-use reth_prune::PrunerWithFactory;
-use reth_stages_api::{MetricEventsSender, Pipeline};
+use reth_prune::Pruner;
+use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -34,59 +35,55 @@ use std::{
 type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
 
 /// Alias for chain orchestrator.
-type EngineServiceType<N, Client> = ChainOrchestrator<
+type EngineServiceType<DB, Client, T> = ChainOrchestrator<
     EngineHandler<
-        EngineApiRequestHandler<EngineApiRequest<<N as NodeTypesWithEngine>::Engine>>,
-        EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
+        EngineApiRequestHandler<EngineApiRequest<T>>,
+        EngineMessageStream<T>,
         BasicBlockDownloader<Client>,
     >,
-    PipelineSync<N>,
+    PipelineSync<DB>,
 >;
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EngineService<N, Client, E>
+pub struct EngineService<DB, Client, E, T>
 where
-    N: EngineNodeTypes,
+    DB: Database + 'static,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    T: EngineTypes,
 {
-    orchestrator: EngineServiceType<N, Client>,
+    orchestrator: EngineServiceType<DB, Client, T>,
     _marker: PhantomData<E>,
 }
 
-impl<N, Client, E> EngineService<N, Client, E>
+impl<DB, Client, E, T> EngineService<DB, Client, E, T>
 where
-    N: EngineNodeTypes,
+    DB: Database + 'static,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    T: EngineTypes + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
-        chain_spec: Arc<N::ChainSpec>,
+        chain_spec: Arc<ChainSpec>,
         client: Client,
-        incoming_requests: EngineMessageStream<N::Engine>,
-        pipeline: Pipeline<N>,
+        incoming_requests: EngineMessageStream<T>,
+        pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
-        provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
-        pruner: PrunerWithFactory<ProviderFactory<N>>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        provider: ProviderFactory<DB>,
+        blockchain_db: BlockchainProvider2<DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
+        payload_builder: PayloadBuilderHandle<T>,
         tree_config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook>,
-        sync_metrics_tx: MetricEventsSender,
     ) -> Self {
-        let engine_kind =
-            if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
-
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_handle =
-            PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
+        let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
         let payload_validator = ExecutionPayloadValidator::new(chain_spec);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
@@ -100,8 +97,6 @@ where
             payload_builder,
             canonical_in_memory_state,
             tree_config,
-            invalid_block_hook,
-            engine_kind,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -116,16 +111,17 @@ where
     }
 
     /// Returns a mutable reference to the orchestrator.
-    pub fn orchestrator_mut(&mut self) -> &mut EngineServiceType<N, Client> {
+    pub fn orchestrator_mut(&mut self) -> &mut EngineServiceType<DB, Client, T> {
         &mut self.orchestrator
     }
 }
 
-impl<N, Client, E> Stream for EngineService<N, Client, E>
+impl<DB, Client, E, T> Stream for EngineService<DB, Client, E, T>
 where
-    N: EngineNodeTypes,
+    DB: Database + 'static,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    T: EngineTypes + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
@@ -145,14 +141,13 @@ mod tests {
     use super::*;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
+    use reth_engine_tree::test_utils::TestPipelineBuilder;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
     use tokio::sync::{mpsc::unbounded_channel, watch};
@@ -184,9 +179,9 @@ mod tests {
                 .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
-        let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
+        let pruner =
+            Pruner::<_, ProviderFactory<_>>::new(provider_factory.clone(), vec![], 0, 0, None, rx);
 
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
         let _eth_service = EngineService::new(
             consensus,
@@ -201,8 +196,6 @@ mod tests {
             pruner,
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
-            Box::new(NoopInvalidBlockHook::default()),
-            sync_metrics_tx,
         );
     }
 }

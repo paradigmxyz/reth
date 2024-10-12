@@ -2,13 +2,8 @@ use crate::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
-use alloy_primitives::Address;
-use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    EIP4844_TX_TYPE_ID,
-};
-use std::{collections::HashSet, ops::Mul};
-
+use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
+use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -44,12 +39,8 @@ pub struct PoolConfig {
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
     pub price_bumps: PriceBumpConfig,
-    /// Minimum base fee required by the protocol.
-    pub minimal_protocol_basefee: u64,
-    /// The max gas limit for transactions in the pool
-    pub gas_limit: u64,
     /// How to handle locally received transactions:
-    /// [`TransactionOrigin::Local`](TransactionOrigin).
+    /// [`TransactionOrigin::Local`](crate::TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
     /// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
     pub pending_tx_listener_buffer_size: usize,
@@ -58,7 +49,7 @@ pub struct PoolConfig {
 }
 
 impl PoolConfig {
-    /// Returns whether the size and amount constraints in any sub-pools are exceeded.
+    /// Returns whether or not the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
         self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
@@ -77,8 +68,6 @@ impl Default for PoolConfig {
             blob_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
-            minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
@@ -105,15 +94,6 @@ impl SubPoolLimit {
     #[inline]
     pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
-    }
-}
-
-impl Mul<usize> for SubPoolLimit {
-    type Output = Self;
-
-    fn mul(self, rhs: usize) -> Self::Output {
-        let Self { max_txs, max_size } = self;
-        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
     }
 }
 
@@ -157,7 +137,7 @@ impl Default for PriceBumpConfig {
 }
 
 /// Configuration options for the locally received transactions:
-/// [`TransactionOrigin::Local`](TransactionOrigin)
+/// [`TransactionOrigin::Local`](crate::TransactionOrigin)
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LocalTransactionConfig {
     /// Apply no exemptions to the locally received transactions.
@@ -167,7 +147,7 @@ pub struct LocalTransactionConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
-    /// Addresses that will be considered as local. Above exemptions apply.
+    /// Addresses that will be considered as local . Above exemptions apply
     pub local_addresses: HashSet<Address>,
     /// Flag indicating whether local transactions should be propagated.
     pub propagate_local_transactions: bool,
@@ -276,7 +256,7 @@ mod tests {
     #[test]
     fn test_contains_local_address() {
         let address = Address::new([1; 20]);
-        let mut local_addresses = HashSet::default();
+        let mut local_addresses = HashSet::new();
         local_addresses.insert(address);
 
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
@@ -293,7 +273,7 @@ mod tests {
         let address = Address::new([1; 20]);
         let config = LocalTransactionConfig {
             no_exemptions: true,
-            local_addresses: HashSet::default(),
+            local_addresses: HashSet::new(),
             ..Default::default()
         };
 
@@ -304,7 +284,7 @@ mod tests {
     #[test]
     fn test_is_local_without_no_exemptions() {
         let address = Address::new([1; 20]);
-        let mut local_addresses = HashSet::default();
+        let mut local_addresses = HashSet::new();
         local_addresses.insert(address);
 
         let config =
@@ -327,15 +307,5 @@ mod tests {
 
         let new_config = config.set_propagate_local_transactions(false);
         assert!(!new_config.propagate_local_transactions);
-    }
-
-    #[test]
-    fn scale_pool_limit() {
-        let limit = SubPoolLimit::default();
-        let double = limit * 2;
-        assert_eq!(
-            double,
-            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
-        )
     }
 }

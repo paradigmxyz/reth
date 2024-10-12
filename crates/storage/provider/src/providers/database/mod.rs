@@ -7,23 +7,19 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
-use core::fmt;
-use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpec, EthChainSpec};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
-    Withdrawals,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -37,47 +33,31 @@ use tracing::trace;
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
-use super::ProviderNodeTypes;
-
 mod metrics;
 
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
-pub struct ProviderFactory<N: NodeTypesWithDB> {
+#[derive(Debug)]
+pub struct ProviderFactory<DB, Spec = ChainSpec> {
     /// Database
-    db: N::DB,
+    db: Arc<DB>,
     /// Chain spec
-    chain_spec: Arc<N::ChainSpec>,
+    chain_spec: Arc<Spec>,
     /// Static File Provider
     static_file_provider: StaticFileProvider,
     /// Optional pruning configuration
     prune_modes: PruneModes,
 }
 
-impl<N> fmt::Debug for ProviderFactory<N>
-where
-    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug>,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { db, chain_spec, static_file_provider, prune_modes } = self;
-        f.debug_struct("ProviderFactory")
-            .field("db", &db)
-            .field("chain_spec", &chain_spec)
-            .field("static_file_provider", &static_file_provider)
-            .field("prune_modes", &prune_modes)
-            .finish()
-    }
-}
-
-impl<N: NodeTypesWithDB> ProviderFactory<N> {
+impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
     pub fn new(
-        db: N::DB,
-        chain_spec: Arc<N::ChainSpec>,
+        db: DB,
+        chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { db, chain_spec, static_file_provider, prune_modes: PruneModes::none() }
+        Self { db: Arc::new(db), chain_spec, static_file_provider, prune_modes: PruneModes::none() }
     }
 
     /// Enables metrics on the static file provider.
@@ -93,23 +73,23 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns reference to the underlying database.
-    pub const fn db_ref(&self) -> &N::DB {
+    pub fn db_ref(&self) -> &DB {
         &self.db
     }
 
     #[cfg(any(test, feature = "test-utils"))]
     /// Consumes Self and returns DB
-    pub fn into_db(self) -> N::DB {
+    pub fn into_db(self) -> Arc<DB> {
         self.db
     }
 }
 
-impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
+impl ProviderFactory<DatabaseEnv> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
         path: P,
-        chain_spec: Arc<N::ChainSpec>,
+        chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
@@ -122,7 +102,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ProviderFactory<N> {
+impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
@@ -130,7 +110,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
     /// data.
     #[track_caller]
-    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N::ChainSpec>> {
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         Ok(DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
@@ -144,7 +124,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     #[track_caller]
-    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N::ChainSpec>> {
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
@@ -165,7 +145,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
+        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
@@ -178,34 +158,26 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
+        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
     }
 }
 
-impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
-    type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX, N::ChainSpec>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N::ChainSpec>;
-
-    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+impl<DB: Database> DatabaseProviderFactory<DB> for ProviderFactory<DB> {
+    fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         self.provider()
-    }
-
-    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        self.provider_rw().map(|provider| provider.0)
     }
 }
 
-impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
+impl<DB> StaticFileProviderFactory for ProviderFactory<DB> {
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider {
         self.static_file_provider.clone()
     }
 }
 
-impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
+impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
     fn sync_gap(
         &self,
         tip: watch::Receiver<B256>,
@@ -215,7 +187,7 @@ impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
+impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.provider()?.header(block_hash)
     }
@@ -289,7 +261,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
+impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
@@ -314,7 +286,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
+impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         self.provider()?.chain_info()
     }
@@ -332,7 +304,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
+impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
@@ -399,7 +371,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
+impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.provider()?.transaction_id(tx_hash)
     }
@@ -473,7 +445,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
+impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
@@ -505,7 +477,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
+impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -519,7 +491,10 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> RequestsProvider for ProviderFactory<N> {
+impl<DB> RequestsProvider for ProviderFactory<DB>
+where
+    DB: Database,
+{
     fn requests_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -529,7 +504,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
+impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
     }
@@ -542,7 +517,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
+impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -551,7 +526,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -564,7 +539,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -576,7 +551,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -588,21 +563,24 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 
-impl<N: NodeTypesWithDB> ChainSpecProvider for ProviderFactory<N> {
-    type ChainSpec = N::ChainSpec;
-
-    fn chain_spec(&self) -> Arc<N::ChainSpec> {
+impl<DB, ChainSpec> ChainSpecProvider for ProviderFactory<DB, ChainSpec>
+where
+    DB: Send + Sync,
+    ChainSpec: EthChainSpec,
+{
+    type ChainSpec = ChainSpec;
+    fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec.clone()
     }
 }
 
-impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
+impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -615,26 +593,24 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
+impl<DB, Spec> Clone for ProviderFactory<DB, Spec> {
     fn clone(&self) -> Self {
         Self {
-            db: self.db.clone(),
+            db: Arc::clone(&self.db),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory},
         BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
-    use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
@@ -643,7 +619,7 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_primitives::StaticFileSegment;
+    use reth_primitives::{StaticFileSegment, TxNumber, B256, U256};
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
@@ -680,7 +656,7 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
+        let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
@@ -708,9 +684,9 @@ mod tests {
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body.transactions[0].recover_signer().unwrap()
+                if sender == block.body[0].recover_signer().unwrap()
             );
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(Some(0)));
+            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
         }
 
         {
@@ -725,7 +701,7 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(None));
+            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
         }
     }
 
@@ -753,7 +729,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
+                        block.body[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );
@@ -766,13 +742,7 @@ mod tests {
                 result,
                 Ok(vec![(
                     0,
-                    block
-                        .body
-                        .transactions
-                        .iter()
-                        .cloned()
-                        .map(|tx| tx.into_ecrecovered().unwrap())
-                        .collect()
+                    block.body.iter().cloned().map(|tx| tx.into_ecrecovered().unwrap()).collect()
                 )])
             )
         }
@@ -799,9 +769,8 @@ mod tests {
         );
 
         // Checkpoint and no gap
-        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
-            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            provider.static_file_provider().latest_writer(StaticFileSegment::Headers).unwrap();
         static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);

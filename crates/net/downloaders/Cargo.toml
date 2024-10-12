@@ -26,9 +26,7 @@ reth-db = { workspace = true, optional = true }
 reth-db-api = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
-# ethereum
-alloy-eips.workspace = true
-alloy-primitives.workspace = true
+# eth
 alloy-rlp.workspace = true
 
 # async

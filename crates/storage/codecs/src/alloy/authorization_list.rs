@@ -2,20 +2,21 @@ use core::ops::Deref;
 
 use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, ChainId, U256};
 use bytes::Buf;
 use reth_codecs_derive::add_arbitrary_tests;
+use serde::{Deserialize, Serialize};
 
 /// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
-#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-pub(crate) struct Authorization {
-    chain_id: U256,
+struct Authorization {
+    chain_id: ChainId,
     address: Address,
-    nonce: u64,
+    nonce: Option<u64>,
 }
 
 impl Compact for AlloyAuthorization {
@@ -33,7 +34,7 @@ impl Compact for AlloyAuthorization {
         let alloy_authorization = Self {
             chain_id: authorization.chain_id,
             address: authorization.address,
-            nonce: authorization.nonce,
+            nonce: authorization.nonce.into(),
         };
         (alloy_authorization, buf)
     }
@@ -78,9 +79,9 @@ mod tests {
     #[test]
     fn test_roundtrip_compact_authorization_list_item() {
         let authorization = AlloyAuthorization {
-            chain_id: U256::from(1),
+            chain_id: 1,
             address: address!("dac17f958d2ee523a2206206994597c13d831ec7"),
-            nonce: 1,
+            nonce: None.into(),
         }
         .into_signed(
             alloy_primitives::Signature::from_rs_and_parity(

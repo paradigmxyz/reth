@@ -3,9 +3,8 @@
 use crate::{
     errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
 };
-use alloy_primitives::B256;
 use reth_chainspec::Chain;
-use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError};
+use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages

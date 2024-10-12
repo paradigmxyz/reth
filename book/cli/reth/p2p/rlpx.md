@@ -4,8 +4,6 @@ RLPx commands
 
 ```bash
 $ reth p2p rlpx --help
-```
-```txt
 Usage: reth p2p rlpx [OPTIONS] <COMMAND>
 
 Commands:

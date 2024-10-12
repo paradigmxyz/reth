@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_network::Network;
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -10,12 +11,11 @@ use reth::{
     rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
     tasks::TaskManager,
 };
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeAddOns, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine,
-    RethFullAdapter,
+    NodeAdapter, NodeAddOns, NodeComponents, NodeTypes, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -47,18 +47,21 @@ mod traits;
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,
-    chain_spec: Arc<N::ChainSpec>,
+    chain_spec: Arc<ChainSpec>,
     is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypes<ChainSpec = ChainSpec>,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
     N::AddOns: NodeAddOns<
         Adapter<N>,
-        EthApi: FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
+        EthApi: FullEthApiServer<
+            NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners
+                    + EthApiBuilderProvider<Adapter<N>>,
     >,
 {
     let tasks = TaskManager::current();
@@ -73,7 +76,8 @@ where
     let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
-        let node_config = NodeConfig::new(chain_spec.clone())
+        let node_config = NodeConfig::test()
+            .with_chain(chain_spec.clone())
             .with_network(network_config.clone())
             .with_unused_ports()
             .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
@@ -110,10 +114,7 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type TmpNodeAdapter<N> = FullNodeTypesAdapter<
-    NodeTypesWithDBAdapter<N, TmpDB>,
-    BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>,
->;
+type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
 
 type Adapter<N> = NodeAdapter<
     RethFullAdapter<TmpDB, N>,

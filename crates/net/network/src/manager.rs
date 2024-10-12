@@ -159,7 +159,9 @@ impl NetworkManager {
         metrics.acc_duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
         metrics.acc_duration_poll_swarm.set(acc_swarm.as_secs_f64());
     }
+}
 
+impl NetworkManager {
     /// Creates the manager of a new network.
     ///
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
@@ -176,7 +178,7 @@ impl NetworkManager {
             listener_addr,
             peers_config,
             sessions_config,
-            chain_id,
+            chain_spec,
             block_import,
             network_mode,
             boot_nodes,
@@ -188,7 +190,6 @@ impl NetworkManager {
             extra_protocols,
             tx_gossip_disabled,
             transactions_manager_config: _,
-            nat,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -228,7 +229,6 @@ impl NetworkManager {
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
         let discv4 = discovery.discv4();
-        let discv5 = discovery.discv5();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
 
@@ -263,12 +263,10 @@ impl NetworkManager {
             local_peer_id,
             peers_handle,
             network_mode,
-            Arc::new(AtomicU64::new(chain_id)),
+            Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
             discv4,
-            discv5,
             event_sender.clone(),
-            nat,
         );
 
         Ok(Self {
@@ -602,7 +600,14 @@ impl NetworkManager {
             }
 
             NetworkHandleMessage::Shutdown(tx) => {
-                self.perform_network_shutdown();
+                // Set connection status to `Shutdown`. Stops node to accept
+                // new incoming connections as well as sending connection requests to newly
+                // discovered nodes.
+                self.swarm.on_shutdown_requested();
+                // Disconnect all active connections
+                self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
+                // drop pending connections
+                self.swarm.sessions_mut().disconnect_all_pending();
                 let _ = tx.send(());
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
@@ -941,7 +946,9 @@ impl NetworkManager {
             .total_pending_connections
             .set(self.swarm.sessions().num_pending_connections() as f64);
     }
+}
 
+impl NetworkManager {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
     /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
@@ -961,23 +968,9 @@ impl NetworkManager {
             },
         }
 
-        self.perform_network_shutdown();
         let res = shutdown_hook(self);
         drop(graceful_guard);
         res
-    }
-
-    /// Performs a graceful network shutdown by stopping new connections from being accepted while
-    /// draining current and pending connections.
-    fn perform_network_shutdown(&mut self) {
-        // Set connection status to `Shutdown`. Stops node from accepting
-        // new incoming connections as well as sending connection requests to newly
-        // discovered nodes.
-        self.swarm.on_shutdown_requested();
-        // Disconnect all active connections
-        self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
-        // drop pending connections
-        self.swarm.sessions_mut().disconnect_all_pending();
     }
 }
 

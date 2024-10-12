@@ -1,8 +1,7 @@
 //! Provider trait for populating the EVM environment.
 
 use crate::ConfigureEvmEnv;
-use alloy_eips::eip1898::BlockHashOrNumber;
-use reth_primitives::Header;
+use reth_primitives::{BlockHashOrNumber, Header};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 
@@ -23,7 +22,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>;
+        EvmConfig: ConfigureEvmEnv;
 
     /// Fills the default [`CfgEnvWithHandlerCfg`] and [BlockEnv] fields with values specific to the
     /// given [Header].
@@ -33,7 +32,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv,
     {
         let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
@@ -51,7 +50,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>;
+        EvmConfig: ConfigureEvmEnv;
 
     /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given
     /// [BlockHashOrNumber].
@@ -62,7 +61,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>;
+        EvmConfig: ConfigureEvmEnv;
 
     /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given [Header].
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -72,5 +71,5 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>;
+        EvmConfig: ConfigureEvmEnv;
 }

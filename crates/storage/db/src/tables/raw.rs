@@ -96,12 +96,8 @@ impl<K: Key> Encode for RawKey<K> {
 
 // Decode
 impl<K: Key> Decode for RawKey<K> {
-    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        Ok(Self { key: value.to_vec(), _phantom: std::marker::PhantomData })
-    }
-
-    fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
-        Ok(Self { key: value, _phantom: std::marker::PhantomData })
+    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, DatabaseError> {
+        Ok(Self { key: key.as_ref().to_vec(), _phantom: std::marker::PhantomData })
     }
 }
 
@@ -172,8 +168,8 @@ impl<V: Value> Compress for RawValue<V> {
 }
 
 impl<V: Value> Decompress for RawValue<V> {
-    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
-        Ok(Self { value: value.to_vec(), _phantom: std::marker::PhantomData })
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+        Ok(Self { value: value.as_ref().to_vec(), _phantom: std::marker::PhantomData })
     }
 
     fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {

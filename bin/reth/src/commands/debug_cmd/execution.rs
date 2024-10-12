@@ -1,18 +1,17 @@
 //! Command for debugging execution.
 
-use crate::{args::NetworkArgs, utils::get_single_header};
-use alloy_primitives::{BlockNumber, B256};
+use std::{path::PathBuf, sync::Arc};
+
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
-use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
+use reth_db_api::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -21,9 +20,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
-use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockHashOrNumber;
+use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
@@ -34,15 +31,16 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
+use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
+
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
-pub struct Command<C: ChainSpecParser> {
+pub struct Command {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -57,17 +55,18 @@ pub struct Command<C: ChainSpecParser> {
     pub interval: u64,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>, Client>(
+impl Command {
+    fn build_pipeline<DB, Client>(
         &self,
         config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        provider_factory: ProviderFactory<N>,
+        provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
-        static_file_producer: StaticFileProducer<ProviderFactory<N>>,
-    ) -> eyre::Result<Pipeline<N>>
+        static_file_producer: StaticFileProducer<DB>,
+    ) -> eyre::Result<Pipeline<DB>>
     where
+        DB: Database + Unpin + Clone + 'static,
         Client: BlockClient + 'static,
     {
         // building network downloaders using the fetch client
@@ -83,9 +82,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
+        let executor = block_executor!(provider_factory.chain_spec());
 
-        let pipeline = Pipeline::<N>::builder()
+        let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
@@ -116,11 +115,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(pipeline)
     }
 
-    async fn build_network<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    async fn build_network(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -157,12 +156,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-        ctx: CliContext,
-    ) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));

@@ -3,11 +3,9 @@
 //! Stage debugging tool
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
-use alloy_eips::BlockHashOrNumber;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
+use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
@@ -19,23 +17,22 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
-use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
+    primitives::BlockHashOrNumber,
     version::{
         BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
         VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
     },
 };
 use reth_node_metrics::{
-    chain::ChainSpecInfo,
     hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, DatabaseProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -52,9 +49,9 @@ use tracing::*;
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
-pub struct Command<C: ChainSpecParser> {
+pub struct Command {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 
     /// Enable Prometheus metrics.
     ///
@@ -102,22 +99,20 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl Command {
     /// Execute `stage` command
-    pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    pub async fn execute<E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
-        F: FnOnce(Arc<C::ChainSpec>) -> E,
+        F: FnOnce(Arc<ChainSpec>) -> E,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
 
-        let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
 
-        let mut provider_rw = provider_factory.database_provider_rw()?;
+        let mut provider_rw = provider_factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -131,7 +126,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
-                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor,
                 Hooks::new(
                     provider_factory.db_ref().clone(),
@@ -333,7 +327,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         provider_rw,
                         provider_factory.static_file_provider(),
                     )?;
-                    provider_rw = provider_factory.database_provider_rw()?;
+                    provider_rw = provider_factory.provider_rw()?;
                 }
             }
         }
@@ -356,7 +350,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             if self.commit {
                 UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
-                provider_rw = provider_factory.database_provider_rw()?;
+                provider_rw = provider_factory.provider_rw()?;
             }
 
             if done {

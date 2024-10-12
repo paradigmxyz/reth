@@ -1,12 +1,10 @@
-use super::{
-    AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
-    StorageRootProvider,
-};
-use alloy_eips::{BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
+use super::{AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Bytecode, KECCAK_EMPTY};
+use reth_primitives::{
+    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, StorageKey,
+    StorageValue, B256, KECCAK_EMPTY, U256,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Type alias of boxed [`StateProvider`].
@@ -15,13 +13,7 @@ pub type StateProviderBox = Box<dyn StateProvider>;
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
-    BlockHashReader
-    + AccountReader
-    + StateRootProvider
-    + StorageRootProvider
-    + StateProofProvider
-    + Send
-    + Sync
+    BlockHashReader + AccountReader + StateRootProvider + StateProofProvider + Send + Sync
 {
     /// Get storage of given account.
     fn storage(
@@ -79,15 +71,6 @@ pub trait StateProvider:
             None => Ok(None),
         }
     }
-}
-
-/// Trait implemented for database providers that can be converted into a historical state provider.
-pub trait TryIntoHistoricalStateProvider {
-    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
-    fn try_into_history_at_block(
-        self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
@@ -148,7 +131,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
-    /// Returns _any_ [StateProvider] with matching block hash.
+    /// Returns _any_[StateProvider] with matching block hash.
     ///
     /// This will return a [StateProvider] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;

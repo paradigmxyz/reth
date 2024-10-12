@@ -1,4 +1,3 @@
-use alloy_primitives::{keccak256, BlockNumber, B256};
 use derive_more::Deref;
 use reth_db::tables;
 use reth_db_api::{
@@ -7,7 +6,7 @@ use reth_db_api::{
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives::StorageEntry;
+use reth_primitives::{keccak256, BlockNumber, StorageEntry, B256};
 use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use reth_trie_common::Nibbles;
 use std::{
@@ -26,7 +25,7 @@ impl<'a, TX> PrefixSetLoader<'a, TX> {
     }
 }
 
-impl<TX: DbTx> PrefixSetLoader<'_, TX> {
+impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
     /// Load all account and storage changes for the given block range.
     pub fn load(self, range: RangeInclusive<BlockNumber>) -> Result<TriePrefixSets, DatabaseError> {
         // Initialize prefix sets.

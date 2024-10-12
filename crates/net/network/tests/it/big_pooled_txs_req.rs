@@ -1,4 +1,3 @@
-use alloy_primitives::B256;
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
@@ -6,7 +5,7 @@ use reth_network::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
-use reth_primitives::{Signature, TransactionSigned};
+use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
@@ -28,7 +27,7 @@ async fn test_large_tx_req() {
 
             let ts = TransactionSigned {
                 hash: Default::default(),
-                signature: Signature::test_signature(),
+                signature: Signature::default(),
                 transaction: tx.clone().into(),
             };
             tx.set_hash(ts.recalculate_hash());

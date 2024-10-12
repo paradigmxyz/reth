@@ -1,11 +1,10 @@
-use std::path::PathBuf;
 use thiserror::Error;
 
 /// Errors associated with [`crate::NippyJar`].
 #[derive(Error, Debug)]
 pub enum NippyJarError {
     #[error(transparent)]
-    Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error(transparent)]
     Disconnect(#[from] std::io::Error),
     #[error(transparent)]
@@ -24,6 +23,20 @@ pub enum NippyJarError {
     ColumnLenMismatch(usize, usize),
     #[error("unexpected missing value: row:col {0}:{1}")]
     UnexpectedMissingValue(u64, u64),
+    #[error(transparent)]
+    EthFilterError(#[from] cuckoofilter::CuckooError),
+    #[error("nippy jar initialized without filter")]
+    FilterMissing,
+    #[error("filter has reached max capacity")]
+    FilterMaxCapacity,
+    #[error("cuckoo was not properly initialized after loaded")]
+    FilterCuckooNotLoaded,
+    #[error("perfect hashing function doesn't have any keys added")]
+    PHFMissingKeys,
+    #[error("nippy jar initialized without perfect hashing function")]
+    PHFMissing,
+    #[error("nippy jar was built without an index")]
+    UnsupportedFilterQuery,
     #[error("the size of an offset must be at most 8 bytes, got {offset_size}")]
     OffsetSizeTooBig {
         /// The read offset size in number of bytes.
@@ -51,6 +64,4 @@ pub enum NippyJarError {
     FrozenJar,
     #[error("File is in an inconsistent state.")]
     InconsistentState,
-    #[error("Missing file: {0}.")]
-    MissingFile(PathBuf),
 }

@@ -1,15 +1,16 @@
-use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{tables, RawKey, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
+use reth_primitives::{TxHash, TxNumber};
 use reth_provider::{
-    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
+    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -53,16 +54,7 @@ impl TransactionLookupStage {
     }
 }
 
-impl<Provider> Stage<Provider> for TransactionLookupStage
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + PruneCheckpointWriter
-        + BlockReader
-        + PruneCheckpointReader
-        + StatsReader
-        + StaticFileProviderFactory
-        + TransactionsProviderExt,
-{
+impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::TransactionLookup
@@ -71,7 +63,7 @@ where
     /// Write transaction hash -> id entries
     fn execute(
         &mut self,
-        provider: &Provider,
+        provider: &DatabaseProviderRW<DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -109,7 +101,7 @@ where
             }
         }
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         // 500MB temporary files
@@ -172,7 +164,7 @@ where
                     "Transaction hashes inserted"
                 );
 
-                break;
+                break
             }
         }
 
@@ -186,7 +178,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &Provider,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -199,7 +191,7 @@ where
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
-                break;
+                break
             }
 
             // Delete all transactions that belong to this block
@@ -220,10 +212,9 @@ where
     }
 }
 
-fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
-where
-    Provider: PruneCheckpointReader + StaticFileProviderFactory + StatsReader,
-{
+fn stage_checkpoint<DB: Database>(
+    provider: &DatabaseProviderRW<DB>,
+) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::TransactionLookup)?
         .and_then(|checkpoint| checkpoint.tx_number)
@@ -250,12 +241,9 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_primitives::SealedBlock;
-    use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, StaticFileProviderFactory,
-    };
+    use reth_primitives::{BlockNumber, SealedBlock, B256};
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
@@ -381,7 +369,7 @@ mod tests {
         let mut tx_hash_numbers = Vec::new();
         let mut tx_hash_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body {
                 if block.number > max_pruned_block {
                     tx_hash_numbers.push((transaction.hash, tx_hash_number));
                 }
@@ -399,7 +387,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.body.len() as u64)
                             .sum::<u64>()
                             .sub(1), // `TxNumber` is 0-indexed
                     ),
@@ -409,15 +397,15 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let provider = db.factory.database_provider_rw().unwrap();
+        let provider = db.factory.provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
+                    .map(|block| block.body.len() as u64)
                     .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
+                total: blocks.iter().map(|block| block.body.len() as u64).sum::<u64>()
             }
         );
     }

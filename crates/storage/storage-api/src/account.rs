@@ -1,7 +1,6 @@
-use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
 use reth_db_models::AccountBeforeTx;
-use reth_primitives::Account;
+use reth_primitives::{Account, Address, BlockNumber};
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, BTreeSet},

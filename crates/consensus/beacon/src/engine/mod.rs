@@ -1,30 +1,31 @@
-use alloy_primitives::{BlockNumber, B256};
-use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
-};
 use futures::{stream::BoxStream, Future, StreamExt};
 use itertools::Either;
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineTypes, PayloadTypes};
+use reth_chainspec::ChainSpec;
+use reth_db_api::database::Database;
+use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     BlockClient,
 };
-use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,
+    constants::EPOCH_SLOTS, BlockNumHash, BlockNumber, Head, Header, SealedBlock, SealedHeader,
+    B256,
 };
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
-    ChainSpecProvider, ProviderError, StageCheckpointReader,
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
+    StageCheckpointReader,
+};
+use reth_rpc_types::engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
@@ -86,11 +87,6 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
-
-/// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
-
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
 
 /// Represents a pending forkchoice update.
 ///
@@ -172,40 +168,40 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct BeaconConsensusEngine<N, BT, Client>
+pub struct BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
-    N: EngineNodeTypes,
+    DB: Database,
     Client: BlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader,
+    EngineT: EngineTypes,
 {
     /// Controls syncing triggered by engine updates.
-    sync: EngineSyncController<N, Client>,
+    sync: EngineSyncController<DB, Client>,
     /// The type we can use to query both the database and the blockchain tree.
     blockchain: BT,
     /// Used for emitting updates about whether the engine is syncing or not.
     sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
-    engine_message_stream: BoxStream<'static, BeaconEngineMessage<N::Engine>>,
+    engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
     /// A clone of the handle
-    handle: BeaconConsensusEngineHandle<N::Engine>,
+    handle: BeaconConsensusEngineHandle<EngineT>,
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PayloadBuilderHandle<N::Engine>,
+    payload_builder: PayloadBuilderHandle<EngineT>,
     /// Validator for execution payloads
-    payload_validator: ExecutionPayloadValidator<N::ChainSpec>,
+    payload_validator: ExecutionPayloadValidator,
     /// Current blockchain tree action.
-    blockchain_tree_action: Option<BlockchainTreeAction<N::Engine>>,
+    blockchain_tree_action: Option<BlockchainTreeAction<EngineT>>,
     /// Pending forkchoice update.
     /// It is recorded if we cannot process the forkchoice update because
     /// a hook with database read-write access is active.
     /// This is a temporary solution to always process missed FCUs.
-    pending_forkchoice_update:
-        Option<PendingForkchoiceUpdate<<N::Engine as PayloadTypes>::PayloadAttributes>>,
+    pending_forkchoice_update: Option<PendingForkchoiceUpdate<EngineT::PayloadAttributes>>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
@@ -228,32 +224,33 @@ where
     metrics: EngineMetrics,
 }
 
-impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
+impl<DB, BT, Client, EngineT> BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
-    N: EngineNodeTypes,
+    DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider<ChainSpec = N::ChainSpec>
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + 'static,
     Client: BlockClient + 'static,
+    EngineT: EngineTypes + Unpin,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Client,
-        pipeline: Pipeline<N>,
+        pipeline: Pipeline<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle<N::Engine>)> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -287,18 +284,18 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn with_channel(
         client: Client,
-        pipeline: Pipeline<N>,
+        pipeline: Pipeline<DB>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
-        to_engine: UnboundedSender<BeaconEngineMessage<N::Engine>>,
-        engine_message_stream: BoxStream<'static, BeaconEngineMessage<N::Engine>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
+        engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle<N::Engine>)> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let event_sender = EventSender::default();
         let handle = BeaconConsensusEngineHandle::new(to_engine, event_sender.clone());
         let sync = EngineSyncController::new(
@@ -352,7 +349,7 @@ where
     }
 
     /// Set the next blockchain tree action.
-    fn set_blockchain_tree_action(&mut self, action: BlockchainTreeAction<N::Engine>) {
+    fn set_blockchain_tree_action(&mut self, action: BlockchainTreeAction<EngineT>) {
         let previous_action = self.blockchain_tree_action.replace(action);
         debug_assert!(previous_action.is_none(), "Pre-existing action found");
     }
@@ -394,7 +391,7 @@ where
     fn on_forkchoice_updated_make_canonical_result(
         &mut self,
         state: ForkchoiceState,
-        mut attrs: Option<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        mut attrs: Option<EngineT::PayloadAttributes>,
         make_canonical_result: Result<CanonicalOutcome, CanonicalError>,
         elapsed: Duration,
     ) -> Result<OnForkChoiceUpdated, CanonicalError> {
@@ -458,12 +455,11 @@ where
         &self,
         head: &BlockNumHash,
         header: &SealedHeader,
-        attrs: &mut Option<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        attrs: &mut Option<EngineT::PayloadAttributes>,
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
-        {
+        if self.blockchain.chain_spec().is_optimism() {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
@@ -503,7 +499,7 @@ where
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        attrs: Option<EngineT::PayloadAttributes>,
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     ) {
         self.metrics.forkchoice_updated_messages.increment(1);
@@ -625,7 +621,7 @@ where
     ///
     /// The [`BeaconConsensusEngineHandle`] can be used to interact with this
     /// [`BeaconConsensusEngine`]
-    pub fn handle(&self) -> BeaconConsensusEngineHandle<N::Engine> {
+    pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
         self.handle.clone()
     }
 
@@ -945,8 +941,8 @@ where
             let safe = self
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
-                .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
-            self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
+                .ok_or_else(|| ProviderError::UnknownBlockHash(safe_block_hash))?;
+            self.blockchain.set_safe(safe.header.seal(safe_block_hash));
         }
         Ok(())
     }
@@ -965,10 +961,9 @@ where
             let finalized = self
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
-                .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
+                .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
             self.blockchain.finalize_block(finalized.number)?;
-            self.blockchain
-                .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
+            self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
         }
         Ok(())
     }
@@ -1162,7 +1157,7 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
-        attrs: <N::Engine as PayloadTypes>::PayloadAttributes,
+        attrs: EngineT::PayloadAttributes,
         head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
@@ -1179,7 +1174,7 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        match <<N:: Engine as PayloadTypes>::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
+        match <EngineT::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,
         ) {
@@ -1251,7 +1246,7 @@ where
                 let event = if attachment.is_canonical() {
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
                 } else {
-                    BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed)
+                    BeaconConsensusEngineEvent::ForkBlockAdded(block)
                 };
                 self.event_sender.notify(event);
                 PayloadStatusEnum::Valid
@@ -1601,7 +1596,7 @@ where
     /// so the state change should be handled accordingly.
     fn on_blockchain_tree_action(
         &mut self,
-        action: BlockchainTreeAction<N::Engine>,
+        action: BlockchainTreeAction<EngineT>,
     ) -> RethResult<EngineEventOutcome> {
         match action {
             BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx } => {
@@ -1794,18 +1789,19 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
+impl<DB, BT, Client, EngineT> Future for BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
-    N: EngineNodeTypes,
+    DB: Database + Unpin + 'static,
     Client: BlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider<ChainSpec = N::ChainSpec>
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + Unpin
         + 'static,
+    EngineT: EngineTypes + Unpin,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 
@@ -1984,10 +1980,10 @@ mod tests {
         test_utils::{spawn_consensus_engine, TestConsensusEngineBuilder},
         BeaconForkChoiceUpdateError,
     };
-    use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
+    use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use reth_stages_api::StageCheckpoint;
@@ -2160,8 +2156,8 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, N: ProviderNodeTypes>(
-        provider_factory: ProviderFactory<N>,
+    fn insert_blocks<'a, DB: Database>(
+        provider_factory: ProviderFactory<DB>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let provider = provider_factory.provider_rw().unwrap();
@@ -2179,12 +2175,12 @@ mod tests {
 
     mod fork_choice_updated {
         use super::*;
-        use alloy_primitives::U256;
-        use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use generators::BlockParams;
-        use reth_db::{tables, test_utils::create_test_static_files_dir, Database};
+        use reth_db::{tables, test_utils::create_test_static_files_dir};
         use reth_db_api::transaction::DbTxMut;
-        use reth_provider::{providers::StaticFileProvider, test_utils::MockNodeTypesWithDB};
+        use reth_primitives::U256;
+        use reth_provider::providers::StaticFileProvider;
+        use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
         #[tokio::test]
@@ -2252,8 +2248,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2320,8 +2316,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2351,8 +2347,8 @@ mod tests {
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2407,8 +2403,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2490,8 +2486,8 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2551,8 +2547,8 @@ mod tests {
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(temp_dir_path).unwrap(),
                 ),
@@ -2580,13 +2576,11 @@ mod tests {
     mod new_payload {
         use super::*;
         use alloy_genesis::Genesis;
-        use alloy_primitives::U256;
         use generators::BlockParams;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_primitives::EthereumHardfork;
+        use reth_primitives::{EthereumHardfork, U256};
         use reth_provider::{
-            providers::StaticFileProvider,
-            test_utils::{blocks::BlockchainTestData, MockNodeTypesWithDB},
+            providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
         };
         use reth_testing_utils::{generators::random_block, GenesisAllocator};
         #[tokio::test]
@@ -2686,8 +2680,8 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2766,8 +2760,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2816,8 +2810,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2862,7 +2856,7 @@ mod tests {
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
-            block2.body.withdrawals = None;
+            block2.withdrawals = None;
             block2.header.parent_hash = block1.hash();
             block2.header.base_fee_per_gas = Some(100);
             block2.header.difficulty = U256::ZERO;
@@ -2887,8 +2881,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    env.db.clone(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),

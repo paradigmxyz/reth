@@ -6,8 +6,8 @@ use jsonrpsee::{
         IdProvider,
     },
     types::{error::reject_too_many_subscriptions, ErrorCode, ErrorObject, Request},
-    BoundedSubscriptions, ConnectionId, MethodCallback, MethodResponse, MethodSink, Methods,
-    SubscriptionState,
+    BoundedSubscriptions, ConnectionId, Extensions, MethodCallback, MethodResponse, MethodSink,
+    Methods, SubscriptionState,
 };
 use std::sync::Arc;
 
@@ -58,7 +58,7 @@ impl<'a> RpcServiceT<'a> for RpcService {
         let params = req.params();
         let name = req.method_name();
         let id = req.id().clone();
-        let extensions = req.extensions.clone();
+        let extensions = Extensions::new();
 
         match self.methods.method_with_name(name) {
             None => {

@@ -1,15 +1,18 @@
 use crate::Compact;
-use alloc::vec::Vec;
 use alloy_genesis::GenesisAccount as AlloyGenesisAccount;
 use alloy_primitives::{Bytes, B256, U256};
 use reth_codecs_derive::add_arbitrary_tests;
+use serde::{Deserialize, Serialize};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// `GenesisAccount` acts as bridge which simplifies Compact implementation for
 /// `AlloyGenesisAccount`.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
 #[derive(Debug, Clone, PartialEq, Eq, Compact)]
-pub(crate) struct GenesisAccountRef<'a> {
+struct GenesisAccountRef<'a> {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
     /// The balance of the account at genesis.
@@ -22,10 +25,10 @@ pub(crate) struct GenesisAccountRef<'a> {
     private_key: Option<&'a B256>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-pub(crate) struct GenesisAccount {
+struct GenesisAccount {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
     /// The balance of the account at genesis.
@@ -38,17 +41,17 @@ pub(crate) struct GenesisAccount {
     private_key: Option<B256>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-pub(crate) struct StorageEntries {
+struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-pub(crate) struct StorageEntry {
+struct StorageEntry {
     key: B256,
     value: B256,
 }

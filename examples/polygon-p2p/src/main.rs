@@ -14,6 +14,7 @@ use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
     config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
 };
+use reth_provider::test_utils::NoopProvider;
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,
@@ -46,10 +47,11 @@ async fn main() {
 
     // The network configuration
     let net_cfg = NetworkConfig::builder(secret_key)
+        .chain_spec(polygon_chain_spec())
         .set_head(head())
         .network_mode(NetworkMode::Work)
         .listener_addr(local_addr)
-        .build_with_noop_provider(polygon_chain_spec());
+        .build(NoopProvider::default());
 
     // Set Discv4 lookup interval to 1 second
     let mut discv4_cfg = Discv4ConfigBuilder::default();

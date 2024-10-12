@@ -266,13 +266,13 @@ mod dictionaries_serde {
 #[derive(Serialize, Deserialize, Deref)]
 pub(crate) struct ZstdDictionaries<'a>(Vec<ZstdDictionary<'a>>);
 
-impl std::fmt::Debug for ZstdDictionaries<'_> {
+impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ZstdDictionaries").field("num", &self.len()).finish_non_exhaustive()
     }
 }
 
-impl ZstdDictionaries<'_> {
+impl<'a> ZstdDictionaries<'a> {
     #[cfg(test)]
     /// Creates [`ZstdDictionaries`].
     pub(crate) fn new(raw: Vec<RawDictionary>) -> Self {
@@ -321,7 +321,7 @@ pub(crate) enum ZstdDictionary<'a> {
     Loaded(DecoderDictionary<'a>),
 }
 
-impl ZstdDictionary<'_> {
+impl<'a> ZstdDictionary<'a> {
     /// Returns a reference to the expected `RawDictionary`
     pub(crate) const fn raw(&self) -> Option<&RawDictionary> {
         match self {
@@ -339,7 +339,7 @@ impl ZstdDictionary<'_> {
     }
 }
 
-impl<'de> Deserialize<'de> for ZstdDictionary<'_> {
+impl<'de, 'a> Deserialize<'de> for ZstdDictionary<'a> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -349,7 +349,7 @@ impl<'de> Deserialize<'de> for ZstdDictionary<'_> {
     }
 }
 
-impl Serialize for ZstdDictionary<'_> {
+impl<'a> Serialize for ZstdDictionary<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -362,7 +362,7 @@ impl Serialize for ZstdDictionary<'_> {
 }
 
 #[cfg(test)]
-impl PartialEq for ZstdDictionary<'_> {
+impl<'a> PartialEq for ZstdDictionary<'a> {
     fn eq(&self, other: &Self) -> bool {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
             return a == b

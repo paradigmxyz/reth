@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-
 #[cfg(feature = "optimism")]
 mod builder;
 

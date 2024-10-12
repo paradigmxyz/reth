@@ -1,5 +1,5 @@
 //! Identifier types for transactions and senders.
-use alloy_primitives::Address;
+use reth_primitives::Address;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 

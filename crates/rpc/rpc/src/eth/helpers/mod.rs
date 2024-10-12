@@ -2,7 +2,6 @@
 //! files.
 
 pub mod signer;
-pub mod types;
 
 mod block;
 mod call;

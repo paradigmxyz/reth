@@ -1,5 +1,4 @@
-use alloy_eips::BlockHashOrNumber;
-use reth_primitives::{Withdrawal, Withdrawals};
+use reth_primitives::{BlockHashOrNumber, Withdrawal, Withdrawals};
 use reth_storage_errors::provider::ProviderResult;
 
 ///  Client trait for fetching [Withdrawal] related data.

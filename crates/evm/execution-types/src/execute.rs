@@ -1,5 +1,4 @@
-use alloy_primitives::U256;
-use reth_primitives::Request;
+use reth_primitives::{Request, U256};
 use revm::db::BundleState;
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.

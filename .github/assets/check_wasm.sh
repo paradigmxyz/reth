@@ -35,6 +35,7 @@ exclude_crates=(
   reth-ethereum-payload-builder
   reth-etl
   reth-evm-ethereum
+  reth-evm-optimism
   reth-execution-errors
   reth-exex
   reth-exex-test-utils
@@ -42,15 +43,13 @@ exclude_crates=(
   reth-net-nat
   reth-network
   reth-node-api
-  reth-node-types
   reth-node-builder
   reth-node-core
   reth-node-ethereum
   reth-node-events
   reth-node-metrics
+  reth-node-optimism
   reth-optimism-cli
-  reth-optimism-evm
-  reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-payload-builder
@@ -66,18 +65,19 @@ exclude_crates=(
   reth-rpc-types
   reth-stages
   reth-storage-errors
-  reth-engine-local
   # The following are not supposed to be working
-  reth # all of the crates below
-  reth-invalid-block-hooks # reth-provider
+  reth # all of the crates below 
+  reth-db # mdbx
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
-  reth-provider # tokio
-  reth-prune # tokio
+  reth-nippy-jar # sucds
+  reth-provider # reth-db, reth-nippy-jar
+  reth-prune # reth-db
   reth-stages-api # reth-provider, reth-prune
-  reth-static-file # tokio
+  reth-static-file # reth-nippy-jar 
   reth-transaction-pool # c-kzg
-  reth-trie-parallel # tokio
+  reth-trie-db # reth-db 
+  reth-trie-parallel # reth-db
 )
 
 # Array to hold the results

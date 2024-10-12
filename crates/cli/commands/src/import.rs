@@ -1,15 +1,13 @@
 //! Command that initializes the node by importing a chain from a file.
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
-use alloy_primitives::B256;
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
+use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::tables;
-use reth_db_api::transaction::DbTx;
+use reth_db_api::{database::Database, transaction::DbTx};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
@@ -20,12 +18,12 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
+use reth_primitives::B256;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError,
-    ProviderFactory, StageCheckpointReader,
+    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
+    StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
@@ -36,9 +34,9 @@ use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
-pub struct ImportCommand<C: ChainSpecParser> {
+pub struct ImportCommand {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    env: EnvironmentArgs,
 
     /// Disables stages that require state.
     #[arg(long, verbatim_doc_comment)]
@@ -56,13 +54,12 @@ pub struct ImportCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportCommand<C> {
+impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
+    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
-        F: FnOnce(Arc<N::ChainSpec>) -> E,
+        F: FnOnce(Arc<ChainSpec>) -> E,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
@@ -75,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
         let executor = executor(provider_factory.chain_spec());
         let consensus = Arc::new(EthBeaconConsensus::new(self.env.chain.clone()));
@@ -158,17 +155,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
-pub fn build_import_pipeline<N, C, E>(
+pub fn build_import_pipeline<DB, C, E>(
     config: &Config,
-    provider_factory: ProviderFactory<N>,
+    provider_factory: ProviderFactory<DB>,
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
-    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
+    static_file_producer: StaticFileProducer<DB>,
     disable_exec: bool,
     executor: E,
-) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
+) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
 where
-    N: ProviderNodeTypes,
+    DB: Database + Clone + Unpin + 'static,
     C: Consensus + 'static,
     E: BlockExecutorProvider,
 {
@@ -180,7 +177,7 @@ where
     let last_block_number = provider_factory.last_block_number()?;
     let local_head = provider_factory
         .sealed_header(last_block_number)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
+        .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
@@ -203,7 +200,7 @@ where
 
     let max_block = file_client.max_block().unwrap_or(0);
 
-    let pipeline = Pipeline::<N>::builder()
+    let pipeline = Pipeline::builder()
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)
@@ -231,13 +228,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
+    use reth_node_core::args::utils::SUPPORTED_CHAINS;
 
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: ImportCommand<EthereumChainSpecParser> =
-                ImportCommand::parse_from(["reth", "--chain", chain, "."]);
+            let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),
                 chain.parse::<reth_chainspec::Chain>(),

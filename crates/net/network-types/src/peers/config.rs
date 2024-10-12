@@ -288,7 +288,6 @@ impl PeersConfig {
         Self {
             refill_slots_interval: Duration::from_millis(100),
             backoff_durations: PeerBackoffDurations::test(),
-            ban_duration: Duration::from_millis(200),
             ..Default::default()
         }
     }

@@ -1,5 +1,7 @@
-use alloc::string::{String, ToString};
 use reth_fs_util::FsPathError;
+
+#[cfg(not(feature = "std"))]
+use alloc::string::{String, ToString};
 
 /// Storage lock error.
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
@@ -12,7 +14,8 @@ pub enum StorageLockError {
     Other(String),
 }
 
-impl core::error::Error for StorageLockError {}
+#[cfg(feature = "std")]
+impl std::error::Error for StorageLockError {}
 
 /// TODO: turn into variant once `ProviderError`
 impl From<FsPathError> for StorageLockError {

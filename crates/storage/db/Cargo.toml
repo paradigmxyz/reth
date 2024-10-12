@@ -24,9 +24,6 @@ reth-stages-types.workspace = true
 reth-tracing.workspace = true
 reth-trie-common.workspace = true
 
-# ethereum
-alloy-primitives.workspace = true
-
 # mdbx
 reth-libmdbx = { workspace = true, optional = true, features = [
     "return-borrowed",
@@ -43,14 +40,13 @@ metrics = { workspace = true, optional = true }
 
 # misc
 bytes.workspace = true
-page_size = { version = "0.6.0", optional = true }
+page_size = {  version = "0.6.0", optional = true }
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 paste.workspace = true
 rustc-hash = { workspace = true, optional = true }
-sysinfo = { version = "0.31", default-features = false, features = ["system"] }
-parking_lot = { workspace = true, optional = true }
+sysinfo = { version = "0.30", default-features = false }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
@@ -62,7 +58,6 @@ rand.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 test-fuzz.workspace = true
-parking_lot.workspace = true
 
 pprof = { workspace = true, features = [
     "flamegraph",
@@ -90,7 +85,7 @@ mdbx = [
     "dep:strum",
     "dep:rustc-hash",
 ]
-test-utils = ["dep:tempfile", "arbitrary", "parking_lot"]
+test-utils = ["dep:tempfile", "arbitrary"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []

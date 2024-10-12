@@ -6,13 +6,12 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
 use reth_db_api::models::CompactU256;
 use reth_primitives::{
-    Header, Receipt, SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, Header, Receipt, SealedHeader,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -75,7 +74,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 }
 
-impl HeaderProvider for StaticFileJarProvider<'_> {
+impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
@@ -119,7 +118,7 @@ impl HeaderProvider for StaticFileJarProvider<'_> {
         Ok(self
             .cursor()?
             .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-            .map(|(header, hash)| SealedHeader::new(header, hash)))
+            .map(|(header, hash)| header.seal(hash)))
     }
 
     fn sealed_headers_while(
@@ -136,7 +135,7 @@ impl HeaderProvider for StaticFileJarProvider<'_> {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {
-                let sealed = SealedHeader::new(header, hash);
+                let sealed = header.seal(hash);
                 if !predicate(&sealed) {
                     break
                 }
@@ -147,7 +146,7 @@ impl HeaderProvider for StaticFileJarProvider<'_> {
     }
 }
 
-impl BlockHashReader for StaticFileJarProvider<'_> {
+impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
@@ -169,7 +168,7 @@ impl BlockHashReader for StaticFileJarProvider<'_> {
     }
 }
 
-impl BlockNumReader for StaticFileJarProvider<'_> {
+impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
@@ -194,7 +193,7 @@ impl BlockNumReader for StaticFileJarProvider<'_> {
     }
 }
 
-impl TransactionsProvider for StaticFileJarProvider<'_> {
+impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
@@ -290,7 +289,7 @@ impl TransactionsProvider for StaticFileJarProvider<'_> {
     }
 }
 
-impl ReceiptProvider for StaticFileJarProvider<'_> {
+impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }

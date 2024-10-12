@@ -206,12 +206,10 @@ mod implementations {
             self.base_fee = Some(base_fee);
 
             let drained = self.inner.drain();
-            self.inner = drained
-                .map(|mock| {
-                    let priority = mock.tx.effective_tip_per_gas(base_fee).expect("set");
-                    MockTransactionWithPriority { tx: mock.tx, priority }
-                })
-                .collect();
+            self.inner = BinaryHeap::from_iter(drained.map(|mock| {
+                let priority = mock.tx.effective_tip_per_gas(base_fee).expect("set");
+                MockTransactionWithPriority { tx: mock.tx, priority }
+            }));
         }
     }
 }

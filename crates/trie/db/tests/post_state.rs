@@ -1,11 +1,8 @@
-#![allow(missing_docs)]
-
-use alloy_primitives::{B256, U256};
 use proptest::prelude::*;
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::create_test_rw_db};
 use reth_db_api::{database::Database, transaction::DbTxMut};
-use reth_primitives::{Account, StorageEntry};
+use reth_primitives::{Account, StorageEntry, B256, U256};
 use reth_trie::{
     hashed_cursor::{
         HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory, HashedStorageCursor,
@@ -55,7 +52,7 @@ fn assert_storage_cursor_order(
 #[test]
 fn post_state_only_accounts() {
     let accounts =
-        (1..11).map(|key| (B256::with_last_byte(key), Account::default())).collect::<Vec<_>>();
+        Vec::from_iter((1..11).map(|key| (B256::with_last_byte(key), Account::default())));
 
     let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in &accounts {
@@ -73,7 +70,7 @@ fn post_state_only_accounts() {
 #[test]
 fn db_only_accounts() {
     let accounts =
-        (1..11).map(|key| (B256::with_last_byte(key), Account::default())).collect::<Vec<_>>();
+        Vec::from_iter((1..11).map(|key| (B256::with_last_byte(key), Account::default())));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -96,7 +93,7 @@ fn db_only_accounts() {
 fn account_cursor_correct_order() {
     // odd keys are in post state, even keys are in db
     let accounts =
-        (1..111).map(|key| (B256::with_last_byte(key), Account::default())).collect::<Vec<_>>();
+        Vec::from_iter((1..111).map(|key| (B256::with_last_byte(key), Account::default())));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -121,9 +118,9 @@ fn account_cursor_correct_order() {
 fn removed_accounts_are_discarded() {
     // odd keys are in post state, even keys are in db
     let accounts =
-        (1..111).map(|key| (B256::with_last_byte(key), Account::default())).collect::<Vec<_>>();
+        Vec::from_iter((1..111).map(|key| (B256::with_last_byte(key), Account::default())));
     // accounts 5, 9, 11 should be considered removed from post state
-    let removed_keys = [5, 9, 11].into_iter().map(B256::with_last_byte).collect::<Vec<_>>();
+    let removed_keys = Vec::from_iter([5, 9, 11].into_iter().map(B256::with_last_byte));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -150,9 +147,9 @@ fn removed_accounts_are_discarded() {
 
 #[test]
 fn post_state_accounts_take_precedence() {
-    let accounts = (1..10)
-        .map(|key| (B256::with_last_byte(key), Account { nonce: key as u64, ..Default::default() }))
-        .collect::<Vec<_>>();
+    let accounts = Vec::from_iter((1..10).map(|key| {
+        (B256::with_last_byte(key), Account { nonce: key as u64, ..Default::default() })
+    }));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -224,7 +221,7 @@ fn storage_is_empty() {
     }
 
     let db_storage =
-        (0..10).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>();
+        BTreeMap::from_iter((0..10).map(|key| (B256::with_last_byte(key), U256::from(key))));
     db.update(|tx| {
         for (slot, value) in &db_storage {
             // insert zero value accounts to the database
@@ -299,10 +296,9 @@ fn storage_is_empty() {
 fn storage_cursor_correct_order() {
     let address = B256::random();
     let db_storage =
-        (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>();
-    let post_state_storage = (11..21)
-        .map(|key| (B256::with_last_byte(key), U256::from(key)))
-        .collect::<BTreeMap<_, _>>();
+        BTreeMap::from_iter((1..11).map(|key| (B256::with_last_byte(key), U256::from(key))));
+    let post_state_storage =
+        BTreeMap::from_iter((11..21).map(|key| (B256::with_last_byte(key), U256::from(key))));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -335,12 +331,10 @@ fn storage_cursor_correct_order() {
 fn zero_value_storage_entries_are_discarded() {
     let address = B256::random();
     let db_storage =
-        (0..10).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>(); // every even number is changed to zero value
-    let post_state_storage = (0..10)
-        .map(|key| {
-            (B256::with_last_byte(key), if key % 2 == 0 { U256::ZERO } else { U256::from(key) })
-        })
-        .collect::<BTreeMap<_, _>>();
+        BTreeMap::from_iter((0..10).map(|key| (B256::with_last_byte(key), U256::from(key)))); // every even number is changed to zero value
+    let post_state_storage = BTreeMap::from_iter((0..10).map(|key| {
+        (B256::with_last_byte(key), if key % 2 == 0 { U256::ZERO } else { U256::from(key) })
+    }));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -374,10 +368,9 @@ fn zero_value_storage_entries_are_discarded() {
 fn wiped_storage_is_discarded() {
     let address = B256::random();
     let db_storage =
-        (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>();
-    let post_state_storage = (11..21)
-        .map(|key| (B256::with_last_byte(key), U256::from(key)))
-        .collect::<BTreeMap<_, _>>();
+        BTreeMap::from_iter((1..11).map(|key| (B256::with_last_byte(key), U256::from(key))));
+    let post_state_storage =
+        BTreeMap::from_iter((11..21).map(|key| (B256::with_last_byte(key), U256::from(key))));
 
     let db = create_test_rw_db();
     db.update(|tx| {
@@ -408,7 +401,7 @@ fn wiped_storage_is_discarded() {
 fn post_state_storages_take_precedence() {
     let address = B256::random();
     let storage =
-        (1..10).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>();
+        BTreeMap::from_iter((1..10).map(|key| (B256::with_last_byte(key), U256::from(key))));
 
     let db = create_test_rw_db();
     db.update(|tx| {

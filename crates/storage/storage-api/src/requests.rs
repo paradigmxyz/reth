@@ -1,5 +1,4 @@
-use alloy_eips::BlockHashOrNumber;
-use reth_primitives::Requests;
+use reth_primitives::{BlockHashOrNumber, Requests};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Client trait for fetching EIP-7685 [Requests] for blocks.

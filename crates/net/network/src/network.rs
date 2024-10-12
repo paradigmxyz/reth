@@ -6,11 +6,9 @@ use std::{
     },
 };
 
-use alloy_primitives::B256;
 use enr::Enr;
 use parking_lot::Mutex;
-use reth_discv4::{Discv4, NatResolver};
-use reth_discv5::Discv5;
+use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -24,7 +22,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
-use reth_primitives::{Head, TransactionSigned};
+use reth_primitives::{Head, TransactionSigned, B256};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use tokio::sync::{
@@ -63,9 +61,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
-        discv5: Option<Discv5>,
         event_sender: EventSender<NetworkEvent>,
-        nat: Option<NatResolver>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -80,9 +76,7 @@ impl NetworkHandle {
             chain_id,
             tx_gossip_disabled,
             discv4,
-            discv5,
             event_sender,
-            nat,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -215,16 +209,11 @@ impl PeersInfo for NetworkHandle {
     fn local_node_record(&self) -> NodeRecord {
         if let Some(discv4) = &self.inner.discv4 {
             discv4.node_record()
-        } else if let Some(record) = self.inner.discv5.as_ref().and_then(|d| d.node_record()) {
-            record
         } else {
-            let external_ip = self.inner.nat.and_then(|nat| nat.as_external_ip());
-
+            let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
-            if let Some(ip) = external_ip {
-                // if able to resolve external ip, use it instead and also set the local address
-                socket_addr.set_ip(ip)
-            } else if socket_addr.ip().is_unspecified() {
+
+            if socket_addr.ip().is_unspecified() {
                 // zero address is invalid
                 if socket_addr.ip().is_ipv4() {
                     socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
@@ -233,7 +222,7 @@ impl PeersInfo for NetworkHandle {
                 }
             }
 
-            NodeRecord::new(socket_addr, *self.peer_id())
+            NodeRecord::new(socket_addr, id)
         }
     }
 
@@ -433,12 +422,8 @@ struct NetworkInner {
     tx_gossip_disabled: bool,
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
-    /// The instance of the discv5 service
-    discv5: Option<Discv5>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
-    /// The NAT resolver
-    nat: Option<NatResolver>,
 }
 
 /// Provides access to modify the network's additional protocol handlers.

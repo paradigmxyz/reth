@@ -1,18 +1,19 @@
 //! Helpers for testing trace calls.
 
-use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
-use alloy_rpc_types::Index;
-use alloy_rpc_types_eth::transaction::TransactionRequest;
-use alloy_rpc_types_trace::{
-    filter::TraceFilter,
-    parity::{LocalizedTransactionTrace, TraceResults, TraceType},
-    tracerequest::TraceCallRequest,
-};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::BlockId;
+use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
+use reth_rpc_types::{
+    trace::{
+        filter::TraceFilter,
+        parity::{LocalizedTransactionTrace, TraceResults, TraceType},
+        tracerequest::TraceCallRequest,
+    },
+    Index, TransactionRequest,
+};
 use std::{
+    collections::HashSet,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -114,7 +115,7 @@ pub struct TraceCallStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceCallResult> + 'a>>,
 }
 
-impl Stream for TraceCallStream<'_> {
+impl<'a> Stream for TraceCallStream<'a> {
     type Item = TraceCallResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -122,7 +123,7 @@ impl Stream for TraceCallStream<'_> {
     }
 }
 
-impl std::fmt::Debug for TraceCallStream<'_> {
+impl<'a> std::fmt::Debug for TraceCallStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceCallStream").finish()
     }
@@ -134,7 +135,7 @@ pub struct TraceFilterStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceFilterResult> + 'a>>,
 }
 
-impl Stream for TraceFilterStream<'_> {
+impl<'a> Stream for TraceFilterStream<'a> {
     type Item = TraceFilterResult;
 
     /// Attempts to pull out the next value of the stream.
@@ -143,7 +144,7 @@ impl Stream for TraceFilterStream<'_> {
     }
 }
 
-impl std::fmt::Debug for TraceFilterStream<'_> {
+impl<'a> std::fmt::Debug for TraceFilterStream<'a> {
     /// Provides a debug representation of the `TraceFilterStream`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceFilterStream").finish_non_exhaustive()
@@ -157,7 +158,7 @@ pub struct TraceGetStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceGetResult> + 'a>>,
 }
 
-impl Stream for TraceGetStream<'_> {
+impl<'a> Stream for TraceGetStream<'a> {
     type Item = TraceGetResult;
 
     /// Attempts to pull out the next item of the stream
@@ -166,7 +167,7 @@ impl Stream for TraceGetStream<'_> {
     }
 }
 
-impl std::fmt::Debug for TraceGetStream<'_> {
+impl<'a> std::fmt::Debug for TraceGetStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceGetStream").finish_non_exhaustive()
     }
@@ -180,7 +181,7 @@ pub struct CallManyTraceStream<'a> {
     stream: Pin<Box<dyn Stream<Item = CallManyTraceResult> + 'a>>,
 }
 
-impl Stream for CallManyTraceStream<'_> {
+impl<'a> Stream for CallManyTraceStream<'a> {
     type Item = CallManyTraceResult;
 
     /// Polls for the next item from the stream.
@@ -189,7 +190,7 @@ impl Stream for CallManyTraceStream<'_> {
     }
 }
 
-impl std::fmt::Debug for CallManyTraceStream<'_> {
+impl<'a> std::fmt::Debug for CallManyTraceStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallManyTraceStream").finish()
     }
@@ -201,7 +202,7 @@ pub struct RawTransactionTraceStream<'a> {
     stream: RawTransactionTraceResult<'a>,
 }
 
-impl Stream for RawTransactionTraceStream<'_> {
+impl<'a> Stream for RawTransactionTraceStream<'a> {
     type Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -209,7 +210,7 @@ impl Stream for RawTransactionTraceStream<'_> {
     }
 }
 
-impl std::fmt::Debug for RawTransactionTraceStream<'_> {
+impl<'a> std::fmt::Debug for RawTransactionTraceStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawTransactionTraceStream").finish()
     }
@@ -221,7 +222,7 @@ pub struct ReplayTransactionStream<'a> {
     stream: Pin<Box<dyn Stream<Item = ReplayTransactionResult> + 'a>>,
 }
 
-impl Stream for ReplayTransactionStream<'_> {
+impl<'a> Stream for ReplayTransactionStream<'a> {
     type Item = ReplayTransactionResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -229,7 +230,7 @@ impl Stream for ReplayTransactionStream<'_> {
     }
 }
 
-impl std::fmt::Debug for ReplayTransactionStream<'_> {
+impl<'a> std::fmt::Debug for ReplayTransactionStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplayTransactionStream").finish()
     }
@@ -393,7 +394,7 @@ impl<'a> TraceBlockStream<'a> {
     }
 }
 
-impl Stream for TraceBlockStream<'_> {
+impl<'a> Stream for TraceBlockStream<'a> {
     type Item = TraceBlockResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -401,7 +402,7 @@ impl Stream for TraceBlockStream<'_> {
     }
 }
 
-impl std::fmt::Debug for TraceBlockStream<'_> {
+impl<'a> std::fmt::Debug for TraceBlockStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceBlockStream").finish_non_exhaustive()
     }
@@ -514,9 +515,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_trace::filter::TraceFilterMode;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
+    use reth_rpc_types::trace::filter::TraceFilterMode;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
 
@@ -539,11 +540,12 @@ mod tests {
             "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
         ];
 
-        let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
+        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
 
         let mut stream = client.replay_transactions(transactions, trace_types);
         let mut successes = 0;
         let mut failures = 0;
+        let mut all_results = Vec::new();
 
         assert_is_stream(&stream);
 
@@ -552,10 +554,12 @@ mod tests {
                 Ok((trace_result, tx_hash)) => {
                     println!("Success for tx_hash {tx_hash:?}: {trace_result:?}");
                     successes += 1;
+                    all_results.push(Ok((trace_result, tx_hash)));
                 }
                 Err((error, tx_hash)) => {
                     println!("Error for tx_hash {tx_hash:?}: {error:?}");
                     failures += 1;
+                    all_results.push(Err((error, tx_hash)));
                 }
             }
         }
@@ -571,7 +575,7 @@ mod tests {
 
         let call_request_1 = TransactionRequest::default();
         let call_request_2 = TransactionRequest::default();
-        let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
+        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
         let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
 
         let mut stream = client.trace_call_many_stream(calls, None);
@@ -652,6 +656,7 @@ mod tests {
         let mut stream = client.trace_call_stream(trace_call_request);
         let mut successes = 0;
         let mut failures = 0;
+        let mut all_results = Vec::new();
 
         assert_is_stream(&stream);
 
@@ -660,10 +665,12 @@ mod tests {
                 Ok(trace_result) => {
                     println!("Success: {trace_result:?}");
                     successes += 1;
+                    all_results.push(Ok(trace_result));
                 }
                 Err((error, request)) => {
                     println!("Error for request {request:?}: {error:?}");
                     failures += 1;
+                    all_results.push(Err((error, request)));
                 }
             }
         }

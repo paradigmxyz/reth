@@ -8,7 +8,7 @@
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
-use reth_provider::providers::ProviderNodeTypes;
+use reth_db_api::database::Database;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -78,19 +78,25 @@ pub enum BackfillEvent {
 
 /// Pipeline sync.
 #[derive(Debug)]
-pub struct PipelineSync<N: ProviderNodeTypes> {
+pub struct PipelineSync<DB>
+where
+    DB: Database,
+{
     /// The type that can spawn the pipeline task.
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
-    pipeline_state: PipelineState<N>,
+    pipeline_state: PipelineState<DB>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<PipelineTarget>,
 }
 
-impl<N: ProviderNodeTypes> PipelineSync<N> {
+impl<DB> PipelineSync<DB>
+where
+    DB: Database + 'static,
+{
     /// Create a new instance.
-    pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(pipeline: Pipeline<DB>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
@@ -177,7 +183,10 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
+impl<DB> BackfillSync for PipelineSync<DB>
+where
+    DB: Database + 'static,
+{
     fn on_action(&mut self, event: BackfillAction) {
         match event {
             BackfillAction::Start(target) => self.set_pipeline_sync_target(target),
@@ -212,14 +221,14 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<N: ProviderNodeTypes> {
+enum PipelineState<DB: Database> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<N>>),
+    Idle(Option<Pipeline<DB>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<N>>),
+    Running(oneshot::Receiver<PipelineWithResult<DB>>),
 }
 
-impl<N: ProviderNodeTypes> PipelineState<N> {
+impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
@@ -230,20 +239,19 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 mod tests {
     use super::*;
     use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
-    use alloy_primitives::{BlockNumber, Sealable, B256};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{Header, SealedHeader};
-    use reth_provider::test_utils::MockNodeTypesWithDB;
+    use reth_primitives::{BlockNumber, Header, B256};
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
 
     struct TestHarness {
-        pipeline_sync: PipelineSync<MockNodeTypesWithDB>,
+        pipeline_sync: PipelineSync<Arc<TempDatabase<DatabaseEnv>>>,
         tip: B256,
     }
 
@@ -267,14 +275,12 @@ mod tests {
 
             let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
             let client = TestFullBlockClient::default();
-            let sealed = Header {
+            let header = Header {
                 base_fee_per_gas: Some(7),
                 gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
             }
             .seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();

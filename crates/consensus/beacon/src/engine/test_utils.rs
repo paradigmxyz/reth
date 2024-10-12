@@ -1,12 +1,7 @@
-#![allow(missing_docs)]
 use crate::{
     engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
-use alloy_primitives::{BlockNumber, Sealable, B256};
-use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -25,14 +20,16 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
-    providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-    ExecutionOutcome,
+    providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    ExecutionOutcome, ProviderFactory,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
+use reth_rpc_types::engine::{
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+};
 use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
@@ -42,9 +39,10 @@ use tokio::sync::{oneshot, watch};
 type DatabaseEnv = TempDatabase<DE>;
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
-    MockNodeTypesWithDB,
-    BlockchainProvider<MockNodeTypesWithDB>,
+    Arc<DatabaseEnv>,
+    BlockchainProvider<Arc<DatabaseEnv>>,
     Arc<Either<Client, NoopFullBlockClient>>,
+    EthEngineTypes,
 >;
 
 #[derive(Debug)]
@@ -357,7 +355,7 @@ where
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(B256::default());
         let mut pipeline = match self.base_config.pipeline_config {
-            TestPipelineConfig::Test(outputs) => Pipeline::<MockNodeTypesWithDB>::builder()
+            TestPipelineConfig::Test(outputs) => Pipeline::builder()
                 .add_stages(TestStages::new(outputs, Default::default()))
                 .with_tip_sender(tip_tx),
             TestPipelineConfig::Real => {
@@ -369,7 +367,7 @@ where
                     .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
-                Pipeline::<MockNodeTypesWithDB>::builder().add_stages(DefaultStages::new(
+                Pipeline::builder().add_stages(DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx.clone(),
                     Arc::clone(&consensus),
@@ -391,22 +389,19 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let tree = Arc::new(ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
-                .expect("failed to create tree"),
+            BlockchainTree::new(
+                externals,
+                BlockchainTreeConfig::new(1, 2, 3, 2),
+                PruneModes::default(),
+            )
+            .expect("failed to create tree"),
         ));
-        let sealed = self.base_config.chain_spec.genesis_header().clone().seal_slow();
-        let (header, seal) = sealed.into_parts();
-        let genesis_block = SealedHeader::new(header, seal);
+        let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
 
-        let blockchain_provider = BlockchainProvider::with_blocks(
-            provider_factory.clone(),
-            tree,
-            genesis_block,
-            None,
-            None,
-        );
+        let blockchain_provider =
+            BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
 
-        let pruner = Pruner::new_with_factory(
+        let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),
             vec![],
             5,

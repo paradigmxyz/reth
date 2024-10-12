@@ -8,9 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod invalid_block_hook;
-pub use invalid_block_hook::InvalidBlockHook;
-
+use reth_chainspec::ChainSpec;
 pub use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
     PayloadTypes,
@@ -39,22 +37,12 @@ pub trait EngineTypes:
     type ExecutionPayloadV3: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V4 type.
     type ExecutionPayloadV4: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
-}
 
-/// Type that validates the payloads sent to the engine.
-pub trait EngineValidator<Types: EngineTypes>: Clone + Send + Sync + Unpin + 'static {
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
-        &self,
+        chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
-    ) -> Result<(), EngineObjectValidationError>;
-
-    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        version: EngineApiMessageVersion,
-        attributes: &<Types as PayloadTypes>::PayloadAttributes,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError>;
 }

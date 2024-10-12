@@ -1,12 +1,11 @@
 //! Some payload tests
 
-use alloy_primitives::{Bytes, Sealable, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
-use alloy_rpc_types_engine::{
+use assert_matches::assert_matches;
+use reth_primitives::{proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, U256};
+use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
-use assert_matches::assert_matches;
-use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
     try_payload_v1_to_block,
@@ -19,14 +18,14 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     let unsealed = src.unseal();
     let mut transformed: Block = f(unsealed);
     // Recalculate roots
-    transformed.header.transactions_root =
-        proofs::calculate_transaction_root(&transformed.body.transactions);
-    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
-    let sealed = transformed.header.seal_slow();
-    let (header, seal) = sealed.into_parts();
+    transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
+    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
     block_to_payload(SealedBlock {
-        header: SealedHeader::new(header, seal),
+        header: transformed.header.seal_slow(),
         body: transformed.body,
+        ommers: transformed.ommers,
+        withdrawals: transformed.withdrawals,
+        requests: transformed.requests,
     })
 }
 
@@ -42,7 +41,7 @@ fn payload_body_roundtrip() {
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
         assert_eq!(
-            Ok(block.body.transactions),
+            Ok(block.body),
             payload_body
                 .transactions
                 .iter()
@@ -50,7 +49,7 @@ fn payload_body_roundtrip() {
                 .collect::<Result<Vec<_>, _>>(),
         );
         let withdraw = payload_body.withdrawals.map(Withdrawals::new);
-        assert_eq!(block.body.withdrawals, withdraw);
+        assert_eq!(block.withdrawals, withdraw);
     }
 }
 
@@ -110,7 +109,7 @@ fn payload_validation() {
 
     // Non empty ommers
     let block_with_ommers = transform_block(block.clone(), |mut b| {
-        b.body.ommers.push(random_header(&mut rng, 100, None).unseal());
+        b.ommers.push(random_header(&mut rng, 100, None).unseal());
         b
     });
     assert_matches!(
@@ -133,7 +132,7 @@ fn payload_validation() {
 
     // None zero nonce
     let block_with_nonce = transform_block(block.clone(), |mut b| {
-        b.header.nonce = 1u64.into();
+        b.header.nonce = 1;
         b
     });
     assert_matches!(

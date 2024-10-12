@@ -520,8 +520,7 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 mod tests {
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory, MockTransactionSet};
-    use alloy_primitives::address;
-    use reth_primitives::TxType;
+    use reth_primitives::{address, TxType};
     use std::collections::HashSet;
 
     #[test]

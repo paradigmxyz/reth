@@ -12,7 +12,7 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-pub use config::{TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig};
+pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
@@ -31,7 +31,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy_primitives::{TxHash, B256};
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -48,7 +47,9 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{
+    PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256,
+};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -153,14 +154,6 @@ impl TransactionsHandle {
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
 
-    /// Manually propagate the given transactions to all peers.
-    ///
-    /// It's up to the [`TransactionsManager`] whether the transactions are sent as hashes or in
-    /// full.
-    pub fn propagate_transactions(&self, transactions: Vec<TxHash>) {
-        self.send(TransactionsCommand::PropagateTransactions(transactions))
-    }
-
     /// Request the transaction hashes known by specific peers.
     pub async fn get_transaction_hashes(
         &self,
@@ -254,8 +247,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
-    /// How the `TransactionsManager` is configured.
-    config: TransactionsManagerConfig,
+    /// Max number of seen transactions to store for each peer.
+    max_transactions_seen_by_peer_history: u32,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -306,7 +299,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
-            config: transactions_manager_config,
+            max_transactions_seen_by_peer_history: transactions_manager_config
+                .max_transactions_seen_by_peer_history,
             metrics,
         }
     }
@@ -406,14 +400,8 @@ where
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
 
-        self.propagate_all(hashes);
-    }
-
-    /// Propagates the given transactions to the peers
-    ///
-    /// This fetches all transaction from the pool, including the 4844 blob transactions but
-    /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
-    fn propagate_all(&mut self, hashes: Vec<TxHash>) {
+        // This fetches all transaction from the pool, including the 4844 blob transactions but
+        // __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
         let propagated = self.propagate_transactions(
             self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect(),
         );
@@ -437,8 +425,9 @@ where
             return propagated
         }
 
-        // send full transactions to a set of the connected peers based on the configured mode
-        let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
+        // send full transactions to a fraction of the connected peers (square root of the total
+        // number of connected peers)
+        let max_num_full = (self.peers.len() as f64).sqrt().round() as usize;
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
@@ -886,12 +875,11 @@ where
                 let peers = self.peers.keys().copied().collect::<HashSet<_>>();
                 tx.send(peers).ok();
             }
-            TransactionsCommand::PropagateTransactionsTo(txs, peer) => {
-                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, peer) {
+            TransactionsCommand::PropagateTransactionsTo(txs, _peer) => {
+                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, _peer) {
                     self.pool.on_propagated(propagated);
                 }
             }
-            TransactionsCommand::PropagateTransactions(txs) => self.propagate_all(txs),
             TransactionsCommand::GetTransactionHashes { peers, tx } => {
                 let mut res = HashMap::with_capacity(peers.len());
                 for peer_id in peers {
@@ -917,7 +905,6 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
-                self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::SessionEstablished {
                 peer_id, client_version, messages, version, ..
@@ -927,7 +914,7 @@ where
                     messages,
                     version,
                     client_version,
-                    self.config.max_transactions_seen_by_peer_history,
+                    self.max_transactions_seen_by_peer_history,
                 );
                 let peer = match self.peers.entry(peer_id) {
                     Entry::Occupied(mut entry) => {
@@ -1047,7 +1034,7 @@ where
                             has_bad_transactions = true;
                         } else {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx.into());
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1410,14 +1397,11 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T>(tx: Arc<ValidPoolTransaction<T>>) -> Self
-    where
-        T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
-    {
+    fn new<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+        tx: Arc<ValidPoolTransaction<T>>,
+    ) -> Self {
         let size = tx.encoded_length();
-        let recovered: TransactionSignedEcRecovered =
-            tx.transaction.clone().into_consensus().into();
-        let transaction = Arc::new(recovered.into_signed());
+        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
         Self { size, transaction }
     }
 }
@@ -1668,8 +1652,6 @@ enum TransactionsCommand {
     GetActivePeers(oneshot::Sender<HashSet<PeerId>>),
     /// Propagate a collection of full transactions to a specific peer.
     PropagateTransactionsTo(Vec<TxHash>, PeerId),
-    /// Propagate a collection of full transactions to all peers.
-    PropagateTransactions(Vec<TxHash>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
     GetTransactionHashes {
         peers: Vec<PeerId>,
@@ -1756,7 +1738,6 @@ struct TxManagerPollDurations {
 mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
-    use alloy_primitives::hex;
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
@@ -1765,6 +1746,7 @@ mod tests {
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
     };
+    use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,

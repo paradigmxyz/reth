@@ -4,8 +4,6 @@ Prune according to the configuration without any limits
 
 ```bash
 $ reth prune --help
-```
-```txt
 Usage: reth prune [OPTIONS]
 
 Options:
@@ -35,7 +33,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static-files <PATH>
+      --datadir.static_files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

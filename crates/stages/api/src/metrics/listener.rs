@@ -1,5 +1,6 @@
 use crate::{metrics::SyncMetrics, StageCheckpoint, StageId};
 use alloy_primitives::BlockNumber;
+use reth_primitives_traits::constants::MEGAGAS;
 use std::{
     future::Future,
     pin::Pin,
@@ -28,6 +29,11 @@ pub enum MetricEvent {
         /// Maximum known block number reachable by this stage.
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
+    },
+    /// Execution stage processed some amount of gas.
+    ExecutionStageGas {
+        /// Gas processed.
+        gas: u64,
     },
 }
 
@@ -75,6 +81,9 @@ impl MetricsListener {
                 if let Some(total) = total {
                     stage_metrics.entities_total.set(total as f64);
                 }
+            }
+            MetricEvent::ExecutionStageGas { gas } => {
+                self.sync_metrics.execution_stage.mgas_processed_total.increment(gas / MEGAGAS)
             }
         }
     }

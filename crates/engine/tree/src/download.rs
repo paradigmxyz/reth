@@ -1,14 +1,13 @@
 //! Handler that can download blocks on demand (e.g. from the network).
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
-use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
@@ -164,9 +163,8 @@ where
 
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
-        let blocks = self.inflight_full_block_requests.len() +
-            self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
-        self.metrics.active_block_downloads.set(blocks as f64);
+        self.metrics.active_block_downloads.set(self.inflight_full_block_requests.len() as f64);
+        // TODO: full block range metrics
     }
 
     /// Adds a pending event to the FIFO queue.
@@ -305,12 +303,11 @@ impl BlockDownloader for NoopBlockDownloader {
 mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
-    use alloy_primitives::Sealable;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{Header, SealedHeader};
+    use reth_primitives::Header;
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
@@ -329,14 +326,12 @@ mod tests {
             );
 
             let client = TestFullBlockClient::default();
-            let sealed = Header {
+            let header = Header {
                 base_fee_per_gas: Some(7),
                 gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
             }
             .seal_slow();
-            let (header, seal) = sealed.into_parts();
-            let header = SealedHeader::new(header, seal);
 
             insert_headers_into_client(&client, header, 0..total_blocks);
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));

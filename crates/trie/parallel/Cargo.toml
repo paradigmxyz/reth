@@ -23,7 +23,6 @@ reth-provider.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
-alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -31,8 +30,14 @@ tracing.workspace = true
 # misc
 thiserror.workspace = true
 derive_more.workspace = true
-rayon.workspace = true
-itertools.workspace = true
+
+# `async` feature
+reth-tasks = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, default-features = false }
+itertools = { workspace = true, optional = true }
+
+# `parallel` feature
+rayon = { workspace = true, optional = true }
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -53,9 +58,12 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
 [features]
-default = ["metrics"]
+default = ["metrics", "async", "parallel"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
+async = ["reth-tasks/rayon", "tokio/sync", "itertools"]
+parallel = ["rayon"]
 
 [[bench]]
 name = "root"
+required-features = ["async", "parallel"]
 harness = false

@@ -1,12 +1,8 @@
-use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
-use alloy_primitives::B256;
-use reth_errors::ProviderError;
-use reth_primitives::GotExpected;
-use reth_storage_api::{BlockReader, DBProvider};
+use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, HeaderProvider};
+use reth_db_api::database::Database;
+use reth_primitives::{GotExpected, B256};
 use reth_storage_errors::provider::ProviderResult;
-
-use reth_trie::HashedPostState;
-use reth_trie_db::DatabaseHashedPostState;
+use std::marker::PhantomData;
 
 pub use reth_storage_errors::provider::ConsistentViewError;
 
@@ -26,47 +22,34 @@ pub use reth_storage_errors::provider::ConsistentViewError;
 ///    appropriately.
 /// 2) be sure that the state does not change.
 #[derive(Clone, Debug)]
-pub struct ConsistentDbView<Factory> {
-    factory: Factory,
+pub struct ConsistentDbView<DB, Provider> {
+    database: PhantomData<DB>,
+    provider: Provider,
     tip: Option<B256>,
 }
 
-impl<Factory> ConsistentDbView<Factory>
+impl<DB, Provider> ConsistentDbView<DB, Provider>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>,
+    DB: Database,
+    Provider: DatabaseProviderFactory<DB>,
 {
     /// Creates new consistent database view.
-    pub const fn new(factory: Factory, tip: Option<B256>) -> Self {
-        Self { factory, tip }
+    pub const fn new(provider: Provider, tip: Option<B256>) -> Self {
+        Self { database: PhantomData, provider, tip }
     }
 
     /// Creates new consistent database view with latest tip.
-    pub fn new_with_latest_tip(provider: Factory) -> ProviderResult<Self> {
+    pub fn new_with_latest_tip(provider: Provider) -> ProviderResult<Self> {
         let provider_ro = provider.database_provider_ro()?;
         let last_num = provider_ro.last_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
         Ok(Self::new(provider, tip))
     }
 
-    /// Retrieve revert hashed state down to the given block hash.
-    pub fn revert_state(&self, block_hash: B256) -> ProviderResult<HashedPostState> {
-        let provider = self.provider_ro()?;
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == provider.best_block_number()? &&
-            block_number == provider.last_block_number()?
-        {
-            Ok(HashedPostState::default())
-        } else {
-            Ok(HashedPostState::from_reverts(provider.tx_ref(), block_number + 1)?)
-        }
-    }
-
     /// Creates new read-only provider and performs consistency checks on the current tip.
-    pub fn provider_ro(&self) -> ProviderResult<Factory::Provider> {
+    pub fn provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         // Create a new provider.
-        let provider_ro = self.factory.database_provider_ro()?;
+        let provider_ro = self.provider.database_provider_ro()?;
 
         // Check that the latest stored header number matches the number
         // that consistent view was initialized with.

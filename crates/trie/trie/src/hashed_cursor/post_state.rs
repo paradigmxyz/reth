@@ -3,8 +3,7 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor, HashedAccountsSorted, HashedPostStateSorted,
     HashedStorageSorted,
 };
-use alloy_primitives::{B256, U256};
-use reth_primitives::Account;
+use reth_primitives::{Account, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use std::collections::HashSet;
 
@@ -132,7 +131,7 @@ where
     }
 }
 
-impl<C> HashedCursor for HashedPostStateAccountCursor<'_, C>
+impl<'a, C> HashedCursor for HashedPostStateAccountCursor<'a, C>
 where
     C: HashedCursor<Value = Account>,
 {
@@ -276,7 +275,7 @@ where
     }
 }
 
-impl<C> HashedCursor for HashedPostStateStorageCursor<'_, C>
+impl<'a, C> HashedCursor for HashedPostStateStorageCursor<'a, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -304,7 +303,7 @@ where
     }
 }
 
-impl<C> HashedStorageCursor for HashedPostStateStorageCursor<'_, C>
+impl<'a, C> HashedStorageCursor for HashedPostStateStorageCursor<'a, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {

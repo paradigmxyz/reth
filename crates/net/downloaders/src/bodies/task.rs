@@ -1,4 +1,3 @@
-use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -6,6 +5,7 @@ use reth_network_p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
+use reth_primitives::BlockNumber;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     future::Future,

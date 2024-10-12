@@ -4,8 +4,6 @@ Download block header
 
 ```bash
 $ reth p2p header --help
-```
-```txt
 Usage: reth p2p header [OPTIONS] <ID>
 
 Arguments:

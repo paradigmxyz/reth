@@ -11,14 +11,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
+alloy-rlp.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
-
-# ethereum
-alloy-eips.workspace = true
-alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 
 # misc
 derive_more.workspace = true

@@ -1,11 +1,10 @@
 use crate::BeaconSidecarConfig;
-use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{BlobTransaction, SealedBlockWithSenders},
+    primitives::{BlobTransaction, SealedBlockWithSenders, B256},
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };

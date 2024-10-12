@@ -5,11 +5,11 @@ use crate::{PipelineTarget, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
+use reth_db_api::database::Database;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
-    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -36,10 +36,10 @@ pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [`Pipeline::run_as_fut`].
-pub type PipelineFut<N> = Pin<Box<dyn Future<Output = PipelineWithResult<N>> + Send>>;
+pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
 
 /// The pipeline type itself with the result of [`Pipeline::run_as_fut`]
-pub type PipelineWithResult<N> = (Pipeline<N>, Result<ControlFlow, PipelineError>);
+pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -63,14 +63,14 @@ pub type PipelineWithResult<N> = (Pipeline<N>, Result<ControlFlow, PipelineError
 /// # Defaults
 ///
 /// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
-pub struct Pipeline<N: ProviderNodeTypes> {
+pub struct Pipeline<DB: Database> {
     /// Provider factory.
-    provider_factory: ProviderFactory<N>,
+    provider_factory: ProviderFactory<DB>,
     /// All configured stages in the order they will be executed.
-    stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
+    stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
+    static_file_producer: StaticFileProducer<DB>,
     /// Sender for events the pipeline emits.
     event_sender: EventSender<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
@@ -80,10 +80,12 @@ pub struct Pipeline<N: ProviderNodeTypes> {
     metrics_tx: Option<MetricEventsSender>,
 }
 
-impl<N: ProviderNodeTypes> Pipeline<N> {
+impl<DB> Pipeline<DB>
+where
+    DB: Database + 'static,
+{
     /// Construct a pipeline using a [`PipelineBuilder`].
-    pub fn builder() -> PipelineBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>
-    {
+    pub fn builder() -> PipelineBuilder<DB> {
         PipelineBuilder::default()
     }
 
@@ -105,9 +107,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     pub fn events(&self) -> EventStream<PipelineEvent> {
         self.event_sender.new_listener()
     }
-}
 
-impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
         let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
@@ -127,7 +127,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<N> {
+    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         let _ = self.register_metrics(); // ignore error
@@ -276,7 +276,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let mut provider_rw = self.provider_factory.database_provider_rw()?;
+        let mut provider_rw = self.provider_factory.provider_rw()?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -354,7 +354,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                         stage.post_unwind_commit()?;
 
-                        provider_rw = self.provider_factory.database_provider_rw()?;
+                        provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });
@@ -423,7 +423,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 };
             }
 
-            let provider_rw = self.provider_factory.database_provider_rw()?;
+            let provider_rw = self.provider_factory.provider_rw()?;
 
             self.event_sender.notify(PipelineEvent::Run {
                 pipeline_stages_progress: PipelineStagesProgress {
@@ -463,8 +463,6 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         self.provider_factory.static_file_provider(),
                     )?;
 
-                    stage.post_execute_commit()?;
-
                     if done {
                         let block_number = checkpoint.block_number;
                         return Ok(if made_progress {
@@ -489,8 +487,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     }
 }
 
-fn on_stage_error<N: ProviderNodeTypes>(
-    factory: &ProviderFactory<N>,
+fn on_stage_error<DB: Database>(
+    factory: &ProviderFactory<DB>,
     stage_id: StageId,
     prev_checkpoint: Option<StageCheckpoint>,
     err: StageError,
@@ -515,7 +513,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                 // FIXME: When handling errors, we do not commit the database transaction. This
                 // leads to the Merkle stage not clearing its checkpoint, and restarting from an
                 // invalid place.
-                let provider_rw = factory.database_provider_rw()?;
+                let provider_rw = factory.provider_rw()?;
                 provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
                 provider_rw.save_stage_checkpoint(
                     StageId::MerkleExecute,
@@ -576,7 +574,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
     }
 }
 
-impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
+impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
@@ -588,14 +586,12 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
+    use reth_provider::test_utils::create_test_provider_factory;
     use reth_prune::PruneModes;
     use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
@@ -632,19 +628,15 @@ mod tests {
     async fn run_pipeline() {
         let provider_factory = create_test_provider_factory();
 
-        let stage_a = TestStage::new(StageId::Other("A"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }));
-        let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
-        let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
-
-        let stage_b = TestStage::new(StageId::Other("B"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }));
-        let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
-        let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
-
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .add_stage(stage_a)
-            .add_stage(stage_b)
+        let mut pipeline = Pipeline::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true })),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("B"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+            )
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
@@ -697,12 +689,6 @@ mod tests {
                 },
             ]
         );
-
-        assert_eq!(post_execute_commit_counter_a.load(Ordering::Relaxed), 1);
-        assert_eq!(post_unwind_commit_counter_a.load(Ordering::Relaxed), 0);
-
-        assert_eq!(post_execute_commit_counter_b.load(Ordering::Relaxed), 1);
-        assert_eq!(post_unwind_commit_counter_b.load(Ordering::Relaxed), 0);
     }
 
     /// Unwinds a simple pipeline.
@@ -710,28 +696,22 @@ mod tests {
     async fn unwind_pipeline() {
         let provider_factory = create_test_provider_factory();
 
-        let stage_a = TestStage::new(StageId::Other("A"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
-            .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
-        let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
-        let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
-
-        let stage_b = TestStage::new(StageId::Other("B"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
-            .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
-        let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
-        let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
-
-        let stage_c = TestStage::new(StageId::Other("C"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
-            .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
-        let (stage_c, post_execute_commit_counter_c) = stage_c.with_post_execute_commit_counter();
-        let (stage_c, post_unwind_commit_counter_c) = stage_c.with_post_unwind_commit_counter();
-
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .add_stage(stage_a)
-            .add_stage(stage_b)
-            .add_stage(stage_c)
+        let mut pipeline = Pipeline::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("B"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("C"))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
+            )
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
@@ -843,15 +823,6 @@ mod tests {
                 },
             ]
         );
-
-        assert_eq!(post_execute_commit_counter_a.load(Ordering::Relaxed), 1);
-        assert_eq!(post_unwind_commit_counter_a.load(Ordering::Relaxed), 1);
-
-        assert_eq!(post_execute_commit_counter_b.load(Ordering::Relaxed), 1);
-        assert_eq!(post_unwind_commit_counter_b.load(Ordering::Relaxed), 1);
-
-        assert_eq!(post_execute_commit_counter_c.load(Ordering::Relaxed), 1);
-        assert_eq!(post_unwind_commit_counter_c.load(Ordering::Relaxed), 1);
     }
 
     /// Unwinds a pipeline with intermediate progress.
@@ -859,7 +830,7 @@ mod tests {
     async fn unwind_pipeline_with_intermediate_progress() {
         let provider_factory = create_test_provider_factory();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -959,7 +930,7 @@ mod tests {
     async fn run_pipeline_with_unwind() {
         let provider_factory = create_test_provider_factory();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
@@ -1080,7 +1051,7 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let provider_factory = create_test_provider_factory();
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
@@ -1096,7 +1067,7 @@ mod tests {
 
         // Fatal
         let provider_factory = create_test_provider_factory();
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))

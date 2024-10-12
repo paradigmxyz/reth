@@ -1,11 +1,11 @@
 use crate::{
-    db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
 use rayon::prelude::*;
-use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
+use reth_db::tables;
+use reth_db_api::database::Database;
+use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
 };
@@ -22,10 +22,7 @@ impl TransactionLookup {
     }
 }
 
-impl<Provider> Segment<Provider> for TransactionLookup
-where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
-{
+impl<DB: Database> Segment<DB> for TransactionLookup {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup
     }
@@ -39,7 +36,11 @@ where
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+    fn prune(
+        &self,
+        provider: &DatabaseProviderRW<DB>,
+        input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError> {
         let (start, end) = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
@@ -72,15 +73,13 @@ where
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = None;
-        let (pruned, done) =
-            provider.tx_ref().prune_table_with_iterator::<tables::TransactionHashNumbers>(
-                hashes,
-                &mut limiter,
-                |row| {
-                    last_pruned_transaction =
-                        Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
-                },
-            )?;
+        let (pruned, done) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
+            hashes,
+            &mut limiter,
+            |row| {
+                last_pruned_transaction = Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
+            },
+        )?;
 
         let done = done && tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
@@ -118,7 +117,7 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::PruneCheckpointReader;
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
     };
@@ -140,7 +139,7 @@ mod tests {
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body {
                 tx_hash_numbers.push((transaction.hash, tx_hash_numbers.len() as u64));
             }
         }
@@ -148,7 +147,7 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body.transactions.len()).sum::<usize>()
+            blocks.iter().map(|block| block.body.len()).sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -183,7 +182,7 @@ mod tests {
             let last_pruned_tx_number = blocks
                 .iter()
                 .take(to_block as usize)
-                .map(|block| block.body.transactions.len())
+                .map(|block| block.body.len())
                 .sum::<usize>()
                 .min(
                     next_tx_number_to_prune as usize +
@@ -194,7 +193,7 @@ mod tests {
             let last_pruned_block_number = blocks
                 .iter()
                 .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.transactions.len();
+                    tx_count += block.body.len();
 
                     if tx_count > last_pruned_tx_number {
                         Done((block.number, tx_count))
@@ -205,7 +204,7 @@ mod tests {
                 .into_inner()
                 .0;
 
-            let provider = db.factory.database_provider_rw().unwrap();
+            let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 

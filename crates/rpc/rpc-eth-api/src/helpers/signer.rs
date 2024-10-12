@@ -1,12 +1,12 @@
 //! An abstraction over ethereum signers.
 
-use alloy_dyn_abi::TypedData;
-use alloy_primitives::Address;
-use alloy_rpc_types_eth::TransactionRequest;
-use dyn_clone::DynClone;
-use reth_primitives::{Signature, TransactionSigned};
-use reth_rpc_eth_types::SignError;
 use std::result;
+
+use alloy_dyn_abi::TypedData;
+use dyn_clone::DynClone;
+use reth_primitives::{Address, Signature, TransactionSigned};
+use reth_rpc_eth_types::SignError;
+use reth_rpc_types::TypedTransactionRequest;
 
 /// Result returned by [`EthSigner`] methods.
 pub type Result<T> = result::Result<T, SignError>;
@@ -26,9 +26,9 @@ pub trait EthSigner: Send + Sync + DynClone {
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature>;
 
     /// signs a transaction request using the given account in request
-    async fn sign_transaction(
+    fn sign_transaction(
         &self,
-        request: TransactionRequest,
+        request: TypedTransactionRequest,
         address: &Address,
     ) -> Result<TransactionSigned>;
 

@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
@@ -15,7 +15,6 @@ use reth_node_core::{
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -190,7 +189,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         TaskExecutor,
         Node::Provider,
         EthApi,
-        Node::Executor,
     >,
 }
 
@@ -206,7 +204,6 @@ where
         TaskExecutor,
         Node::Provider,
         EthApi,
-        Node::Executor,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -237,7 +234,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) node: Node,
 
     /// Gives access to the node configuration.
-    pub(crate) config: &'a NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub(crate) config: &'a NodeConfig,
 
     /// A Helper type the holds instances of the configured modules.
     ///
@@ -254,13 +251,13 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub auth_module: &'a mut AuthRpcModule,
 }
 
-impl<Node, EthApi> RpcContext<'_, Node, EthApi>
+impl<'a, Node, EthApi> RpcContext<'a, Node, EthApi>
 where
     Node: FullNodeComponents,
     EthApi: EthApiTypes,
 {
     /// Returns the config of the node.
-    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
+    pub const fn config(&self) -> &NodeConfig {
         self.config
     }
 
@@ -285,9 +282,7 @@ where
     }
 
     /// Returns the handle to the payload builder service
-    pub fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
         self.node.payload_builder()
     }
 }
@@ -296,14 +291,17 @@ where
 pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     node: Node,
     engine_api: Engine,
-    config: &NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    config: &NodeConfig,
     jwt_secret: JwtSecret,
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
-    Node: FullNodeComponents<Types: ProviderNodeTypes> + Clone,
-    Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
-    EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
+    Node: FullNodeComponents + Clone,
+    Engine: EngineApiServer<Node::Engine>,
+    EthApi: EthApiBuilderProvider<Node>
+        + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        >,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;
     let module_config = config.rpc.transport_rpc_module_config();
@@ -316,7 +314,6 @@ where
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config().clone())
-        .with_block_executor(node.block_executor().clone())
         .build_with_auth_server(module_config, engine_api, EthApi::eth_api_builder());
 
     let mut registry = RpcRegistry { registry };
@@ -379,15 +376,15 @@ where
 pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> + EthApiTypes {
     /// Returns the eth api builder.
     #[allow(clippy::type_complexity)]
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Self>) -> Self + Send>;
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
 }
 
 impl<N, F> EthApiBuilderProvider<N> for F
 where
     N: FullNodeComponents,
-    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N, Self>> + EthApiTypes,
+    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>> + EthApiTypes,
 {
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Self>) -> Self + Send> {
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {
         F::builder()
     }
 }

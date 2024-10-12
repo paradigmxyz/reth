@@ -3,8 +3,8 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_primitives::{Address, BlockNumber, B256};
 use derive_more::AsRef;
+use reth_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
 
 use super::ShardedKey;
@@ -61,7 +61,8 @@ impl Encode for StorageShardedKey {
 }
 
 impl Decode for StorageShardedKey {
-    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+        let value = value.as_ref();
         let tx_num_index = value.len() - 8;
 
         let highest_tx_number = u64::from_be_bytes(

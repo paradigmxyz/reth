@@ -5,9 +5,8 @@ use reth_db_api::{
     table::Table,
     transaction::{DbTx, DbTxMut},
 };
-use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{ProviderFactory, StaticFileProviderFactory};
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]
@@ -18,10 +17,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db clear` command
-    pub fn execute<N: NodeTypesWithDB>(
-        self,
-        provider_factory: ProviderFactory<N>,
-    ) -> eyre::Result<()> {
+    pub fn execute<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommands::Mdbx { table } => {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
@@ -32,7 +28,8 @@ impl Command {
 
                 if let Some(segment_static_files) = static_files.get(&segment) {
                     for (block_range, _) in segment_static_files {
-                        static_file_provider.delete_jar(segment, block_range.start())?;
+                        static_file_provider
+                            .delete_jar(segment, find_fixed_range(block_range.start()))?;
                     }
                 }
             }

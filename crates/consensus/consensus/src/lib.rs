@@ -9,14 +9,19 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
-use alloc::{fmt::Debug, vec::Vec};
-use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, GotExpected, GotExpectedBoxed, Header,
-    InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
+    constants::MINIMUM_GAS_LIMIT, BlockHash, BlockNumber, BlockWithSenders, Bloom, GotExpected,
+    GotExpectedBoxed, Header, InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
+    B256, U256,
 };
+
+#[cfg(feature = "std")]
+use std::fmt::Debug;
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::{fmt::Debug, vec::Vec};
 
 /// A consensus implementation that does nothing.
 pub mod noop;
@@ -122,7 +127,7 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display, derive_more::Error)]
+#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
     #[display("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
@@ -390,6 +395,16 @@ pub enum ConsensusError {
     },
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for ConsensusError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidTransaction(err) => std::error::Error::source(err),
+            _ => Option::None,
+        }
+    }
+}
+
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
     pub const fn is_state_root_error(&self) -> bool {
@@ -404,6 +419,9 @@ impl From<InvalidTransactionError> for ConsensusError {
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
-#[derive(derive_more::Display, derive_more::Error, Debug)]
+#[derive(derive_more::Display, Debug)]
 #[display("Consensus error: {_0}, Invalid header: {_1:?}")]
 pub struct HeaderConsensusError(ConsensusError, SealedHeader);
+
+#[cfg(feature = "std")]
+impl std::error::Error for HeaderConsensusError {}

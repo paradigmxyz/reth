@@ -1,4 +1,4 @@
-use crate::{BlockNumber, Compression};
+use crate::{BlockNumber, Compression, Filters, InclusionFilter};
 use alloy_primitives::TxNumber;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,17 @@ impl StaticFileSegment {
 
     /// Returns the default configuration of the segment.
     pub const fn config(&self) -> SegmentConfig {
-        SegmentConfig { compression: Compression::Lz4 }
+        let default_config = SegmentConfig {
+            filters: Filters::WithFilters(
+                InclusionFilter::Cuckoo,
+                super::PerfectHashingFunction::Fmph,
+            ),
+            compression: Compression::Lz4,
+        };
+
+        match self {
+            Self::Headers | Self::Transactions | Self::Receipts => default_config,
+        }
     }
 
     /// Returns the number of columns for the segment
@@ -69,12 +79,18 @@ impl StaticFileSegment {
     /// Returns file name for the provided segment and range, alongside filters, compression.
     pub fn filename_with_configuration(
         &self,
+        filters: Filters,
         compression: Compression,
         block_range: &SegmentRangeInclusive,
     ) -> String {
         let prefix = self.filename(block_range);
 
-        let filters_name = "none".to_string();
+        let filters_name = match filters {
+            Filters::WithFilters(inclusion_filter, phf) => {
+                format!("{}-{}", inclusion_filter.as_ref(), phf.as_ref())
+            }
+            Filters::WithoutFilters => "none".to_string(),
+        };
 
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`.]
@@ -121,12 +137,6 @@ impl StaticFileSegment {
     /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
     pub const fn is_receipts(&self) -> bool {
         matches!(self, Self::Receipts)
-    }
-
-    /// Returns `true` if the segment is `StaticFileSegment::Receipts` or
-    /// `StaticFileSegment::Transactions`.
-    pub const fn is_tx_based(&self) -> bool {
-        matches!(self, Self::Receipts | Self::Transactions)
     }
 }
 
@@ -245,7 +255,7 @@ impl SegmentHeader {
         match self.segment {
             StaticFileSegment::Headers => {
                 if let Some(range) = &mut self.block_range {
-                    if num > range.end - range.start {
+                    if num > range.end {
                         self.block_range = None;
                     } else {
                         range.end = range.end.saturating_sub(num);
@@ -254,7 +264,7 @@ impl SegmentHeader {
             }
             StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 if let Some(range) = &mut self.tx_range {
-                    if num > range.end - range.start {
+                    if num > range.end {
                         self.tx_range = None;
                     } else {
                         range.end = range.end.saturating_sub(num);
@@ -296,6 +306,8 @@ impl SegmentHeader {
 /// Configuration used on the segment.
 #[derive(Debug, Clone, Copy)]
 pub struct SegmentConfig {
+    /// Inclusion filters used on the segment
+    pub filters: Filters,
     /// Compression used on the segment
     pub compression: Compression,
 }
@@ -368,28 +380,46 @@ mod tests {
             (
                 StaticFileSegment::Headers,
                 2..=30,
-                "static_file_headers_2_30_none_lz4",
-                Some(Compression::Lz4),
+                "static_file_headers_2_30_cuckoo-fmph_lz4",
+                Some((
+                    Compression::Lz4,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::PerfectHashingFunction::Fmph,
+                    ),
+                )),
             ),
             (
                 StaticFileSegment::Headers,
                 2..=30,
-                "static_file_headers_2_30_none_zstd",
-                Some(Compression::Zstd),
+                "static_file_headers_2_30_cuckoo-fmph_zstd",
+                Some((
+                    Compression::Zstd,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::PerfectHashingFunction::Fmph,
+                    ),
+                )),
             ),
             (
                 StaticFileSegment::Headers,
                 2..=30,
-                "static_file_headers_2_30_none_zstd-dict",
-                Some(Compression::ZstdWithDictionary),
+                "static_file_headers_2_30_cuckoo-fmph_zstd-dict",
+                Some((
+                    Compression::ZstdWithDictionary,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::PerfectHashingFunction::Fmph,
+                    ),
+                )),
             ),
         ];
 
-        for (segment, block_range, filename, compression) in test_vectors {
+        for (segment, block_range, filename, configuration) in test_vectors {
             let block_range: SegmentRangeInclusive = block_range.into();
-            if let Some(compression) = compression {
+            if let Some((compression, filters)) = configuration {
                 assert_eq!(
-                    segment.filename_with_configuration(compression, &block_range),
+                    segment.filename_with_configuration(filters, compression, &block_range,),
                     filename
                 );
             } else {

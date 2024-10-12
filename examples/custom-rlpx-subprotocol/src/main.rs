@@ -19,6 +19,7 @@ use reth_network::{
 };
 use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
 use reth_node_ethereum::EthereumNode;
+use reth_provider::test_utils::NoopProvider;
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
@@ -50,7 +51,7 @@ fn main() -> eyre::Result<()> {
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_discovery()
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
-            .build_with_noop_provider(node.chain_spec());
+            .build(NoopProvider::default());
 
         // spawn the second network instance
         let subnetwork = NetworkManager::new(net_cfg).await?;

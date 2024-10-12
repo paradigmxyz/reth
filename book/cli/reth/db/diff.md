@@ -4,8 +4,6 @@ Create a diff between two database tables or two entire databases
 
 ```bash
 $ reth db diff --help
-```
-```txt
 Usage: reth db diff [OPTIONS] --secondary-datadir <SECONDARY_DATADIR> --output <OUTPUT>
 
 Options:

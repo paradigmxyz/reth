@@ -4,8 +4,6 @@ Scripts for node recovery
 
 ```bash
 $ reth recover --help
-```
-```txt
 Usage: reth recover [OPTIONS] <COMMAND>
 
 Commands:

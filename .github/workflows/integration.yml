@@ -47,7 +47,7 @@ jobs:
         name: Run tests
         run: |
           cargo nextest run \
-            --locked -p reth-optimism-node --features "optimism"
+            --locked -p reth-node-optimism --features "optimism"
 
   integration-success:
     name: integration success

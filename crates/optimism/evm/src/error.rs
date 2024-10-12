@@ -19,7 +19,7 @@ pub enum OptimismBlockExecutionError {
     BlobTransactionRejected,
     /// Thrown when a database account could not be loaded.
     #[error("failed to load account {0}")]
-    AccountLoadFailed(alloy_primitives::Address),
+    AccountLoadFailed(reth_primitives::Address),
 }
 
 impl From<OptimismBlockExecutionError> for BlockExecutionError {

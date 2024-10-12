@@ -4,8 +4,6 @@ Database debugging utilities
 
 ```bash
 $ reth db --help
-```
-```txt
 Usage: reth db [OPTIONS] <COMMAND>
 
 Commands:
@@ -47,7 +45,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static-files <PATH>
+      --datadir.static_files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

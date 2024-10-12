@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-provider.workspace = true
@@ -23,7 +22,6 @@ reth-tokio-util.workspace = true
 reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
 reth-stages-types.workspace = true
-reth-node-types.workspace = true
 
 alloy-primitives.workspace = true
 

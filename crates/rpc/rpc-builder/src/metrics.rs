@@ -30,12 +30,9 @@ impl RpcRequestMetrics {
         Self {
             inner: Arc::new(RpcServerMetricsInner {
                 connection_metrics: transport.connection_metrics(),
-                call_metrics: module
-                    .method_names()
-                    .map(|method| {
-                        (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
-                    })
-                    .collect(),
+                call_metrics: HashMap::from_iter(module.method_names().map(|method| {
+                    (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
+                })),
             }),
         }
     }

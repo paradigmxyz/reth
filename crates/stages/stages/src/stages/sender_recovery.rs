@@ -1,16 +1,15 @@
-use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
 use reth_db_api::{
     cursor::DbCursorRW,
+    database::Database,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt,
 };
-use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{Address, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
-    BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StaticFileProviderFactory, StatsReader,
+    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
+    StatsReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -52,14 +51,7 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-impl<Provider> Stage<Provider> for SenderRecoveryStage
-where
-    Provider: DBProvider<Tx: DbTxMut>
-        + BlockReader
-        + StaticFileProviderFactory
-        + StatsReader
-        + PruneCheckpointReader,
-{
+impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::SenderRecovery
@@ -69,7 +61,11 @@ where
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -114,7 +110,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &Provider,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -124,7 +120,7 @@ where
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .last_tx_num();
-        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+        provider.unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -133,13 +129,13 @@ where
     }
 }
 
-fn recover_range<Provider, CURSOR>(
+fn recover_range<DB, CURSOR>(
     tx_range: Range<u64>,
-    provider: &Provider,
+    provider: &DatabaseProviderRW<DB>,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
+    DB: Database,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
@@ -156,38 +152,24 @@ where
         })
         .unzip();
 
-    let static_file_provider = provider.static_file_provider();
-
-    // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
-    // there will be a timeout grace period in which Tokio does not allow spawning
-    // additional blocking tasks. This would cause this function to return
-    // `SenderRecoveryStageError::RecoveredSendersMismatch` at the end.
-    //
-    // However, using `std::thread::spawn` allows us to utilize the timeout grace
-    // period to complete some work without throwing errors during the shutdown.
-    std::thread::spawn(move || {
+    let static_file_provider = provider.static_file_provider().clone();
+    tokio::task::spawn_blocking(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
             // Read the raw value, and let the rayon worker to decompress & decode.
-            let chunk = match static_file_provider.fetch_range_with_predicate(
-                StaticFileSegment::Transactions,
-                chunk_range.clone(),
-                |cursor, number| {
-                    Ok(cursor
-                        .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
-                            number.into(),
-                        )?
-                        .map(|tx| (number, tx)))
-                },
-                |_| true,
-            ) {
-                Ok(chunk) => chunk,
-                Err(err) => {
-                    // We exit early since we could not process this chunk.
-                    let _ = recovered_senders_tx
-                        .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                    break
-                }
-            };
+            let chunk = static_file_provider
+                .fetch_range_with_predicate(
+                    StaticFileSegment::Transactions,
+                    chunk_range.clone(),
+                    |cursor, number| {
+                        Ok(cursor
+                            .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
+                                number.into(),
+                            )?
+                            .map(|tx| (number, tx)))
+                    },
+                    |_| true,
+                )
+                .expect("failed to fetch range");
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has read the transaction
@@ -195,27 +177,15 @@ where
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for (number, tx) in chunk {
-                    let res = tx
-                        .value()
-                        .map_err(|err| Box::new(SenderRecoveryStageError::StageError(err.into())))
-                        .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
-
-                    let is_err = res.is_err();
-
-                    let _ = recovered_senders_tx.send(res);
-
-                    // Finish early
-                    if is_err {
-                        break
-                    }
+                    rlp_buf.clear();
+                    let tx = tx.value().expect("decode error");
+                    let _ = recovered_senders_tx.send(recover_sender((number, tx), &mut rlp_buf));
                 }
             });
         }
     });
 
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
-
-    let mut processed_transactions = 0;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
             let (tx_id, sender) = match recovered {
@@ -231,10 +201,9 @@ where
 
                             // fetch the sealed header so we can use it in the sender recovery
                             // unwind
-                            let sealed_header =
-                                provider.sealed_header(block_number)?.ok_or_else(|| {
-                                    ProviderError::HeaderNotFound(block_number.into())
-                                })?;
+                            let sealed_header = provider
+                                .sealed_header(block_number)?
+                                .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
@@ -243,32 +212,13 @@ where
                             })
                         }
                         SenderRecoveryStageError::StageError(err) => Err(err),
-                        SenderRecoveryStageError::RecoveredSendersMismatch(expectation) => {
-                            Err(StageError::Fatal(
-                                SenderRecoveryStageError::RecoveredSendersMismatch(expectation)
-                                    .into(),
-                            ))
-                        }
                     }
                 }
             };
             senders_cursor.append(tx_id, sender)?;
-            processed_transactions += 1;
         }
     }
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
-
-    // Fail safe to ensure that we do not proceed without having recovered all senders.
-    let expected = tx_range.end - tx_range.start;
-    if processed_transactions != expected {
-        return Err(StageError::Fatal(
-            SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected {
-                got: processed_transactions,
-                expected,
-            })
-            .into(),
-        ));
-    }
 
     Ok(())
 }
@@ -290,10 +240,9 @@ fn recover_sender(
     Ok((tx_id, sender))
 }
 
-fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
-where
-    Provider: StatsReader + StaticFileProviderFactory + PruneCheckpointReader,
-{
+fn stage_checkpoint<DB: Database>(
+    provider: &DatabaseProviderRW<DB>,
+) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
@@ -317,10 +266,6 @@ enum SenderRecoveryStageError {
     #[error(transparent)]
     FailedRecovery(#[from] FailedSenderRecoveryError),
 
-    /// Number of recovered senders does not match
-    #[error("mismatched sender count during recovery: {_0}")]
-    RecoveredSendersMismatch(GotExpected<u64>),
-
     /// A different type of stage error occurred
     #[error(transparent)]
     StageError(#[from] StageError),
@@ -335,13 +280,12 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{SealedBlock, TransactionSigned};
+    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
-        StaticFileProviderFactory, TransactionsProvider,
+        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
+        TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
@@ -447,7 +391,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body.transactions.len();
+                tx_count += x.body.len();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -506,7 +450,7 @@ mod tests {
         let mut tx_senders = Vec::new();
         let mut tx_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body {
                 if block.number > max_pruned_block {
                     tx_senders
                         .push((tx_number, transaction.recover_signer().expect("recover signer")));
@@ -525,7 +469,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.body.len() as u64)
                             .sum::<u64>(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -534,15 +478,15 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let provider = db.factory.database_provider_rw().unwrap();
+        let provider = db.factory.provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
+                    .map(|block| block.body.len() as u64)
                     .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
+                total: blocks.iter().map(|block| block.body.len() as u64).sum::<u64>()
             }
         );
     }

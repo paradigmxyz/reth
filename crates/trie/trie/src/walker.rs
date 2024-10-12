@@ -3,7 +3,7 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::B256;
+use reth_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::collections::HashSet;
 

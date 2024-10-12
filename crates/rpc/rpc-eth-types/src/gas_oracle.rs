@@ -3,10 +3,8 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use alloy_primitives::{B256, U256};
-use alloy_rpc_types::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
-use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
 use reth_rpc_server_types::constants;
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
@@ -120,7 +118,7 @@ where
         let header = self
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+            .ok_or(EthApiError::UnknownBlockNumber)?;
 
         let mut inner = self.inner.lock().await;
 
@@ -155,7 +153,7 @@ where
                     let (parent_hash, block_values) = self
                         .get_block_values(current_hash, SAMPLE_NUMBER)
                         .await?
-                        .ok_or(EthApiError::HeaderNotFound(current_hash.into()))?;
+                        .ok_or(EthApiError::UnknownBlockNumber)?;
                     inner
                         .lowest_effective_tip_cache
                         .insert(current_hash, (parent_hash, block_values.clone()));
@@ -221,11 +219,11 @@ where
         let parent_hash = block.parent_hash;
 
         // sort the functions by ascending effective tip first
-        block.body.transactions.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
+        block.body.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in block.body.transactions() {
+        for tx in &block.body {
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {

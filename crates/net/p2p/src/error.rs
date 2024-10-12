@@ -1,13 +1,13 @@
 use std::ops::RangeInclusive;
 
 use super::headers::client::HeadersRequest;
-use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
-use derive_more::{Display, Error};
+use derive_more::Display;
 use reth_consensus::ConsensusError;
 use reth_network_peers::WithPeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{GotExpected, GotExpectedBoxed, Header};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, B256,
+};
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use tokio::sync::{mpsc, oneshot};
 
@@ -76,7 +76,7 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 /// Error variants that can happen when sending requests to a session.
 ///
 /// Represents errors encountered when sending requests.
-#[derive(Clone, Debug, Eq, PartialEq, Display, Error)]
+#[derive(Clone, Debug, Eq, PartialEq, Display)]
 pub enum RequestError {
     /// Closed channel to the peer.
     #[display("closed channel to the peer")]
@@ -126,11 +126,14 @@ impl From<oneshot::error::RecvError> for RequestError {
     }
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for RequestError {}
+
 /// The download result type
 pub type DownloadResult<T> = Result<T, DownloadError>;
 
 /// The downloader error type
-#[derive(Debug, Clone, PartialEq, Eq, Display, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
     /// Header validation failed.
@@ -141,7 +144,6 @@ pub enum DownloadError {
         /// Number of header failing validation
         number: u64,
         /// The details of validation failure
-        #[error(source)]
         error: Box<ConsensusError>,
     },
     /// Received an invalid tip.
@@ -211,6 +213,20 @@ impl From<RequestError> for DownloadError {
 impl From<ProviderError> for DownloadError {
     fn from(error: ProviderError) -> Self {
         Self::Provider(error)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for DownloadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::HeaderValidation { error, .. } | Self::BodyValidation { error, .. } => {
+                std::error::Error::source(error)
+            }
+            Self::RequestError(error) => std::error::Error::source(error),
+            Self::Provider(error) => std::error::Error::source(error),
+            _ => None,
+        }
     }
 }
 

@@ -11,7 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
 reth-provider.workspace = true
 reth-beacon-consensus.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
@@ -22,8 +21,7 @@ reth-static-file.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 
-# ethereum
-alloy-primitives.workspace = true
+# alloy
 alloy-rpc-types-engine.workspace = true
 
 # async
@@ -34,6 +32,6 @@ futures.workspace = true
 
 tracing.workspace = true
 
-# misc
+#misc
 pin-project.workspace = true
 humantime.workspace = true

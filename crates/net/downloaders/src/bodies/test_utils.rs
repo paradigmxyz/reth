@@ -2,11 +2,10 @@
 
 #![allow(dead_code)]
 
-use alloy_primitives::B256;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
-use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader};
+use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(
@@ -20,7 +19,13 @@ pub(crate) fn zip_blocks<'a>(
             if header.is_empty() {
                 BlockResponse::Empty(header.clone())
             } else {
-                BlockResponse::Full(SealedBlock { header: header.clone(), body })
+                BlockResponse::Full(SealedBlock {
+                    header: header.clone(),
+                    body: body.transactions,
+                    ommers: body.ommers,
+                    withdrawals: body.withdrawals,
+                    requests: body.requests,
+                })
             }
         })
         .collect()
@@ -34,7 +39,7 @@ pub(crate) fn create_raw_bodies(
         .into_iter()
         .map(|header| {
             let body = bodies.remove(&header.hash()).expect("body exists");
-            body.into_block(header.unseal())
+            body.create_block(header.unseal())
         })
         .collect()
 }

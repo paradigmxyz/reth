@@ -10,13 +10,14 @@ mod receipts;
 pub use receipts::Receipts;
 
 use alloy_primitives::BlockNumber;
-use reth_provider::providers::StaticFileProvider;
+use reth_db_api::database::Database;
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderRO};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
 
 /// A segment represents moving some portion of the data to static files.
-pub trait Segment<Provider>: Send + Sync {
+pub trait Segment<DB: Database>: Send + Sync {
     /// Returns the [`StaticFileSegment`].
     fn segment(&self) -> StaticFileSegment;
 
@@ -24,7 +25,7 @@ pub trait Segment<Provider>: Send + Sync {
     /// the management of and writing to files.
     fn copy_to_static_files(
         &self,
-        provider: Provider,
+        provider: DatabaseProviderRO<DB>,
         static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;

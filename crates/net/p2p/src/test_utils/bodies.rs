@@ -4,9 +4,8 @@ use crate::{
     error::PeerRequestResult,
     priority::Priority,
 };
-use alloy_primitives::B256;
 use futures::FutureExt;
-use reth_primitives::BlockBody;
+use reth_primitives::{BlockBody, B256};
 use std::fmt::{Debug, Formatter};
 use tokio::sync::oneshot;
 

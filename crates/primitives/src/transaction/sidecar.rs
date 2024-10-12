@@ -1,9 +1,9 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
-use crate::{Signature, Transaction, TransactionSigned, EIP4844_TX_TYPE_ID};
-use alloy_consensus::{transaction::TxEip4844, TxEip4844WithSidecar};
-use alloy_primitives::{keccak256, TxHash};
-use alloy_rlp::{Decodable, Error as RlpError, Header};
+use crate::{
+    keccak256, Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
+};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use serde::{Deserialize, Serialize};
 
 #[doc(inline)]
@@ -12,6 +12,7 @@ pub use alloy_eips::eip4844::BlobTransactionSidecar;
 #[cfg(feature = "c-kzg")]
 pub use alloy_eips::eip4844::BlobTransactionValidationError;
 
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
@@ -19,15 +20,16 @@ use alloc::vec::Vec;
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a `PooledTransactions` response.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransaction {
     /// The transaction hash.
     pub hash: TxHash,
+    /// The transaction payload.
+    pub transaction: TxEip4844,
     /// The transaction signature.
     pub signature: Signature,
-    /// The transaction payload with the sidecar.
-    #[serde(flatten)]
-    pub transaction: TxEip4844WithSidecar,
+    /// The transaction's blob sidecar.
+    pub sidecar: BlobTransactionSidecar,
 }
 
 impl BlobTransaction {
@@ -41,11 +43,7 @@ impl BlobTransaction {
     ) -> Result<Self, (TransactionSigned, BlobTransactionSidecar)> {
         let TransactionSigned { transaction, signature, hash } = tx;
         match transaction {
-            Transaction::Eip4844(transaction) => Ok(Self {
-                hash,
-                transaction: TxEip4844WithSidecar { tx: transaction, sidecar },
-                signature,
-            }),
+            Transaction::Eip4844(transaction) => Ok(Self { hash, transaction, signature, sidecar }),
             transaction => {
                 let tx = TransactionSigned { transaction, signature, hash };
                 Err((tx, sidecar))
@@ -61,19 +59,19 @@ impl BlobTransaction {
         &self,
         proof_settings: &c_kzg::KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        self.transaction.validate_blob(proof_settings)
+        self.transaction.validate_blob(&self.sidecar, proof_settings)
     }
 
     /// Splits the [`BlobTransaction`] into its [`TransactionSigned`] and [`BlobTransactionSidecar`]
     /// components.
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
         let transaction = TransactionSigned {
-            transaction: Transaction::Eip4844(self.transaction.tx),
+            transaction: Transaction::Eip4844(self.transaction),
             hash: self.hash,
             signature: self.signature,
         };
 
-        (transaction, self.transaction.sidecar)
+        (transaction, self.sidecar)
     }
 
     /// Encodes the [`BlobTransaction`] fields as RLP, with a tx type. If `with_header` is `false`,
@@ -113,7 +111,36 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP encoding methods, and does not
     /// represent the full RLP encoding of the blob transaction.
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        self.transaction.encode_with_signature_fields(&self.signature, out);
+        // First we construct both required list headers.
+        //
+        // The `transaction_payload_body` length is the length of the fields, plus the length of
+        // its list header.
+        let tx_header = Header {
+            list: true,
+            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
+        };
+
+        let tx_length = tx_header.length() + tx_header.payload_length;
+
+        // The payload length is the length of the `tranascation_payload_body` list, plus the
+        // length of the blobs, commitments, and proofs.
+        let payload_length = tx_length + self.sidecar.fields_len();
+
+        // First we use the payload len to construct the first list header
+        let blob_tx_header = Header { list: true, payload_length };
+
+        // Encode the blob tx header first
+        blob_tx_header.encode(out);
+
+        // Encode the inner tx list header, then its fields
+        tx_header.encode(out);
+        self.transaction.encode_fields(out);
+
+        // Encode the signature
+        self.signature.encode(out);
+
+        // Encode the blobs, commitments, and proofs
+        self.sidecar.encode(out);
     }
 
     /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
@@ -154,14 +181,14 @@ impl BlobTransaction {
         // its list header.
         let tx_header = Header {
             list: true,
-            payload_length: self.transaction.tx.fields_len() + self.signature.rlp_vrs_len(),
+            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
         };
 
         let tx_length = tx_header.length() + tx_header.payload_length;
 
         // The payload length is the length of the `tranascation_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
-        let payload_length = tx_length + self.transaction.sidecar.fields_len();
+        let payload_length = tx_length + self.sidecar.fields_len();
 
         // We use the calculated payload len to construct the first list header, which encompasses
         // everything in the tx - the length of the second, inner list header is part of
@@ -207,10 +234,10 @@ impl BlobTransaction {
         let inner_remaining_len = data.len();
 
         // inner transaction
-        let transaction = TxEip4844::decode_fields(data)?;
+        let transaction = TxEip4844::decode_inner(data)?;
 
         // signature
-        let signature = Signature::decode_rlp_vrs(data)?;
+        let signature = Signature::decode(data)?;
 
         // the inner header only decodes the transaction and signature, so we check the length here
         let inner_consumed = inner_remaining_len - data.len();
@@ -247,7 +274,7 @@ impl BlobTransaction {
             return Err(RlpError::UnexpectedLength)
         }
 
-        Ok(Self { transaction: TxEip4844WithSidecar { tx: transaction, sidecar }, hash, signature })
+        Ok(Self { transaction, hash, signature, sidecar })
     }
 }
 
@@ -282,13 +309,8 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
 #[cfg(all(test, feature = "c-kzg"))]
 mod tests {
     use super::*;
-    use crate::{kzg::Blob, PooledTransactionsElement};
-    use alloy_eips::{
-        eip2718::{Decodable2718, Encodable2718},
-        eip4844::Bytes48,
-    };
-    use alloy_primitives::hex;
-    use alloy_rlp::Encodable;
+    use crate::{hex, kzg::Blob};
+    use alloy_eips::eip4844::Bytes48;
     use std::{fs, path::PathBuf, str::FromStr};
 
     #[test]
@@ -428,25 +450,5 @@ mod tests {
 
         // Assert the equality between the original BlobTransactionSidecar and the decoded one
         assert_eq!(sidecar, decoded_sidecar);
-    }
-
-    #[test]
-    fn decode_encode_raw_4844_rlp() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/4844rlp");
-        let dir = fs::read_dir(path).expect("Unable to read folder");
-        for entry in dir {
-            let entry = entry.unwrap();
-            let content = fs::read_to_string(entry.path()).unwrap();
-            let raw = hex::decode(content.trim()).unwrap();
-            let tx = PooledTransactionsElement::decode_2718(&mut raw.as_ref())
-                .map_err(|err| {
-                    panic!("Failed to decode transaction: {:?} {:?}", err, entry.path());
-                })
-                .unwrap();
-            // We want to test only EIP-4844 transactions
-            assert!(tx.is_eip4844());
-            let encoded = tx.encoded_2718();
-            assert_eq!(encoded.as_slice(), &raw[..], "{:?}", entry.path());
-        }
     }
 }

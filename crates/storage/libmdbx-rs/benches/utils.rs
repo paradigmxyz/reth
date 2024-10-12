@@ -1,6 +1,4 @@
 #![allow(unreachable_pub)]
-#![allow(missing_docs)]
-
 use reth_libmdbx::{Environment, WriteFlags};
 use tempfile::{tempdir, TempDir};
 

@@ -1,6 +1,8 @@
 use crate::BlockExecutionOutput;
-use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
+use reth_primitives::{
+    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
+    StorageEntry, B256, U256,
+};
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
@@ -83,7 +85,7 @@ impl ExecutionOutcome {
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
-        contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
+        contracts_init: Vec<(B256, Bytecode)>,
         receipts: Receipts,
         first_block: BlockNumber,
         requests: Vec<Requests>,
@@ -196,21 +198,24 @@ impl ExecutionOutcome {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
     }
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn generic_receipts_root_slow(
+    #[cfg(feature = "optimism")]
+    pub fn optimism_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        f: impl FnOnce(&[&Receipt]) -> B256,
+        chain_spec: &reth_chainspec::ChainSpec,
+        timestamp: u64,
     ) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
+        self.receipts.optimism_root_slow(
+            self.block_number_to_index(block_number)?,
+            chain_spec,
+            timestamp,
+        )
     }
 
     /// Returns reference to receipts.
@@ -366,8 +371,8 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
 mod tests {
     use super::*;
     use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
-    use alloy_primitives::{Address, FixedBytes, LogData, B256};
-    use reth_primitives::{Receipts, Request, Requests, TxType};
+    use alloy_primitives::{FixedBytes, LogData};
+    use reth_primitives::{Address, Receipts, Request, Requests, TxType, B256};
     use std::collections::HashMap;
 
     #[test]
@@ -436,16 +441,16 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = HashMap::default();
+        let mut state_init: BundleStateInit = HashMap::new();
         state_init
             .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
 
         // Create a HashMap for account reverts and insert initial data
-        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
+        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::new();
         revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
-        let mut revert_init: RevertsInit = HashMap::default();
+        let mut revert_init: RevertsInit = HashMap::new();
         revert_init.insert(123, revert_inner);
 
         // Assert that creating a new ExecutionOutcome using the new_init method matches

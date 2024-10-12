@@ -4,8 +4,6 @@ ping node
 
 ```bash
 $ reth p2p rlpx ping --help
-```
-```txt
 Usage: reth p2p rlpx ping [OPTIONS] <NODE>
 
 Arguments:

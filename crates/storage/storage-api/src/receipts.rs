@@ -1,7 +1,7 @@
 use crate::BlockIdReader;
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, TxHash, TxNumber};
-use reth_primitives::Receipt;
+use reth_primitives::{
+    BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, Receipt, TxHash, TxNumber,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 

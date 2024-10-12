@@ -9,10 +9,9 @@ use crate::{
     walker::TrieWalker,
     HashBuilder, Nibbles, TrieAccount,
 };
-use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::constants::EMPTY_ROOT_HASH;
+use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use tracing::trace;
 
 #[cfg(feature = "metrics")]
@@ -25,7 +24,7 @@ pub struct StateRoot<T, H> {
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
     pub hashed_cursor_factory: H,
-    /// A set of prefix sets that have changed.
+    /// A set of prefix sets that have changes.
     pub prefix_sets: TriePrefixSets,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,

@@ -1,7 +1,6 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
     PrunerError,
 };
@@ -9,10 +8,11 @@ use alloy_primitives::BlockNumber;
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, RangeWalker},
+    database::Database,
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{providers::StaticFileProvider, DBProvider};
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW};
 use reth_prune_types::{
     PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
@@ -34,7 +34,7 @@ impl Headers {
     }
 }
 
-impl<Provider: DBProvider<Tx: DbTxMut>> Segment<Provider> for Headers {
+impl<DB: Database> Segment<DB> for Headers {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Headers
     }
@@ -49,7 +49,11 @@ impl<Provider: DBProvider<Tx: DbTxMut>> Segment<Provider> for Headers {
         PrunePurpose::StaticFile
     }
 
-    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+    fn prune(
+        &self,
+        provider: &DatabaseProviderRW<DB>,
+        input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError> {
         let (block_range_start, block_range_end) = match input.get_next_block_range() {
             Some(range) => (*range.start(), *range.end()),
             None => {
@@ -102,19 +106,18 @@ impl<Provider: DBProvider<Tx: DbTxMut>> Segment<Provider> for Headers {
         })
     }
 }
-type Walker<'a, Provider, T> =
-    RangeWalker<'a, T, <<Provider as DBProvider>::Tx as DbTxMut>::CursorMut<T>>;
+type Walker<'a, DB, T> = RangeWalker<'a, T, <<DB as Database>::TXMut as DbTxMut>::CursorMut<T>>;
 
 #[allow(missing_debug_implementations)]
-struct HeaderTablesIter<'a, Provider>
+struct HeaderTablesIter<'a, DB>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    DB: Database,
 {
-    provider: &'a Provider,
+    provider: &'a DatabaseProviderRW<DB>,
     limiter: &'a mut PruneLimiter,
-    headers_walker: Walker<'a, Provider, tables::Headers>,
-    header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
-    canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
+    headers_walker: Walker<'a, DB, tables::Headers>,
+    header_tds_walker: Walker<'a, DB, tables::HeaderTerminalDifficulties>,
+    canonical_headers_walker: Walker<'a, DB, tables::CanonicalHeaders>,
 }
 
 struct HeaderTablesIterItem {
@@ -122,24 +125,24 @@ struct HeaderTablesIterItem {
     entries_pruned: usize,
 }
 
-impl<'a, Provider> HeaderTablesIter<'a, Provider>
+impl<'a, DB> HeaderTablesIter<'a, DB>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    DB: Database,
 {
     fn new(
-        provider: &'a Provider,
+        provider: &'a DatabaseProviderRW<DB>,
         limiter: &'a mut PruneLimiter,
-        headers_walker: Walker<'a, Provider, tables::Headers>,
-        header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
-        canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
+        headers_walker: Walker<'a, DB, tables::Headers>,
+        header_tds_walker: Walker<'a, DB, tables::HeaderTerminalDifficulties>,
+        canonical_headers_walker: Walker<'a, DB, tables::CanonicalHeaders>,
     ) -> Self {
         Self { provider, limiter, headers_walker, header_tds_walker, canonical_headers_walker }
     }
 }
 
-impl<Provider> Iterator for HeaderTablesIter<'_, Provider>
+impl<'a, DB> Iterator for HeaderTablesIter<'a, DB>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    DB: Database,
 {
     type Item = Result<HeaderTablesIterItem, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -151,7 +154,7 @@ where
         let mut pruned_block_td = None;
         let mut pruned_block_canonical = None;
 
-        if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
+        if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.headers_walker,
             self.limiter,
             &mut |_| false,
@@ -160,7 +163,7 @@ where
             return Some(Err(err.into()))
         }
 
-        if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
+        if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.header_tds_walker,
             self.limiter,
             &mut |_| false,
@@ -169,7 +172,7 @@ where
             return Some(Err(err.into()))
         }
 
-        if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
+        if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.canonical_headers_walker,
             self.limiter,
             &mut |_| false,
@@ -199,10 +202,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::transaction::DbTx;
-    use reth_provider::{
-        DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
-        StaticFileProviderFactory,
-    };
+    use reth_provider::{PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, SegmentOutputCheckpoint,
@@ -254,7 +254,7 @@ mod tests {
                 .map(|block_number| block_number + 1)
                 .unwrap_or_default();
 
-            let provider = db.factory.database_provider_rw().unwrap();
+            let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
             trace!(target: "pruner::test",
@@ -325,7 +325,7 @@ mod tests {
             limiter,
         };
 
-        let provider = db.factory.database_provider_rw().unwrap();
+        let provider = db.factory.provider_rw().unwrap();
         let segment = super::Headers::new(db.factory.static_file_provider());
         let result = segment.prune(&provider, input).unwrap();
         assert_eq!(

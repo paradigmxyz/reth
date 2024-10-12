@@ -17,13 +17,14 @@ pub use reth_payload_primitives as payload;
 pub use reth_payload_primitives::*;
 
 /// Traits and helper types used to abstract over EVM methods and types.
-pub use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+pub use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+
+pub mod primitives;
 
 pub mod node;
 pub use node::*;
 
 // re-export for convenience
-pub use reth_node_types::*;
 pub use reth_provider::FullProvider;
 
 pub use reth_rpc_eth_api::EthApiTypes;

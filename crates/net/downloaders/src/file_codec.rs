@@ -1,9 +1,11 @@
 //! Codec for reading raw block bodies from a file.
 
 use crate::file_client::FileClientError;
-use alloy_primitives::bytes::{Buf, BytesMut};
 use alloy_rlp::{Decodable, Encodable};
-use reth_primitives::Block;
+use reth_primitives::{
+    bytes::{Buf, BytesMut},
+    Block,
+};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Codec for reading raw block bodies from a file.

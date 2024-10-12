@@ -1,31 +1,43 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, BlockBody, Signature,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, Signature, Transaction,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
+    TxEip4844, TxLegacy, TxType,
 };
-use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
-use alloy_primitives::{Parity, TxKind};
+use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
-use alloy_serde::WithOtherFields;
-use op_alloy_rpc_types as _;
 
-impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>> for Block {
+#[cfg(not(feature = "std"))]
+use alloc::{string::ToString, vec::Vec};
+
+impl TryFrom<alloy_rpc_types::Block> for Block {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(
-        block: alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(block: alloy_rpc_types::Block) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
-        let transactions = {
+        let body = {
             let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
                 .transactions
             {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => {
-                    transactions.into_iter().map(|tx| tx.try_into()).collect()
-                }
+                alloy_rpc_types::BlockTransactions::Full(transactions) => transactions
+                    .into_iter()
+                    .map(|tx| {
+                        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
+                        Ok(TransactionSigned::from_transaction_and_signature(
+                            tx.try_into()?,
+                            crate::Signature {
+                                r: signature.r,
+                                s: signature.s,
+                                odd_y_parity: signature
+                                    .y_parity
+                                    .unwrap_or_else(|| alloy_rpc_types::Parity(!signature.v.bit(0)))
+                                    .0,
+                            },
+                        ))
+                    })
+                    .collect(),
                 alloy_rpc_types::BlockTransactions::Hashes(_) |
                 alloy_rpc_types::BlockTransactions::Uncle => {
                     // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
@@ -42,29 +54,22 @@ impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction
 
         Ok(Self {
             header: block.header.try_into()?,
-            body: BlockBody {
-                transactions,
-                ommers: Default::default(),
-                withdrawals: block.withdrawals.map(Into::into),
-                // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it
-                // as empty.
-                requests: None,
-            },
+            body,
+            ommers: Default::default(),
+            withdrawals: block.withdrawals.map(Into::into),
+            // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it as
+            // empty.
+            requests: None,
         })
     }
 }
 
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
+impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
         use alloy_eips::eip2718::Eip2718Error;
         use alloy_rpc_types::ConversionError;
-
-        #[cfg(feature = "optimism")]
-        let WithOtherFields { inner: tx, other } = tx;
-        #[cfg(not(feature = "optimism"))]
-        let WithOtherFields { inner: tx, other: _ } = tx;
 
         match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
             ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
@@ -102,7 +107,10 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     chain_id,
                     nonce: tx.nonce,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                    gas_limit: tx.gas,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     input: tx.input,
@@ -113,7 +121,10 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                 Ok(Self::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
-                    gas_limit: tx.gas,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     input: tx.input,
@@ -132,7 +143,10 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     max_fee_per_gas: tx
                         .max_fee_per_gas
                         .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx.gas,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
@@ -150,7 +164,11 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     max_fee_per_gas: tx
                         .max_fee_per_gas
                         .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx.gas,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    placeholder: tx.to.map(drop),
                     to: tx.to.unwrap_or_default(),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
@@ -193,10 +211,11 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
             }
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
-                let fields = other
-                    .deserialize_into::<op_alloy_rpc_types::OpTransactionFields>()
+                let fields = tx
+                    .other
+                    .deserialize_into::<alloy_rpc_types::optimism::OptimismTransactionFields>()
                     .map_err(|e| ConversionError::Custom(e.to_string()))?;
-                Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
+                Ok(Self::Deposit(crate::transaction::TxDeposit {
                     source_hash: fields
                         .source_hash
                         .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?,
@@ -204,7 +223,10 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     to: TxKind::from(tx.to),
                     mint: fields.mint.filter(|n| *n != 0),
                     value: tx.value,
-                    gas_limit: tx.gas,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     is_system_transaction: fields.is_system_tx.unwrap_or(false),
                     input: tx.input,
                 }))
@@ -213,48 +235,43 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
     }
 }
 
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigned {
+impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
         let transaction: Transaction = tx.try_into()?;
-        let y_parity = if let Some(y_parity) = signature.y_parity {
-            y_parity.0
-        } else {
-            match transaction.tx_type() {
-                // If the transaction type is Legacy, adjust the v component of the
-                // signature according to the Ethereum specification
-                TxType::Legacy => {
-                    extract_chain_id(signature.v.to())
-                        .map_err(|_| ConversionError::InvalidSignature)?
-                        .0
-                }
-                _ => !signature.v.is_zero(),
-            }
-        };
-
-        let mut parity = Parity::Parity(y_parity);
-
-        if matches!(transaction.tx_type(), TxType::Legacy) {
-            if let Some(chain_id) = transaction.chain_id() {
-                parity = parity.with_chain_id(chain_id)
-            }
-        }
 
         Ok(Self::from_transaction_and_signature(
-            transaction,
-            Signature::new(signature.r, signature.s, parity),
+            transaction.clone(),
+            Signature {
+                r: signature.r,
+                s: signature.s,
+                odd_y_parity: if let Some(y_parity) = signature.y_parity {
+                    y_parity.0
+                } else {
+                    match transaction.tx_type() {
+                        // If the transaction type is Legacy, adjust the v component of the
+                        // signature according to the Ethereum specification
+                        TxType::Legacy => {
+                            extract_chain_id(signature.v.to())
+                                .map_err(|_| ConversionError::InvalidSignature)?
+                                .0
+                        }
+                        _ => !signature.v.is_zero(),
+                    }
+                },
+            },
         ))
     }
 }
 
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSignedEcRecovered {
+impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         let transaction: TransactionSigned = tx.try_into()?;
@@ -263,10 +280,26 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
     }
 }
 
-impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSignedNoHash {
+impl TryFrom<alloy_rpc_types::Signature> for Signature {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
+    fn try_from(signature: alloy_rpc_types::Signature) -> Result<Self, Self::Error> {
+        use alloy_rpc_types::ConversionError;
+
+        let odd_y_parity = if let Some(y_parity) = signature.y_parity {
+            y_parity.0
+        } else {
+            extract_chain_id(signature.v.to()).map_err(|_| ConversionError::InvalidSignature)?.0
+        };
+
+        Ok(Self { r: signature.r, s: signature.s, odd_y_parity })
+    }
+}
+
+impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedNoHash {
+    type Error = alloy_rpc_types::ConversionError;
+
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
         Ok(Self {
             signature: tx.signature.ok_or(Self::Error::MissingSignature)?.try_into()?,
             transaction: tx.try_into()?,
@@ -278,8 +311,9 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
 #[cfg(feature = "optimism")]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, Address, B256, U256};
+    use alloy_primitives::{B256, U256};
     use alloy_rpc_types::Transaction as AlloyTransaction;
+    use revm_primitives::{address, Address};
 
     #[test]
     fn optimism_deposit_tx_conversion_no_mint() {
@@ -303,7 +337,7 @@ mod tests {
             "v": "0x0",
             "value": "0x0"
         }"#;
-        let alloy_tx: WithOtherFields<AlloyTransaction> =
+        let alloy_tx: AlloyTransaction =
             serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
@@ -353,7 +387,7 @@ mod tests {
             "v": "0x0",
             "value": "0x239c2e16a5ca590000"
         }"#;
-        let alloy_tx: WithOtherFields<AlloyTransaction> =
+        let alloy_tx: AlloyTransaction =
             serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");

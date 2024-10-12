@@ -13,7 +13,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
 use reth_network_api::test_utils::PeersHandle;
@@ -24,7 +23,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{BlockBody, Header};
+use reth_primitives::{BlockBody, Header, B256};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -472,8 +471,7 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use alloy_primitives::B512;
-    use reth_primitives::SealedHeader;
+    use reth_primitives::{SealedHeader, B512};
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]

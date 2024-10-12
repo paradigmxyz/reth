@@ -4,8 +4,6 @@ Recover the node by deleting dangling storage tries
 
 ```bash
 $ reth recover storage-tries --help
-```
-```txt
 Usage: reth recover storage-tries [OPTIONS]
 
 Options:
@@ -35,7 +33,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static-files <PATH>
+      --datadir.static_files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

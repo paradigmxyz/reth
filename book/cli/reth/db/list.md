@@ -4,8 +4,6 @@ Lists the contents of a table
 
 ```bash
 $ reth db list --help
-```
-```txt
 Usage: reth db list [OPTIONS] <TABLE>
 
 Arguments:

@@ -10,13 +10,12 @@ use crate::{
     },
     valid_payload::call_new_payload,
 };
-use alloy_primitives::B256;
 use alloy_provider::Provider;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::Block;
+use reth_primitives::{Block, B256};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -46,8 +45,16 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
                 let block = block_res.unwrap().unwrap();
-                let block_hash = block.header.hash;
-                let block = Block::try_from(block.inner).unwrap().seal(block_hash);
+                let block = match block.header.hash {
+                    Some(block_hash) => {
+                        // we can reuse the hash in the response
+                        Block::try_from(block).unwrap().seal(block_hash)
+                    }
+                    None => {
+                        // we don't have the hash, so let's just hash it
+                        Block::try_from(block).unwrap().seal_slow()
+                    }
+                };
 
                 next_block += 1;
                 sender.send(block).await.unwrap();

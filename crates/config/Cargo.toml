@@ -27,4 +27,3 @@ eyre.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 reth-network-peers.workspace = true
-alloy-primitives.workspace = true

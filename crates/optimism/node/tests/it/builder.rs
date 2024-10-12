@@ -3,19 +3,18 @@
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_optimism_chainspec::BASE_MAINNET;
-use reth_optimism_node::{node::OptimismAddOns, OptimismNode};
+use reth_node_optimism::node::{OptimismAddOns, OptimismNode};
 
 #[test]
 fn test_basic_setup() {
     // parse CLI -> config
-    let config = NodeConfig::new(BASE_MAINNET.clone());
+    let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<OptimismNode>()
         .with_components(OptimismNode::components(Default::default()))
-        .with_add_ons(OptimismAddOns::new(None))
+        .with_add_ons::<OptimismAddOns>()
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())

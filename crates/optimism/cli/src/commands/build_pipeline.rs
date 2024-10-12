@@ -2,19 +2,18 @@ use alloy_primitives::B256;
 use futures_util::{Stream, StreamExt};
 use reth_config::Config;
 use reth_consensus::Consensus;
+use reth_db_api::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_errors::ProviderError;
+use reth_evm_optimism::OpExecutorProvider;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::NodeTypesWithDB;
 use reth_node_events::node::NodeEvent;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpExecutorProvider;
 use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderFactory};
 use reth_prune::PruneModes;
 use reth_stages::{sets::DefaultStages, Pipeline, StageSet};
@@ -27,16 +26,16 @@ use tokio::sync::watch;
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
-pub(crate) async fn build_import_pipeline<N, C>(
+pub(crate) async fn build_import_pipeline<DB, C>(
     config: &Config,
-    provider_factory: ProviderFactory<N>,
+    provider_factory: ProviderFactory<DB>,
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
-    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
+    static_file_producer: StaticFileProducer<DB>,
     disable_exec: bool,
-) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
+) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
 where
-    N: NodeTypesWithDB<ChainSpec = OpChainSpec>,
+    DB: Database + Clone + Unpin + 'static,
     C: Consensus + 'static,
 {
     if !file_client.has_canonical_blocks() {
@@ -47,7 +46,7 @@ where
     let last_block_number = provider_factory.last_block_number()?;
     let local_head = provider_factory
         .sealed_header(last_block_number)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
+        .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
@@ -71,7 +70,7 @@ where
 
     let max_block = file_client.max_block().unwrap_or(0);
 
-    let pipeline = Pipeline::<N>::builder()
+    let pipeline = Pipeline::builder()
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)

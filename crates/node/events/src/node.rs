@@ -1,7 +1,6 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
-use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_beacon_consensus::{
@@ -9,7 +8,7 @@ use reth_beacon_consensus::{
 };
 use reth_network::NetworkEvent;
 use reth_network_api::PeersInfo;
-use reth_primitives::constants;
+use reth_primitives::{constants, BlockNumber, B256};
 use reth_primitives_traits::{format_gas, format_gas_throughput};
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
@@ -259,7 +258,7 @@ impl NodeState {
                     number=block.number,
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
-                    txs=block.body.transactions.len(),
+                    txs=block.body.len(),
                     gas=%format_gas(block.header.gas_used),
                     gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
@@ -276,8 +275,8 @@ impl NodeState {
 
                 info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed) => {
-                info!(number=block.number, hash=?block.hash(), ?elapsed, "Block added to fork chain");
+            BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
+                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
             }
         }
     }

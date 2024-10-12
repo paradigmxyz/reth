@@ -112,18 +112,6 @@ where
         self.inner.txn_execute(f)
     }
 
-    /// Executes the given closure once the lock on the transaction is acquired. If the transaction
-    /// is timed out, it will be renewed first.
-    ///
-    /// Returns the result of the closure or an error if the transaction renewal fails.
-    #[inline]
-    pub(crate) fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(*mut ffi::MDBX_txn) -> T,
-    {
-        self.inner.txn_execute_renew_on_timeout(f)
-    }
-
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
     #[doc(hidden)]
     #[cfg(test)]
@@ -332,14 +320,6 @@ where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         self.txn.txn_execute_fail_on_timeout(f)
-    }
-
-    #[inline]
-    fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(*mut ffi::MDBX_txn) -> T,
-    {
-        self.txn.txn_execute_renew_on_timeout(f)
     }
 }
 
@@ -616,7 +596,7 @@ impl TransactionPtr {
     ///
     /// Returns the result of the closure or an error if the transaction renewal fails.
     #[inline]
-    pub(crate) fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
+    fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {

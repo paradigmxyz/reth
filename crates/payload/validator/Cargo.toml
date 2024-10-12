@@ -15,7 +15,5 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
-
-# alloy
-alloy-rpc-types = { workspace = true, features = ["engine"] }

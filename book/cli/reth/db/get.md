@@ -4,8 +4,6 @@ Gets the content of a table for the given key
 
 ```bash
 $ reth db get --help
-```
-```txt
 Usage: reth db get [OPTIONS] <COMMAND>
 
 Commands:

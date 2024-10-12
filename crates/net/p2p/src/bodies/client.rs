@@ -4,9 +4,8 @@ use std::{
 };
 
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
-use alloy_primitives::B256;
 use futures::{Future, FutureExt};
-use reth_primitives::BlockBody;
+use reth_primitives::{BlockBody, B256};
 
 /// The bodies future type
 pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;

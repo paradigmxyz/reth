@@ -1,5 +1,4 @@
-use alloy_primitives::{BlockNumber, U256};
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
 
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]

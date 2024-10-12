@@ -4,8 +4,6 @@ Initialize the database from a state dump file
 
 ```bash
 $ reth init-state --help
-```
-```txt
 Usage: reth init-state [OPTIONS] <STATE_DUMP_FILE>
 
 Options:
@@ -35,7 +33,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static-files <PATH>
+      --datadir.static_files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

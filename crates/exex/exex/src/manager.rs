@@ -1,20 +1,11 @@
-use crate::{
-    wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
-};
-use futures::StreamExt;
-use itertools::Itertools;
+use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
 use metrics::Gauge;
-use reth_chain_state::ForkChoiceStream;
-use reth_chainspec::Head;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumHash, SealedHeader};
-use reth_provider::HeaderProvider;
+use reth_primitives::BlockNumber;
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
-    fmt::Debug,
     future::{poll_fn, Future},
-    ops::Not,
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -23,28 +14,10 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{
-    mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
+    mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
-
-/// Default max size of the internal state notifications buffer.
-///
-/// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
-/// or 17 minutes of 1-second blocks.
-pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
-
-/// The source of the notification.
-///
-/// This distinguishment is needed to not commit any pipeline notificatations to [WAL](`Wal`),
-/// because they are already finalized.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExExNotificationSource {
-    /// The notification was sent from the pipeline.
-    Pipeline,
-    /// The notification was sent from the blockchain tree.
-    BlockchainTree,
-}
 
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
@@ -67,34 +40,28 @@ pub struct ExExHandle {
     id: String,
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
+
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
     sender: PollSender<ExExNotification>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
-    /// The finished block of the `ExEx`.
+
+    /// The finished block number of the `ExEx`.
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
-    finished_height: Option<BlockNumHash>,
+    finished_height: Option<BlockNumber>,
 }
 
 impl ExExHandle {
     /// Create a new handle for the given `ExEx`.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
-    /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new<P, E>(
-        id: String,
-        node_head: Head,
-        provider: P,
-        executor: E,
-        wal_handle: WalHandle,
-    ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
+    /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
+    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<ExExNotification>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let notifications =
-            ExExNotifications::new(node_head, provider, executor, notification_rx, wal_handle);
 
         (
             Self {
@@ -106,7 +73,7 @@ impl ExExHandle {
                 finished_height: None,
             },
             event_tx,
-            notifications,
+            notification_rx,
         )
     }
 
@@ -125,12 +92,11 @@ impl ExExHandle {
                     // Skip the chain commit notification if the finished height of the ExEx is
                     // higher than or equal to the tip of the new notification.
                     // I.e., the ExEx has already processed the notification.
-                    if finished_height.number >= new.tip().number {
+                    if finished_height >= new.tip().number {
                         debug!(
-                            target: "exex::manager",
                             exex_id = %self.id,
                             %notification_id,
-                            ?finished_height,
+                            %finished_height,
                             new_tip = %new.tip().number,
                             "Skipping notification"
                         );
@@ -148,7 +114,6 @@ impl ExExHandle {
         }
 
         debug!(
-            target: "exex::manager",
             exex_id = %self.id,
             %notification_id,
             "Reserving slot for notification"
@@ -159,7 +124,6 @@ impl ExExHandle {
         }
 
         debug!(
-            target: "exex::manager",
             exex_id = %self.id,
             %notification_id,
             "Sending notification"
@@ -177,7 +141,7 @@ impl ExExHandle {
 
 /// Metrics for the `ExEx` manager.
 #[derive(Metrics)]
-#[metrics(scope = "exex.manager")]
+#[metrics(scope = "exex_manager")]
 pub struct ExExManagerMetrics {
     /// Max size of the internal state notifications buffer.
     max_capacity: Gauge,
@@ -201,15 +165,12 @@ pub struct ExExManagerMetrics {
 /// - Error handling
 /// - Monitoring
 #[derive(Debug)]
-pub struct ExExManager<P> {
-    /// Provider for querying headers.
-    provider: P,
-
+pub struct ExExManager {
     /// Handles to communicate with the `ExEx`'s.
     exex_handles: Vec<ExExHandle>,
 
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
-    handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification)>,
+    handle_rx: UnboundedReceiver<ExExNotification>,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
@@ -233,18 +194,13 @@ pub struct ExExManager<P> {
     /// The finished height of all `ExEx`'s.
     finished_height: watch::Sender<FinishedExExHeight>,
 
-    /// Write-Ahead Log for the [`ExExNotification`]s.
-    wal: Wal,
-    /// A stream of finalized headers.
-    finalized_header_stream: ForkChoiceStream<SealedHeader>,
-
     /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle,
     /// Metrics for the `ExEx` manager.
     metrics: ExExManagerMetrics,
 }
 
-impl<P> ExExManager<P> {
+impl ExExManager {
     /// Create a new [`ExExManager`].
     ///
     /// You must provide an [`ExExHandle`] for each `ExEx` and the maximum capacity of the
@@ -252,13 +208,7 @@ impl<P> ExExManager<P> {
     ///
     /// When the capacity is exceeded (which can happen if an `ExEx` is slow) no one can send
     /// notifications over [`ExExManagerHandle`]s until there is capacity again.
-    pub fn new(
-        provider: P,
-        handles: Vec<ExExHandle>,
-        max_capacity: usize,
-        wal: Wal,
-        finalized_header_stream: ForkChoiceStream<SealedHeader>,
-    ) -> Self {
+    pub fn new(handles: Vec<ExExHandle>, max_capacity: usize) -> Self {
         let num_exexs = handles.len();
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
@@ -276,8 +226,6 @@ impl<P> ExExManager<P> {
         metrics.num_exexs.set(num_exexs as f64);
 
         Self {
-            provider,
-
             exex_handles: handles,
 
             handle_rx,
@@ -290,9 +238,6 @@ impl<P> ExExManager<P> {
 
             is_ready: is_ready_tx,
             finished_height: finished_height_tx,
-
-            wal,
-            finalized_header_stream,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
@@ -333,96 +278,60 @@ impl<P> ExExManager<P> {
     }
 }
 
-impl<P> ExExManager<P>
-where
-    P: HeaderProvider,
-{
-    /// Finalizes the WAL according to the passed finalized header.
-    ///
-    /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
-    /// necessary.
-    fn finalize_wal(&self, finalized_header: SealedHeader) -> eyre::Result<()> {
-        debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
-
-        // Check if all ExExes are on the canonical chain
-        let exex_finished_heights = self
-            .exex_handles
-            .iter()
-            // Get ID and finished height for each ExEx
-            .map(|exex_handle| (&exex_handle.id, exex_handle.finished_height))
-            // Deduplicate all hashes
-            .unique_by(|(_, num_hash)| num_hash.map(|num_hash| num_hash.hash))
-            // Check if hashes are canonical
-            .map(|(exex_id, num_hash)| {
-                num_hash.map_or(Ok((exex_id, num_hash, false)), |num_hash| {
-                    self.provider
-                        .is_known(&num_hash.hash)
-                        // Save the ExEx ID, finished height, and whether the hash is canonical
-                        .map(|is_canonical| (exex_id, Some(num_hash), is_canonical))
-                })
-            })
-            // We collect here to be able to log the unfinalized ExExes below
-            .collect::<Result<Vec<_>, _>>()?;
-        if exex_finished_heights.iter().all(|(_, _, is_canonical)| *is_canonical) {
-            // If there is a finalized header and all ExExs are on the canonical chain, finalize
-            // the WAL with either the lowest finished height among all ExExes, or finalized header
-            // – whichever is lower.
-            let lowest_finished_height = exex_finished_heights
-                .iter()
-                .copied()
-                .filter_map(|(_, num_hash, _)| num_hash)
-                .chain([(finalized_header.num_hash())])
-                .min_by_key(|num_hash| num_hash.number)
-                .unwrap();
-
-            self.wal.finalize(lowest_finished_height)?;
-        } else {
-            let unfinalized_exexes = exex_finished_heights
-                .into_iter()
-                .filter_map(|(exex_id, num_hash, is_canonical)| {
-                    is_canonical.not().then_some((exex_id, num_hash))
-                })
-                .format_with(", ", |(exex_id, num_hash), f| {
-                    f(&format_args!("{exex_id} = {num_hash:?}"))
-                })
-                // We need this because `debug!` uses the argument twice when formatting the final
-                // log message, but the result of `format_with` can only be used once
-                .to_string();
-            debug!(
-                target: "exex::manager",
-                %unfinalized_exexes,
-                "Not all ExExes are on the canonical chain, can't finalize the WAL"
-            );
-        }
-
-        Ok(())
-    }
-}
-
-impl<P> Future for ExExManager<P>
-where
-    P: HeaderProvider + Unpin + 'static,
-{
+impl Future for ExExManager {
     type Output = eyre::Result<()>;
 
-    /// Main loop of the [`ExExManager`]. The order of operations is as follows:
-    /// 1. Handle incoming ExEx events. We do it before finalizing the WAL, because it depends on
-    ///    the latest state of [`ExExEvent::FinishedHeight`] events.
-    /// 2. Finalize the WAL with the finalized header, if necessary.
-    /// 3. Drain [`ExExManagerHandle`] notifications, push them to the internal buffer and update
-    ///    the internal buffer capacity.
-    /// 5. Send notifications from the internal buffer to those ExExes that are ready to receive new
-    ///    notifications.
-    /// 5. Remove notifications from the internal buffer that have been sent to **all** ExExes and
-    ///    update the internal buffer capacity.
-    /// 6. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // drain handle notifications
+        while self.buffer.len() < self.max_capacity {
+            if let Poll::Ready(Some(notification)) = self.handle_rx.poll_recv(cx) {
+                debug!(
+                    committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
+                    reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
+                    "Received new notification"
+                );
+                self.push_notification(notification);
+                continue
+            }
+            break
+        }
 
-        // Handle incoming ExEx events
-        for exex in &mut this.exex_handles {
+        // update capacity
+        self.update_capacity();
+
+        // advance all poll senders
+        let mut min_id = usize::MAX;
+        for idx in (0..self.exex_handles.len()).rev() {
+            let mut exex = self.exex_handles.swap_remove(idx);
+
+            // it is a logic error for this to ever underflow since the manager manages the
+            // notification IDs
+            let notification_index = exex
+                .next_notification_id
+                .checked_sub(self.min_id)
+                .expect("exex expected notification ID outside the manager's range");
+            if let Some(notification) = self.buffer.get(notification_index) {
+                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
+                    // the channel was closed, which is irrecoverable for the manager
+                    return Poll::Ready(Err(err.into()))
+                }
+            }
+            min_id = min_id.min(exex.next_notification_id);
+            self.exex_handles.push(exex);
+        }
+
+        // remove processed buffered notifications
+        debug!(%min_id, "Updating lowest notification id in buffer");
+        self.buffer.retain(|&(id, _)| id >= min_id);
+        self.min_id = min_id;
+
+        // update capacity
+        self.update_capacity();
+
+        // handle incoming exex events
+        for exex in &mut self.exex_handles {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
+                debug!(exex_id = %exex.id, ?event, "Received event from exex");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
@@ -430,78 +339,12 @@ where
             }
         }
 
-        // Drain the finalized header stream and finalize the WAL with the last header
-        let mut last_finalized_header = None;
-        while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
-            last_finalized_header = finalized_header;
-        }
-        if let Some(header) = last_finalized_header {
-            this.finalize_wal(header)?;
-        }
-
-        // Drain handle notifications
-        while this.buffer.len() < this.max_capacity {
-            if let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
-                let committed_tip = notification.committed_chain().map(|chain| chain.tip().number);
-                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number);
-                debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
-
-                // Commit to WAL only notifications from blockchain tree. Pipeline notifications
-                // always contain only finalized blocks.
-                match source {
-                    ExExNotificationSource::BlockchainTree => {
-                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
-                        this.wal.commit(&notification)?;
-                    }
-                    ExExNotificationSource::Pipeline => {
-                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
-                    }
-                }
-
-                this.push_notification(notification);
-                continue
-            }
-            break
-        }
-
-        // Update capacity
-        this.update_capacity();
-
-        // Advance all poll senders
-        let mut min_id = usize::MAX;
-        for idx in (0..this.exex_handles.len()).rev() {
-            let mut exex = this.exex_handles.swap_remove(idx);
-
-            // It is a logic error for this to ever underflow since the manager manages the
-            // notification IDs
-            let notification_index = exex
-                .next_notification_id
-                .checked_sub(this.min_id)
-                .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = this.buffer.get(notification_index) {
-                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
-                    // The channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(err.into()))
-                }
-            }
-            min_id = min_id.min(exex.next_notification_id);
-            this.exex_handles.push(exex);
-        }
-
-        // Remove processed buffered notifications
-        debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
-        this.min_id = min_id;
-
-        // Update capacity
-        this.update_capacity();
-
-        // Update watch channel block number
-        let finished_height = this.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
-            exex.finished_height.map_or(Err(()), |height| Ok(height.number.min(curr)))
+        // update watch channel block number
+        let finished_height = self.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
+            exex.finished_height.map_or(Err(()), |height| Ok(height.min(curr)))
         });
         if let Ok(finished_height) = finished_height {
-            let _ = this.finished_height.send(FinishedExExHeight::Height(finished_height));
+            let _ = self.finished_height.send(FinishedExExHeight::Height(finished_height));
         }
 
         Poll::Pending
@@ -512,7 +355,7 @@ where
 #[derive(Debug)]
 pub struct ExExManagerHandle {
     /// Channel to send notifications to the `ExEx` manager.
-    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification)>,
+    exex_tx: UnboundedSender<ExExNotification>,
     /// The number of `ExEx`'s running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
@@ -554,12 +397,8 @@ impl ExExManagerHandle {
     /// Synchronously send a notification over the channel to all execution extensions.
     ///
     /// Senders should call [`Self::has_capacity`] first.
-    pub fn send(
-        &self,
-        source: ExExNotificationSource,
-        notification: ExExNotification,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification)>> {
-        self.exex_tx.send((source, notification))
+    pub fn send(&self, notification: ExExNotification) -> Result<(), SendError<ExExNotification>> {
+        self.exex_tx.send(notification)
     }
 
     /// Asynchronously send a notification over the channel to all execution extensions.
@@ -568,11 +407,10 @@ impl ExExManagerHandle {
     /// capacity in the channel, the future will wait.
     pub async fn send_async(
         &mut self,
-        source: ExExNotificationSource,
         notification: ExExNotification,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification)>> {
+    ) -> Result<(), SendError<ExExNotification>> {
         self.ready().await;
-        self.exex_tx.send((source, notification))
+        self.exex_tx.send(notification)
     }
 
     /// Get the current capacity of the `ExEx` manager's internal notification buffer.
@@ -635,91 +473,44 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
-    use futures::{StreamExt, TryStreamExt};
-    use rand::Rng;
-    use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::SealedBlockWithSenders;
-    use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DatabaseProviderFactory, TransactionVariant,
-    };
-    use reth_testing_utils::generators::{self, random_block, BlockParams};
-
-    fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
-        let (tx, rx) = watch::channel(None);
-        // Do not drop the sender, otherwise the receiver will always return an error
-        std::mem::forget(tx);
-        ForkChoiceStream::new(rx)
-    }
+    use reth_primitives::{SealedBlockWithSenders, B256};
+    use reth_provider::Chain;
 
     #[tokio::test]
     async fn test_delivers_events() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
         let (mut exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+            ExExHandle::new("test_exex".to_string());
 
         // Send an event and check that it's delivered correctly
-        let event = ExExEvent::FinishedHeight(BlockNumHash::new(42, B256::random()));
-        event_tx.send(event).unwrap();
+        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
         let received_event = exex_handle.receiver.recv().await.unwrap();
-        assert_eq!(received_event, event);
+        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
     }
 
     #[tokio::test]
     async fn test_has_exexs() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string());
 
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), wal.handle());
+        assert!(!ExExManager::new(vec![], 0).handle.has_exexs());
 
-        assert!(!ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
-            .handle
-            .has_exexs());
-
-        assert!(ExExManager::new((), vec![exex_handle_1], 0, wal, empty_finalized_header_stream())
-            .handle
-            .has_exexs());
+        assert!(ExExManager::new(vec![exex_handle_1], 0).handle.has_exexs());
     }
 
     #[tokio::test]
     async fn test_has_capacity() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string());
 
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), wal.handle());
+        assert!(!ExExManager::new(vec![], 0).handle.has_capacity());
 
-        assert!(!ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
-            .handle
-            .has_capacity());
-
-        assert!(ExExManager::new(
-            (),
-            vec![exex_handle_1],
-            10,
-            wal,
-            empty_finalized_header_stream()
-        )
-        .handle
-        .has_capacity());
+        assert!(ExExManager::new(vec![exex_handle_1], 10).handle.has_capacity());
     }
 
     #[test]
     fn test_push_notification() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (exex_handle, _, _) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string());
 
         // Create a mock ExExManager and add the exex_handle to it
-        let mut exex_manager =
-            ExExManager::new((), vec![exex_handle], 10, wal, empty_finalized_header_stream());
+        let mut exex_manager = ExExManager::new(vec![exex_handle], 10);
 
         // Define the notification for testing
         let mut block1 = SealedBlockWithSenders::default();
@@ -761,21 +552,11 @@ mod tests {
 
     #[test]
     fn test_update_capacity() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (exex_handle, _, _) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string());
 
         // Create a mock ExExManager and add the exex_handle to it
         let max_capacity = 5;
-        let mut exex_manager = ExExManager::new(
-            (),
-            vec![exex_handle],
-            max_capacity,
-            wal,
-            empty_finalized_header_stream(),
-        );
+        let mut exex_manager = ExExManager::new(vec![exex_handle], max_capacity);
 
         // Push some notifications to fill part of the buffer
         let mut block1 = SealedBlockWithSenders::default();
@@ -805,29 +586,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let provider_factory = create_test_provider_factory();
-
         let (exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), Head::default(), (), (), wal.handle());
+            ExExHandle::new("test_exex".to_string());
 
         // Check initial block height
         assert!(exex_handle.finished_height.is_none());
 
         // Update the block height via an event
-        let block = BlockNumHash::new(42, B256::random());
-        event_tx.send(ExExEvent::FinishedHeight(block)).unwrap();
+        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
 
         // Create a mock ExExManager and add the exex_handle to it
-        let exex_manager = ExExManager::new(
-            provider_factory,
-            vec![exex_handle],
-            10,
-            Wal::new(temp_dir.path()).unwrap(),
-            empty_finalized_header_stream(),
-        );
+        let exex_manager = ExExManager::new(vec![exex_handle], 10);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -837,7 +606,7 @@ mod tests {
 
         // Check that the block height was updated
         let updated_exex_handle = &pinned_manager.exex_handles[0];
-        assert_eq!(updated_exex_handle.finished_height, Some(block));
+        assert_eq!(updated_exex_handle.finished_height, Some(42));
 
         // Get the receiver for the finished height
         let mut receiver = pinned_manager.handle.finished_height();
@@ -854,31 +623,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height_lower() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let provider_factory = create_test_provider_factory();
-
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) =
-            ExExHandle::new("test_exex1".to_string(), Head::default(), (), (), wal.handle());
-        let (exex_handle2, event_tx2, _) =
-            ExExHandle::new("test_exex2".to_string(), Head::default(), (), (), wal.handle());
-
-        let block1 = BlockNumHash::new(42, B256::random());
-        let block2 = BlockNumHash::new(10, B256::random());
+        let (exex_handle1, event_tx1, _) = ExExHandle::new("test_exex1".to_string());
+        let (exex_handle2, event_tx2, _) = ExExHandle::new("test_exex2".to_string());
 
         // Send events to update the block heights of the two handles, with the second being lower
-        event_tx1.send(ExExEvent::FinishedHeight(block1)).unwrap();
-        event_tx2.send(ExExEvent::FinishedHeight(block2)).unwrap();
+        event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
+        event_tx2.send(ExExEvent::FinishedHeight(10)).unwrap();
 
-        let exex_manager = ExExManager::new(
-            provider_factory,
-            vec![exex_handle1, exex_handle2],
-            10,
-            Wal::new(temp_dir.path()).unwrap(),
-            empty_finalized_header_stream(),
-        );
+        let exex_manager = ExExManager::new(vec![exex_handle1, exex_handle2], 10);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -901,34 +654,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height_greater() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let provider_factory = create_test_provider_factory();
-
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) =
-            ExExHandle::new("test_exex1".to_string(), Head::default(), (), (), wal.handle());
-        let (exex_handle2, event_tx2, _) =
-            ExExHandle::new("test_exex2".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle1, event_tx1, _) = ExExHandle::new("test_exex1".to_string());
+        let (exex_handle2, event_tx2, _) = ExExHandle::new("test_exex2".to_string());
 
         // Assert that the initial block height is `None` for the first `ExExHandle`.
         assert!(exex_handle1.finished_height.is_none());
 
-        let block1 = BlockNumHash::new(42, B256::random());
-        let block2 = BlockNumHash::new(100, B256::random());
-
         // Send events to update the block heights of the two handles, with the second being higher.
-        event_tx1.send(ExExEvent::FinishedHeight(block1)).unwrap();
-        event_tx2.send(ExExEvent::FinishedHeight(block2)).unwrap();
+        event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
+        event_tx2.send(ExExEvent::FinishedHeight(100)).unwrap();
 
-        let exex_manager = ExExManager::new(
-            provider_factory,
-            vec![exex_handle1, exex_handle2],
-            10,
-            Wal::new(temp_dir.path()).unwrap(),
-            empty_finalized_header_stream(),
-        );
+        let exex_manager = ExExManager::new(vec![exex_handle1, exex_handle2], 10);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -955,23 +692,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_exex_manager_capacity() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let provider_factory = create_test_provider_factory();
-
-        let (exex_handle_1, _, _) =
-            ExExHandle::new("test_exex_1".to_string(), Head::default(), (), (), wal.handle());
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string());
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
-        let mut exex_manager = ExExManager::new(
-            provider_factory,
-            vec![exex_handle_1],
-            max_capacity,
-            Wal::new(temp_dir.path()).unwrap(),
-            empty_finalized_header_stream(),
-        );
+        let mut exex_manager = ExExManager::new(vec![exex_handle_1], max_capacity);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -985,21 +710,9 @@ mod tests {
         };
 
         // Send notifications to go over the max capacity
-        exex_manager
-            .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification.clone()))
-            .unwrap();
-        exex_manager
-            .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification.clone()))
-            .unwrap();
-        exex_manager
-            .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification))
-            .unwrap();
+        exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
+        exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
+        exex_manager.handle.exex_tx.send(notification).unwrap();
 
         // Pin the ExExManager to call the poll method
         let mut pinned_manager = std::pin::pin!(exex_manager);
@@ -1017,20 +730,7 @@ mod tests {
 
     #[tokio::test]
     async fn exex_handle_new() {
-        let provider_factory = create_test_provider_factory();
-        init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
-            "test_exex".to_string(),
-            Head::default(),
-            provider,
-            EthExecutorProvider::mainnet(),
-            wal.handle(),
-        );
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
 
         // Check initial state
         assert_eq!(exex_handle.id, "test_exex");
@@ -1059,7 +759,7 @@ mod tests {
         // Send a notification and ensure it's received correctly
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notifications.next().await.unwrap().unwrap();
+                let received_notification = notification_rx.recv().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending => panic!("Notification send is pending"),
@@ -1072,23 +772,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_notification_if_finished_height_gt_chain_tip() {
-        let provider_factory = create_test_provider_factory();
-        init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
-            "test_exex".to_string(),
-            Head::default(),
-            provider,
-            EthExecutorProvider::mainnet(),
-            wal.handle(),
-        );
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
 
         // Set finished_height to a value higher than the block tip
-        exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
+        exex_handle.finished_height = Some(15);
 
         let mut block1 = SealedBlockWithSenders::default();
         block1.block.header.set_hash(B256::new([0x01; 32]));
@@ -1103,13 +790,9 @@ mod tests {
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification)) {
             Poll::Ready(Ok(())) => {
-                poll_fn(|cx| {
-                    // The notification should be skipped, so nothing should be sent.
-                    // Check that the receiver channel is indeed empty
-                    assert!(notifications.poll_next_unpin(cx).is_pending());
-                    Poll::Ready(())
-                })
-                .await;
+                // The notification should be skipped, so nothing should be sent.
+                // Check that the receiver channel is indeed empty
+                assert!(notification_rx.try_recv().is_err(), "Receiver channel should be empty");
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Notification should not be pending or fail");
@@ -1122,20 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reorged_notification() {
-        let provider_factory = create_test_provider_factory();
-        init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
-            "test_exex".to_string(),
-            Head::default(),
-            provider,
-            EthExecutorProvider::mainnet(),
-            wal.handle(),
-        );
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
 
         let notification = ExExNotification::ChainReorged {
             old: Arc::new(Chain::default()),
@@ -1144,14 +814,14 @@ mod tests {
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
-        exex_handle.finished_height = Some(BlockNumHash::new(u64::MAX, B256::random()));
+        exex_handle.finished_height = Some(u64::MAX);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notifications.next().await.unwrap().unwrap();
+                let received_notification = notification_rx.recv().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
@@ -1165,33 +835,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reverted_notification() {
-        let provider_factory = create_test_provider_factory();
-        init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
-            "test_exex".to_string(),
-            Head::default(),
-            provider,
-            EthExecutorProvider::mainnet(),
-            wal.handle(),
-        );
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
 
         let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
-        exex_handle.finished_height = Some(BlockNumHash::new(u64::MAX, B256::random()));
+        exex_handle.finished_height = Some(u64::MAX);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notifications.next().await.unwrap().unwrap();
+                let received_notification = notification_rx.recv().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
@@ -1201,117 +858,5 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
-    }
-
-    #[tokio::test]
-    async fn test_exex_wal() -> eyre::Result<()> {
-        reth_tracing::init_test_tracing();
-
-        let mut rng = generators::rng();
-
-        let provider_factory = create_test_provider_factory();
-        let genesis_hash = init_genesis(&provider_factory).unwrap();
-        let genesis_block = provider_factory
-            .sealed_block_with_senders(genesis_hash.into(), TransactionVariant::NoHash)
-            .unwrap()
-            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-
-        let block = random_block(
-            &mut rng,
-            genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), ..Default::default() },
-        )
-        .seal_with_senders()
-        .unwrap();
-        let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(block.clone()).unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        let (exex_handle, events_tx, mut notifications) = ExExHandle::new(
-            "test_exex".to_string(),
-            Head::default(),
-            provider.clone(),
-            EthExecutorProvider::mainnet(),
-            wal.handle(),
-        );
-
-        let genesis_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![genesis_block.clone()], Default::default(), None)),
-        };
-        let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
-        };
-
-        let (finalized_headers_tx, rx) = watch::channel(None);
-        finalized_headers_tx.send(Some(genesis_block.header.clone()))?;
-        let finalized_header_stream = ForkChoiceStream::new(rx);
-
-        let mut exex_manager = std::pin::pin!(ExExManager::new(
-            provider,
-            vec![exex_handle],
-            2,
-            wal,
-            finalized_header_stream
-        ));
-
-        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-
-        exex_manager
-            .handle()
-            .send(ExExNotificationSource::Pipeline, genesis_notification.clone())?;
-        exex_manager.handle().send(ExExNotificationSource::BlockchainTree, notification.clone())?;
-
-        assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
-        assert_eq!(
-            notifications.try_poll_next_unpin(&mut cx)?,
-            Poll::Ready(Some(genesis_notification))
-        );
-        assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
-        assert_eq!(
-            notifications.try_poll_next_unpin(&mut cx)?,
-            Poll::Ready(Some(notification.clone()))
-        );
-        // WAL shouldn't contain the genesis notification, because it's finalized
-        assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
-            [notification.clone()]
-        );
-
-        finalized_headers_tx.send(Some(block.header.clone()))?;
-        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
-        // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
-        assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
-            [notification.clone()]
-        );
-
-        // Send a `FinishedHeight` event with a non-canonical block
-        events_tx
-            .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
-            .unwrap();
-
-        finalized_headers_tx.send(Some(block.header.clone()))?;
-        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
-        // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
-        // non-canonical block
-        assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
-            [notification]
-        );
-
-        // Send a `FinishedHeight` event with a canonical block
-        events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
-
-        finalized_headers_tx.send(Some(block.header.clone()))?;
-        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
-        // WAL is finalized
-        assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);
-
-        Ok(())
     }
 }

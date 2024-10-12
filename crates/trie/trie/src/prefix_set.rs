@@ -1,5 +1,5 @@
 use crate::Nibbles;
-use alloy_primitives::B256;
+use reth_primitives::B256;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -20,9 +20,9 @@ pub struct TriePrefixSetsMut {
 impl TriePrefixSetsMut {
     /// Extends prefix sets with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
-        self.account_prefix_set.extend(other.account_prefix_set);
+        self.account_prefix_set.extend(other.account_prefix_set.keys);
         for (hashed_address, prefix_set) in other.storage_prefix_sets {
-            self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set);
+            self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set.keys);
         }
         self.destroyed_accounts.extend(other.destroyed_accounts);
     }
@@ -115,18 +115,12 @@ impl PrefixSetMut {
         self.keys.push(nibbles);
     }
 
-    /// Extend prefix set with contents of another prefix set.
-    pub fn extend(&mut self, other: Self) {
-        self.all |= other.all;
-        self.keys.extend(other.keys);
-    }
-
     /// Extend prefix set keys with contents of provided iterator.
-    pub fn extend_keys<I>(&mut self, keys: I)
+    pub fn extend<I>(&mut self, nibbles_iter: I)
     where
         I: IntoIterator<Item = Nibbles>,
     {
-        self.keys.extend(keys);
+        self.keys.extend(nibbles_iter);
     }
 
     /// Returns the number of elements in the set.
@@ -275,12 +269,5 @@ mod tests {
         assert!(!prefix_set.contains(&[7, 8]));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
-    }
-
-    #[test]
-    fn test_prefix_set_all_extend() {
-        let mut prefix_set_mut = PrefixSetMut::default();
-        prefix_set_mut.extend(PrefixSetMut::all());
-        assert!(prefix_set_mut.all);
     }
 }
