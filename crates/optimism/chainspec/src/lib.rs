@@ -16,25 +16,154 @@ mod dev;
 mod op;
 mod op_sepolia;
 
-use std::fmt::Display;
-
+use alloy_chains::Chain;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
+use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
+use once_cell::sync::OnceCell;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
-
-use derive_more::{Constructor, Deref, Into};
-use once_cell::sync::OnceCell;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, DepositContract, EthChainSpec, EthereumHardforks,
-    ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
+    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
+use std::fmt::Display;
+
+/// Chain spec builder for a OP stack chain.
+#[derive(Debug, Default, From)]
+pub struct OpChainSpecBuilder {
+    /// [`ChainSpecBuilder`]
+    inner: ChainSpecBuilder,
+}
+
+impl OpChainSpecBuilder {
+    /// Construct a new builder from the base mainnet chain spec.
+    pub fn base_mainnet() -> Self {
+        let mut inner = ChainSpecBuilder::default()
+            .chain(BASE_MAINNET.chain)
+            .genesis(BASE_MAINNET.genesis.clone());
+        let forks = BASE_MAINNET.hardforks.clone();
+        inner = inner.with_forks(forks);
+
+        Self { inner }
+    }
+
+    /// Construct a new builder from the optimism mainnet chain spec.
+    pub fn optimism_mainnet() -> Self {
+        let mut inner =
+            ChainSpecBuilder::default().chain(OP_MAINNET.chain).genesis(OP_MAINNET.genesis.clone());
+        let forks = OP_MAINNET.hardforks.clone();
+        inner = inner.with_forks(forks);
+
+        Self { inner }
+    }
+}
+
+impl OpChainSpecBuilder {
+    /// Set the chain ID
+    pub fn chain(mut self, chain: Chain) -> Self {
+        self.inner = self.inner.chain(chain);
+        self
+    }
+
+    /// Set the genesis block.
+    pub fn genesis(mut self, genesis: Genesis) -> Self {
+        self.inner = self.inner.genesis(genesis);
+        self
+    }
+
+    /// Add the given fork with the given activation condition to the spec.
+    pub fn with_fork<H: Hardfork>(mut self, fork: H, condition: ForkCondition) -> Self {
+        self.inner = self.inner.with_fork(fork, condition);
+        self
+    }
+
+    /// Add the given forks with the given activation condition to the spec.
+    pub fn with_forks(mut self, forks: ChainHardforks) -> Self {
+        self.inner = self.inner.with_forks(forks);
+        self
+    }
+
+    /// Remove the given fork from the spec.
+    pub fn without_fork(mut self, fork: reth_optimism_forks::OptimismHardfork) -> Self {
+        self.inner = self.inner.without_fork(fork);
+        self
+    }
+
+    /// Enable Bedrock at genesis
+    pub fn bedrock_activated(mut self) -> Self {
+        self.inner = self.inner.paris_activated();
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OptimismHardfork::Bedrock, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Regolith at genesis
+    pub fn regolith_activated(mut self) -> Self {
+        self = self.bedrock_activated();
+        self.inner = self.inner.with_fork(
+            reth_optimism_forks::OptimismHardfork::Regolith,
+            ForkCondition::Timestamp(0),
+        );
+        self
+    }
+
+    /// Enable Canyon at genesis
+    pub fn canyon_activated(mut self) -> Self {
+        self = self.regolith_activated();
+        // Canyon also activates changes from L1's Shanghai hardfork
+        self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Ecotone at genesis
+    pub fn ecotone_activated(mut self) -> Self {
+        self = self.canyon_activated();
+        self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Fjord at genesis
+    pub fn fjord_activated(mut self) -> Self {
+        self = self.ecotone_activated();
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Granite at genesis
+    pub fn granite_activated(mut self) -> Self {
+        self = self.fjord_activated();
+        self.inner = self
+            .inner
+            .with_fork(reth_optimism_forks::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Build the resulting [`OpChainSpec`].
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
+    /// [`Self::genesis`])
+    pub fn build(self) -> OpChainSpec {
+        OpChainSpec { inner: self.inner.build() }
+    }
+}
 
 /// OP stack chain spec type.
 #[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
@@ -286,6 +415,8 @@ mod tests {
 
     #[test]
     fn base_mainnet_forkids() {
+        let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
+        let _ = base_mainnet.genesis_hash.set(BASE_MAINNET.genesis_hash.get().copied().unwrap());
         test_fork_ids(
             &BASE_MAINNET,
             &[
@@ -372,8 +503,12 @@ mod tests {
 
     #[test]
     fn op_mainnet_forkids() {
+        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        // for OP mainnet we have to do this because the genesis header can't be properly computed
+        // from the genesis.json file
+        let _ = op_mainnet.genesis_hash.set(OP_MAINNET.genesis_hash());
         test_fork_ids(
-            &OP_MAINNET,
+            &op_mainnet,
             &[
                 (
                     Head { number: 0, ..Default::default() },
@@ -484,8 +619,18 @@ mod tests {
     }
 
     #[test]
+    fn latest_base_mainnet_fork_id_with_builder() {
+        let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
+        assert_eq!(
+            ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
+            base_mainnet.latest_fork_id()
+        )
+    }
+
+    #[test]
     fn is_bedrock_active() {
-        assert!(!OP_MAINNET.is_bedrock_active_at_block(1))
+        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        assert!(!op_mainnet.is_bedrock_active_at_block(1))
     }
 
     #[test]
