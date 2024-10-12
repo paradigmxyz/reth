@@ -504,7 +504,9 @@ mod tests {
     #[test]
     fn op_mainnet_forkids() {
         let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
-        let _ = op_mainnet.genesis_hash.set(OP_MAINNET.genesis_hash.get().copied().unwrap());
+        // for OP mainnet we have to do this because the genesis header can't be properly computed
+        // from the genesis.json file
+        let _ = op_mainnet.genesis_hash.set(OP_MAINNET.genesis_hash());
         test_fork_ids(
             &op_mainnet,
             &[
