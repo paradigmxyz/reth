@@ -41,6 +41,9 @@ use tracing::trace;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 
+/// Result type for `eth_simulateV1` RPC method.
+pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
+
 /// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
 pub trait EthCall: Call + LoadPendingBlock {
@@ -62,8 +65,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         &self,
         payload: SimulatePayload,
         block: Option<BlockId>,
-    ) -> impl Future<Output = Result<Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>>, Self::Error>>
-           + Send
+    ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send
     where
         Self: LoadBlock + FullEthApiTypes,
     {
