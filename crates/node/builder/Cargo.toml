@@ -96,3 +96,7 @@ tempfile.workspace = true
 [features]
 default = []
 test-utils = ["reth-db/test-utils"]
+
+# Do not check the timestamp for forkchoice update. This breaks the EngineAPI spec
+# but is helpful if subsecond block times are desired.
+no-forkchoice-timestamp-check = ["reth-engine-service/no-forkchoice-timestamp-check"]

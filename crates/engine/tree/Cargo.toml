@@ -88,3 +88,7 @@ test-utils = [
   "reth-static-file",
   "reth-tracing"
 ]
+
+# Do not check the timestamp for forkchoice update. This breaks the EngineAPI spec
+# but is helpful if subsecond block times are desired.
+no-forkchoice-timestamp-check = []

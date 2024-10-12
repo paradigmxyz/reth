@@ -43,3 +43,8 @@ reth-chainspec.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
+
+[features]
+# Do not check the timestamp for forkchoice update. This breaks the EngineAPI spec
+# but is helpful if subsecond block times are desired.
+no-forkchoice-timestamp-check = ["reth-engine-tree/no-forkchoice-timestamp-check"]

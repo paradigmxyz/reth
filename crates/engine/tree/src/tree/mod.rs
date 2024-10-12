@@ -2488,6 +2488,7 @@ where
         //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
         //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
         //    be rolled back.
+        #[cfg(not(feature = "no-forkchoice-timestamp-check"))]
         if attrs.timestamp() <= head.timestamp {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }

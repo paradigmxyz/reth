@@ -120,6 +120,10 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
+# Do not check the timestamp for forkchoice update. This breaks the EngineAPI spec
+# but is helpful if subsecond block times are desired. Does not change the legacy engine.
+no-forkchoice-timestamp-check = ["reth-node-builder/no-forkchoice-timestamp-check"]
+
 [[bin]]
 name = "reth"
 path = "src/main.rs"
