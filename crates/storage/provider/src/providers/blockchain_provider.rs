@@ -197,8 +197,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for tx_num in block_body.tx_num_range() {
-                let receipt =
-                    receipt_iter.next().ok_or(ProviderError::ReceiptNotFound(tx_num.into()))?;
+                let receipt = receipt_iter
+                    .next()
+                    .ok_or_else(|| ProviderError::ReceiptNotFound(tx_num.into()))?;
                 block_receipts.push(Some(receipt));
             }
             receipts.push(block_receipts);
