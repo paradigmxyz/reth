@@ -160,12 +160,7 @@ impl PayloadAttributes for OpPayloadAttributes {
 }
 
 /// A builder that can return the current payload attribute.
-pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
-    /// The payload attributes type returned by the builder.
-    type PayloadAttributes: PayloadAttributes;
-    /// The error type returned by [`PayloadAttributesBuilder::build`].
-    type Error: core::error::Error + Send + Sync;
-
+pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     /// Return a new payload attribute from the builder.
-    fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;
+    fn build(&self, timestamp: u64) -> Attributes;
 }
