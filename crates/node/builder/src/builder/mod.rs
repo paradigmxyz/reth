@@ -179,7 +179,6 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
     }
 
     /// Returns a mutable reference to the node builder's config.
-    #[cfg(feature = "test-utils")]
     pub fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.config
     }
