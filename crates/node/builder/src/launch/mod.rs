@@ -1,16 +1,5 @@
 //! Abstraction for launching a node.
 
-pub mod common;
-mod exex;
-
-pub(crate) mod engine;
-
-pub use common::LaunchContext;
-use common::{Attached, LaunchContextWith, WithConfigs};
-pub use exex::ExExLauncher;
-
-use std::{future::Future, sync::Arc};
-
 use alloy_primitives::utils::format_ether;
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -39,6 +28,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
+use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -50,6 +40,16 @@ use crate::{
     rpc::EthApiBuilderProvider,
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
+
+pub mod common;
+pub use common::LaunchContext;
+use common::{Attached, LaunchContextWith, WithConfigs};
+
+mod exex;
+pub use exex::ExExLauncher;
+
+pub(crate) mod engine;
+pub(crate) mod engine_task;
 
 /// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
 pub type EthApiBuilderCtx<N, Eth> = reth_rpc_eth_types::EthApiBuilderCtx<

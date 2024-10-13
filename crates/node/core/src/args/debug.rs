@@ -26,6 +26,11 @@ pub struct DebugArgs {
     #[arg(long = "debug.max-block", help_heading = "Debug")]
     pub max_block: Option<u64>,
 
+    /// Flag indicating whether the node should send locally-produced payload
+    /// back to consensus engine for validation.
+    #[arg(long = "debug.payload-building-validation", help_heading = "Debug")]
+    pub payload_building_validation: bool,
+
     /// Runs a fake consensus client that advances the chain using recent block hashes
     /// on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment variable.
     #[arg(
@@ -95,6 +100,7 @@ impl Default for DebugArgs {
             terminate: false,
             tip: None,
             max_block: None,
+            payload_building_validation: false,
             etherscan: None,
             rpc_consensus_ws: None,
             skip_fcu: None,
