@@ -7,7 +7,7 @@ use alloy_primitives::{BlockHash, BlockNumber};
 use linked_hash_set::LinkedHashSet;
 use reth_execution_types::Chain;
 use reth_primitives::SealedBlockWithSenders;
-use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
 ///
@@ -223,14 +223,11 @@ impl BlockIndices {
         block_hash: BlockHash,
     ) -> BTreeSet<SidechainId> {
         // rm number -> block
-        if let btree_map::Entry::Occupied(mut entry) =
-            self.block_number_to_block_hashes.entry(block_number)
-        {
-            let set = entry.get_mut();
+        if let Some(set) = self.block_number_to_block_hashes.get_mut(&block_number) {
             set.remove(&block_hash);
             // remove set if empty
             if set.is_empty() {
-                entry.remove();
+                self.block_number_to_block_hashes.remove(&block_number);
             }
         }
 
@@ -270,24 +267,20 @@ impl BlockIndices {
                 self.blocks_to_chain.remove(&hash);
 
                 // rm number -> block
-                if let btree_map::Entry::Occupied(mut entry) =
-                    self.block_number_to_block_hashes.entry(number)
-                {
-                    let set = entry.get_mut();
+                if let Some(set) = self.block_number_to_block_hashes.get_mut(&number) {
                     set.remove(&hash);
                     // remove set if empty
                     if set.is_empty() {
-                        entry.remove();
+                        self.block_number_to_block_hashes.remove(&number);
                     }
                 }
+
                 // rm fork block -> hash
-                if let hash_map::Entry::Occupied(mut entry) = self.fork_to_child.entry(parent_hash)
-                {
-                    let set = entry.get_mut();
+                if let Some(set) = self.fork_to_child.get_mut(&parent_hash) {
                     set.remove(&hash);
                     // remove set if empty
                     if set.is_empty() {
-                        entry.remove();
+                        self.fork_to_child.remove(&parent_hash);
                     }
                 }
             },
