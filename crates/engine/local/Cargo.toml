@@ -42,9 +42,6 @@ tracing.workspace = true
 
 op-alloy-rpc-types-engine = { workspace = true, optional = true }
 
-[dev-dependencies]
-reth-node-builder.workspace = true
-
 [lints]
 workspace = true
 
