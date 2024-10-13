@@ -154,6 +154,7 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
+use identifier::SenderId;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
@@ -461,6 +462,20 @@ where
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions(hashes)
+    }
+
+    fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.remove_transactions_and_descendants(hashes)
+    }
+
+    fn remove_transactions_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.remove_transactions_by_sender(sender)
     }
 
     fn retain_unknown<A>(&self, announcement: &mut A)

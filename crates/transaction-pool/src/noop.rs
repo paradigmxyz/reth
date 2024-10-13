@@ -6,6 +6,7 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolError,
+    identifier::SenderId,
     traits::{
         BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar,
         TransactionListenerKind,
@@ -179,6 +180,20 @@ impl TransactionPool for NoopTransactionPool {
     fn remove_transactions(
         &self,
         _hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn remove_transactions_and_descendants(
+        &self,
+        _hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn remove_transactions_by_sender(
+        &self,
+        _sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
