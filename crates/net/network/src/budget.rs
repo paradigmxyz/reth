@@ -5,8 +5,8 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 10;
 
 /// Default budget to try and drain headers and bodies download streams.
 ///
-/// Default is 1 iteration.
-pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 1;
+/// Default is 2 iterations.
+pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 2;
 
 /// Default budget to try and drain [`Swarm`](crate::swarm::Swarm).
 ///
