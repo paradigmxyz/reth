@@ -1,0 +1,24 @@
+[package]
+name = "example-custom-beacon-withdrawals"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+
+[dependencies]
+reth.workspace = true
+reth-node-ethereum.workspace = true
+reth-transaction-pool.workspace = true
+reth-tracing.workspace = true
+reth-evm-ethereum.workspace = true
+reth-chainspec.workspace = true
+reth-evm.workspace = true
+reth-primitives.workspace = true
+reth-prune-types.workspace = true
+reth-ethereum-consensus.workspace = true
+alloy-sol-macro = "0.7.6"
+alloy-sol-types = "0.7.6"
+
+
+eyre.workspace = true
