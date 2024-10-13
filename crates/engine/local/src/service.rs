@@ -17,12 +17,13 @@ use std::{
 use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
+use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
     engine::{
-        EngineApiRequest, EngineApiRequestHandler, EngineRequestHandler, FromEngine,
+        EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineRequestHandler, FromEngine,
         RequestHandlerEvent,
     },
     persistence::PersistenceHandle,
@@ -79,9 +80,13 @@ where
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
     {
+        let chain_spec = provider.chain_spec();
+        let engine_kind =
+            if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
+
         let persistence_handle =
             PersistenceHandle::spawn_service(provider.clone(), pruner, sync_metrics_tx);
-        let payload_validator = ExecutionPayloadValidator::new(provider.chain_spec());
+        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
@@ -95,6 +100,7 @@ where
             canonical_in_memory_state,
             tree_config,
             invalid_block_hook,
+            engine_kind,
         );
 
         let handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);

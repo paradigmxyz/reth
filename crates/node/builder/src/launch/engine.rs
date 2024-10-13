@@ -218,6 +218,11 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let mut engine_service = if ctx.is_dev() {
+            let mining_mode = if let Some(block_time) = ctx.node_config().dev.block_time {
+                MiningMode::interval(block_time)
+            } else {
+                MiningMode::instant(ctx.components().pool().clone())
+            };
             let eth_service = LocalEngineService::new(
                 ctx.consensus(),
                 ctx.components().block_executor().clone(),
@@ -230,7 +235,7 @@ where
                 ctx.sync_metrics_tx(),
                 consensus_engine_tx.clone(),
                 Box::pin(consensus_engine_stream),
-                MiningMode::instant(ctx.components().pool().clone()),
+                mining_mode,
                 LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
             );
 
