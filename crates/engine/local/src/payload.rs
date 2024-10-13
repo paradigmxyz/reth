@@ -46,13 +46,13 @@ where
 }
 
 #[cfg(feature = "optimism")]
-impl<ChainSpec> PayloadAttributesBuilder<op_alloy_rpc_types_engine::OptimismPayloadAttributes>
+impl<ChainSpec> PayloadAttributesBuilder<op_alloy_rpc_types_engine::OpPayloadAttributes>
     for LocalPayloadAttributesBuilder<ChainSpec>
 where
     ChainSpec: Send + Sync + EthereumHardforks + 'static,
 {
-    fn build(&self, timestamp: u64) -> op_alloy_rpc_types_engine::OptimismPayloadAttributes {
-        op_alloy_rpc_types_engine::OptimismPayloadAttributes {
+    fn build(&self, timestamp: u64) -> op_alloy_rpc_types_engine::OpPayloadAttributes {
+        op_alloy_rpc_types_engine::OpPayloadAttributes {
             payload_attributes: self.build(timestamp),
             transactions: None,
             no_tx_pool: None,
