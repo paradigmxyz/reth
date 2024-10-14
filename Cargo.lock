@@ -739,7 +739,8 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.7.0"
-source = "git+https://github.com/alloy-rs/trie#32859232eb69f735b841bafbc644588f1cd391c4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e16ec0fbafe3189197ea39b491df4a425deab5545b1da2e4137df3451323023"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -4417,7 +4418,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -11264,7 +11265,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
