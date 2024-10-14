@@ -738,8 +738,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.6.0"
-source = "git+https://github.com/alloy-rs/trie?branch=dani/fix-arbitrary-hashbuilder#5308e54ce41b635da9ed071fbfcf2b25662db273"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e16ec0fbafe3189197ea39b491df4a425deab5545b1da2e4137df3451323023"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
