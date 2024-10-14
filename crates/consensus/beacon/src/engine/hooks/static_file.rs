@@ -14,9 +14,7 @@ use reth_provider::{
 };
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
-use std::{
-    task::{ready, Context, Poll},
-};
+use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
 use tracing::trace;
 
