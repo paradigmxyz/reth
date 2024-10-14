@@ -41,6 +41,9 @@ pub use log::{logs_bloom, Log, LogData};
 mod storage;
 pub use storage::StorageEntry;
 
+pub mod tx_type;
+pub use tx_type::TxType;
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
