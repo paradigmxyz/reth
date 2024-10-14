@@ -28,7 +28,7 @@ reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
-reth-chainspec.workspace = true
+reth-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -76,6 +76,7 @@ assert_matches.workspace = true
 
 [features]
 optimism = [
+    "reth-chainspec",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
