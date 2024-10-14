@@ -118,14 +118,14 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction(tx)?;
+        let tx = recover_raw_transaction(tx)?.into_ecrecovered_transaction();
 
         let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block,
-            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction()),
+            Call::evm_config(self.eth_api()).tx_env(tx.as_signed(), tx.signer()),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
@@ -372,7 +372,7 @@ where
             },
         );
 
-        let block = self.eth_api().block(block_id);
+        let block = self.eth_api().block_with_senders(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -468,7 +468,9 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.eth_api().block(block_id).await? else { return Ok(None) };
+        let Some(block) = self.eth_api().block_with_senders(block_id).await? else {
+            return Ok(None)
+        };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
