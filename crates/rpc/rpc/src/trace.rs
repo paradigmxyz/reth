@@ -327,7 +327,7 @@ where
         // array.
         if let Some(after) = after.map(|a| a as usize) {
             if after < all_traces.len() {
-                all_traces.drain(0..after);
+                all_traces.drain(..after);
             } else {
                 return Ok(vec![])
             }
