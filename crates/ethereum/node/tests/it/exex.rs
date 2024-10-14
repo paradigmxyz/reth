@@ -30,10 +30,6 @@ fn basic_exex() {
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder = NodeBuilder::new(config)
-        .apply(|mut builder| {
-            builder.config_mut().dev.dev = true;
-            builder
-        })
         .with_database(db)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
