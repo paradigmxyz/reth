@@ -27,7 +27,7 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
-reth-revm = { workspace = true, features = ["std", "c-kzg"] }
+reth-revm = { workspace = true, features = ["std"] }
 reth-beacon-consensus.workspace = true
 reth-discv5.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -43,7 +43,7 @@ reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 
 # revm
-revm = { workspace = true, features = ["secp256k1", "blst"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # ethereum
 alloy-eips.workspace = true

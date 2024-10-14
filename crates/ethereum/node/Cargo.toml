@@ -29,10 +29,10 @@ reth-rpc.workspace = true
 reth-node-api.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-revm = { workspace = true, features = ["std", "c-kzg"] }
+reth-revm = { workspace = true, features = ["std"] }
 
 # revm
-revm = { workspace = true, features = ["secp256k1", "blst"] }
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # misc
 eyre.workspace = true
