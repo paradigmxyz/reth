@@ -322,13 +322,18 @@ where
             }
         }
 
-        // apply after and count to traces if specified, this allows for a pagination style.
-        // only consider traces after
-        if let Some(after) = after.map(|a| a as usize).filter(|a| *a < all_traces.len()) {
-            all_traces = all_traces.split_off(after);
+        // Skips the first `after` number of matching traces.
+        // If `after` is greater than or equal to the number of matched traces, it returns an empty
+        // array.
+        if let Some(after) = after.map(|a| a as usize) {
+            if after < all_traces.len() {
+                all_traces.drain(..after);
+            } else {
+                return Ok(vec![])
+            }
         }
 
-        // at most, return count of traces
+        // Return at most `count` of traces
         if let Some(count) = count {
             let count = count as usize;
             if count < all_traces.len() {
