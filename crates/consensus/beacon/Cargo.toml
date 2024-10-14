@@ -70,6 +70,7 @@ reth-config.workspace = true
 reth-testing-utils.workspace = true
 reth-exex-types.workspace = true
 reth-prune-types.workspace = true
+reth-chainspec.workspace = true
 alloy-genesis.workspace = true
 
 assert_matches.workspace = true
