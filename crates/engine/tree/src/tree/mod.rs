@@ -46,7 +46,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     cmp::Ordering,
-    collections::{btree_map, hash_map, BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     ops::Bound,
     sync::{
@@ -182,28 +182,24 @@ impl TreeState {
         let executed = self.blocks_by_hash.remove(&hash)?;
 
         // Remove this block from collection of children of its parent block.
-        let parent_entry = self.parent_to_child.entry(executed.block.parent_hash);
-        if let hash_map::Entry::Occupied(mut entry) = parent_entry {
-            entry.get_mut().remove(&hash);
-
-            if entry.get().is_empty() {
-                entry.remove();
+        if let Some(children) = self.parent_to_child.get_mut(&executed.block.parent_hash) {
+            children.remove(&hash);
+            if children.is_empty() {
+                self.parent_to_child.remove(&executed.block.parent_hash);
             }
         }
 
         // Remove point to children of this block.
         let children = self.parent_to_child.remove(&hash).unwrap_or_default();
 
-        // Remove this block from `blocks_by_number`.
-        let block_number_entry = self.blocks_by_number.entry(executed.block.number);
-        if let btree_map::Entry::Occupied(mut entry) = block_number_entry {
+        // Remove this block from blocks_by_number.
+        if let Some(blocks) = self.blocks_by_number.get_mut(&executed.block.number) {
             // We have to find the index of the block since it exists in a vec
-            if let Some(index) = entry.get().iter().position(|b| b.block.hash() == hash) {
-                entry.get_mut().swap_remove(index);
-
+            if let Some(index) = blocks.iter().position(|b| b.block.hash() == hash) {
+                blocks.swap_remove(index);
                 // If there are no blocks left then remove the entry for this block
-                if entry.get().is_empty() {
-                    entry.remove();
+                if blocks.is_empty() {
+                    self.blocks_by_number.remove(&executed.block.number);
                 }
             }
         }
