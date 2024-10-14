@@ -191,11 +191,11 @@ pub trait Trace: LoadState {
             // block the transaction is included in
             let parent_block = block.parent_hash;
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let block_txs = block.into_transactions_ecrecovered();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let block_txs = block.transactions_with_sender();
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
@@ -227,7 +227,7 @@ pub trait Trace: LoadState {
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(&tx),
+                    Call::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
@@ -356,10 +356,10 @@ pub trait Trace: LoadState {
                 let mut results = Vec::with_capacity(max_transactions);
 
                 let mut transactions = block
-                    .into_transactions_ecrecovered()
+                    .transactions_with_sender()
                     .take(max_transactions)
                     .enumerate()
-                    .map(|(idx, tx)| {
+                    .map(|(idx, (signer, tx))| {
                         let tx_info = TransactionInfo {
                             hash: Some(tx.hash()),
                             index: Some(idx as u64),
@@ -367,7 +367,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(&tx);
+                        let tx_env = Trace::evm_config(&this).tx_env(tx, *signer);
                         (tx_info, tx_env)
                     })
                     .peekable();

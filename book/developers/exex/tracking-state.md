@@ -19,63 +19,7 @@ because you can't access variables inside the function to assert the state of yo
 </div>
 
 ```rust,norun,noplayground,ignore
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-
-use futures_util::StreamExt;
-use reth::api::FullNodeComponents;
-use reth_exex::{ExExContext, ExExEvent, ExExNotification};
-use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
-
-struct MyExEx<Node: FullNodeComponents> {
-    ctx: ExExContext<Node>,
-}
-
-impl<Node: FullNodeComponents> Future for MyExEx<Node> {
-    type Output = eyre::Result<()>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        while let Some(notification) = ready!(this.ctx.notifications.poll_next_unpin(cx)) {
-            match &notification {
-                ExExNotification::ChainCommitted { new } => {
-                    info!(committed_chain = ?new.range(), "Received commit");
-                }
-                ExExNotification::ChainReorged { old, new } => {
-                    info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-                }
-                ExExNotification::ChainReverted { old } => {
-                    info!(reverted_chain = ?old.range(), "Received revert");
-                }
-            };
-
-            if let Some(committed_chain) = notification.committed_chain() {
-                this.ctx
-                    .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
-            }
-        }
-
-        Poll::Ready(Ok(()))
-    }
-}
-
-fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let handle = builder
-            .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(MyExEx { ctx }) })
-            .launch()
-            .await?;
-
-        handle.wait_for_node_exit().await
-    })
-}
+{{#include ../../sources/exex/tracking-state/src/bin/1.rs}}
 ```
 
 For those who are not familiar with how async Rust works on a lower level, that may seem scary,
@@ -96,85 +40,7 @@ With all that done, we're now free to add more fields to our `MyExEx` struct, an
 Our ExEx will count the number of transactions in each block and log it to the console.
 
 ```rust,norun,noplayground,ignore
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-
-use futures_util::StreamExt;
-use reth::{api::FullNodeComponents, primitives::BlockNumber};
-use reth_exex::{ExExContext, ExExEvent};
-use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
-
-struct MyExEx<Node: FullNodeComponents> {
-    ctx: ExExContext<Node>,
-    /// First block that was committed since the start of the ExEx.
-    first_block: Option<BlockNumber>,
-    /// Total number of transactions committed.
-    transactions: u64,
-}
-
-impl<Node: FullNodeComponents> MyExEx<Node> {
-    fn new(ctx: ExExContext<Node>) -> Self {
-        Self {
-            ctx,
-            first_block: None,
-            transactions: 0,
-        }
-    }
-}
-
-impl<Node: FullNodeComponents> Future for MyExEx<Node> {
-    type Output = eyre::Result<()>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        while let Some(notification) = ready!(this.ctx.notifications.poll_next_unpin(cx)) {
-            if let Some(reverted_chain) = notification.reverted_chain() {
-                this.transactions = this.transactions.saturating_sub(
-                    reverted_chain
-                        .blocks_iter()
-                        .map(|b| b.body.len() as u64)
-                        .sum(),
-                );
-            }
-
-            if let Some(committed_chain) = notification.committed_chain() {
-                this.first_block.get_or_insert(committed_chain.first().number);
-
-                this.transactions += committed_chain
-                    .blocks_iter()
-                    .map(|b| b.body.len() as u64)
-                    .sum::<u64>();
-
-                this.ctx
-                    .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
-            }
-
-            if let Some(first_block) = this.first_block {
-                info!(%first_block, transactions = %this.transactions, "Total number of transactions");
-            }
-        }
-
-        Poll::Ready(Ok(()))
-    }
-}
-
-fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let handle = builder
-            .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(MyExEx::new(ctx)) })
-            .launch()
-            .await?;
-
-        handle.wait_for_node_exit().await
-    })
-}
+{{#include ../../sources/exex/tracking-state/src/bin/2.rs}}
 ```
 
 As you can see, we added two fields to our ExEx struct:

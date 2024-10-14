@@ -46,6 +46,11 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// The bootnodes for the chain, if any.
     fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
+
+    /// Returns `true` if this chain contains Optimism configuration.
+    fn is_optimism(&self) -> bool {
+        self.chain().is_optimism()
+    }
 }
 
 impl EthChainSpec for ChainSpec {
@@ -91,5 +96,9 @@ impl EthChainSpec for ChainSpec {
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.bootnodes()
+    }
+
+    fn is_optimism(&self) -> bool {
+        Self::is_optimism(self)
     }
 }

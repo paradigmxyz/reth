@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-engine-local.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-auto-seal-consensus.workspace = true
@@ -87,6 +88,7 @@ optimism = [
     "reth-revm/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-optimism-rpc/optimism",
+    "reth-engine-local/optimism",
 ]
 asm-keccak = ["reth-primitives/asm-keccak"]
 test-utils = ["reth-node-builder/test-utils"]

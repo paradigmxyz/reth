@@ -1472,6 +1472,11 @@ impl TransactionSignedEcRecovered {
         self.signer
     }
 
+    /// Returns a reference to [`TransactionSigned`]
+    pub const fn as_signed(&self) -> &TransactionSigned {
+        &self.signed_transaction
+    }
+
     /// Transform back to [`TransactionSigned`]
     pub fn into_signed(self) -> TransactionSigned {
         self.signed_transaction

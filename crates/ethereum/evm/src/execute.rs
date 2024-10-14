@@ -372,7 +372,7 @@ where
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         mut self,
         input: Self::Input<'_>,
         mut witness: F,
