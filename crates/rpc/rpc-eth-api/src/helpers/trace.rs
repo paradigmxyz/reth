@@ -16,7 +16,7 @@ use reth_rpc_eth_types::{
 };
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState, TxEnv};
+use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
@@ -193,11 +193,11 @@ pub trait Trace: LoadState {
             // block the transaction is included in
             let parent_block = block.parent_hash;
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let block_txs = block.into_transactions_ecrecovered();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let block_txs = block.transactions_with_sender();
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
@@ -229,7 +229,7 @@ pub trait Trace: LoadState {
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(&tx),
+                    Call::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
@@ -314,7 +314,7 @@ pub trait Trace: LoadState {
                 if block.is_some() {
                     return Ok(block)
                 }
-                self.block_with_senders(block_id).await.map(|b| b.map(Arc::new))
+                self.block_with_senders(block_id).await
             };
 
             let ((cfg, block_env, _), block) =
@@ -379,9 +379,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-
-                        let mut tx_env = TxEnv::default();
-                        Trace::evm_config(&this).fill_tx_env(&mut tx_env, tx, *signer);
+                        let tx_env = Trace::evm_config(&this).tx_env(tx, *signer);
                         (tx_info, tx_env)
                     })
                     .peekable();

@@ -38,12 +38,12 @@ pub trait Executor<DB> {
     /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
 
-    /// Executes the EVM with the given input and accepts a witness closure that is invoked with the
-    /// EVM state after execution.
-    fn execute_with_state_witness<F>(
+    /// Executes the EVM with the given input and accepts a state closure that is invoked with
+    /// the EVM state after execution.
+    fn execute_with_state_closure<F>(
         self,
         input: Self::Input<'_>,
-        witness: F,
+        state: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>);
@@ -203,7 +203,7 @@ mod tests {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
 
-        fn execute_with_state_witness<F>(
+        fn execute_with_state_closure<F>(
             self,
             _: Self::Input<'_>,
             _: F,

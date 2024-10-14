@@ -228,7 +228,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            evm_config.tx_env(&tx),
+            evm_config.tx_env(tx.as_signed(), tx.signer()),
         );
 
         // Configure the environment for the block.
