@@ -23,6 +23,9 @@ pub use account::{Account, Bytecode};
 pub mod receipt;
 pub use receipt::Receipt;
 
+pub mod transaction;
+pub use transaction::Transaction;
+
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
