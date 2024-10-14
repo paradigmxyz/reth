@@ -504,7 +504,7 @@ where
             } else if let Some(latest_block) = this.state.latest_block {
                 let now =
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-                if now - this.state.latest_block_time.unwrap_or(0) > 60 {
+                if now.saturating_sub(this.state.latest_block_time.unwrap_or(0)) > 60 {
                     // Once we start receiving consensus nodes, don't emit status unless stalled for
                     // 1 minute
                     info!(
