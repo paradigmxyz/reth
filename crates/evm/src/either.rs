@@ -97,7 +97,7 @@ where
         state_hook: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         match self {
             Self::Left(a) => a.execute_with_state_hook(input, state_hook),

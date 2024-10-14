@@ -199,7 +199,7 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this),
+                    Trace::evm_config(&this).clone(),
                     LoadState::provider(&this).chain_spec(),
                 );
                 system_caller
@@ -332,7 +332,7 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this),
+                    Trace::evm_config(&this).clone(),
                     LoadState::provider(&this).chain_spec(),
                 );
                 system_caller

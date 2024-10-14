@@ -56,7 +56,7 @@ pub trait Executor<DB> {
         state_hook: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: OnStateHook;
+        F: OnStateHook + 'static;
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,

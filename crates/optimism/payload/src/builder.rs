@@ -201,7 +201,7 @@ where
     );
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(&evm_config, &chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), &chain_spec);
 
     system_caller
         .pre_block_beacon_root_contract_call(
