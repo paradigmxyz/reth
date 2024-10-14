@@ -17,8 +17,8 @@ use revm::{db::BundleState, primitives::AccountInfo};
 use std::str::FromStr;
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
-    provider: &DatabaseProviderRW<DB, Spec>,
+pub fn assert_genesis_block<DB: Database, Spec: Send + Sync, DS: Send + Sync>(
+    provider: &DatabaseProviderRW<DB, Spec, DS>,
     g: SealedBlock,
 ) {
     let n = g.number;

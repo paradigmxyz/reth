@@ -8,6 +8,7 @@ use crate::{
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
 use reth_chainspec::EthereumHardforks;
 use reth_node_types::NodeTypesWithDB;
+use reth_storage_api::HashedPostStateProvider;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
@@ -22,6 +23,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + CanonStateSubscriptions
     + ForkChoiceSubscriptions
     + StageCheckpointReader
+    + HashedPostStateProvider
     + Clone
     + Unpin
     + 'static
@@ -40,6 +42,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + CanonStateSubscriptions
         + ForkChoiceSubscriptions
         + StageCheckpointReader
+        + HashedPostStateProvider
         + Clone
         + Unpin
         + 'static

@@ -112,6 +112,7 @@ where
 impl NodeTypes for OptimismNode {
     type Primitives = ();
     type ChainSpec = OpChainSpec;
+    type State = ();
 }
 
 impl NodeTypesWithEngine for OptimismNode {

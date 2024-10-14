@@ -31,7 +31,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    HashedPostStateProvider, ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    StateRootProvider, ToLatestStateProviderRef,
 };
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_stages::StageId;
@@ -39,8 +40,6 @@ use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
@@ -266,11 +265,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
-                let hashed_post_state = execution_outcome.hash_state_slow();
-                let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
-                    provider_factory.provider()?.tx_ref(),
-                    hashed_post_state.clone(),
-                )?;
+                let provider = provider_factory.provider()?;
+                let hashed_post_state =
+                    provider.execution_outcome_hashed_post_state(&execution_outcome);
+                let (state_root, trie_updates, _) =
+                    provider.latest_ref().state_root_with_updates(hashed_post_state.clone())?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(

@@ -33,7 +33,7 @@ reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
-reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-db = { workspace = true, features = ["metrics"], optional = true }
 
 reth-testing-utils = { workspace = true, optional = true }
 
@@ -101,6 +101,7 @@ test-utils = [
     "reth-stages-api/test-utils",
     "dep:reth-testing-utils",
     "dep:tempfile",
+    "dep:reth-trie-db"
 ]
 
 [[bench]]

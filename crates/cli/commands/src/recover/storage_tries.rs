@@ -9,9 +9,9 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_node_builder::NodeTypesWithEngine;
-use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
-use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
+use reth_provider::{
+    BlockNumReader, HeaderProvider, ProviderError, StateRootProvider, ToLatestStateProviderRef,
+};
 use tracing::*;
 
 /// `reth recover storage-tries` command
@@ -51,7 +51,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             entry = storage_trie_cursor.next()?;
         }
 
-        let state_root = StateRoot::from_tx(tx_mut).root()?;
+        let state_root = provider.latest_ref().state_root(Default::default())?;
         if state_root != best_header.state_root {
             eyre::bail!(
                 "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",

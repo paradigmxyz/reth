@@ -5,7 +5,7 @@ use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_provider::{CanonChainTracker, StateProviderFactory};
+use reth_provider::{CanonChainTracker, HashedPostStateProvider, StateProviderFactory};
 use reth_stages_api::PipelineEvent;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
@@ -82,7 +82,12 @@ impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes, ChainSpec>
 impl<Executor, Client, Pool, Engine, ChainSpec> Future
     for MiningTask<Client, Pool, Executor, Engine, ChainSpec>
 where
-    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
+    Client: StateProviderFactory
+        + HashedPostStateProvider
+        + CanonChainTracker
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Engine: EngineTypes,
     Executor: BlockExecutorProvider,
@@ -103,7 +108,7 @@ where
             if this.insert_task.is_none() {
                 if this.queued.is_empty() {
                     // nothing to insert
-                    break
+                    break;
                 }
 
                 // ready to queue in new insert task
@@ -170,18 +175,18 @@ where
                                             ForkchoiceStatus::Valid => break,
                                             ForkchoiceStatus::Invalid => {
                                                 error!(target: "consensus::auto", ?fcu_response, "Forkchoice update returned invalid response");
-                                                return None
+                                                return None;
                                             }
                                             ForkchoiceStatus::Syncing => {
                                                 debug!(target: "consensus::auto", ?fcu_response, "Forkchoice update returned SYNCING, waiting for VALID");
                                                 // wait for the next fork choice update
-                                                continue
+                                                continue;
                                             }
                                         }
                                     }
                                     Err(err) => {
                                         error!(target: "consensus::auto", %err, "Autoseal fork choice update failed");
-                                        return None
+                                        return None;
                                     }
                                 }
                             }
@@ -207,7 +212,7 @@ where
                     }
                     Poll::Pending => {
                         this.insert_task = Some(fut);
-                        break
+                        break;
                     }
                 }
             }

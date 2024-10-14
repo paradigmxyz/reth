@@ -5,7 +5,7 @@ use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, Account};
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
-use reth_trie::{proof::Proof, Nibbles};
+use reth_trie::{proof::Proof, KeccakKeyHasher, Nibbles};
 use reth_trie_common::{AccountProof, StorageProof};
 use reth_trie_db::DatabaseProof;
 use std::{
@@ -86,7 +86,9 @@ fn testspec_proofs() {
     let provider = factory.provider().unwrap();
     for (target, expected_proof) in data {
         let target = Address::from_str(target).unwrap();
-        let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
+        let account_proof = Proof::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
+            .account_proof(target, &[])
+            .unwrap();
         similar_asserts::assert_eq!(
             account_proof.proof,
             expected_proof,
@@ -106,7 +108,9 @@ fn testspec_empty_storage_proof() {
     let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
 
     let provider = factory.provider().unwrap();
-    let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &slots).unwrap();
+    let account_proof = Proof::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
+        .account_proof(target, &slots)
+        .unwrap();
     assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
 
     assert_eq!(slots.len(), account_proof.storage_proofs.len());
@@ -141,7 +145,9 @@ fn mainnet_genesis_account_proof() {
     ]);
 
     let provider = factory.provider().unwrap();
-    let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
+    let account_proof = Proof::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
+        .account_proof(target, &[])
+        .unwrap();
     similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
     assert_eq!(account_proof.verify(root), Ok(()));
 }
@@ -164,7 +170,9 @@ fn mainnet_genesis_account_proof_nonexistent() {
     ]);
 
     let provider = factory.provider().unwrap();
-    let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
+    let account_proof = Proof::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
+        .account_proof(target, &[])
+        .unwrap();
     similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
     assert_eq!(account_proof.verify(root), Ok(()));
 }
@@ -250,7 +258,9 @@ fn holesky_deposit_contract_proof() {
     };
 
     let provider = factory.provider().unwrap();
-    let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &slots).unwrap();
+    let account_proof = Proof::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
+        .account_proof(target, &slots)
+        .unwrap();
     similar_asserts::assert_eq!(account_proof, expected);
     assert_eq!(account_proof.verify(root), Ok(()));
 }

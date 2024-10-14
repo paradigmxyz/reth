@@ -17,11 +17,12 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
-    providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
-    FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
+    providers::{ConsistentDbView, ProviderNodeTypes},
+    FullExecutionDataProvider, HashedPostStateProvider, ProviderError, ProviderFactory,
+    StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -201,7 +202,8 @@ impl AppendableChain {
             .disable_long_read_transaction_safety()
             .try_into_history_at_block(canonical_fork.number)?;
 
-        let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
+        let provider =
+            ProviderFactory::<N>::bundle_state_provider(state_provider, bundle_state_data_provider);
 
         let db = StateProviderDatabase::new(&provider);
         let executor = externals.executor_factory.executor(db);
@@ -227,14 +229,19 @@ impl AppendableChain {
                 execution_outcome.extend(initial_execution_outcome.clone());
                 ParallelStateRoot::new(
                     consistent_view,
-                    TrieInput::from_state(execution_outcome.hash_state_slow()),
+                    TrieInput::from_state(
+                        externals
+                            .provider_factory
+                            .execution_outcome_hashed_post_state(&execution_outcome),
+                    ),
                 )
                 .incremental_root_with_updates()
                 .map(|(root, updates)| (root, Some(updates)))
                 .map_err(ProviderError::from)?
             } else {
-                let hashed_state =
-                    HashedPostState::from_bundle_state(&initial_execution_outcome.state().state);
+                let hashed_state = externals
+                    .provider_factory
+                    .execution_outcome_hashed_post_state(&initial_execution_outcome);
                 let state_root = provider.state_root(hashed_state)?;
                 (state_root, None)
             };
@@ -242,7 +249,7 @@ impl AppendableChain {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
                 )
-                .into())
+                .into());
             }
 
             tracing::debug!(

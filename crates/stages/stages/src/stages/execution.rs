@@ -15,8 +15,8 @@ use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateChangeWriter, StateWriter, StaticFileProviderFactory, StatsReader,
+    BlockReader, DBProvider, HeaderProvider, OriginalValuesKnown, ProviderError, StateChangeWriter,
+    StateWriter, StaticFileProviderFactory, StatsReader, ToLatestStateProviderRef,
     TransactionVariant,
 };
 use reth_prune_types::PruneModes;
@@ -174,8 +174,12 @@ impl<E> ExecutionStage<E> {
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
-    Provider:
-        DBProvider + BlockReader + StaticFileProviderFactory + StatsReader + StateChangeWriter,
+    Provider: DBProvider
+        + BlockReader
+        + StaticFileProviderFactory
+        + StatsReader
+        + StateChangeWriter
+        + ToLatestStateProviderRef,
     for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
 {
     /// Return the id of the stage
@@ -196,7 +200,7 @@ where
     /// Execute the stage
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let start_block = input.next_block();
@@ -219,10 +223,7 @@ where
             None
         };
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(
-            provider.tx_ref(),
-            provider.static_file_provider(),
-        ));
+        let db = StateProviderDatabase(provider.latest_ref());
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
         executor.set_prune_modes(prune_modes);
@@ -319,7 +320,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break
+                break;
             }
         }
 
@@ -356,7 +357,7 @@ where
                 // means that we didn't send the notification to ExExes
                 return Err(StageError::PostExecuteCommit(
                     "Previous post execute commit input wasn't processed",
-                ))
+                ));
             }
         }
 
@@ -407,7 +408,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            })
+            });
         }
 
         // Unwind account and storage changesets, as well as receipts.
@@ -633,11 +634,11 @@ where
             loop {
                 if let Some(indices) = provider.block_body_indices(last_block)? {
                     if indices.last_tx_num() <= last_receipt_num {
-                        break
+                        break;
                     }
                 }
                 if last_block == 0 {
-                    break
+                    break;
                 }
                 last_block -= 1;
             }
@@ -648,7 +649,7 @@ where
             return Err(StageError::MissingStaticFileData {
                 block: missing_block,
                 segment: StaticFileSegment::Receipts,
-            })
+            });
         }
     }
 

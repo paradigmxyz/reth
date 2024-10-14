@@ -8,6 +8,8 @@ use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{Bytecode, KECCAK_EMPTY};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::HashedPostState;
+use revm::db::BundleState;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -20,6 +22,7 @@ pub trait StateProvider:
     + StateRootProvider
     + StorageRootProvider
     + StateProofProvider
+    + HashedPostStateProvider
     + Send
     + Sync
 {
@@ -46,10 +49,10 @@ pub trait StateProvider:
 
         if let Some(code_hash) = acc.bytecode_hash {
             if code_hash == KECCAK_EMPTY {
-                return Ok(None)
+                return Ok(None);
             }
             // Get the code from the code hash
-            return self.bytecode_by_hash(code_hash)
+            return self.bytecode_by_hash(code_hash);
         }
 
         // Return `None` if no code hash is set
@@ -88,6 +91,31 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
+}
+
+/// Trait implemented for database providers that can be converted into a latest state provider.
+pub trait ToLatestStateProviderRef {
+    /// Returns a [`StateProvider`] for the latest state.
+    fn latest_ref<'a>(&'a self) -> Box<dyn 'a + StateProvider>;
+}
+
+/// Trait that provides the `HashedPostState` from various sources.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait HashedPostStateProvider {
+    /// Returns the `HashedPostState` of the `ExecutionOutcome`
+    fn execution_outcome_hashed_post_state(
+        &self,
+        execution_outcome: &ExecutionOutcome,
+    ) -> HashedPostState;
+
+    /// Returns the `HashedPostState` of the `BundleState`.
+    fn bundle_state_hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+
+    /// Returns the `HashedPostState` for the given block number.
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given

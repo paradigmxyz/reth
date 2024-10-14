@@ -8,7 +8,9 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
-use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
+use reth_provider::{
+    BlockExecutionOutput, ChainSpecProvider, HashedPostStateProvider, StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
@@ -18,7 +20,7 @@ use reth_revm::{
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
+use reth_trie::{updates::TrieUpdates, HashedStorage};
 use serde::Serialize;
 
 /// Generates a witness for the given block and saves it to a file.
@@ -51,6 +53,7 @@ impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + HashedPostStateProvider
         + Send
         + Sync
         + 'static,
@@ -127,7 +130,7 @@ where
         //
         // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
         // referenced accounts + storage slots.
-        let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let mut hashed_state = self.provider.bundle_state_hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
             let hashed_address = keccak256(address);
             hashed_state
@@ -233,7 +236,7 @@ where
 
         // Calculate the state root and trie updates after re-execution. They should match
         // the original ones.
-        let (re_executed_root, trie_output) =
+        let (re_executed_root, trie_output, _) =
             state_provider.state_root_with_updates(hashed_state)?;
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
@@ -297,6 +300,7 @@ impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        + HashedPostStateProvider
         + Send
         + Sync
         + 'static,

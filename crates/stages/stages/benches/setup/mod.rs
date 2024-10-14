@@ -8,7 +8,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{Account, SealedBlock, SealedHeader};
-use reth_provider::{DatabaseProvider, DatabaseProviderFactory, TrieWriter};
+use reth_provider::{
+    DatabaseProvider, DatabaseProviderFactory, StateRootProvider, ToLatestStateProviderRef,
+    TrieWriter,
+};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
@@ -17,7 +20,6 @@ use reth_testing_utils::generators::{
     self, random_block_range, random_changeset_range, random_contract_account_range,
     random_eoa_accounts, BlockRangeParams,
 };
-use reth_trie::StateRoot;
 use std::{collections::BTreeMap, fs, path::Path};
 use tokio::runtime::Handle;
 
@@ -26,12 +28,11 @@ mod constants;
 mod account_hashing;
 pub use account_hashing::*;
 use reth_stages_api::{ExecInput, Stage, UnwindInput};
-use reth_trie_db::DatabaseStateRoot;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec, ()>>,
 >(
     stage: S,
     db: &TestStageDB,
@@ -63,7 +64,8 @@ pub(crate) fn stage_unwind<
 
 pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
 where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec, ()>>,
 {
     let (input, unwind) = range;
 
@@ -137,8 +139,12 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = StateRoot::from_tx(db.factory.provider_rw().unwrap().tx_ref())
-            .root_with_updates()
+        let (root, updates, _) = db
+            .factory
+            .provider_rw()
+            .unwrap()
+            .latest_ref()
+            .state_root_with_updates(Default::default())
             .unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
@@ -169,9 +175,13 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         // make last block have valid state root
         let root = {
-            let tx_mut = db.factory.provider_rw().unwrap();
-            let root = StateRoot::from_tx(tx_mut.tx_ref()).root().unwrap();
-            tx_mut.commit().unwrap();
+            let root = db
+                .factory
+                .provider_rw()
+                .unwrap()
+                .latest_ref()
+                .state_root(Default::default())
+                .unwrap();
             root
         };
 

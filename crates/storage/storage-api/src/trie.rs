@@ -1,11 +1,13 @@
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    Address, Bytes, B256,
+    Address, BlockNumber, Bytes, B256,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, MultiProof, StateRootProgress, TrieInput,
 };
+use std::ops::RangeInclusive;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -29,13 +31,38 @@ pub trait StateRootProvider: Send + Sync {
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)>;
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)>;
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)>;
+
+    /// Set the previously recorded intermediate state, walks the intermediate nodes of existing
+    /// state trie (if any) and hashed entries. Feeds the nodes into the hash builder. Collects
+    /// the updates in the process.
+    ///
+    /// # Returns
+    ///
+    /// The intermediate progress of state root computation.
+    fn state_root_with_progress(
+        &self,
+        state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress>;
+
+    /// Computes the state root of the trie with the changed account and storage prefixes and
+    /// existing trie nodes collecting updates in the process.
+    ///
+    /// Ignores the threshold.
+    ///
+    /// # Returns
+    ///
+    /// The updated state root and the trie updates.
+    fn incremental_root_with_updates(
+        &self,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 }
 

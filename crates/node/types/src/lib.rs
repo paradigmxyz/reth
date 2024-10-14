@@ -16,6 +16,7 @@ use reth_db_api::{
     Database,
 };
 use reth_engine_primitives::EngineTypes;
+use reth_trie_db::DatabaseState;
 
 /// Configures all the primitive types of the node.
 // TODO(mattsse): this is currently a placeholder
@@ -34,6 +35,8 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
     type ChainSpec: EthChainSpec;
+    /// The types that define the state based operations of the node.
+    type State: DatabaseState;
 }
 
 /// The type that configures an Ethereum-like node with an engine for consensus.
@@ -85,6 +88,7 @@ where
 {
     type Primitives = Types::Primitives;
     type ChainSpec = Types::ChainSpec;
+    type State = Types::State;
 }
 
 impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
@@ -105,70 +109,85 @@ where
 
 /// A [`NodeTypes`] type builder.
 #[derive(Default, Debug)]
-pub struct AnyNodeTypes<P = (), C = ()>(PhantomData<P>, PhantomData<C>);
+pub struct AnyNodeTypes<P = (), C = (), S = ()>(PhantomData<P>, PhantomData<C>, PhantomData<S>);
 
-impl<P, C> AnyNodeTypes<P, C> {
+impl<P, C, S> AnyNodeTypes<P, C, S> {
     /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypes<T, C> {
-        AnyNodeTypes::<T, C>(PhantomData::<T>, PhantomData::<C>)
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, C, S> {
+        AnyNodeTypes::<T, C, S>(PhantomData::<T>, PhantomData::<C>, PhantomData::<S>)
     }
 
     /// Sets the `ChainSpec` associated type.
-    pub const fn chain_spec<T>(self) -> AnyNodeTypes<P, T> {
-        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
+    pub const fn chain_spec<T>(self) -> AnyNodeTypes<P, T, S> {
+        AnyNodeTypes::<P, T, S>(PhantomData::<P>, PhantomData::<T>, PhantomData::<S>)
+    }
+
+    /// Sets the `State` associated type.
+    pub const fn state<T>(self) -> AnyNodeTypes<P, C, T> {
+        AnyNodeTypes::<P, C, T>(PhantomData::<P>, PhantomData::<C>, PhantomData::<T>)
     }
 }
 
-impl<P, C> NodeTypes for AnyNodeTypes<P, C>
+impl<P, C, S> NodeTypes for AnyNodeTypes<P, C, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     C: EthChainSpec + 'static,
+    S: DatabaseState,
 {
     type Primitives = P;
     type ChainSpec = C;
+    type State = S;
 }
 
 /// A [`NodeTypesWithEngine`] type builder.
 #[derive(Default, Debug)]
-pub struct AnyNodeTypesWithEngine<P = (), E = (), C = ()> {
+pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), S = ()> {
     /// Embedding the basic node types.
-    base: AnyNodeTypes<P, C>,
+    base: AnyNodeTypes<P, C, S>,
     /// Phantom data for the engine.
     _engine: PhantomData<E>,
 }
 
-impl<P, E, C> AnyNodeTypesWithEngine<P, E, C> {
+impl<P, E, C, S> AnyNodeTypesWithEngine<P, E, C, S> {
     /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypesWithEngine<T, E, C> {
+    pub const fn primitives<T>(self) -> AnyNodeTypesWithEngine<T, E, C, S> {
         AnyNodeTypesWithEngine { base: self.base.primitives::<T>(), _engine: PhantomData }
     }
 
     /// Sets the `Engine` associated type.
-    pub const fn engine<T>(self) -> AnyNodeTypesWithEngine<P, T, C> {
+    pub const fn engine<T>(self) -> AnyNodeTypesWithEngine<P, T, C, S> {
         AnyNodeTypesWithEngine { base: self.base, _engine: PhantomData::<T> }
     }
 
     /// Sets the `ChainSpec` associated type.
-    pub const fn chain_spec<T>(self) -> AnyNodeTypesWithEngine<P, E, T> {
+    pub const fn chain_spec<T>(self) -> AnyNodeTypesWithEngine<P, E, T, S> {
         AnyNodeTypesWithEngine { base: self.base.chain_spec::<T>(), _engine: PhantomData }
+    }
+
+    /// Sets the `State` associated type.
+    pub const fn state<T>(self) -> AnyNodeTypesWithEngine<P, E, C, T> {
+        AnyNodeTypesWithEngine { base: self.base.state::<T>(), _engine: PhantomData }
     }
 }
 
-impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
+impl<P, E, C, S> NodeTypes for AnyNodeTypesWithEngine<P, E, C, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec + 'static,
+    S: DatabaseState,
 {
     type Primitives = P;
     type ChainSpec = C;
+    type State = S;
 }
 
-impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
+impl<P, E, C, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec + 'static,
+    S: DatabaseState,
 {
     type Engine = E;
 }

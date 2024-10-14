@@ -71,7 +71,7 @@ where
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (tx_range, block_range, is_final_range) =
@@ -85,7 +85,7 @@ where
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
-            })
+            });
         }
 
         // Acquire the cursor for inserting elements
@@ -185,7 +185,7 @@ where
                     // We exit early since we could not process this chunk.
                     let _ = recovered_senders_tx
                         .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                    break
+                    break;
                 }
             };
 
@@ -206,7 +206,7 @@ where
 
                     // Finish early
                     if is_err {
-                        break
+                        break;
                     }
                 }
             });
@@ -249,7 +249,7 @@ where
                                     .into(),
                             ))
                         }
-                    }
+                    };
                 }
             };
             senders_cursor.append(tx_id, sender)?;
@@ -631,7 +631,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let mut body_cursor =

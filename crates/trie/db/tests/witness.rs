@@ -8,7 +8,9 @@ use alloy_primitives::{
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_primitives::{constants::EMPTY_ROOT_HASH, Account};
 use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-use reth_trie::{proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, StateRoot};
+use reth_trie::{
+    proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot,
+};
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
 
 #[test]
@@ -22,7 +24,7 @@ fn includes_empty_node_preimage() {
 
     // witness includes empty state trie root node
     assert_eq!(
-        TrieWitness::from_tx(provider.tx_ref())
+        TrieWitness::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
             .compute(HashedPostState {
                 accounts: HashMap::from([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::default(),
@@ -34,12 +36,12 @@ fn includes_empty_node_preimage() {
     // Insert account into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
 
-    let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
-    let multiproof = Proof::from_tx(provider.tx_ref())
+    let state_root = StateRoot::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref()).root().unwrap();
+    let multiproof = Proof::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
         .multiproof(HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]))
         .unwrap();
 
-    let witness = TrieWitness::from_tx(provider.tx_ref())
+    let witness = TrieWitness::<_, _, KeccakKeyHasher>::from_tx(provider.tx_ref())
         .compute(HashedPostState {
             accounts: HashMap::from([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from([(

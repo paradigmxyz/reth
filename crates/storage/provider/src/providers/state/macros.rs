@@ -44,8 +44,10 @@ macro_rules! delegate_provider_impls {
             StateRootProvider $(where [$($generics)*])? {
                 fn state_root(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
                 fn state_root_from_nodes(&self, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
-                fn state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
-                fn state_root_from_nodes_with_updates(&self, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                fn state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates, reth_trie::HashedPostStateSorted)>;
+                fn state_root_from_nodes_with_updates(&self, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates, reth_trie::HashedPostStateSorted)>;
+                fn state_root_with_progress(&self, state: Option<reth_trie::IntermediateStateRootState>) -> reth_storage_errors::provider::ProviderResult<reth_trie::StateRootProgress>;
+                fn incremental_root_with_updates(&self, range: std::ops::RangeInclusive<alloy_primitives::BlockNumber>) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
             }
             StorageRootProvider $(where [$($generics)*])? {
                 fn storage_root(&self, address: alloy_primitives::Address, storage: reth_trie::HashedStorage) ->  reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
@@ -54,6 +56,11 @@ macro_rules! delegate_provider_impls {
                 fn proof(&self, input: reth_trie::TrieInput, address: alloy_primitives::Address, slots: &[alloy_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
                 fn multiproof(&self, input: reth_trie::TrieInput, targets: alloy_primitives::map::HashMap<alloy_primitives::B256, alloy_primitives::map::HashSet<alloy_primitives::B256>>) -> reth_storage_errors::provider::ProviderResult<reth_trie::MultiProof>;
                 fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::map::HashMap<alloy_primitives::B256, alloy_primitives::Bytes>>;
+            }
+            HashedPostStateProvider $(where [$($generics)*])? {
+                fn execution_outcome_hashed_post_state(&self, execution_outcome: &reth_execution_types::ExecutionOutcome) -> reth_trie::HashedPostState;
+                fn hashed_post_state_from_reverts(&self, block_number: alloy_primitives::BlockNumber) -> reth_storage_errors::provider::ProviderResult<reth_trie::HashedPostState>;
+                fn bundle_state_hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> reth_trie::HashedPostState;
             }
         );
     }

@@ -13,7 +13,9 @@ use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
-use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
@@ -21,7 +23,6 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use reth_trie::HashedPostState;
 use revm_primitives::{
     calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
 };
@@ -104,7 +105,7 @@ impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider,
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader + StateProviderFactory + HashedPostStateProvider,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -130,7 +131,7 @@ where
                     }
                     Err(_) => {}
                 };
-                continue
+                continue;
             }
 
             if let EngineReorgState::Reorg { queue } = &mut this.state {
@@ -178,7 +179,7 @@ where
                                 payload,
                                 cancun_fields,
                                 tx,
-                            }))
+                            }));
                         }
                     };
                     let reorg_forkchoice_state = ForkchoiceState {
@@ -211,7 +212,7 @@ where
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
-                    continue
+                    continue;
                 }
                 (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
@@ -223,7 +224,7 @@ where
                 }
                 (item, _) => item,
             };
-            return Poll::Ready(item)
+            return Poll::Ready(item);
         }
     }
 }
@@ -237,7 +238,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
     next_cancun_fields: Option<CancunPayloadFields>,
 ) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
 where
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader + StateProviderFactory + HashedPostStateProvider,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -257,7 +258,7 @@ where
                 .block_by_hash(previous_hash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
             if depth == 0 {
-                break 'target reorg_target
+                break 'target reorg_target;
             }
 
             depth -= 1;
@@ -303,7 +304,7 @@ where
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
-            continue
+            continue;
         }
 
         // Configure the environment for the block.
@@ -315,7 +316,7 @@ where
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
                 trace!(target: "engine::stream::reorg", hash = %tx.hash(), ?error, "Error executing transaction from next block");
-                continue
+                continue;
             }
             // Treat error as fatal
             Err(error) => {
@@ -364,7 +365,7 @@ where
         reorg_target.number,
         Default::default(),
     );
-    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
+    let hashed_state = provider.execution_outcome_hashed_post_state(&outcome);
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {

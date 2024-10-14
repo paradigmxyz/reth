@@ -24,10 +24,11 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, MultiProof, StateRootProgress, TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::{broadcast, watch};
@@ -336,13 +337,27 @@ impl StateRootProvider for NoopProvider {
     fn state_root_with_updates(
         &self,
         _state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        Ok((B256::default(), TrieUpdates::default()))
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+        Ok((B256::default(), TrieUpdates::default(), Default::default()))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         _input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+        Ok((B256::default(), TrieUpdates::default(), Default::default()))
+    }
+
+    fn state_root_with_progress(
+        &self,
+        _state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress> {
+        Ok(reth_trie::StateRootProgress::Complete(B256::default(), 0, Default::default()))
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
@@ -382,6 +397,29 @@ impl StateProofProvider for NoopProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for NoopProvider {
+    fn execution_outcome_hashed_post_state(
+        &self,
+        _execution_outcome: &reth_execution_types::ExecutionOutcome,
+    ) -> HashedPostState {
+        HashedPostState::default()
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
+    }
+
+    fn bundle_state_hashed_post_state(
+        &self,
+        _bundle_state: &revm::db::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 

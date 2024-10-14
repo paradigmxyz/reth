@@ -70,6 +70,7 @@ impl EthereumNode {
 impl NodeTypes for EthereumNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type State = ();
 }
 
 impl NodeTypesWithEngine for EthereumNode {

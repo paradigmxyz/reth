@@ -23,13 +23,12 @@ use reth_primitives::{
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HashedPostStateProvider,
+    HeaderProvider, ProviderError, StateRootProvider, StaticFileProviderFactory,
+    ToLatestStateProviderRef,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
-use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -198,7 +197,7 @@ where
             return Err(BlockchainTreeError::PendingBlockIsFinalized {
                 last_finalized: last_finalized_block,
             }
-            .into())
+            .into());
         }
 
         // is block inside chain
@@ -211,7 +210,7 @@ where
             return Ok(Some(BlockStatus::Disconnected {
                 head: self.state.block_indices.canonical_tip(),
                 missing_ancestor: block.parent_num_hash(),
-            }))
+            }));
         }
 
         Ok(None)
@@ -349,7 +348,7 @@ where
                     parent_block_number: canonical_parent_number,
                     block_number: block.number,
                 }
-                .into())
+                .into());
             }
         }
 
@@ -410,7 +409,7 @@ where
             return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
                 hash: block.hash(),
             })
-            .into())
+            .into());
         }
 
         let parent_header = provider
@@ -549,7 +548,7 @@ where
             } else {
                 // if there is no fork block that point to other chains, break the loop.
                 // it means that this fork joins to canonical block.
-                break
+                break;
             }
         }
         hashes
@@ -570,9 +569,9 @@ where
             // get fork block chain
             if let Some(fork_chain_id) = self.block_indices().get_side_chain_id(&fork.hash) {
                 chain_id = fork_chain_id;
-                continue
+                continue;
             }
-            break
+            break;
         }
         (self.block_indices().canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
     }
@@ -988,7 +987,7 @@ where
         }
 
         if header.is_none() && self.sidechain_block_by_hash(*hash).is_some() {
-            return Ok(None)
+            return Ok(None);
         }
 
         if header.is_none() {
@@ -1051,7 +1050,7 @@ where
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: block_hash,
-                }))
+                }));
             }
 
             let head = self.state.block_indices.canonical_tip();
@@ -1062,7 +1061,7 @@ where
             debug!(target: "blockchain_tree", ?block_hash, "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash,
-            }))
+            }));
         };
 
         // we are splitting chain at the block hash that we want to make canonical
@@ -1070,7 +1069,7 @@ where
             debug!(target: "blockchain_tree", ?block_hash, ?chain_id, "Chain not present");
             return Err(CanonicalError::from(BlockchainTreeError::BlockSideChainIdConsistency {
                 chain_id: chain_id.into(),
-            }))
+            }));
         };
         trace!(target: "blockchain_tree", chain = ?canonical, "Found chain to make canonical");
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
@@ -1100,7 +1099,7 @@ where
             debug!(target: "blockchain_tree", "No blocks in the chain to make canonical");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: fork_block.hash,
-            }))
+            }));
         };
         trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
         let mut chain_appended = false;
@@ -1216,18 +1215,17 @@ where
         recorder: &mut MakeCanonicalDurationsRecorder,
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
-        let hashed_state = state.hash_state_slow();
-        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let hashed_state_sorted = hashed_state.into_sorted();
+        let hashed_state =
+            self.externals.provider_factory.execution_outcome_hashed_post_state(&state);
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
         let block_hash_numbers =
             blocks.iter().map(|(number, b)| (number, b.hash())).collect::<Vec<_>>();
-        let trie_updates = match chain_trie_updates {
+        let (trie_updates, hashed_state_sorted) = match chain_trie_updates {
             Some(updates) => {
                 debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Using cached trie updates");
                 self.metrics.trie_updates_insert_cached.increment(1);
-                updates
+                (updates, hashed_state.into_sorted())
             }
             None => {
                 debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Recomputing state root for insert");
@@ -1238,14 +1236,8 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
-                let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
-                    .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                        &hashed_state_sorted,
-                    ))
-                    .with_prefix_sets(prefix_sets)
-                    .root_with_updates()
-                    .map_err(Into::<BlockValidationError>::into)?;
+                let (state_root, trie_updates, hashed_state_sorted) =
+                    provider.latest_ref().state_root_with_updates(hashed_state)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1253,10 +1245,10 @@ where
                         block_number: tip.number,
                         block_hash: tip.hash(),
                     }))
-                    .into())
+                    .into());
                 }
                 self.metrics.trie_updates_insert_recomputed.increment(1);
-                trie_updates
+                (trie_updates, hashed_state_sorted)
             }
         };
         recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
@@ -1315,8 +1307,8 @@ where
             .provider_factory
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default() >
-            revert_until
+            .unwrap_or_default()
+            > revert_until
         {
             trace!(
                 target: "blockchain_tree",
@@ -1399,10 +1391,10 @@ mod tests {
             blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        ProviderFactory,
+        ProviderFactory, StateRootProvider,
     };
     use reth_stages_api::StageCheckpoint;
-    use reth_trie::{root::state_root_unhashed, StateRoot};
+    use reth_trie::{root::state_root_unhashed, TrieInput};
     use std::collections::HashMap;
 
     fn setup_externals(
@@ -1614,8 +1606,8 @@ mod tests {
                     signer,
                     (
                         AccountInfo {
-                            balance: initial_signer_balance -
-                                (single_tx_cost * U256::from(num_of_signer_txs)),
+                            balance: initial_signer_balance
+                                - (single_tx_cost * U256::from(num_of_signer_txs)),
                             nonce: num_of_signer_txs,
                             ..Default::default()
                         },
@@ -1875,9 +1867,10 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets().freeze();
-        let state_root =
-            StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
+        let prefix_sets =
+            provider.execution_outcome_hashed_post_state(&exec5).construct_prefix_sets();
+        let state_root_input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
+        let state_root = provider.latest_ref().state_root_from_nodes(state_root_input).unwrap();
         assert_eq!(state_root, block5.state_root);
     }
 

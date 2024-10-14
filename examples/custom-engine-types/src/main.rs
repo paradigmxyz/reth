@@ -38,7 +38,7 @@ use reth::{
         node::{NodeTypes, NodeTypesWithEngine},
         BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
-    providers::{CanonStateSubscriptions, StateProviderFactory},
+    providers::{CanonStateSubscriptions, HashedPostStateProvider, StateProviderFactory},
     tasks::TaskManager,
     transaction_pool::TransactionPool,
 };
@@ -187,7 +187,7 @@ where
         if attributes.custom == 0 {
             return Err(EngineObjectValidationError::invalid_params(
                 CustomError::CustomFieldIsNotZero,
-            ))
+            ));
         }
 
         Ok(())
@@ -218,6 +218,7 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type State = ();
 }
 
 /// Configure the node types with the custom engine types
@@ -308,7 +309,8 @@ pub struct CustomPayloadBuilder;
 
 impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client:
+        StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + HashedPostStateProvider,
     Pool: TransactionPool,
 {
     type Attributes = CustomPayloadBuilderAttributes;

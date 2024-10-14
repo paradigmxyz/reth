@@ -8,8 +8,8 @@ use alloy_primitives::{
 };
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
-use reth_storage_api::StateProvider;
-use reth_trie::HashedStorage;
+use reth_storage_api::{HashedPostStateProvider, StateProvider};
+use reth_trie::{HashedPostStateSorted, HashedStorage};
 use revm::Database;
 
 /// Helper alias type for the state's [`CacheDB`]
@@ -38,15 +38,31 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
     fn state_root_with_updates(
         &self,
         hashed_state: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
+    ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates, HashedPostStateSorted)>
+    {
         self.0.state_root_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         input: reth_trie::TrieInput,
-    ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
+    ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates, HashedPostStateSorted)>
+    {
         self.0.state_root_from_nodes_with_updates(input)
+    }
+
+    fn state_root_with_progress(
+        &self,
+        state: Option<reth_trie::IntermediateStateRootState>,
+    ) -> ProviderResult<reth_trie::StateRootProgress> {
+        self.0.state_root_with_progress(state)
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        range: std::ops::RangeInclusive<alloy_primitives::BlockNumber>,
+    ) -> ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
+        self.0.incremental_root_with_updates(range)
     }
 }
 
@@ -118,6 +134,29 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
         hash_or_number: alloy_rpc_types::BlockHashOrNumber,
     ) -> reth_errors::ProviderResult<Option<B256>> {
         self.0.convert_block_hash(hash_or_number)
+    }
+}
+
+impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
+    fn bundle_state_hashed_post_state(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_trie::HashedPostState {
+        self.0.bundle_state_hashed_post_state(bundle_state)
+    }
+
+    fn execution_outcome_hashed_post_state(
+        &self,
+        execution_outcome: &reth_execution_types::ExecutionOutcome,
+    ) -> reth_trie::HashedPostState {
+        self.0.execution_outcome_hashed_post_state(execution_outcome)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: alloy_primitives::BlockNumber,
+    ) -> ProviderResult<reth_trie::HashedPostState> {
+        self.0.hashed_post_state_from_reverts(block_number)
     }
 }
 

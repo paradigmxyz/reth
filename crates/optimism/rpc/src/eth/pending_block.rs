@@ -10,7 +10,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
-    ReceiptProvider, StateProviderFactory,
+    HashedPostStateProvider, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -32,7 +32,8 @@ where
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
            + ChainSpecProvider<ChainSpec: EthereumHardforks>
-           + StateProviderFactory {
+           + StateProviderFactory
+           + HashedPostStateProvider {
         self.inner.provider()
     }
 

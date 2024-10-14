@@ -305,7 +305,7 @@ impl CanonicalInMemoryState {
         {
             if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
                 // do nothing
-                return
+                return;
             }
         }
 
@@ -545,7 +545,7 @@ impl CanonicalInMemoryState {
             if let Some(tx) =
                 block_state.block_ref().block().body.transactions().find(|tx| tx.hash() == hash)
             {
-                return Some(tx.clone())
+                return Some(tx.clone());
             }
         }
         None
@@ -575,7 +575,7 @@ impl CanonicalInMemoryState {
                     timestamp: block_state.block_ref().block.timestamp,
                     excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
                 };
-                return Some((tx.clone(), meta))
+                return Some((tx.clone(), meta));
             }
         }
         None
@@ -869,10 +869,13 @@ mod tests {
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, Receipt, Requests};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
-        StorageRootProvider,
+        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+        StateRootProvider, StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
+    use reth_trie::{
+        AccountProof, HashedPostStateSorted, HashedStorage, IntermediateStateRootState,
+        KeccakKeyHasher, MultiProof, StateRootProgress, TrieInput,
+    };
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -953,13 +956,27 @@ mod tests {
         fn state_root_with_updates(
             &self,
             _hashed_state: HashedPostState,
-        ) -> ProviderResult<(B256, TrieUpdates)> {
-            Ok((B256::random(), TrieUpdates::default()))
+        ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+            Ok((B256::random(), TrieUpdates::default(), HashedPostStateSorted::default()))
         }
 
         fn state_root_from_nodes_with_updates(
             &self,
             _input: TrieInput,
+        ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+            Ok((B256::random(), TrieUpdates::default(), HashedPostStateSorted::default()))
+        }
+
+        fn state_root_with_progress(
+            &self,
+            _state: Option<IntermediateStateRootState>,
+        ) -> ProviderResult<StateRootProgress> {
+            Ok(reth_trie::StateRootProgress::Complete(B256::random(), 0, Default::default()))
+        }
+
+        fn incremental_root_with_updates(
+            &self,
+            _range: std::ops::RangeInclusive<BlockNumber>,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
@@ -999,6 +1016,29 @@ mod tests {
             _target: HashedPostState,
         ) -> ProviderResult<HashMap<B256, Bytes>> {
             Ok(HashMap::default())
+        }
+    }
+
+    impl HashedPostStateProvider for MockStateProvider {
+        fn bundle_state_hashed_post_state(
+            &self,
+            bundle_state: &revm::db::BundleState,
+        ) -> HashedPostState {
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state)
+        }
+
+        fn execution_outcome_hashed_post_state(
+            &self,
+            execution_outcome: &ExecutionOutcome,
+        ) -> HashedPostState {
+            execution_outcome.hash_state_slow::<KeccakKeyHasher>()
+        }
+
+        fn hashed_post_state_from_reverts(
+            &self,
+            _block_number: BlockNumber,
+        ) -> ProviderResult<HashedPostState> {
+            Ok(HashedPostState::default())
         }
     }
 

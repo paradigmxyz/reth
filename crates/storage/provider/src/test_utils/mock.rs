@@ -27,11 +27,13 @@ use reth_primitives::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, KeccakKeyHasher, MultiProof, StateRootProgress, TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -151,8 +153,8 @@ impl MockEthProvider {
 
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
-    type Provider = DatabaseProvider<TxMock, ChainSpec>;
-    type ProviderRW = DatabaseProvider<TxMock, ChainSpec>;
+    type Provider = DatabaseProvider<TxMock, ChainSpec, ()>;
+    type ProviderRW = DatabaseProvider<TxMock, ChainSpec, ()>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
@@ -236,6 +238,29 @@ impl ChainSpecProvider for MockEthProvider {
     }
 }
 
+impl HashedPostStateProvider for MockEthProvider {
+    fn execution_outcome_hashed_post_state(
+        &self,
+        execution_outcome: &ExecutionOutcome,
+    ) -> HashedPostState {
+        execution_outcome.hash_state_slow::<KeccakKeyHasher>()
+    }
+
+    fn bundle_state_hashed_post_state(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        unimplemented!("hashed_post_state_from_reverts not implemented")
+    }
+}
+
 impl TransactionsProvider for MockEthProvider {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let lock = self.blocks.lock();
@@ -293,7 +318,7 @@ impl TransactionsProvider for MockEthProvider {
                         excess_blob_gas: block.header.excess_blob_gas,
                         timestamp: block.header.timestamp,
                     };
-                    return Ok(Some((tx.clone(), meta)))
+                    return Ok(Some((tx.clone(), meta)));
                 }
             }
         }
@@ -305,7 +330,7 @@ impl TransactionsProvider for MockEthProvider {
         let mut current_tx_number: TxNumber = 0;
         for block in lock.values() {
             if current_tx_number + (block.body.transactions.len() as TxNumber) > id {
-                return Ok(Some(block.header.number))
+                return Ok(Some(block.header.number));
             }
             current_tx_number += block.body.transactions.len() as TxNumber;
         }
@@ -617,14 +642,30 @@ impl StateRootProvider for MockEthProvider {
     fn state_root_with_updates(
         &self,
         _state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
-        Ok((state_root, Default::default()))
+        Ok((state_root, Default::default(), Default::default()))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         _input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok((state_root, Default::default(), Default::default()))
+    }
+
+    fn state_root_with_progress(
+        &self,
+        _state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress> {
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok(StateRootProgress::Complete(state_root, 0, Default::default()))
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))

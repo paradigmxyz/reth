@@ -22,15 +22,14 @@ use reth_primitives::{
     TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
-    ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HashedPostStateProvider,
+    ProviderError, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
-use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -49,7 +48,8 @@ pub trait LoadPendingBlock: EthApiTypes {
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
            + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-           + StateProviderFactory;
+           + StateProviderFactory
+           + HashedPostStateProvider;
 
     /// Returns a handle for reading data from transaction pool.
     ///
@@ -138,7 +138,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                         .receipts_by_block(block.hash().into())
                         .map_err(Self::Error::from_eth_err)?
                     {
-                        return Ok(Some((block, receipts)))
+                        return Ok(Some((block, receipts)));
                     }
                 }
             }
@@ -155,7 +155,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())))
+                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
                 }
             }
 
@@ -170,7 +170,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
+                    return Ok(None);
                 }
             };
 
@@ -291,7 +291,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             if pool_tx.origin.is_private() {
@@ -299,7 +299,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // convert tx to a signed transaction
@@ -315,7 +315,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue
+                    continue;
                 }
             }
 
@@ -340,11 +340,11 @@ pub trait LoadPendingBlock: EthApiTypes {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(Self::Error::from_evm_err(err))
+                            return Err(Self::Error::from_evm_err(err));
                         }
                     }
                 }
@@ -398,7 +398,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             block_number,
             Vec::new(),
         );
-        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let hashed_state = self.provider().execution_outcome_hashed_post_state(&execution_outcome);
 
         let receipts_root = self.receipts_root(&block_env, &execution_outcome, block_number);
 

@@ -2,11 +2,9 @@ use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use alloy_primitives::B256;
 use reth_errors::ProviderError;
 use reth_primitives::GotExpected;
-use reth_storage_api::{BlockReader, DBProvider};
+use reth_storage_api::{BlockReader, HashedPostStateProvider};
 use reth_storage_errors::provider::ProviderResult;
-
 use reth_trie::HashedPostState;
-use reth_trie_db::DatabaseHashedPostState;
 
 pub use reth_storage_errors::provider::ConsistentViewError;
 
@@ -33,7 +31,7 @@ pub struct ConsistentDbView<Factory> {
 
 impl<Factory> ConsistentDbView<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>,
+    Factory: DatabaseProviderFactory<Provider: BlockReader + HashedPostStateProvider>,
 {
     /// Creates new consistent database view.
     pub const fn new(factory: Factory, tip: Option<B256>) -> Self {
@@ -54,12 +52,12 @@ where
         let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == provider.best_block_number()? &&
-            block_number == provider.last_block_number()?
+        if block_number == provider.best_block_number()?
+            && block_number == provider.last_block_number()?
         {
             Ok(HashedPostState::default())
         } else {
-            Ok(HashedPostState::from_reverts(provider.tx_ref(), block_number + 1)?)
+            provider.hashed_post_state_from_reverts(block_number + 1)
         }
     }
 
@@ -79,7 +77,7 @@ where
             return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
             }
-            .into())
+            .into());
         }
 
         // Check that the best block number is the same as the latest stored header.
@@ -90,7 +88,7 @@ where
             return Err(ConsistentViewError::Syncing {
                 best_block: GotExpected { got: best_block_number, expected: last_num },
             }
-            .into())
+            .into());
         }
 
         Ok(provider_ro)

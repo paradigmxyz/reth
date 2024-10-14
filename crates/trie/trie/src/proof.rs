@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -7,14 +9,13 @@ use crate::{
     HashBuilder, Nibbles,
 };
 use alloy_primitives::{
-    keccak256,
     map::{HashMap, HashSet},
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
+    proof::ProofRetainer, AccountProof, KeyHasher, MultiProof, StorageMultiProof, TrieAccount,
 };
 
 /// A struct for generating merkle proofs.
@@ -23,40 +24,45 @@ use reth_trie_common::{
 /// on the hash builder and follows the same algorithm as the state root calculator.
 /// See `StateRoot::root` for more info.
 #[derive(Debug)]
-pub struct Proof<T, H> {
+pub struct Proof<T, H, KH> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
+    /// The key hasher.
+    _key_hasher: PhantomData<KH>,
 }
 
-impl<T, H> Proof<T, H> {
+impl<T, H, KH> Proof<T, H, KH> {
     /// Create a new [`Proof`] instance.
     pub fn new(t: T, h: H) -> Self {
         Self {
             trie_cursor_factory: t,
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
+            _key_hasher: PhantomData,
         }
     }
 
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H, KH> {
         Proof {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            _key_hasher: self._key_hasher,
         }
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF, KH> {
         Proof {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            _key_hasher: self._key_hasher,
         }
     }
 
@@ -67,10 +73,11 @@ impl<T, H> Proof<T, H> {
     }
 }
 
-impl<T, H> Proof<T, H>
+impl<T, H, KH> Proof<T, H, KH>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
+    KH: KeyHasher,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn account_proof(
@@ -80,8 +87,8 @@ where
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
             .multiproof(HashMap::from_iter([(
-                keccak256(address),
-                slots.iter().map(keccak256).collect(),
+                KH::hash_key(address),
+                slots.iter().map(KH::hash_key).collect(),
             )]))?
             .account_proof(address, slots)?)
     }
@@ -118,7 +125,7 @@ where
                         .remove(&hashed_address)
                         .unwrap_or_default();
                     let proof_targets = targets.remove(&hashed_address).unwrap_or_default();
-                    let storage_multiproof = StorageProof::new_hashed(
+                    let storage_multiproof = StorageProof::<T, H, KH>::new_hashed(
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
@@ -143,7 +150,7 @@ where
 
 /// Generates storage merkle proofs.
 #[derive(Debug)]
-pub struct StorageProof<T, H> {
+pub struct StorageProof<T, H, KH> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -152,12 +159,14 @@ pub struct StorageProof<T, H> {
     hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     prefix_set: PrefixSetMut,
+    /// The key hasher.
+    _key_hasher: PhantomData<KH>,
 }
 
-impl<T, H> StorageProof<T, H> {
+impl<T, H, KH: KeyHasher> StorageProof<T, H, KH> {
     /// Create a new [`StorageProof`] instance.
     pub fn new(t: T, h: H, address: Address) -> Self {
-        Self::new_hashed(t, h, keccak256(address))
+        Self::new_hashed(t, h, KH::hash_key(address))
     }
 
     /// Create a new [`StorageProof`] instance with hashed address.
@@ -167,6 +176,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_cursor_factory: h,
             hashed_address,
             prefix_set: PrefixSetMut::default(),
+            _key_hasher: PhantomData,
         }
     }
 
@@ -177,10 +187,11 @@ impl<T, H> StorageProof<T, H> {
     }
 }
 
-impl<T, H> StorageProof<T, H>
+impl<T, H, KH> StorageProof<T, H, KH>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
+    KH: KeyHasher,
 {
     /// Generate storage proof.
     pub fn storage_proof(
@@ -192,7 +203,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok(StorageMultiProof::empty())
+            return Ok(StorageMultiProof::empty());
         }
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();

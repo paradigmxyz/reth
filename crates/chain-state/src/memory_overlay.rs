@@ -7,11 +7,12 @@ use alloy_primitives::{
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateProviderBox, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, MultiProof, StateRootProgress, TrieInput,
 };
 use std::sync::OnceLock;
 
@@ -61,7 +62,7 @@ impl BlockHashReader for MemoryOverlayStateProvider {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in &self.in_memory {
             if block.block.number == number {
-                return Ok(Some(block.block.hash()))
+                return Ok(Some(block.block.hash()));
             }
         }
 
@@ -94,7 +95,7 @@ impl AccountReader for MemoryOverlayStateProvider {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         for block in &self.in_memory {
             if let Some(account) = block.execution_output.account(&address) {
-                return Ok(account)
+                return Ok(account);
             }
         }
 
@@ -116,17 +117,33 @@ impl StateRootProvider for MemoryOverlayStateProvider {
     fn state_root_with_updates(
         &self,
         state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         mut input: TrieInput,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.state_root_from_nodes_with_updates(input)
+    }
+
+    fn state_root_with_progress(
+        &self,
+        _state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress> {
+        unimplemented!("state_root_with_progress not implemented for MemoryOverlayStateProvider")
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        _range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        unimplemented!(
+            "incremental_root_with_updates not implemented for MemoryOverlayStateProvider"
+        )
     }
 }
 
@@ -173,6 +190,29 @@ impl StateProofProvider for MemoryOverlayStateProvider {
     }
 }
 
+impl HashedPostStateProvider for MemoryOverlayStateProvider {
+    fn bundle_state_hashed_post_state(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+    ) -> HashedPostState {
+        self.historical.bundle_state_hashed_post_state(bundle_state)
+    }
+
+    fn execution_outcome_hashed_post_state(
+        &self,
+        execution_outcome: &reth_execution_types::ExecutionOutcome,
+    ) -> HashedPostState {
+        self.historical.execution_outcome_hashed_post_state(execution_outcome)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        self.historical.hashed_post_state_from_reverts(block_number)
+    }
+}
+
 impl StateProvider for MemoryOverlayStateProvider {
     fn storage(
         &self,
@@ -181,7 +221,7 @@ impl StateProvider for MemoryOverlayStateProvider {
     ) -> ProviderResult<Option<StorageValue>> {
         for block in &self.in_memory {
             if let Some(value) = block.execution_output.storage(&address, storage_key.into()) {
-                return Ok(Some(value))
+                return Ok(Some(value));
             }
         }
 
@@ -191,7 +231,7 @@ impl StateProvider for MemoryOverlayStateProvider {
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
             if let Some(contract) = block.execution_output.bytecode(&code_hash) {
-                return Ok(Some(contract))
+                return Ok(Some(contract));
             }
         }
 

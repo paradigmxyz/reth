@@ -4,7 +4,7 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::TrieWitnessError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    witness::TrieWitness, HashedPostState, TrieInput,
+    witness::TrieWitness, HashedPostState, KeyHasher, TrieInput,
 };
 
 /// Extends [`TrieWitness`] with operations specific for working with a database transaction.
@@ -20,8 +20,8 @@ pub trait DatabaseTrieWitness<'a, TX> {
     ) -> Result<HashMap<B256, Bytes>, TrieWitnessError>;
 }
 
-impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
-    for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+impl<'a, TX: DbTx, KH: KeyHasher> DatabaseTrieWitness<'a, TX>
+    for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, KH>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))

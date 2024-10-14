@@ -69,6 +69,8 @@ where
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
     type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
+
+    type State = <N::Types as NodeTypes>::State;
 }
 
 impl<N, C, AO> NodeTypesWithEngine for AnyNode<N, C, AO>

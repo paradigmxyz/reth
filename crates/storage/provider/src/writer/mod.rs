@@ -99,7 +99,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     #[allow(unused)]
     const fn ensure_static_file(&self) -> Result<(), UnifiedStorageWriterError> {
         if self.static_file.is_none() {
-            return Err(UnifiedStorageWriterError::MissingStaticFileWriter)
+            return Err(UnifiedStorageWriterError::MissingStaticFileWriter);
         }
         Ok(())
     }
@@ -163,7 +163,7 @@ where
     pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "provider::storage_writer", "Attempted to write empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         // NOTE: checked non-empty above
@@ -555,7 +555,7 @@ mod tests {
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, StateRoot, StorageRoot,
+        HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot, StorageRoot,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm::{
@@ -1432,14 +1432,15 @@ mod tests {
             }
         }
 
-        let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
+        let (_, updates) =
+            StateRoot::<_, _, KeccakKeyHasher>::from_tx(tx).root_with_updates().unwrap();
         provider_rw.write_trie_updates(&updates).unwrap();
 
         let mut state = State::builder().with_bundle_update().build();
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                StateRoot::overlay_root(
+                StateRoot::<_, _, KeccakKeyHasher>::overlay_root(
                     tx,
                     ExecutionOutcome::new(
                         state.bundle_state.clone(),
@@ -1447,7 +1448,7 @@ mod tests {
                         0,
                         Vec::new()
                     )
-                    .hash_state_slow(),
+                    .hash_state_slow::<KeccakKeyHasher>(),
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
@@ -1637,7 +1638,9 @@ mod tests {
 
         // calculate database storage root and write intermediate storage nodes.
         let (storage_root, _, storage_updates) =
-            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
+            StorageRoot::<_, _, KeccakKeyHasher>::from_tx_hashed(tx, hashed_address)
+                .calculate(true)
+                .unwrap();
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
@@ -1659,7 +1662,12 @@ mod tests {
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
         // re-calculate database storage root
-        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
+        let storage_root = StorageRoot::<_, _, KeccakKeyHasher>::overlay_root(
+            tx,
+            address,
+            updated_storage.clone(),
+        )
+        .unwrap();
         assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }

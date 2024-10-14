@@ -27,8 +27,10 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::StorageChangeSetReader;
+use reth_storage_api::{HashedPostStateProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::HashedPostState;
+use reth_trie_db::DatabaseState;
 use revm::{
     db::states::PlainStorageRevert,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -136,7 +138,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<ExecutionOutcome>> {
         if range.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
         let start_block_number = *range.start();
         let end_block_number = *range.end();
@@ -153,10 +155,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // get transaction receipts
         let Some(from_transaction_num) = block_bodies.first().map(|body| body.1.first_tx_num())
         else {
-            return Ok(None)
+            return Ok(None);
         };
         let Some(to_transaction_num) = block_bodies.last().map(|body| body.1.last_tx_num()) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         let mut account_changeset = Vec::new();
@@ -287,7 +289,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N::ChainSpec, N::State>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
@@ -314,7 +316,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         });
 
         if start > end {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
 
         // Split range into storage_range and in-memory range. If the in-memory range is not
@@ -362,7 +364,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             // The predicate was not met, if the number of items differs from the expected. So, we
             // return what we have.
             if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
-                return Ok(items)
+                return Ok(items);
             }
         }
 
@@ -372,7 +374,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 if let Some(item) = map_block_state_item(block, &mut predicate) {
                     items.push(item);
                 } else {
-                    break
+                    break;
                 }
             }
         }
@@ -403,7 +405,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<R>>
     where
         S: FnOnce(
-            DatabaseProviderRO<N::DB, N::ChainSpec>,
+            DatabaseProviderRO<N::DB, N::ChainSpec, N::State>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, Arc<BlockState>) -> ProviderResult<Vec<R>>,
@@ -429,12 +431,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             in_mem_chain
                 .iter()
                 .map(|b| b.block_ref().block().body.transactions.len() as u64)
-                .sum::<u64>() +
-                last_block_body_index.last_tx_num()
+                .sum::<u64>()
+                + last_block_body_index.last_tx_num()
         });
 
         if start > end {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
 
         let mut tx_range = start..=end;
@@ -466,7 +468,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             // If the transaction range start is higher than this block last transaction, advance
             if *tx_range.start() > in_memory_tx_num + block_tx_count as u64 - 1 {
                 in_memory_tx_num += block_tx_count as u64;
-                continue
+                continue;
             }
 
             // This should only be more than 0 once, in case of a partial range inside a block.
@@ -481,7 +483,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
             // Break if the range has been fully processed
             if in_memory_tx_num > *tx_range.end() {
-                break
+                break;
             }
 
             // Set updated range
@@ -500,7 +502,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec, N::State>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, Arc<BlockState>) -> ProviderResult<Option<R>>,
     {
         // Order of instantiation matters. More information on:
@@ -526,7 +528,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         // database lookup
         if let HashOrNumber::Number(id) = id {
             if id < in_memory_tx_num {
-                return fetch_from_db(provider)
+                return fetch_from_db(provider);
             }
         }
 
@@ -539,12 +541,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
                 match id {
                     HashOrNumber::Hash(tx_hash) => {
                         if tx_hash == block.body.transactions[tx_index].hash() {
-                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
+                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state);
                         }
                     }
                     HashOrNumber::Number(id) => {
                         if id == in_memory_tx_num {
-                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
+                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state);
                         }
                     }
                 }
@@ -555,7 +557,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
         // Not found in-memory, so check database.
         if let HashOrNumber::Hash(_) = id {
-            return fetch_from_db(provider)
+            return fetch_from_db(provider);
         }
 
         Ok(None)
@@ -569,7 +571,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<R>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec, N::State>) -> ProviderResult<R>,
         M: Fn(Arc<BlockState>) -> ProviderResult<R>,
     {
         let block_state = match id {
@@ -582,7 +584,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         };
 
         if let Some(block_state) = block_state {
-            return fetch_from_block_state(block_state)
+            return fetch_from_block_state(block_state);
         }
         fetch_from_db(self.database_provider_ro()?)
     }
@@ -721,6 +723,31 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> HashedPostStateProvider for BlockchainProvider2<N> {
+    fn bundle_state_hashed_post_state(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_trie::HashedPostState {
+        HashedPostState::from_bundle_state::<<N::State as DatabaseState>::KeyHasher>(
+            &bundle_state.state,
+        )
+    }
+
+    fn execution_outcome_hashed_post_state(
+        &self,
+        execution_outcome: &ExecutionOutcome,
+    ) -> HashedPostState {
+        execution_outcome.hash_state_slow::<<N::State as DatabaseState>::KeyHasher>()
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        self.database.provider()?.hashed_post_state_from_reverts(block_number)
+    }
+}
+
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.get_in_memory_or_storage_by_block(
@@ -832,7 +859,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
                     .final_paris_total_difficulty(block_state.number())
                     .is_some()
                 {
-                    return Ok(Some(Vec::new()))
+                    return Ok(Some(Vec::new()));
                 }
 
                 Ok(Some(block_state.block_ref().block().body.ommers.clone()))
@@ -979,7 +1006,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         if let Some(tx) = self.canonical_in_memory_state.transaction_by_hash(hash) {
-            return Ok(Some(tx))
+            return Ok(Some(tx));
         }
 
         self.database.transaction_by_hash(hash)
@@ -992,7 +1019,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
         if let Some((tx, meta)) =
             self.canonical_in_memory_state.transaction_by_hash_with_meta(tx_hash)
         {
-            return Ok(Some((tx, meta)))
+            return Ok(Some((tx, meta)));
         }
 
         self.database.transaction_by_hash_with_meta(tx_hash)
@@ -1160,7 +1187,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
-            return Ok(None)
+            return Ok(None);
         }
 
         self.get_in_memory_or_storage_by_block(
@@ -1196,7 +1223,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
         if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
-            return Ok(None)
+            return Ok(None);
         }
 
         self.get_in_memory_or_storage_by_block(
@@ -1614,7 +1641,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider2<N> {
                 .unwrap_or(true);
 
             if !storage_history_exists {
-                return Err(ProviderError::StateAtBlockPruned(block_number))
+                return Err(ProviderError::StateAtBlockPruned(block_number));
             }
 
             provider.storage_changeset(block_number)
@@ -1657,7 +1684,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
                 .unwrap_or(true);
 
             if !account_history_exists {
-                return Err(ProviderError::StateAtBlockPruned(block_number))
+                return Err(ProviderError::StateAtBlockPruned(block_number));
             }
 
             provider.account_block_changeset(block_number)
@@ -4225,7 +4252,7 @@ mod tests {
              canonical_in_memory_state: CanonicalInMemoryState,
              _factory: ProviderFactory<MockNodeTypesWithDB>| {
                 if let Some(tx) = canonical_in_memory_state.transaction_by_hash(hash) {
-                    return Ok::<_, ProviderError>(Some(tx))
+                    return Ok::<_, ProviderError>(Some(tx));
                 }
                 panic!("should not be in database");
                 // _factory.transaction_by_hash(hash)
