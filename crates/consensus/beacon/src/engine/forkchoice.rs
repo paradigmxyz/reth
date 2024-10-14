@@ -150,15 +150,18 @@ pub enum ForkchoiceStatus {
 }
 
 impl ForkchoiceStatus {
-    pub(crate) const fn is_valid(&self) -> bool {
+    /// Returns `true` if the forkchoice state is [`ForkchoiceStatus::Valid`].
+    pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid)
     }
 
-    pub(crate) const fn is_invalid(&self) -> bool {
+    /// Returns `true` if the forkchoice state is [`ForkchoiceStatus::Invalid`].
+    pub const fn is_invalid(&self) -> bool {
         matches!(self, Self::Invalid)
     }
 
-    pub(crate) const fn is_syncing(&self) -> bool {
+    /// Returns `true` if the forkchoice state is [`ForkchoiceStatus::Syncing`].
+    pub const fn is_syncing(&self) -> bool {
         matches!(self, Self::Syncing)
     }
 

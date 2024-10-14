@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.8"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.81"
 license = "MIT OR Apache-2.0"
@@ -123,6 +123,7 @@ members = [
     "crates/trie/common",
     "crates/trie/db",
     "crates/trie/parallel/",
+    "crates/trie/sparse",
     "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
@@ -183,6 +184,7 @@ equatable_if_let = "warn"
 explicit_into_iter_loop = "warn"
 explicit_iter_loop = "warn"
 flat_map_option = "warn"
+from_iter_instead_of_collect = "warn"
 if_not_else = "warn"
 implicit_clone = "warn"
 imprecise_flops = "warn"
@@ -460,10 +462,10 @@ alloy-transport-ipc = { version = "0.4.2", default-features = false }
 alloy-transport-ws = { version = "0.4.2", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.3.2"
-op-alloy-rpc-types-engine = "0.3.2"
-op-alloy-network = "0.3.2"
-op-alloy-consensus = "0.3.2"
+op-alloy-rpc-types = "0.4"
+op-alloy-rpc-types-engine = "0.4"
+op-alloy-network = "0.4"
+op-alloy-consensus = "0.4"
 
 # misc
 aquamarine = "0.5"

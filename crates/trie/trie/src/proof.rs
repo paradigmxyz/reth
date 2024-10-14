@@ -100,7 +100,7 @@ where
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = ProofRetainer::from_iter(targets.keys().map(Nibbles::unpack));
+        let retainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut storages = HashMap::default();
