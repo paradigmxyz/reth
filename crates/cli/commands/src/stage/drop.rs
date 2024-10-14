@@ -174,6 +174,7 @@ fn reset_prune_checkpoint(
 
     Ok(())
 }
+
 fn reset_stage_checkpoint(
     tx: &Tx<reth_db::mdbx::RW>,
     stage_id: StageId,
