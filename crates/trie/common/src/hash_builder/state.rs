@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "arbitrary",
     derive(arbitrary::Arbitrary),
