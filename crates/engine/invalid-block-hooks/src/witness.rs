@@ -84,7 +84,8 @@ where
             EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default()),
         );
 
-        let mut system_caller = SystemCaller::new(&self.evm_config, self.provider.chain_spec());
+        let mut system_caller =
+            SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
         system_caller.apply_pre_execution_changes(&block.clone().unseal(), &mut evm)?;
