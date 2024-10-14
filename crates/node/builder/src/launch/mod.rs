@@ -24,9 +24,7 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB, NodeTypesWithEngine,
-};
+use reth_node_api::{FullNodeTypes, NodeAddOns, NodeCore, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -51,14 +49,14 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`NodeCore`].
 pub type EthApiBuilderCtx<N, Eth> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    <N as FullNodeComponents>::Network,
+    <N as NodeCore>::Provider,
+    <N as NodeCore>::Pool,
+    <N as NodeCore>::Evm,
+    <N as NodeCore>::Network,
     TaskExecutor,
-    <N as FullNodeTypes>::Provider,
+    <N as NodeCore>::Provider,
     Eth,
 >;
 
