@@ -424,7 +424,7 @@ alloy-dyn-abi = "0.8.0"
 alloy-primitives = { version = "0.8.4", default-features = false }
 alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
-alloy-trie = { version = "0.6", default-features = false }
+alloy-trie = { version = "0.7", default-features = false }
 
 alloy-consensus = { version = "0.4.0", default-features = false }
 alloy-eips = { version = "0.4.0", default-features = false }
@@ -591,7 +591,6 @@ tikv-jemallocator = "0.6"
 tracy-client = "0.17.3"
 
 [patch.crates-io]
-alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "dani/fix-arbitrary-hashbuilder" }
 #alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
