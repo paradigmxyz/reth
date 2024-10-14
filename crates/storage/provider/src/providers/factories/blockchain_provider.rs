@@ -1,20 +1,20 @@
 #![allow(unused)]
 use crate::{
-    providers::{BlockchainProvider2, StaticFileProvider},
+    providers::{BlockchainProvider2, BlockchainProvider3, StaticFileProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
+    DatabaseProviderFactory, EvmEnvProvider, FullProvider, HeaderProvider, ProviderError,
+    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db::models::BlockNumberAddress;
+use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
@@ -26,7 +26,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::StorageChangeSetReader;
+use reth_storage_api::{DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -47,10 +47,10 @@ use crate::providers::ProviderNodeTypes;
 #[derive(Debug)]
 pub struct BlockchainProviderFactory<N: NodeTypesWithDB> {
     /// Provider factory used to access the database.
-    database: ProviderFactory<N>,
+    pub(crate) database: ProviderFactory<N>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
-    pub(super) canonical_in_memory_state: CanonicalInMemoryState,
+    pub(crate) canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProviderFactory<N> {
@@ -118,10 +118,15 @@ impl<N: ProviderNodeTypes> BlockchainProviderFactory<N> {
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     #[track_caller]
-    pub fn provider(&self) -> ProviderResult<BlockchainProvider2<N>> {
+    pub fn provider2(&self) -> ProviderResult<BlockchainProvider2<N>> {
         let mut provider = BlockchainProvider2::new(self.database.clone())?;
         provider.canonical_in_memory_state = self.canonical_in_memory_state();
         Ok(provider)
+    }
+
+    #[track_caller]
+    pub(crate) fn provider(&self) -> ProviderResult<BlockchainProvider3<N>> {
+        BlockchainProvider3::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].

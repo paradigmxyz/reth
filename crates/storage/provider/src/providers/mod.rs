@@ -61,6 +61,9 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
 
+mod blockchain_provider3;
+pub use blockchain_provider3::BlockchainProvider3;
+
 mod factories;
 pub use factories::BlockchainProviderFactory;
 
