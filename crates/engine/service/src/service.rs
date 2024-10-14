@@ -31,7 +31,7 @@ use std::{
 };
 
 /// Alias for consensus engine stream.
-type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
+pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
 
 /// Alias for chain orchestrator.
 type EngineServiceType<N, Client> = ChainOrchestrator<

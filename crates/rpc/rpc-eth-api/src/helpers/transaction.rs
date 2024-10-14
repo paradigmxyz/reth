@@ -18,6 +18,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use std::sync::Arc;
 
 use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
 
@@ -79,7 +80,11 @@ pub trait EthTransactions: LoadTransaction {
         block: B256,
     ) -> impl Future<Output = Result<Option<Vec<TransactionSigned>>, Self::Error>> + Send {
         async move {
-            self.cache().get_block_transactions(block).await.map_err(Self::Error::from_eth_err)
+            self.cache()
+                .get_sealed_block_with_senders(block)
+                .await
+                .map(|b| b.map(|b| b.body.transactions.clone()))
+                .map_err(Self::Error::from_eth_err)
         }
     }
 
@@ -194,7 +199,7 @@ pub trait EthTransactions: LoadTransaction {
                 let block_hash = block.hash();
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
-                if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
+                if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
                         block_hash: Some(block_hash),
@@ -204,7 +209,8 @@ pub trait EthTransactions: LoadTransaction {
                     };
 
                     return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
-                        tx, tx_info,
+                        tx.clone().with_signer(*signer),
+                        tx_info,
                     )))
                 }
             }
@@ -270,10 +276,10 @@ pub trait EthTransactions: LoadTransaction {
                     let base_fee_per_gas = block.base_fee_per_gas;
 
                     block
-                        .into_transactions_ecrecovered()
+                        .transactions_with_sender()
                         .enumerate()
-                        .find(|(_, tx)| tx.signer() == sender && tx.nonce() == nonce)
-                        .map(|(index, tx)| {
+                        .find(|(_, (signer, tx))| **signer == sender && tx.nonce() == nonce)
+                        .map(|(index, (signer, tx))| {
                             let tx_info = TransactionInfo {
                                 hash: Some(tx.hash()),
                                 block_hash: Some(block_hash),
@@ -282,7 +288,8 @@ pub trait EthTransactions: LoadTransaction {
                                 index: Some(index as u64),
                             };
                             from_recovered_with_block_context::<Self::TransactionCompat>(
-                                tx, tx_info,
+                                tx.clone().with_signer(*signer),
+                                tx_info,
                             )
                         })
                 })
@@ -544,8 +551,9 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
     fn transaction_and_block(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<(TransactionSource, SealedBlockWithSenders)>, Self::Error>>
-           + Send {
+    ) -> impl Future<
+        Output = Result<Option<(TransactionSource, Arc<SealedBlockWithSenders>)>, Self::Error>,
+    > + Send {
         async move {
             let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
                 None => return Ok(None),
@@ -559,10 +567,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
             };
             let block = self
                 .cache()
-                .get_block_with_senders(block_hash)
+                .get_sealed_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
-            Ok(block.map(|block| (transaction, (*block).clone().seal(block_hash))))
+            Ok(block.map(|block| (transaction, block)))
         }
     }
 }

@@ -119,7 +119,7 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            Call::evm_config(this.eth_api()).tx_env(&tx),
+                            Call::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -219,7 +219,7 @@ where
 
         self.trace_block(
             state_at.into(),
-            block.into_transactions_ecrecovered().collect(),
+            (*block).clone().into_transactions_ecrecovered().collect(),
             cfg,
             block_env,
             opts,
@@ -245,11 +245,12 @@ where
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
         let block_hash = block.hash();
-        let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |state| {
+                let block_txs = block.transactions_with_sender();
+
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
@@ -267,7 +268,7 @@ where
                     env: Env::boxed(
                         cfg.cfg_env.clone(),
                         block_env,
-                        Call::evm_config(this.eth_api()).tx_env(&tx),
+                        Call::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
                     ),
                     handler_cfg: cfg.handler_cfg,
                 };
@@ -527,15 +528,15 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    let transactions = block.into_transactions_ecrecovered().take(num_txs);
+                    let transactions = block.transactions_with_sender().take(num_txs);
 
                     // Execute all transactions until index
-                    for tx in transactions {
+                    for (signer, tx) in transactions {
                         let env = EnvWithHandlerCfg {
                             env: Env::boxed(
                                 cfg.cfg_env.clone(),
                                 block_env.clone(),
-                                Call::evm_config(this.eth_api()).tx_env(&tx),
+                                Call::evm_config(this.eth_api()).tx_env(tx, *signer),
                             ),
                             handler_cfg: cfg.handler_cfg,
                         };
@@ -613,7 +614,7 @@ where
 
                 let _ = block_executor
                     .execute_with_state_closure(
-                        (&block.clone().unseal(), block.difficulty).into(),
+                        (&(*block).clone().unseal(), block.difficulty).into(),
                         |statedb: &State<_>| {
                             codes = statedb
                                 .cache
