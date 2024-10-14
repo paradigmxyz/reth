@@ -9,6 +9,7 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::BlockchainTreeConfig;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
+use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder, MiningMode};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -18,7 +19,10 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypesWithEngine};
+use reth_node_api::{
+    BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypesWithEngine, PayloadAttributesBuilder,
+    PayloadTypes,
+};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -79,6 +83,9 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer
                     + AddDevSigners,
+    >,
+    LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
+        <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
@@ -210,23 +217,49 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
-        // Configure the consensus engine
-        let mut eth_service = EngineService::new(
-            ctx.consensus(),
-            ctx.components().block_executor().clone(),
-            ctx.chain_spec(),
-            network_client.clone(),
-            Box::pin(consensus_engine_stream),
-            pipeline,
-            Box::new(ctx.task_executor().clone()),
-            ctx.provider_factory().clone(),
-            ctx.blockchain_db().clone(),
-            pruner,
-            ctx.components().payload_builder().clone(),
-            engine_tree_config,
-            ctx.invalid_block_hook()?,
-            ctx.sync_metrics_tx(),
-        );
+        let mut engine_service = if ctx.is_dev() {
+            let mining_mode = if let Some(block_time) = ctx.node_config().dev.block_time {
+                MiningMode::interval(block_time)
+            } else {
+                MiningMode::instant(ctx.components().pool().clone())
+            };
+            let eth_service = LocalEngineService::new(
+                ctx.consensus(),
+                ctx.components().block_executor().clone(),
+                ctx.provider_factory().clone(),
+                ctx.blockchain_db().clone(),
+                pruner,
+                ctx.components().payload_builder().clone(),
+                engine_tree_config,
+                ctx.invalid_block_hook()?,
+                ctx.sync_metrics_tx(),
+                consensus_engine_tx.clone(),
+                Box::pin(consensus_engine_stream),
+                mining_mode,
+                LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
+            );
+
+            Either::Left(eth_service)
+        } else {
+            let eth_service = EngineService::new(
+                ctx.consensus(),
+                ctx.components().block_executor().clone(),
+                ctx.chain_spec(),
+                network_client.clone(),
+                Box::pin(consensus_engine_stream),
+                pipeline,
+                Box::new(ctx.task_executor().clone()),
+                ctx.provider_factory().clone(),
+                ctx.blockchain_db().clone(),
+                pruner,
+                ctx.components().payload_builder().clone(),
+                engine_tree_config,
+                ctx.invalid_block_hook()?,
+                ctx.sync_metrics_tx(),
+            );
+
+            Either::Right(eth_service)
+        };
 
         let event_sender = EventSender::default();
 
@@ -340,7 +373,9 @@ where
         ctx.task_executor().spawn_critical("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                eth_service.orchestrator_mut().start_backfill_sync(initial_target);
+                if let Either::Right(eth_service) = &mut engine_service {
+                    eth_service.orchestrator_mut().start_backfill_sync(initial_target);
+                }
             }
 
             let mut res = Ok(());
@@ -351,10 +386,12 @@ where
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
                             debug!(target: "reth::cli", block=?executed_block.block().num_hash(),  "inserting built payload");
-                            eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
+                            if let Either::Right(eth_service) = &mut engine_service {
+                                eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
+                            }
                         }
                     }
-                    event =  eth_service.next() => {
+                    event = engine_service.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");
                         match event {
