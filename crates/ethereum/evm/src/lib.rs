@@ -134,17 +134,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
         let spec_id = revm_spec_by_timestamp_after_merge(&self.chain_spec, attributes.timestamp);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
+        // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
             .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id == SpecId::CANCUN {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
+            .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
             .map(BlobExcessGasAndPrice::new);
 
         let mut basefee = parent.next_block_base_fee(
