@@ -73,6 +73,7 @@ use sync::{EngineSyncController, EngineSyncEvent};
 /// [consensus engine][`crate::engine::BeaconConsensusEngine`].
 pub mod hooks;
 use hooks::{EngineHookContext, EngineHookEvent, EngineHooks, EngineHooksController, PolledHook};
+use reth_chainspec::EthChainSpec;
 
 #[cfg(test)]
 pub mod test_utils;
@@ -462,8 +463,7 @@ where
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
-        {
+        if self.blockchain.chain_spec().is_optimism() {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,

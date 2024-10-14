@@ -32,6 +32,7 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
+use reth_optimism_forks::OptimismHardforks;
 use reth_primitives_traits::Header;
 use std::fmt::Display;
 
@@ -261,6 +262,8 @@ impl EthereumHardforks for OpChainSpec {
         self.inner.final_paris_total_difficulty(block_number)
     }
 }
+
+impl OptimismHardforks for OpChainSpec {}
 
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {

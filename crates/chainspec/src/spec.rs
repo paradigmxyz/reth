@@ -239,21 +239,6 @@ impl ChainSpec {
         self.chain.is_ethereum()
     }
 
-    /// Returns `true` if this chain contains Optimism configuration.
-    #[inline]
-    #[cfg(feature = "optimism")]
-    pub fn is_optimism(&self) -> bool {
-        self.chain.is_optimism() ||
-            self.hardforks.get(reth_optimism_forks::OptimismHardfork::Bedrock).is_some()
-    }
-
-    /// Returns `true` if this chain contains Optimism configuration.
-    #[inline]
-    #[cfg(not(feature = "optimism"))]
-    pub const fn is_optimism(&self) -> bool {
-        self.chain.is_optimism()
-    }
-
     /// Returns `true` if this chain is Optimism mainnet.
     #[inline]
     pub fn is_optimism_mainnet(&self) -> bool {
@@ -705,9 +690,6 @@ impl EthereumHardforks for ChainSpec {
         self.final_paris_total_difficulty(block_number)
     }
 }
-
-#[cfg(feature = "optimism")]
-impl reth_optimism_forks::OptimismHardforks for ChainSpec {}
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
