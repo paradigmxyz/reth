@@ -297,11 +297,8 @@ impl ChainSpec {
             };
 
         // If Prague is activated at genesis we set requests root to an empty trie root.
-        let requests_root = if self.is_prague_active_at_timestamp(self.genesis.timestamp) {
-            Some(EMPTY_ROOT_HASH)
-        } else {
-            None
-        };
+        let requests_root =
+            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(EMPTY_ROOT_HASH);
 
         Header {
             gas_limit: self.genesis.gas_limit,
