@@ -15,7 +15,6 @@ use reth_provider::{
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
-    ops::Deref,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
