@@ -124,6 +124,7 @@ members = [
     "crates/trie/db",
     "crates/trie/parallel/",
     "crates/trie/trie",
+    "crates/trie/sparse",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
