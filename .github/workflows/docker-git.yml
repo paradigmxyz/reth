@@ -1,11 +1,11 @@
-# Publishes the Docker image.
+# Publishes the Docker image, only to be used with `workflow_dispatch`. The
+# images from this workflow will be tagged with the git sha of the branch used
+# and will NOT tag it as `latest`.
 
-name: docker
+name: docker-git
 
 on:
-  push:
-    tags:
-      - v*
+  workflow_dispatch: {}
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -15,6 +15,7 @@ env:
   DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
   OP_DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/op-reth
   DOCKER_USERNAME: ${{ github.actor }}
+  GIT_SHA: ${{ github.sha }}
 
 jobs:
   build:
@@ -37,11 +38,7 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
-      - name: Build and push reth image, tag as "latest"
-        run: make PROFILE=maxperf docker-build-push-latest
-      - name: Build and push reth image
-        run: make PROFILE=maxperf docker-build-push
-      - name: Build and push op-reth image, tag as "latest"
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-latest
-      - name: Build and push op-reth image
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push
+      - name: Build and push the git-sha-tagged reth image
+        run: make PROFILE=maxperf GIT_SHA=$GIT_SHA docker-build-push-git-sha
+      - name: Build and push the git-sha-tagged op-reth image
+        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME GIT_SHA=$GIT_SHA PROFILE=maxperf op-docker-build-push-git-sha
