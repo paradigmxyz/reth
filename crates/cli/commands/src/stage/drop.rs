@@ -69,7 +69,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::Headers>()?;
                 tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
-                reset_prune_checkpoint(tx, PruneSegment::Headers)?;
+                reset_stage_checkpoint(tx, PruneSegment::Headers)?;
 
                 insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
