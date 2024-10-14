@@ -52,8 +52,8 @@ where
         let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == provider.best_block_number()?
-            && block_number == provider.last_block_number()?
+        if block_number == provider.best_block_number()? &&
+            block_number == provider.last_block_number()?
         {
             Ok(HashedPostState::default())
         } else {

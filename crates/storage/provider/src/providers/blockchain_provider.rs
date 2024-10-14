@@ -431,8 +431,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             in_mem_chain
                 .iter()
                 .map(|b| b.block_ref().block().body.transactions.len() as u64)
-                .sum::<u64>()
-                + last_block_body_index.last_tx_num()
+                .sum::<u64>() +
+                last_block_body_index.last_tx_num()
         });
 
         if start > end {

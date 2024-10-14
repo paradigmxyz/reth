@@ -473,8 +473,8 @@ where
 
         accounts.push((address, account));
 
-        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0)
-            || index == accounts_len - 1
+        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
+            index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
 

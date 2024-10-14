@@ -210,7 +210,7 @@ impl<TX: DbTx, Spec: Send + Sync, DS: DatabaseState> HashedPostStateProvider
         block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         HashedPostState::from_reverts::<DS::KeyHasher>(self.tx_ref(), block_number)
-            .map_err(|err| ProviderError::Database(err.into()))
+            .map_err(ProviderError::Database)
     }
 }
 
@@ -232,8 +232,8 @@ impl<TX: DbTx + 'static, Spec: Send + Sync, DS: DatabaseState> TryIntoHistorical
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        if block_number == self.best_block_number().unwrap_or_default()
-            && block_number == self.last_block_number().unwrap_or_default()
+        if block_number == self.best_block_number().unwrap_or_default() &&
+            block_number == self.last_block_number().unwrap_or_default()
         {
             return Ok(Box::new(LatestStateProvider::<TX, DS>::new(
                 self.tx,
@@ -3084,7 +3084,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync, DS: DatabaseState> HashingWriter
             // are pre-loaded.
             let prefix_sets = TriePrefixSetsMut {
                 account_prefix_set,
-                storage_prefix_sets: storage_prefix_sets.into_iter().map(|(k, v)| (k, v)).collect(),
+                storage_prefix_sets: storage_prefix_sets.into_iter().collect(),
                 destroyed_accounts,
             };
             let trie_input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
@@ -3178,8 +3178,8 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync, DS: Send + Sync> HistoryWriter
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
                 |storage_sharded_key| {
-                    storage_sharded_key.address == address
-                        && storage_sharded_key.sharded_key.key == storage_key
+                    storage_sharded_key.address == address &&
+                        storage_sharded_key.sharded_key.key == storage_key
                 },
             )?;
 

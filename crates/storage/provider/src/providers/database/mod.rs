@@ -190,7 +190,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 
     /// Returns a bundle state provider for the given state provider and execution data provider.
-    pub fn bundle_state_provider<SP: StateProvider, EDP: ExecutionDataProvider>(
+    pub const fn bundle_state_provider<SP: StateProvider, EDP: ExecutionDataProvider>(
         state_provider: SP,
         block_execution_data_provider: EDP,
     ) -> BundleStateProvider<SP, EDP, N::State> {

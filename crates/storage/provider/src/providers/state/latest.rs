@@ -106,7 +106,7 @@ impl<TX: DbTx, DS: DatabaseState> HashedPostStateProvider for LatestStateProvide
         block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         HashedPostState::from_reverts::<DS::KeyHasher>(self.tx, block_number)
-            .map_err(|err| ProviderError::Database(err.into()))
+            .map_err(ProviderError::Database)
     }
 }
 

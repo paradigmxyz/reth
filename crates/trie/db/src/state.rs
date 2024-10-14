@@ -244,7 +244,7 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
     }
 
     fn root(self) -> Result<B256, StateRootError> {
-        StateRoot::<_, _, _>::root(self)
+        Self::root(self)
     }
 }
 

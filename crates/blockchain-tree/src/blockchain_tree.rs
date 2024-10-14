@@ -1307,8 +1307,8 @@ where
             .provider_factory
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default()
-            > revert_until
+            .unwrap_or_default() >
+            revert_until
         {
             trace!(
                 target: "blockchain_tree",
@@ -1606,8 +1606,8 @@ mod tests {
                     signer,
                     (
                         AccountInfo {
-                            balance: initial_signer_balance
-                                - (single_tx_cost * U256::from(num_of_signer_txs)),
+                            balance: initial_signer_balance -
+                                (single_tx_cost * U256::from(num_of_signer_txs)),
                             nonce: num_of_signer_txs,
                             ..Default::default()
                         },
