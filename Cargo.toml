@@ -123,6 +123,7 @@ members = [
     "crates/trie/common",
     "crates/trie/db",
     "crates/trie/parallel/",
+    "crates/trie/sparse",
     "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
