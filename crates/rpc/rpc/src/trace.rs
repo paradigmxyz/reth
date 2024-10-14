@@ -325,7 +325,9 @@ where
         // apply after and count to traces if specified, this allows for a pagination style.
         // only consider traces after
         if let Some(after) = after.map(|a| a as usize).filter(|a| *a < all_traces.len()) {
-            all_traces = all_traces.split_off(after);
+            all_traces.drain(0..after);
+        } else {
+            return Ok(vec![])
         }
 
         // at most, return count of traces
