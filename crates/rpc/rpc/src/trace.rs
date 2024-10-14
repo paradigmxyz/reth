@@ -251,7 +251,8 @@ where
         &self,
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
-        let matcher = filter.matcher();
+        // We'll reuse the matcher across multiple blocks that are traced in parallel
+        let matcher = Arc::new(filter.matcher());
         let TraceFilter { from_block, to_block, after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
         let end = if let Some(to_block) = to_block {

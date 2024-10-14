@@ -13,6 +13,11 @@ use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
+/// Result type of the fetched block receipts.
+pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
+/// Result type of the fetched block and its receipts.
+pub type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, E>;
+
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
@@ -108,7 +113,7 @@ pub trait EthBlocks: LoadBlock {
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>> + Send
+    ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send
     where
         Self: LoadReceipt;
 
@@ -116,7 +121,7 @@ pub trait EthBlocks: LoadBlock {
     fn load_block_and_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, Self::Error>> + Send
+    ) -> impl Future<Output = BlockAndReceiptsResult<Self::Error>> + Send
     where
         Self: LoadReceipt,
     {

@@ -416,6 +416,8 @@ tables! {
 pub enum ChainStateKey {
     /// Last finalized block key
     LastFinalizedBlock,
+    /// Last finalized block key
+    LastSafeBlockBlock,
 }
 
 impl Encode for ChainStateKey {
@@ -424,16 +426,17 @@ impl Encode for ChainStateKey {
     fn encode(self) -> Self::Encoded {
         match self {
             Self::LastFinalizedBlock => [0],
+            Self::LastSafeBlockBlock => [1],
         }
     }
 }
 
 impl Decode for ChainStateKey {
     fn decode(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
-        if value == [0] {
-            Ok(Self::LastFinalizedBlock)
-        } else {
-            Err(reth_db_api::DatabaseError::Decode)
+        match value {
+            [0] => Ok(Self::LastFinalizedBlock),
+            [1] => Ok(Self::LastSafeBlockBlock),
+            _ => Err(reth_db_api::DatabaseError::Decode),
         }
     }
 }

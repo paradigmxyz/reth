@@ -132,9 +132,8 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// created and inserts them
     fn add_new_transactions(&mut self) {
         while let Some(pending_tx) = self.try_recv() {
-            let tx = pending_tx.transaction.clone();
             //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
-            let tx_id = *tx.id();
+            let tx_id = *pending_tx.transaction.id();
             if self.ancestor(&tx_id).is_none() {
                 self.independent.insert(pending_tx.clone());
             }

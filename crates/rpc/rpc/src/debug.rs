@@ -34,7 +34,7 @@ use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::CacheDB,
+    db::{CacheDB, State},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
 };
 use revm_inspectors::tracing::{
@@ -615,12 +615,23 @@ where
                 let _ = block_executor
                     .execute_with_state_closure(
                         (&(*block).clone().unseal(), block.difficulty).into(),
-                        |statedb| {
+                        |statedb: &State<_>| {
                             codes = statedb
                                 .cache
                                 .contracts
                                 .iter()
                                 .map(|(hash, code)| (*hash, code.original_bytes()))
+                                .chain(
+                                    // cache state does not have all the contracts, especially when
+                                    // a contract is created within the block
+                                    // the contract only exists in bundle state, therefore we need
+                                    // to include them as well
+                                    statedb
+                                        .bundle_state
+                                        .contracts
+                                        .iter()
+                                        .map(|(hash, code)| (*hash, code.original_bytes())),
+                                )
                                 .collect();
 
                             for (address, account) in &statedb.cache.accounts {
@@ -653,11 +664,7 @@ where
 
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
-                Ok(ExecutionWitness {
-                    state: HashMap::from_iter(state.into_iter()),
-                    codes,
-                    keys: Some(keys),
-                })
+                Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys: Some(keys) })
             })
             .await
     }

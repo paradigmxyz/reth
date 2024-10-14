@@ -454,20 +454,11 @@ impl FinalizedBlockTracker {
 
     /// Updates the tracked finalized block and returns the new finalized block if it changed
     fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
-        match (self.last_finalized_block, finalized_block) {
-            (Some(last), Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                if last < finalized {
-                    Some(finalized)
-                } else {
-                    None
-                }
-            }
-            (None, Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                Some(finalized)
-            }
-            _ => None,
+        let finalized = finalized_block?;
+        if self.last_finalized_block.replace(finalized).map_or(true, |last| last < finalized) {
+            Some(finalized)
+        } else {
+            None
         }
     }
 }
@@ -490,7 +481,7 @@ impl MaintainedPoolState {
     }
 }
 
-/// A unique `ChangedAccount` identified by its address that can be used for deduplication
+/// A unique [`ChangedAccount`] identified by its address that can be used for deduplication
 #[derive(Eq)]
 struct ChangedAccountEntry(ChangedAccount);
 

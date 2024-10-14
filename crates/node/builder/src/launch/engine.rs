@@ -334,6 +334,8 @@ where
             .fuse();
         let chainspec = ctx.chain_spec();
         let (exit, rx) = oneshot::channel();
+        let terminate_after_backfill = ctx.terminate_after_initial_backfill();
+
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", async move {
             if let Some(initial_target) = initial_target {
@@ -357,6 +359,11 @@ where
                         debug!(target: "reth::cli", "Event: {event}");
                         match event {
                             ChainEvent::BackfillSyncFinished => {
+                                if terminate_after_backfill {
+                                    debug!(target: "reth::cli", "Terminating after initial backfill");
+                                    break
+                                }
+
                                 network_handle.update_sync_state(SyncState::Idle);
                             }
                             ChainEvent::BackfillSyncStarted => {
