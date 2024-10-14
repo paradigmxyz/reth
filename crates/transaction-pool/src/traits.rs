@@ -3,7 +3,6 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolResult,
-    identifier::SenderId,
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
@@ -315,7 +314,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: Utility
     fn remove_transactions_by_sender(
         &self,
-        sender: SenderId,
+        sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.

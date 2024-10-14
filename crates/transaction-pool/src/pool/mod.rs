@@ -735,9 +735,10 @@ where
 
     pub(crate) fn remove_transactions_by_sender(
         &self,
-        sender: SenderId,
+        sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let removed = self.pool.write().remove_transactions_by_sender(sender);
+        let sender_id = self.get_sender_id(sender);
+        let removed = self.pool.write().remove_transactions_by_sender(sender_id);
 
         let mut listener = self.event_listener.write();
 

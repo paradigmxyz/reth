@@ -682,10 +682,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Removes all transactions from the given sender.
     pub(crate) fn remove_transactions_by_sender(
         &mut self,
-        sender: SenderId,
+        sender_id: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        let txs = self.get_transactions_by_sender(sender);
+        let txs = self.get_transactions_by_sender(sender_id);
         for tx in txs {
             if let Some(tx) = self.remove_transaction(tx.id()) {
                 removed.push(tx);

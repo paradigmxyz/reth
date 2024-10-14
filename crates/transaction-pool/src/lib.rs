@@ -154,7 +154,6 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
-use identifier::SenderId;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
@@ -473,7 +472,7 @@ where
 
     fn remove_transactions_by_sender(
         &self,
-        sender: SenderId,
+        sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions_by_sender(sender)
     }
