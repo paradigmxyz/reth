@@ -1,4 +1,3 @@
-use super::utils::LOG_INTERVAL;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
@@ -18,7 +17,6 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderError;
-use std::time::Instant;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -149,18 +147,16 @@ where
                     .cursor_write::<tables::RawTable<tables::TransactionHashNumbers>>()?;
 
                 let total_hashes = hash_collector.len();
-                let mut last_log = Instant::now();
+                let interval = (total_hashes / 10).max(1);
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
-                    let now = Instant::now();
-                    if now.duration_since(last_log) >= LOG_INTERVAL {
+                    if index > 0 && index % interval == 0 {
                         info!(
                             target: "sync::stages::transaction_lookup",
                             ?append_only,
                             progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                             "Inserting hashes"
                         );
-                        last_log = now;
                     }
 
                     let key = RawKey::<TxHash>::from_vec(hash);
