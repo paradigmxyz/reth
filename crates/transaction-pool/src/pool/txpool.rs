@@ -116,10 +116,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut next_expected_nonce = on_chain_nonce + 1;
         let mut last_connected_tx = None;
-    
         for (_, tx) in self.all().txs_iter(sender) {
             let tx_nonce = tx.transaction.nonce();
-    
             match tx_nonce.cmp(&next_expected_nonce) {
                 std::cmp::Ordering::Equal => {
                     // This transaction is the next expected one
@@ -133,7 +131,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                 _ => {}
             }
         }
-    
         last_connected_tx
     }
 
@@ -2789,7 +2786,7 @@ mod tests {
         let mut pool = TxPool::new(MockOrdering::default(), PoolConfig::default());
         let mut f = MockTransactionFactory::default();
         
-        // Get sender id 
+        // Get sender id
         let sender = Address::random();
 
         // Create transactions with nonces 0, 1, 2, 4, 5

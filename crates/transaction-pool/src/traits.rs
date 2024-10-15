@@ -356,8 +356,13 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain nonce without a nonce gap.
-    fn get_highest_consecutive_transaction_by_sender(&self, sender: Address, on_chain_nonce: u64) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain
+    /// nonce without a nonce gap.
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns a transaction sent by a given user and a nonce
     fn get_transaction_by_sender_and_nonce(
