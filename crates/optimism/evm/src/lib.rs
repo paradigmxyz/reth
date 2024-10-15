@@ -203,15 +203,14 @@ impl ConfigureEvm for OptimismEvmConfig {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_execution_types::ExecutionOutcome;
     use alloy_primitives::{B256, U256};
-    use reth_chainspec::{Chain, ChainSpec};
-    use reth_execution_types::Chain;
+    use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, KECCAK_EMPTY,
+        Header, Receipt, Receipts, SealedBlockWithSenders, TxType, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
@@ -219,7 +218,7 @@ mod tests {
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
-    use std::{collections::HashSet, sync::Arc, collections::BTreeMap};
+    use std::{collections::HashSet, sync::Arc};
 
     fn test_evm_config() -> OptimismEvmConfig {
         OptimismEvmConfig::new(BASE_MAINNET.clone())
@@ -239,7 +238,7 @@ mod tests {
         // Build the ChainSpec for Ethereum mainnet, activating London, Paris, and Shanghai
         // hardforks
         let chain_spec = ChainSpec::builder()
-            .chain(Chain::mainnet())
+            .chain(0.into())
             .genesis(Genesis::default())
             .london_activated()
             .paris_activated()
@@ -557,7 +556,10 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
+        block1.block.header.set_block_number(10);
         block1.block.header.set_hash(block1_hash);
+
+        block2.block.header.set_block_number(11);
         block2.block.header.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
@@ -595,11 +597,7 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain = Chain {
-            blocks: BTreeMap::from([(10, block1), (11, block2)]),
-            execution_outcome: execution_outcome.clone(),
-            ..Default::default()
-        };
+        let chain = Chain::new([block1, block2], execution_outcome.clone(), None);
 
         // Assert that the proper receipt vector is returned for block1_hash
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
