@@ -33,20 +33,17 @@ pub fn calculate_root_from_leaves(c: &mut Criterion) {
 
         // sparse trie
         group.bench_function(BenchmarkId::new("sparse trie", size), |b| {
-            b.iter_with_setup(
-                || SparseTrie::revealed_empty(),
-                |mut sparse| {
-                    for (key, value) in &state {
-                        sparse
-                            .update_leaf(
-                                Nibbles::unpack(key),
-                                alloy_rlp::encode_fixed_size(value).to_vec(),
-                            )
-                            .unwrap();
-                    }
-                    sparse.root().unwrap();
-                },
-            )
+            b.iter_with_setup(SparseTrie::revealed_empty, |mut sparse| {
+                for (key, value) in &state {
+                    sparse
+                        .update_leaf(
+                            Nibbles::unpack(key),
+                            alloy_rlp::encode_fixed_size(value).to_vec(),
+                        )
+                        .unwrap();
+                }
+                sparse.root().unwrap();
+            })
         });
     }
 }
