@@ -53,8 +53,6 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-use op_alloy_consensus::DepositTransaction;
-#[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
 use reth_optimism_chainspec::optimism_deposit_tx_signature;
@@ -140,7 +138,7 @@ pub enum Transaction {
 }
 
 #[cfg(feature = "optimism")]
-impl DepositTransaction for Transaction {
+impl op_alloy_consensus::DepositTransaction for Transaction {
     fn source_hash(&self) -> Option<B256> {
         match self {
             Self::Deposit(tx) => tx.source_hash(),
