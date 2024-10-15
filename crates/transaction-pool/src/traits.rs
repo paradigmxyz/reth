@@ -7,6 +7,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use alloy_consensus::Transaction as _;
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
@@ -1183,7 +1184,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input().as_ref()
+        self.transaction.input()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.

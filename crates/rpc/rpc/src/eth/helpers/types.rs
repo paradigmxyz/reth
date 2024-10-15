@@ -1,5 +1,6 @@
 //! L1 `eth` API types.
 
+use alloy_consensus::Transaction as _;
 use alloy_network::{AnyNetwork, Network};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{Transaction, TransactionInfo};
@@ -59,7 +60,7 @@ where
                 max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
                 signature: Some(signature),
                 gas: signed_tx.gas_limit(),
-                input: signed_tx.input().clone(),
+                input: signed_tx.input().to_vec().into(),
                 chain_id,
                 access_list,
                 transaction_type: Some(signed_tx.tx_type() as u8),

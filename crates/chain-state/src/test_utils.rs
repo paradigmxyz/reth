@@ -2,7 +2,7 @@ use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
-use alloy_consensus::TxEip1559;
+use alloy_consensus::{Transaction as _, TxEip1559};
 use alloy_primitives::{Address, BlockNumber, Sealable, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;

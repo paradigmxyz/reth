@@ -4,6 +4,7 @@ mod signature;
 pub use signature::*;
 use std::fmt;
 
+use alloy_consensus::Transaction as _;
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     Transaction, TransactionInfo,
@@ -107,7 +108,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     let to = Some(tx.transaction.to().into());
     let gas = tx.transaction.gas_limit();
     let value = tx.transaction.value();
-    let input = tx.transaction.input().clone();
+    let input = tx.transaction.input().to_vec().into();
     let nonce = tx.transaction.nonce();
     let chain_id = tx.transaction.chain_id();
     let access_list = tx.transaction.access_list().cloned();

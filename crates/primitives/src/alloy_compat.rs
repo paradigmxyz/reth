@@ -217,6 +217,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
     type Error = alloy_rpc_types::ConversionError;
 
     fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
+        use alloy_consensus::Transaction as _;
         use alloy_rpc_types::ConversionError;
 
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;

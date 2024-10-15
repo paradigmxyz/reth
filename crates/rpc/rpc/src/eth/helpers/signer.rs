@@ -109,6 +109,7 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::Transaction;
     use alloy_primitives::{Bytes, Parity, U256};
     use alloy_rpc_types_eth::TransactionInput;
     use revm_primitives::TxKind;
@@ -254,6 +255,6 @@ mod tests {
         let txn_signed = signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
-        assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);
+        assert_eq!(message.to_vec(), txn_signed.unwrap().input().to_vec());
     }
 }
