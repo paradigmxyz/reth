@@ -33,7 +33,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_provider::{providers::BlockchainProvider2, ChainSpecProvider, ProviderFactory};
+use reth_provider::{providers::BlockchainProviderFactory, ChainSpecProvider, ProviderFactory};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use tokio::sync::mpsc::UnboundedSender;
@@ -66,7 +66,7 @@ where
         consensus: Arc<dyn Consensus>,
         executor_factory: impl BlockExecutorProvider,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         tree_config: TreeConfig,

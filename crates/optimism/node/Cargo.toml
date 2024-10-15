@@ -87,7 +87,6 @@ optimism = [
     "reth-optimism-evm/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",
-    "reth-revm/optimism",
     "revm/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-optimism-rpc/optimism",

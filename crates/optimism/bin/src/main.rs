@@ -6,8 +6,7 @@ use clap::Parser;
 use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
-use reth_optimism_rpc::SequencerClient;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProviderFactory;
 
 use tracing as _;
 
@@ -32,19 +31,9 @@ fn main() {
                         .with_persistence_threshold(rollup_args.persistence_threshold)
                         .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
                     let handle = builder
-                        .with_types_and_provider::<OptimismNode, BlockchainProvider2<_>>()
+                        .with_types_and_provider::<OptimismNode, BlockchainProviderFactory<_>>()
                         .with_components(OptimismNode::components(rollup_args))
-                        .with_add_ons(OptimismAddOns::new(sequencer_http_arg.clone()))
-                        .extend_rpc_modules(move |ctx| {
-                            // register sequencer tx forwarder
-                            if let Some(sequencer_http) = sequencer_http_arg {
-                                ctx.registry
-                                    .eth_api()
-                                    .set_sequencer_client(SequencerClient::new(sequencer_http))?;
-                            }
-
-                            Ok(())
-                        })
+                        .with_add_ons(OptimismAddOns::new(sequencer_http_arg))
                         .launch_with_fn(|builder| {
                             let launcher = EngineNodeLauncher::new(
                                 builder.task_executor().clone(),
@@ -58,20 +47,8 @@ fn main() {
                     handle.node_exit_future.await
                 }
                 false => {
-                    let handle = builder
-                        .node(OptimismNode::new(rollup_args.clone()))
-                        .extend_rpc_modules(move |ctx| {
-                            // register sequencer tx forwarder
-                            if let Some(sequencer_http) = sequencer_http_arg {
-                                ctx.registry
-                                    .eth_api()
-                                    .set_sequencer_client(SequencerClient::new(sequencer_http))?;
-                            }
-
-                            Ok(())
-                        })
-                        .launch()
-                        .await?;
+                    let handle =
+                        builder.node(OptimismNode::new(rollup_args.clone())).launch().await?;
 
                     handle.node_exit_future.await
                 }

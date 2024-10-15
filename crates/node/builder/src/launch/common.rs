@@ -39,7 +39,9 @@ use reth_node_metrics::{
 };
 use reth_primitives::Head;
 use reth_provider::{
-    providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
+    providers::{
+        BlockchainProvider, BlockchainProviderFactory, ProviderNodeTypes, StaticFileProvider,
+    },
     BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
     ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
     TreeViewer,
@@ -78,7 +80,7 @@ impl<N: NodeTypesWithDB> WithTree for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> WithTree for BlockchainProvider2<N> {
+impl<N: NodeTypesWithDB> WithTree for BlockchainProviderFactory<N> {
     fn set_tree(self, _tree: Arc<dyn TreeViewer>) -> Self {
         self
     }
@@ -1072,7 +1074,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
-                    block_interval: 0,
+                    block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,
                     sender_recovery_before: None,
