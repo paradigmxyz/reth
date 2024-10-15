@@ -111,7 +111,7 @@ mod tests {
         #[should_panic]
         fn reveal_first_node_not_root() {
             let mut sparse = SparseStateTrie::default();
-            let proof = [(Nibbles::from_nibbles(&[0x1]), Bytes::from([EMPTY_STRING_CODE]))];
+            let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
             sparse.reveal_account(Default::default(), proof).unwrap();
         }
 
@@ -121,7 +121,7 @@ mod tests {
             let mut sparse = SparseStateTrie::default();
             let proof = [
                 (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
-                (Nibbles::from_nibbles(&[0x1]), Bytes::new()),
+                (Nibbles::from_nibbles([0x1]), Bytes::new()),
             ];
             sparse.reveal_account(Default::default(), proof).unwrap();
         }
