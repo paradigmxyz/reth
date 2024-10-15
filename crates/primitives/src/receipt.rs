@@ -215,6 +215,15 @@ pub trait EnvelopedEncoding {
 
 // Implement the trait for ReceiptWithBloom
 impl EnvelopedEncoding for ReceiptWithBloom {
+    /// Encodes the receipt into its "raw" format.
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
+    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
+    /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
+    /// of the receipt:
+    /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
+    ///   logsBloom, logs])`
     fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
