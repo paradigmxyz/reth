@@ -347,38 +347,51 @@ impl RevealedSparseTrie {
                         child_path.push_unchecked(child_nibble);
 
                         // Remove the only child node.
-                        let child = self.nodes.remove(&child_path).unwrap();
+                        let child = self.nodes.get(&child_path).unwrap();
 
                         debug!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
 
-                        match child {
+                        let mut delete_child = false;
+                        let new_node = match child {
                             SparseNode::Empty => return Err(SparseTrieError::Blind),
                             SparseNode::Hash(hash) => {
-                                return Err(SparseTrieError::BlindedNode { path: child_path, hash })
+                                return Err(SparseTrieError::BlindedNode {
+                                    path: child_path,
+                                    hash: *hash,
+                                })
                             }
                             // If the only child is a leaf node, we downgrade the branch node into a
-                            // leaf node, prepending the nibble to the key.
+                            // leaf node, prepending the nibble to the key, and delete the old
+                            // child.
                             SparseNode::Leaf { key, .. } => {
+                                delete_child = true;
+
                                 let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend_from_slice_unchecked(&key);
+                                new_key.extend_from_slice_unchecked(key);
                                 SparseNode::new_leaf(new_key)
                             }
                             // If the only child node is an extension node, we downgrade the branch
                             // node into an even longer extension node, prepending the nibble to the
-                            // key.
+                            // key, and delete the old child.
                             SparseNode::Extension { key, .. } => {
+                                delete_child = true;
+
                                 let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend_from_slice_unchecked(&key);
+                                new_key.extend_from_slice_unchecked(key);
                                 SparseNode::new_ext(new_key)
                             }
-                            // If the only child is a branch node, we insert it back and we
-                            // downgrade the current branch node into a one-nibble extension node.
+                            // If the only child is a branch node, we downgrade the current branch
+                            // node into a one-nibble extension node.
                             SparseNode::Branch { .. } => {
-                                // TODO: Do not insert back but rather not delete in the first place
-                                self.nodes.insert(child_path, child);
                                 SparseNode::new_ext(Nibbles::from_nibbles_unchecked([child_nibble]))
                             }
+                        };
+
+                        if delete_child {
+                            self.nodes.remove(&child_path);
                         }
+
+                        new_node
                     }
                     // If more than one child is left set in the branch, we just re-insert it
                     // as-is.
