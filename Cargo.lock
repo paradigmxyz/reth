@@ -6532,7 +6532,6 @@ dependencies = [
  "once_cell",
  "reth-ethereum-forks",
  "reth-network-peers",
- "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-trie-common",
  "serde_json",
