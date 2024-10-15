@@ -8,10 +8,9 @@ pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, Execut
 pub use reth_storage_errors::provider::ProviderError;
 
 use crate::system_calls::OnStateHook;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::BlockNumber;
 use core::{fmt::Display, marker::PhantomData};
-use reth_chainspec::ChainSpec;
 use reth_consensus::ConsensusError;
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
@@ -204,9 +203,6 @@ pub trait BlockExecutionStrategy<DB> {
 
     /// Returns the final bundle state.
     fn finish(&mut self) -> BundleState;
-
-    /// Returns the strategy chain spec.
-    fn chain_spec(&self) -> Arc<ChainSpec>;
 
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
@@ -627,10 +623,6 @@ mod tests {
 
         fn finish(&mut self) -> BundleState {
             self.finish_result.clone()
-        }
-
-        fn chain_spec(&self) -> Arc<ChainSpec> {
-            MAINNET.clone()
         }
 
         fn validate_block_post_execution(
