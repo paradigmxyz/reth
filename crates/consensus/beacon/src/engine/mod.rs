@@ -462,8 +462,7 @@ where
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
-        {
+        if reth_chainspec::EthChainSpec::is_optimism(&self.blockchain.chain_spec()) {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
