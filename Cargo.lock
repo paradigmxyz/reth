@@ -745,13 +745,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.6.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9703ce68b97f8faae6f7739d1e003fc97621b856953cbcdbb2b515743f23288"
+checksum = "6fa8acead43cb238a7b7f47238c71137f4677a0b8d90e7e3be6e6ca59a28194e"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "arrayvec",
  "derive_arbitrary",
  "derive_more 1.0.0",
  "nybbles",
@@ -996,6 +997,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "asn1_der"
@@ -2566,7 +2570,9 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-stages",
+ "revm",
  "serde",
  "serde_json",
  "thiserror",
@@ -7822,9 +7828,14 @@ dependencies = [
 name = "reth-node-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-rpc-types-engine",
+ "eyre",
+ "reth-beacon-consensus",
+ "reth-consensus",
  "reth-engine-primitives",
  "reth-evm",
  "reth-network-api",
+ "reth-node-core",
  "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -7978,10 +7989,12 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rpc",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
+ "revm",
  "serde_json",
  "tokio",
 ]
@@ -8204,6 +8217,7 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tracing",
  "reth-transaction-pool",
+ "revm",
  "serde",
  "serde_json",
  "thiserror",
@@ -8863,6 +8877,7 @@ dependencies = [
 name = "reth-rpc-types-compat"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -9254,6 +9269,21 @@ dependencies = [
 [[package]]
 name = "reth-trie-sparse"
 version = "1.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "assert_matches",
+ "criterion",
+ "itertools 0.13.0",
+ "proptest",
+ "rayon",
+ "reth-primitives",
+ "reth-trie",
+ "reth-trie-common",
+ "smallvec",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "revm"

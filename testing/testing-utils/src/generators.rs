@@ -1,6 +1,6 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::TxLegacy;
+use alloy_consensus::{Transaction as _, TxLegacy};
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
