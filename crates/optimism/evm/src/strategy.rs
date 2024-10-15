@@ -270,3 +270,222 @@ where
         validate_block_post_execution(block, &self.chain_spec.clone(), receipts)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::OpChainSpec;
+    use alloy_consensus::TxEip1559;
+    use alloy_primitives::{b256, Address, StorageKey, StorageValue};
+    use reth_chainspec::MIN_TRANSACTION_GAS;
+    use reth_evm::execute::{BatchExecutor, BlockExecutorProvider, GenericBlockExecutorProvider};
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
+    use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
+    use reth_revm::{
+        database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
+    };
+    use std::{collections::HashMap, str::FromStr};
+
+    fn create_op_state_provider() -> StateProviderTest {
+        let mut db = StateProviderTest::default();
+
+        let l1_block_contract_account =
+            Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
+
+        let mut l1_block_storage = HashMap::default();
+        // base fee
+        l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
+        // l1 fee overhead
+        l1_block_storage.insert(StorageKey::with_last_byte(5), StorageValue::from(188));
+        // l1 fee scalar
+        l1_block_storage.insert(StorageKey::with_last_byte(6), StorageValue::from(684000));
+        // l1 free scalars post ecotone
+        l1_block_storage.insert(
+            StorageKey::with_last_byte(3),
+            StorageValue::from_str(
+                "0x0000000000000000000000000000000000001db0000d27300000000000000005",
+            )
+            .unwrap(),
+        );
+
+        db.insert_account(L1_BLOCK_CONTRACT, l1_block_contract_account, None, l1_block_storage);
+
+        db
+    }
+
+    fn executor_provider(
+        chain_spec: Arc<OpChainSpec>,
+    ) -> GenericBlockExecutorProvider<OpExecutionStrategyFactory> {
+        let strategy_factory =
+            OpExecutionStrategyFactory::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec));
+
+        GenericBlockExecutorProvider::new(strategy_factory)
+    }
+
+    #[test]
+    fn op_deposit_fields_pre_canyon() {
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            gas_limit: 1_000_000,
+            gas_used: 42_000,
+            receipts_root: b256!(
+                "83465d1e7d01578c0d609be33570f91242f013e9e295b0879905346abbd63731"
+            ),
+            ..Default::default()
+        };
+
+        let mut db = create_op_state_provider();
+
+        let addr = Address::ZERO;
+        let account = Account { balance: U256::MAX, ..Account::default() };
+        db.insert_account(addr, account, None, HashMap::default());
+
+        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
+
+        let tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip1559(TxEip1559 {
+                chain_id: chain_spec.chain.id(),
+                nonce: 0,
+                gas_limit: MIN_TRANSACTION_GAS,
+                to: addr.into(),
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        );
+
+        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
+                from: addr,
+                to: addr.into(),
+                gas_limit: MIN_TRANSACTION_GAS,
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        );
+
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+
+        // make sure the L1 block contract state is preloaded.
+        let _ = executor.with_state_mut(|state| {
+            state.storage(L1_BLOCK_CONTRACT, StorageKey::with_last_byte(1).into()).unwrap()
+        });
+
+        // Attempt to execute a block with one deposit and one non-deposit transaction
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: BlockBody {
+                                transactions: vec![tx, tx_deposit],
+                                ..Default::default()
+                            },
+                        },
+                        senders: vec![addr, addr],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .unwrap();
+
+        let receipts = executor.receipts();
+        let tx_receipt = receipts[0][0].as_ref().unwrap();
+        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+
+        // deposit_receipt_version is not present in pre canyon transactions
+        assert!(deposit_receipt.deposit_receipt_version.is_none());
+        assert!(tx_receipt.deposit_receipt_version.is_none());
+
+        // deposit_nonce is present only in deposit transactions
+        assert!(deposit_receipt.deposit_nonce.is_some());
+        assert!(tx_receipt.deposit_nonce.is_none());
+    }
+
+    #[test]
+    fn op_deposit_fields_post_canyon() {
+        // ensure_create2_deployer will fail if timestamp is set to less then 2
+        let header = Header {
+            timestamp: 2,
+            number: 1,
+            gas_limit: 1_000_000,
+            gas_used: 42_000,
+            receipts_root: b256!(
+                "fffc85c4004fd03c7bfbe5491fae98a7473126c099ac11e8286fd0013f15f908"
+            ),
+            ..Default::default()
+        };
+
+        let mut db = create_op_state_provider();
+        let addr = Address::ZERO;
+        let account = Account { balance: U256::MAX, ..Account::default() };
+
+        db.insert_account(addr, account, None, HashMap::default());
+
+        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
+
+        let tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip1559(TxEip1559 {
+                chain_id: chain_spec.chain.id(),
+                nonce: 0,
+                gas_limit: MIN_TRANSACTION_GAS,
+                to: addr.into(),
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        );
+
+        let tx_deposit = TransactionSigned::from_transaction_and_signature(
+            Transaction::Deposit(op_alloy_consensus::TxDeposit {
+                from: addr,
+                to: addr.into(),
+                gas_limit: MIN_TRANSACTION_GAS,
+                ..Default::default()
+            }),
+            optimism_deposit_tx_signature(),
+        );
+
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+
+        // make sure the L1 block contract state is preloaded.
+        let _ = executor.with_state_mut(|state| {
+            state.storage(L1_BLOCK_CONTRACT, StorageKey::with_last_byte(1).into()).unwrap()
+        });
+
+        // attempt to execute an empty block with parent beacon block root, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: BlockBody {
+                                transactions: vec![tx, tx_deposit],
+                                ..Default::default()
+                            },
+                        },
+                        senders: vec![addr, addr],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect("Executing a block while canyon is active should not fail");
+
+        let receipts = executor.receipts();
+        let tx_receipt = receipts[0][0].as_ref().unwrap();
+        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+
+        // deposit_receipt_version is set to 1 for post canyon deposit transactions
+        assert_eq!(deposit_receipt.deposit_receipt_version, Some(1));
+        assert!(tx_receipt.deposit_receipt_version.is_none());
+
+        // deposit_nonce is present only in deposit transactions
+        assert!(deposit_receipt.deposit_nonce.is_some());
+        assert!(tx_receipt.deposit_nonce.is_none());
+    }
+}
