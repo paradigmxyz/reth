@@ -9221,6 +9221,21 @@ dependencies = [
 [[package]]
 name = "reth-trie-sparse"
 version = "1.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "assert_matches",
+ "criterion",
+ "itertools 0.13.0",
+ "proptest",
+ "rayon",
+ "reth-primitives",
+ "reth-trie",
+ "reth-trie-common",
+ "smallvec",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "revm"
