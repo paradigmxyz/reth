@@ -869,190 +869,231 @@ mod tests {
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
-        sparse.update_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1]), value.clone()).unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3]), value.clone()).unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x2, 0x0, 0x1, 0x3]), value.clone()).unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x3, 0x1, 0x0, 0x2]), value.clone()).unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2]), value.clone()).unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x2, 0x0]), value).unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
-        // Branch (Mask = 1011)
-        // ├── 0 -> Extension (Key = 23)
-        // │        └── Branch (Mask = 0101)
-        // │              ├── 1 -> Leaf (Key = 0231)
-        // │              └── 3 -> Leaf (Key = 0233)
-        // ├── 2 -> Leaf (Key = 2013)
-        // └── 3 -> Branch (Mask = 0101)
-        //            ├── 1 -> Leaf (Key = 3102)
-        //            └── 3 -> Branch (Mask = 1010)
-        //                   ├── 0 -> Leaf (Key = 3302)
-        //                   └── 2 -> Leaf (Key = 3320)
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1011)
+        //     ├── 0 -> Extension (Key = 23)
+        //     │        └── Branch (Mask = 0101)
+        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231)
+        //     │              └── 3 -> Leaf (Key = 3, Path = 50233)
+        //     ├── 2 -> Leaf (Key = 013, Path = 52013)
+        //     └── 3 -> Branch (Mask = 0101)
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                └── 3 -> Branch (Mask = 1010)
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_branch(0b1101.into())),
+                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1101.into())),
                 (
-                    Nibbles::from_nibbles([0x0]),
+                    Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3]))
                 ),
-                (Nibbles::from_nibbles([0x0, 0x2, 0x3]), SparseNode::new_branch(0b1010.into())),
-                (Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1]), SparseNode::new_leaf(Nibbles::new())),
-                (Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3]), SparseNode::new_leaf(Nibbles::new())),
                 (
-                    Nibbles::from_nibbles([0x2]),
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
+                    SparseNode::new_branch(0b1010.into())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::new())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
+                    SparseNode::new_leaf(Nibbles::new())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x2]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x1, 0x3]))
                 ),
-                (Nibbles::from_nibbles([0x3]), SparseNode::new_branch(0b1010.into())),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x1]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x1]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
                 ),
-                (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x0]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
                 ),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x2]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
                 )
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x2, 0x0, 0x1, 0x3])).unwrap();
+        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])).unwrap();
 
-        // Branch (Mask = 1001)
-        // ├── 0 -> Extension (Key = 23)
-        // │        └── Branch (Mask = 0101)
-        // │              ├── 1 -> Leaf (Key = 0231)
-        // │              └── 3 -> Leaf (Key = 0233)
-        // └── 3 -> Branch (Mask = 0101)
-        //            ├── 1 -> Leaf (Key = 3102)
-        //            └── 3 -> Branch (Mask = 1010)
-        //                   ├── 0 -> Leaf (Key = 3302)
-        //                   └── 2 -> Leaf (Key = 3320)
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1001)
+        //     ├── 0 -> Extension (Key = 23)
+        //     │        └── Branch (Mask = 0101)
+        //     │              ├── 1 -> Leaf (Key = 0231, Path = 50231)
+        //     │              └── 3 -> Leaf (Key = 0233, Path = 50233)
+        //     └── 3 -> Branch (Mask = 0101)
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                └── 3 -> Branch (Mask = 1010)
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
-                    Nibbles::from_nibbles([0x0]),
+                    Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3]))
                 ),
-                (Nibbles::from_nibbles([0x0, 0x2, 0x3]), SparseNode::new_branch(0b1010.into())),
-                (Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1]), SparseNode::new_leaf(Nibbles::new())),
-                (Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3]), SparseNode::new_leaf(Nibbles::new())),
-                (Nibbles::from_nibbles([0x3]), SparseNode::new_branch(0b1010.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x1]),
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
+                    SparseNode::new_branch(0b1010.into())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::new())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
+                    SparseNode::new_leaf(Nibbles::new())
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x1]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
                 ),
-                (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x0]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
                 ),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x2]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
                 )
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1])).unwrap();
+        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])).unwrap();
 
-        // Branch (Mask = 1001)
-        // ├── 0 -> Leaf (Key = 0233)
-        // └── 3 -> Branch (Mask = 0101)
-        //            ├── 1 -> Leaf (Key = 3102)
-        //            └── 3 -> Branch (Mask = 1010)
-        //                   ├── 0 -> Leaf (Key = 3302)
-        //                   └── 2 -> Leaf (Key = 3320)
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1001)
+        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
+        //     └── 3 -> Branch (Mask = 0101)
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                └── 3 -> Branch (Mask = 1010)
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
-                    Nibbles::from_nibbles([0x0]),
+                    Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
                 ),
-                (Nibbles::from_nibbles([0x3]), SparseNode::new_branch(0b1010.into())),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x1]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x1]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
                 ),
-                (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x0]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
                 ),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x2]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
                 )
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x1, 0x0, 0x2])).unwrap();
+        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])).unwrap();
 
-        // Branch (Mask = 1001)
-        // ├── 0 -> Leaf (Key = 0233)
-        // └── 3 -> Branch (Mask = 1010)
-        //            ├── 0 -> Leaf (Key = 3302)
-        //            └── 2 -> Leaf (Key = 3320)
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1001)
+        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
+        //     └── 3 -> Branch (Mask = 1010)
+        //                ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                └── 2 -> Leaf (Key = 3320, Path = 53320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
-                    Nibbles::from_nibbles([0x0]),
+                    Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
                 ),
-                (Nibbles::from_nibbles([0x3]), SparseNode::new_ext(Nibbles::from_nibbles([0x3]))),
-                (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x0]),
+                    Nibbles::from_nibbles([0x5, 0x3]),
+                    SparseNode::new_ext(Nibbles::from_nibbles([0x3]))
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
                 ),
                 (
-                    Nibbles::from_nibbles([0x3, 0x3, 0x2]),
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
                 )
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x2, 0x0])).unwrap();
+        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])).unwrap();
 
-        // Branch (Mask = 1001)
-        // ├── 0 -> Leaf (Key = 0233)
-        // └── 3 -> Leaf (Key = 3302)
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1001)
+        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
+        //     └── 3 -> Leaf (Key = 3302, Path = 53302)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
-                    Nibbles::from_nibbles([0x0]),
+                    Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
                 ),
                 (
-                    Nibbles::from_nibbles([0x3]),
+                    Nibbles::from_nibbles([0x5, 0x3]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x0, 0x2]))
                 ),
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3])).unwrap();
+        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])).unwrap();
 
-        // Leaf (Key = 3302)
+        // Leaf (Key = 53302)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([(
                 Nibbles::new(),
-                SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2]))
+                SparseNode::new_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]))
             ),])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2])).unwrap();
+        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])).unwrap();
 
         // (Empty Trie)
         assert!(sparse.nodes.is_empty());
