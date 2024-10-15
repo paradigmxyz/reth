@@ -9,7 +9,7 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::BlockNumber;
-use core::{cell::RefCell, fmt::Display, marker::PhantomData};
+use core::{fmt::Display, marker::PhantomData};
 use reth_primitives::{BlockWithSenders, Receipt, Request};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, State};
@@ -261,7 +261,7 @@ pub struct GenericBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
 {
-    strategy: RefCell<S>,
+    strategy: S,
     _phantom: PhantomData<DB>,
 }
 
@@ -271,7 +271,7 @@ where
 {
     /// Creates a new `GenericBlockExecutor` with the given strategy.
     pub const fn new(strategy: S) -> Self {
-        Self { strategy: RefCell::new(strategy), _phantom: PhantomData }
+        Self { strategy, _phantom: PhantomData }
     }
 }
 
@@ -284,21 +284,19 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = S::Error;
 
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty: _ } = input;
 
-        let mut strategy = self.strategy.borrow_mut();
-
-        strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = strategy.execute_transactions(block)?;
-        let requests = strategy.apply_post_execution_changes()?;
-        let state = strategy.finish();
+        self.strategy.apply_pre_execution_changes()?;
+        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes()?;
+        let state = self.strategy.finish();
 
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
     }
 
     fn execute_with_state_closure<F>(
-        self,
+        mut self,
         input: Self::Input<'_>,
         mut state: F,
     ) -> Result<Self::Output, Self::Error>
@@ -307,21 +305,19 @@ where
     {
         let BlockExecutionInput { block, total_difficulty: _ } = input;
 
-        let mut strategy = self.strategy.borrow_mut();
+        self.strategy.apply_pre_execution_changes()?;
+        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes()?;
 
-        strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = strategy.execute_transactions(block)?;
-        let requests = strategy.apply_post_execution_changes()?;
+        state(self.strategy.state_ref());
 
-        state(strategy.state_ref());
-
-        let state = strategy.finish();
+        let state = self.strategy.finish();
 
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
     }
 
     fn execute_with_state_hook<H>(
-        self,
+        mut self,
         input: Self::Input<'_>,
         state_hook: H,
     ) -> Result<Self::Output, Self::Error>
@@ -330,15 +326,13 @@ where
     {
         let BlockExecutionInput { block, total_difficulty: _ } = input;
 
-        let mut strategy = self.strategy.borrow_mut();
+        self.strategy.with_state_hook(Some(Box::new(state_hook)));
 
-        strategy.with_state_hook(Some(Box::new(state_hook)));
+        self.strategy.apply_pre_execution_changes()?;
+        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes()?;
 
-        strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = strategy.execute_transactions(block)?;
-        let requests = strategy.apply_post_execution_changes()?;
-
-        let state = strategy.finish();
+        let state = self.strategy.finish();
 
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
     }
