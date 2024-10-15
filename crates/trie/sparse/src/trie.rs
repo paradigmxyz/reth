@@ -1,10 +1,13 @@
 use crate::{SparseTrieError, SparseTrieResult};
 use alloy_primitives::{hex, keccak256, map::HashMap, B256};
 use alloy_rlp::Decodable;
-use reth_trie::prefix_set::{PrefixSet, PrefixSetMut};
+use reth_trie::{
+    prefix_set::{PrefixSet, PrefixSetMut},
+    RlpNode,
+};
 use reth_trie_common::{
-    word_rlp, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, TrieMask, TrieNode,
-    CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
+    BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, TrieMask, TrieNode, CHILD_INDEX_RANGE,
+    EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use std::{collections::HashSet, fmt};
@@ -312,26 +315,26 @@ impl RevealedSparseTrie {
         }
     }
 
-    fn rlp_node(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> Vec<u8> {
+    fn rlp_node(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         // stack of paths we need rlp nodes for
         let mut path_stack = Vec::from([path]);
         // stack of rlp nodes
-        let mut rlp_node_stack = Vec::<(Nibbles, Vec<u8>)>::new();
+        let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
         // reusable branch child path
         let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
         // reusable branch value stack
-        let mut branch_value_stack_buf = SmallVec::<[Vec<u8>; 16]>::new_const();
+        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
 
         'main: while let Some(path) = path_stack.pop() {
             let rlp_node = match self.nodes.get_mut(&path).unwrap() {
-                SparseNode::Empty => word_rlp(&EMPTY_ROOT_HASH),
-                SparseNode::Hash(hash) => word_rlp(hash),
+                SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
+                SparseNode::Hash(hash) => RlpNode::word_rlp(hash),
                 SparseNode::Leaf { key, hash } => {
                     self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
-                        word_rlp(&hash)
+                        RlpNode::word_rlp(&hash)
                     } else {
                         let value = self.values.get(&path).unwrap();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
@@ -345,7 +348,7 @@ impl RevealedSparseTrie {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
-                        word_rlp(&hash)
+                        RlpNode::word_rlp(&hash)
                     } else if rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
                         let (_, child) = rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
@@ -361,7 +364,7 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, hash } => {
                     if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
-                        rlp_node_stack.push((path, word_rlp(&hash)));
+                        rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
 
@@ -388,7 +391,7 @@ impl RevealedSparseTrie {
                     }
 
                     self.rlp_buf.clear();
-                    let rlp_node = BranchNodeRef::new(&branch_value_stack_buf, state_mask)
+                    let rlp_node = BranchNodeRef::new(&branch_value_stack_buf, *state_mask)
                         .rlp(&mut self.rlp_buf);
                     if rlp_node.len() == B256::len_bytes() + 1 {
                         *hash = Some(B256::from_slice(&rlp_node[1..]));

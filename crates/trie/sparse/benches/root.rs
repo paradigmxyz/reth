@@ -12,7 +12,7 @@ use reth_trie::{
     HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
-use reth_trie_sparse::{SparseStateTrie, SparseTrie};
+use reth_trie_sparse::SparseTrie;
 
 pub fn calculate_root_from_leaves(c: &mut Criterion) {
     let mut group = c.benchmark_group("calculate root from leaves");
@@ -34,13 +34,15 @@ pub fn calculate_root_from_leaves(c: &mut Criterion) {
         // sparse trie
         group.bench_function(BenchmarkId::new("sparse trie", size), |b| {
             b.iter_with_setup(
-                || SparseStateTrie::from_state(SparseTrie::revealed_empty()),
+                || SparseTrie::revealed_empty(),
                 |mut sparse| {
                     for (key, value) in &state {
-                        sparse.update_leaf(
-                            Nibbles::unpack(key),
-                            alloy_rlp::encode_fixed_size(value).to_vec(),
-                        );
+                        sparse
+                            .update_leaf(
+                                Nibbles::unpack(key),
+                                alloy_rlp::encode_fixed_size(value).to_vec(),
+                            )
+                            .unwrap();
                     }
                     sparse.root().unwrap();
                 },
@@ -148,13 +150,14 @@ pub fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                 group.bench_function(benchmark_id, |b| {
                     b.iter_with_setup(
                         || {
-                            let mut sparse =
-                                SparseStateTrie::from_state(SparseTrie::revealed_empty());
+                            let mut sparse = SparseTrie::revealed_empty();
                             for (key, value) in &init_state {
-                                sparse.update_leaf(
-                                    Nibbles::unpack(key),
-                                    alloy_rlp::encode_fixed_size(value).to_vec(),
-                                );
+                                sparse
+                                    .update_leaf(
+                                        Nibbles::unpack(key),
+                                        alloy_rlp::encode_fixed_size(value).to_vec(),
+                                    )
+                                    .unwrap();
                             }
                             sparse.root().unwrap();
                             sparse
@@ -162,10 +165,12 @@ pub fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                         |mut sparse| {
                             for update in &updates {
                                 for (key, value) in update {
-                                    sparse.update_leaf(
-                                        Nibbles::unpack(key),
-                                        alloy_rlp::encode_fixed_size(value).to_vec(),
-                                    );
+                                    sparse
+                                        .update_leaf(
+                                            Nibbles::unpack(key),
+                                            alloy_rlp::encode_fixed_size(value).to_vec(),
+                                        )
+                                        .unwrap();
                                 }
                                 sparse.root().unwrap();
                             }
