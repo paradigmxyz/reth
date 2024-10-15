@@ -387,7 +387,8 @@ where
         let pipeline = pipeline.build(provider_factory.clone(), static_file_producer);
 
         // Setup blockchain tree
-        let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
+        let externals =
+            TreeExternals::new(provider_factory.clone(), consensus, executor_factory, true);
         let tree = Arc::new(ShareableBlockchainTree::new(
             BlockchainTree::new(
                 externals,

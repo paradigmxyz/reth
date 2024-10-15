@@ -1232,13 +1232,10 @@ where
             }
             None => {
                 debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Recomputing state root for insert");
-                let provider = self
-                    .externals
-                    .provider_factory
-                    .provider()?
-                    // State root calculation can take a while, and we're sure no write transaction
-                    // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
-                    .disable_long_read_transaction_safety();
+                let provider = self.externals.get_provider();
+                // State root calculation can take a while, and we're sure no write transaction
+                // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
+
                 let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
                     .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
                         DatabaseHashedCursorFactory::new(provider.tx_ref()),
@@ -1262,7 +1259,7 @@ where
         };
         recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
 
-        let provider_rw = self.externals.provider_factory.provider_rw()?;
+        let provider_rw = self.externals.get_provider_rw();
         provider_rw
             .append_blocks_with_state(
                 blocks.into_blocks().collect(),
@@ -1421,7 +1418,7 @@ mod tests {
         let executor_factory = MockExecutorProvider::default();
         executor_factory.extend(exec_res);
 
-        TreeExternals::new(provider_factory, consensus, executor_factory)
+        TreeExternals::new(provider_factory, consensus, executor_factory, true)
     }
 
     fn setup_genesis<DB: Database>(factory: &ProviderFactory<DB>, mut genesis: SealedBlock) {
@@ -1653,7 +1650,7 @@ mod tests {
             mock_block(3, Some(sidechain_block_1.hash()), Vec::from([mock_tx(2)]), 3);
 
         let mut tree = BlockchainTree::new(
-            TreeExternals::new(provider_factory, consensus, executor_provider),
+            TreeExternals::new(provider_factory, consensus, executor_provider, true),
             BlockchainTreeConfig::default(),
             PruneModes::default(),
         )
@@ -2378,11 +2375,13 @@ mod tests {
             provider_factory: externals.provider_factory.clone(),
             executor_factory: externals.executor_factory.clone(),
             consensus: externals.consensus.clone(),
+            disable_transaction_timeout: true,
         };
         let cloned_externals_2 = TreeExternals {
             provider_factory: externals.provider_factory.clone(),
             executor_factory: externals.executor_factory.clone(),
             consensus: externals.consensus.clone(),
+            disable_transaction_timeout: true,
         };
 
         // last finalized block would be number 9.

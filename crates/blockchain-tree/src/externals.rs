@@ -5,8 +5,8 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{
-    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
-    StatsReader,
+    DatabaseProvider, DatabaseProviderRW, FinalizedBlockReader, FinalizedBlockWriter,
+    ProviderFactory, StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -28,6 +28,8 @@ pub struct TreeExternals<DB, E> {
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
+    /// flag
+    pub disable_transaction_timeout: bool,
 }
 
 impl<DB, E> TreeExternals<DB, E> {
@@ -36,8 +38,29 @@ impl<DB, E> TreeExternals<DB, E> {
         provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
+        disable_transaction_timeout: bool,
     ) -> Self {
-        Self { provider_factory, consensus, executor_factory }
+        Self { provider_factory, consensus, executor_factory, disable_transaction_timeout }
+    }
+}
+
+impl<N: Database, E> TreeExternals<N, E> {
+    pub fn get_provider(&self) -> DatabaseProvider<<N as Database>::TX> {
+        let mut provider = self.provider_factory.provider().unwrap();
+        if self.disable_transaction_timeout {
+            provider = provider.disable_long_read_transaction_safety();
+        }
+        provider
+    }
+
+    pub fn get_provider_rw(&self) -> DatabaseProviderRW<N> {
+        let mut provider = self.provider_factory.provider_rw().unwrap();
+        if self.disable_transaction_timeout {
+            provider = reth_provider::DatabaseProviderRW(
+                provider.0.disable_long_read_transaction_safety(),
+            );
+        }
+        provider
     }
 }
 
