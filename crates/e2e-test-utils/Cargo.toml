@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 reth.workspace = true
 reth-chainspec.workspace = true
+reth-engine-local.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -26,7 +27,6 @@ reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
 reth-network-peers.workspace = true
 reth-node-ethereum.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 
 # rpc
@@ -35,6 +35,8 @@ jsonrpsee.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true

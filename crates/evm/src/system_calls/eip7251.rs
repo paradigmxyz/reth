@@ -1,60 +1,26 @@
 //! [EIP-7251](https://eips.ethereum.org/EIPS/eip-7251) system call implementation.
-use alloc::{boxed::Box, format, string::ToString, vec::Vec};
-use core::fmt::Display;
-
 use crate::ConfigureEvm;
+use alloc::{boxed::Box, format, string::ToString, vec::Vec};
 use alloy_eips::eip7251::{ConsolidationRequest, CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS};
+use alloy_primitives::{bytes::Buf, Address, Bytes, FixedBytes};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Buf, Header, Request};
-use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use revm_primitives::{
-    Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, FixedBytes,
-    ResultAndState,
-};
-
-/// Apply the [EIP-7251](https://eips.ethereum.org/EIPS/eip-7251) post block contract call.
-///
-/// This constructs a new [Evm] with the given DB, and environment
-/// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the post block contract call.
-///
-/// This uses [`apply_consolidation_requests_contract_call`] to ultimately calculate the
-/// [requests](Request).
-pub fn post_block_consolidation_requests_contract_call<EvmConfig, DB>(
-    evm_config: &EvmConfig,
-    db: &mut DB,
-    initialized_cfg: &CfgEnvWithHandlerCfg,
-    initialized_block_env: &BlockEnv,
-) -> Result<Vec<Request>, BlockExecutionError>
-where
-    DB: Database + DatabaseCommit,
-    DB::Error: Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
-{
-    // apply post-block EIP-7251 contract call
-    let mut evm_post_block = Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            Default::default(),
-        ))
-        .build();
-
-    // initialize a block from the env, because the post block call needs the block itself
-    apply_consolidation_requests_contract_call(evm_config, &mut evm_post_block)
-}
+use reth_primitives::{Header, Request};
+use revm::{interpreter::Host, Database, Evm};
+use revm_primitives::{ExecutionResult, ResultAndState};
 
 /// Applies the post-block call to the EIP-7251 consolidation requests contract.
 ///
 /// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
 /// returned. Otherwise, the consolidation requests are returned.
+///
+/// Note: this does not commit the state changes to the database, it only transact the call.
 #[inline]
-pub fn apply_consolidation_requests_contract_call<EvmConfig, EXT, DB>(
+pub(crate) fn transact_consolidation_requests_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
     evm: &mut Evm<'_, EXT, DB>,
-) -> Result<Vec<Request>, BlockExecutionError>
+) -> Result<ResultAndState, BlockExecutionError>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -77,7 +43,7 @@ where
         Bytes::new(),
     );
 
-    let ResultAndState { result, mut state } = match evm.transact() {
+    let mut res = match evm.transact() {
         Ok(res) => res,
         Err(e) => {
             evm.context.evm.env = previous_env;
@@ -89,13 +55,18 @@ where
     };
 
     // cleanup the state
-    state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-    evm.context.evm.db.commit(state);
+    res.state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
+    res.state.remove(&evm.block().coinbase);
 
     // re-set the previous env
     evm.context.evm.env = previous_env;
 
+    Ok(res)
+}
+
+/// Parses the consolidation requests from the execution output.
+#[inline]
+pub(crate) fn post_commit(result: ExecutionResult) -> Result<Vec<Request>, BlockExecutionError> {
     let mut data = match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {

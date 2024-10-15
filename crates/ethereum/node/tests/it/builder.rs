@@ -22,7 +22,7 @@ fn test_basic_setup() {
         .with_database(db)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             println!("{msg}");
@@ -54,7 +54,7 @@ async fn test_eth_launcher() {
                 NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
             >>()
             .with_components(EthereumNode::components())
-            .with_add_ons::<EthereumAddOns>()
+            .with_add_ons(EthereumAddOns::default())
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
                     tasks.executor(),

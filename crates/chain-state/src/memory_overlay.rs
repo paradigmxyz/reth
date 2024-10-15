@@ -1,5 +1,9 @@
 use super::ExecutedBlock;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
@@ -9,10 +13,7 @@ use reth_storage_api::{
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
@@ -132,10 +133,25 @@ impl StateRootProvider for MemoryOverlayStateProvider {
 impl StorageRootProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
+        let state = &self.trie_state().state;
         let mut hashed_storage =
-            self.trie_state().state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
         self.historical.storage_root(address, hashed_storage)
+    }
+
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let state = &self.trie_state().state;
+        let mut hashed_storage =
+            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        hashed_storage.extend(&storage);
+        self.historical.storage_proof(address, slot, hashed_storage)
     }
 }
 

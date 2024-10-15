@@ -8,6 +8,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use std::{
+    fmt::Debug,
+    future::{poll_fn, Future},
+    sync::Arc,
+    task::Poll,
+};
+
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -17,9 +24,10 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
+use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
-use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications};
+use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
@@ -33,23 +41,22 @@ use reth_node_builder::{
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
-    node::{EthereumAddOns, EthereumNetworkBuilder, EthereumPayloadBuilder},
+    node::{
+        EthereumAddOns, EthereumEngineValidatorBuilder, EthereumNetworkBuilder,
+        EthereumPayloadBuilder,
+    },
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Head, SealedBlockWithSenders};
+use reth_primitives::{BlockNumHash, Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::{
-    fmt::Debug,
-    future::{poll_fn, Future},
-    sync::Arc,
-    task::Poll,
-};
+
+use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
@@ -133,8 +140,11 @@ where
         EthereumNetworkBuilder,
         TestExecutorBuilder,
         TestConsensusBuilder,
+        EthereumEngineValidatorBuilder,
     >;
-    type AddOns = EthereumAddOns;
+    type AddOns = EthereumAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
@@ -144,6 +154,11 @@ where
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
+            .engine_validator(EthereumEngineValidatorBuilder::default())
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        EthereumAddOns::default()
     }
 }
 
@@ -176,6 +191,8 @@ pub struct TestExExHandle {
     pub notifications_tx: Sender<ExExNotification>,
     /// Node task manager
     pub tasks: TaskManager,
+    /// WAL temp directory handle
+    _wal_directory: TempDir,
 }
 
 impl TestExExHandle {
@@ -216,7 +233,7 @@ impl TestExExHandle {
     /// Asserts that the Execution Extension emitted a `FinishedHeight` event with the correct
     /// height.
     #[track_caller]
-    pub fn assert_event_finished_height(&mut self, height: u64) -> eyre::Result<()> {
+    pub fn assert_event_finished_height(&mut self, height: BlockNumHash) -> eyre::Result<()> {
         let event = self.events_rx.try_recv()?;
         assert_eq!(event, ExExEvent::FinishedHeight(height));
         Ok(())
@@ -246,7 +263,7 @@ pub async fn test_exex_context_with_chain_spec(
     let db = create_test_rw_db();
     let provider_factory = ProviderFactory::new(
         db,
-        chain_spec,
+        chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
     );
 
@@ -256,6 +273,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+            .with_unused_discovery_port()
             .build(provider_factory.clone()),
     )
     .await?;
@@ -266,6 +284,8 @@ pub async fn test_exex_context_with_chain_spec(
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
 
+    let engine_validator = EthereumEngineValidator::new(chain_spec.clone());
+
     let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
         components: Components {
             transaction_pool,
@@ -274,6 +294,7 @@ pub async fn test_exex_context_with_chain_spec(
             consensus,
             network,
             payload_builder,
+            engine_validator,
         },
         task_executor,
         provider,
@@ -294,6 +315,9 @@ pub async fn test_exex_context_with_chain_spec(
         total_difficulty: Default::default(),
     };
 
+    let wal_directory = tempfile::tempdir()?;
+    let wal = Wal::new(wal_directory.path())?;
+
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
     let notifications = ExExNotifications::new(
@@ -301,6 +325,7 @@ pub async fn test_exex_context_with_chain_spec(
         components.provider.clone(),
         components.components.executor.clone(),
         notifications_rx,
+        wal.handle(),
     );
 
     let ctx = ExExContext {
@@ -312,7 +337,17 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
+    Ok((
+        ctx,
+        TestExExHandle {
+            genesis,
+            provider_factory,
+            events_rx,
+            notifications_tx,
+            tasks,
+            _wal_directory: wal_directory,
+        },
+    ))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.
@@ -355,5 +390,15 @@ impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
             Poll::Pending => Poll::Ready(Ok(())),
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn check_test_context_creation() {
+        let _ = test_exex_context().await.unwrap();
     }
 }

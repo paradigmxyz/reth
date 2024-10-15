@@ -1,3 +1,4 @@
+use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{tables, RawKey, RawTable, RawValue};
@@ -6,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::{keccak256, Account, B256};
+use reth_primitives::Account;
 use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
@@ -63,9 +64,9 @@ impl AccountHashingStage {
     >(
         provider: &reth_provider::DatabaseProvider<Tx, Spec>,
         opts: SeedOpts,
-    ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
+    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError> {
+        use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
-        use reth_primitives::U256;
         use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
@@ -297,8 +298,9 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         UnwindStageTestRunner,
     };
+    use alloy_primitives::U256;
     use assert_matches::assert_matches;
-    use reth_primitives::{Account, U256};
+    use reth_primitives::Account;
     use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
@@ -348,7 +350,7 @@ mod tests {
     mod test_utils {
         use super::*;
         use crate::test_utils::TestStageDB;
-        use reth_primitives::Address;
+        use alloy_primitives::Address;
         use reth_provider::DatabaseProviderFactory;
 
         pub(crate) struct AccountHashingTestRunner {

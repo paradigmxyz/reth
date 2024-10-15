@@ -3,7 +3,7 @@
 use super::task::TaskDownloader;
 use crate::metrics::HeaderDownloaderMetrics;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
@@ -249,7 +249,15 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
+        let sealed_headers = headers
+            .into_par_iter()
+            .map(|h| {
+                let sealed = h.seal_slow();
+                let (header, seal) = sealed.into_parts();
+
+                SealedHeader::new(header, seal)
+            })
+            .collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -375,7 +383,9 @@ where
                     .into())
                 }
 
-                let target = headers.remove(0).seal_slow();
+                let sealed_target = headers.swap_remove(0).seal_slow();
+                let (header, seal) = sealed_target.into_parts();
+                let target = SealedHeader::new(header, seal);
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {
@@ -1286,7 +1296,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(Header::default().seal(B256::random()));
+        let target = SyncTarget::Gap(SealedHeader::new(Header::default(), B256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
@@ -1310,7 +1320,7 @@ mod tests {
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
         next.number += 1;
-        downloader.update_local_head(next.seal(B256::random()));
+        downloader.update_local_head(SealedHeader::new(next, B256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }
 

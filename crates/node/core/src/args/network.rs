@@ -4,11 +4,10 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
-    sync::Arc,
 };
 
 use clap::Args;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -173,7 +172,7 @@ impl NetworkArgs {
 
                     DEFAULT_DISCOVERY_ADDR
                 }
-            }
+            };
         }
 
         self.addr
@@ -186,8 +185,8 @@ impl NetworkArgs {
         })
     }
 
-    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
-    /// values in this option struct.
+    /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
+    /// the values in this option struct.
     ///
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
@@ -200,7 +199,7 @@ impl NetworkArgs {
     pub fn network_config(
         &self,
         config: &Config,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
@@ -227,6 +226,7 @@ impl NetworkArgs {
                 self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            propagation_mode: Default::default(),
         };
 
         // Configure basic network stack
@@ -240,7 +240,6 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
             .apply(|builder| {
@@ -356,6 +355,10 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub enable_discv5_discovery: bool,
 
+    /// Disable Nat discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_nat: bool,
+
     /// The UDP address to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: IpAddr,
@@ -417,6 +420,10 @@ impl DiscoveryArgs {
 
         if self.disable_discovery || self.disable_discv4_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
+        }
+
+        if self.disable_discovery || self.disable_nat {
+            network_config_builder = network_config_builder.disable_nat();
         }
 
         if !self.disable_discovery && self.enable_discv5_discovery {
@@ -495,6 +502,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,

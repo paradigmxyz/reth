@@ -67,14 +67,14 @@ pub struct StaticFileProviderRWRefMut<'a>(
     pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
 );
 
-impl<'a> std::ops::DerefMut for StaticFileProviderRWRefMut<'a> {
+impl std::ops::DerefMut for StaticFileProviderRWRefMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
         self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
-impl<'a> std::ops::Deref for StaticFileProviderRWRefMut<'a> {
+impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
     type Target = StaticFileProviderRW;
 
     fn deref(&self) -> &Self::Target {
@@ -289,16 +289,16 @@ impl StaticFileProviderRW {
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
         // there's no block data in static files.
-        let segment_max_block = match self.writer.user_header().block_range() {
-            Some(block_range) => Some(block_range.end()),
-            None => {
-                if self.writer.user_header().expected_block_start() > 0 {
-                    Some(self.writer.user_header().expected_block_start() - 1)
-                } else {
-                    None
-                }
-            }
-        };
+        let segment_max_block = self
+            .writer
+            .user_header()
+            .block_range()
+            .as_ref()
+            .map(|block_range| block_range.end())
+            .or_else(|| {
+                (self.writer.user_header().expected_block_start() > 0)
+                    .then(|| self.writer.user_header().expected_block_start() - 1)
+            });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
@@ -381,8 +381,9 @@ impl StaticFileProviderRW {
     /// Commits to the configuration file at the end.
     fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
         let mut remaining_rows = num_rows;
+        let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
-            let len = match self.writer.user_header().segment() {
+            let len = match segment {
                 StaticFileSegment::Headers => {
                     self.writer.user_header().block_len().unwrap_or_default()
                 }
@@ -396,7 +397,14 @@ impl StaticFileProviderRW {
                 // delete the whole file and go to the next static file
                 let block_start = self.writer.user_header().expected_block_start();
 
-                if block_start != 0 {
+                // We only delete the file if it's NOT the first static file AND:
+                // * it's a Header segment  OR
+                // * it's a tx-based segment AND `last_block` is lower than the first block of this
+                //   file's block range. Otherwise, having no rows simply means that this block
+                //   range has no transactions, but the file should remain.
+                if block_start != 0 &&
+                    (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
+                {
                     self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`

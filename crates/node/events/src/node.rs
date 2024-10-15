@@ -259,7 +259,7 @@ impl NodeState {
                     number=block.number,
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
-                    txs=block.body.len(),
+                    txs=block.body.transactions.len(),
                     gas=%format_gas(block.header.gas_used),
                     gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
@@ -504,7 +504,7 @@ where
             } else if let Some(latest_block) = this.state.latest_block {
                 let now =
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-                if now - this.state.latest_block_time.unwrap_or(0) > 60 {
+                if now.saturating_sub(this.state.latest_block_time.unwrap_or(0)) > 60 {
                     // Once we start receiving consensus nodes, don't emit status unless stalled for
                     // 1 minute
                     info!(

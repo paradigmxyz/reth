@@ -1,8 +1,8 @@
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::Serialize;
 
-use alloy_primitives::Address;
-use reth_primitives::{Account, Buf};
+use alloy_primitives::{bytes::Buf, Address};
+use reth_primitives::Account;
 
 /// Account as it is saved in the database.
 ///
@@ -39,13 +39,11 @@ impl Compact for AccountBeforeTx {
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 
-        let info = if len - 20 > 0 {
+        let info = (len - 20 > 0).then(|| {
             let (acc, advanced_buf) = Account::from_compact(buf, len - 20);
             buf = advanced_buf;
-            Some(acc)
-        } else {
-            None
-        };
+            acc
+        });
 
         (Self { address, info }, buf)
     }

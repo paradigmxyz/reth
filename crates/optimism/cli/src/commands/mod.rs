@@ -2,7 +2,6 @@ use crate::chainspec::OpChainSpecParser;
 use clap::Subcommand;
 use import::ImportOpCommand;
 use import_receipts::ImportReceiptsOpCommand;
-use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     config_cmd, db, dump_genesis, init_cmd,
@@ -19,10 +18,8 @@ pub mod init_state;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<
-    Spec: ChainSpecParser<ChainSpec = ChainSpec> = OpChainSpecParser,
-    Ext: clap::Args + fmt::Debug = NoArgs,
-> {
+pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
+{
     /// Start the node
     #[command(name = "node")]
     Node(Box<node::NodeCommand<Spec, Ext>>),

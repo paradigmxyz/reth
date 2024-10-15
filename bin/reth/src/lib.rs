@@ -90,6 +90,7 @@ pub mod dirs {
 /// Re-exported from `reth_chainspec`
 pub mod chainspec {
     pub use reth_chainspec::*;
+    pub use reth_ethereum_cli::chainspec::*;
 }
 
 /// Re-exported from `reth_provider`.
@@ -151,9 +152,9 @@ pub mod rpc {
         pub use reth_rpc_builder::*;
     }
 
-    /// Re-exported from `reth_rpc_types`.
+    /// Re-exported from `alloy_rpc_types`.
     pub mod types {
-        pub use reth_rpc_types::*;
+        pub use alloy_rpc_types::*;
     }
 
     /// Re-exported from `reth_rpc_server_types`.

@@ -1,12 +1,11 @@
 use crate::{mode::MiningMode, Storage};
+use alloy_rpc_types_engine::ForkchoiceState;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
-use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
@@ -21,7 +20,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
-pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTypes> {
+pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTypes, ChainSpec> {
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
@@ -46,8 +45,8 @@ pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTyp
 
 // === impl MiningTask ===
 
-impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes>
-    MiningTask<Client, Pool, Executor, Engine>
+impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes, ChainSpec>
+    MiningTask<Client, Pool, Executor, Engine, ChainSpec>
 {
     /// Creates a new instance of the task
     #[allow(clippy::too_many_arguments)]
@@ -80,12 +79,14 @@ impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes>
     }
 }
 
-impl<Executor, Client, Pool, Engine> Future for MiningTask<Client, Pool, Executor, Engine>
+impl<Executor, Client, Pool, Engine, ChainSpec> Future
+    for MiningTask<Client, Pool, Executor, Engine, ChainSpec>
 where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Engine: EngineTypes,
     Executor: BlockExecutorProvider,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     type Output = ();
 
@@ -112,7 +113,6 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
-                let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let executor = this.block_executor.clone();
 
@@ -138,11 +138,6 @@ where
                         &executor,
                     ) {
                         Ok((new_header, _bundle_state)) => {
-                            // clear all transactions from pool
-                            pool.remove_transactions(
-                                transactions.iter().map(|tx| tx.hash()).collect(),
-                            );
-
                             let state = ForkchoiceState {
                                 head_block_hash: new_header.hash(),
                                 finalized_block_hash: new_header.hash(),
@@ -216,8 +211,8 @@ where
     }
 }
 
-impl<Client, Pool: TransactionPool, EvmConfig: std::fmt::Debug, Engine: EngineTypes> std::fmt::Debug
-    for MiningTask<Client, Pool, EvmConfig, Engine>
+impl<Client, Pool: TransactionPool, EvmConfig: std::fmt::Debug, Engine: EngineTypes, ChainSpec>
+    std::fmt::Debug for MiningTask<Client, Pool, EvmConfig, Engine, ChainSpec>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MiningTask").finish_non_exhaustive()

@@ -2,20 +2,20 @@
 
 //! Optimism builder support
 
+use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
+/// Re-export for use in downstream arguments.
+pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
-};
-/// Re-export for use in downstream arguments.
-pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
-use reth_rpc_types::{
-    engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId},
-    optimism::{OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4},
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
@@ -38,13 +38,13 @@ pub struct OptimismPayloadBuilderAttributes {
 }
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
-    type RpcPayloadAttributes = OptimismPayloadAttributes;
+    type RpcPayloadAttributes = OpPayloadAttributes;
     type Error = alloy_rlp::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, Self::Error> {
+    fn try_new(parent: B256, attributes: OpPayloadAttributes) -> Result<Self, Self::Error> {
         let id = payload_id_optimism(&parent, &attributes);
 
         let transactions = attributes
@@ -52,8 +52,15 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                TransactionSigned::decode_enveloped(&mut data.as_ref())
-                    .map(|tx| WithEncoded::new(data, tx))
+                let mut buf = data.as_ref();
+                let tx =
+                    TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+
+                if !buf.is_empty() {
+                    return Err(alloy_rlp::Error::UnexpectedLength);
+                }
+
+                Ok(WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;
 
@@ -119,7 +126,7 @@ pub struct OptimismBuiltPayload {
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
     /// The rollup's chainspec.
-    pub(crate) chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<OpChainSpec>,
     /// The payload attributes.
     pub(crate) attributes: OptimismPayloadBuilderAttributes,
 }
@@ -132,7 +139,7 @@ impl OptimismBuiltPayload {
         id: PayloadId,
         block: SealedBlock,
         fees: U256,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: Arc<OpChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
     ) -> Self {
@@ -174,7 +181,7 @@ impl BuiltPayload for OptimismBuiltPayload {
     }
 }
 
-impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
+impl BuiltPayload for &OptimismBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -204,7 +211,7 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
+impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
@@ -231,7 +238,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
         }
     }
 }
-impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
+impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
@@ -259,13 +266,10 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
     }
 }
 
-/// Generates the payload id for the configured payload from the [`OptimismPayloadAttributes`].
+/// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(
-    parent: &B256,
-    attributes: &OptimismPayloadAttributes,
-) -> PayloadId {
+pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());

@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
     path::PathBuf,
     sync::Arc,
@@ -7,6 +6,7 @@ use std::{
 
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
+    map::{HashMap, HashSet},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use reth_chain_state::{
@@ -355,6 +355,15 @@ impl StorageRootProvider for NoopProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(B256::default())
+    }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(reth_trie::StorageProof::new(slot))
     }
 }
 

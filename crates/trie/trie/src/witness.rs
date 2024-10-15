@@ -1,16 +1,23 @@
 use crate::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof,
-    trie_cursor::TrieCursorFactory, HashedPostState,
+    hashed_cursor::{HashedCursor, HashedCursorFactory},
+    prefix_set::TriePrefixSetsMut,
+    proof::{Proof, StorageProof},
+    trie_cursor::TrieCursorFactory,
+    HashedPostState,
 };
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Bytes, B256,
+};
 use alloy_rlp::{BufMut, Decodable, Encodable};
-use itertools::Either;
+use itertools::{Either, Itertools};
 use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
-    BranchNode, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
+    BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -78,61 +85,69 @@ where
         mut self,
         state: HashedPostState,
     ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
-        let proof_targets = HashMap::from_iter(
-            state
-                .accounts
-                .keys()
-                .map(|hashed_address| (*hashed_address, HashSet::default()))
-                .chain(state.storages.iter().map(|(hashed_address, storage)| {
-                    (*hashed_address, storage.storage.keys().copied().collect())
-                })),
-        );
+        if state.is_empty() {
+            return Ok(self.witness)
+        }
+
+        let proof_targets = self.get_proof_targets(&state)?;
         let mut account_multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_targets(proof_targets.clone())
-                .multiproof()?;
+                .multiproof(proof_targets.clone())?;
 
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_trie_nodes = BTreeMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
-            let storage_multiproof =
-                account_multiproof.storages.remove(&hashed_address).unwrap_or_default();
+            let storage_multiproof = account_multiproof
+                .storages
+                .remove(&hashed_address)
+                .unwrap_or_else(StorageMultiProof::empty);
 
             // Gather and record account trie nodes.
             let account = state
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
-            let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
-                account_rlp.clear();
-                TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
-                    .encode(&mut account_rlp as &mut dyn BufMut);
-                Some(account_rlp.clone())
-            } else {
-                None
-            };
+            let value =
+                (account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH).then(|| {
+                    account_rlp.clear();
+                    TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
+                        .encode(&mut account_rlp as &mut dyn BufMut);
+                    account_rlp.clone()
+                });
             let key = Nibbles::unpack(hashed_address);
-            let proof = account_multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
-            account_trie_nodes.extend(self.target_nodes(key.clone(), value, proof)?);
+            account_trie_nodes.extend(
+                self.target_nodes(
+                    key.clone(),
+                    value,
+                    account_multiproof
+                        .account_subtree
+                        .matching_nodes_iter(&key)
+                        .sorted_by(|a, b| a.0.cmp(b.0)),
+                )?,
+            );
 
             // Gather and record storage trie nodes for this account.
             let mut storage_trie_nodes = BTreeMap::default();
             let storage = state.storages.get(&hashed_address);
             for hashed_slot in hashed_slots {
-                let slot_key = Nibbles::unpack(hashed_slot);
+                let slot_nibbles = Nibbles::unpack(hashed_slot);
                 let slot_value = storage
                     .and_then(|s| s.storage.get(&hashed_slot))
                     .filter(|v| !v.is_zero())
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
-                let proof = storage_multiproof.subtree.iter().filter(|e| slot_key.starts_with(e.0));
-                storage_trie_nodes.extend(self.target_nodes(
-                    slot_key.clone(),
-                    slot_value,
-                    proof,
-                )?);
+                storage_trie_nodes.extend(
+                    self.target_nodes(
+                        slot_nibbles.clone(),
+                        slot_value,
+                        storage_multiproof
+                            .subtree
+                            .matching_nodes_iter(&slot_nibbles)
+                            .sorted_by(|a, b| a.0.cmp(b.0)),
+                    )?,
+                );
             }
 
             Self::next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
@@ -140,19 +155,25 @@ where
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
                 let target_key = B256::from_slice(&padded_key);
-                let mut proof = Proof::new(
+                let storage_prefix_set = self
+                    .prefix_sets
+                    .storage_prefix_sets
+                    .get(&hashed_address)
+                    .cloned()
+                    .unwrap_or_default();
+                let proof = StorageProof::new_hashed(
                     self.trie_cursor_factory.clone(),
                     self.hashed_cursor_factory.clone(),
+                    hashed_address,
                 )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_target((hashed_address, HashSet::from([target_key])))
-                .storage_multiproof(hashed_address)?;
+                .with_prefix_set_mut(storage_prefix_set)
+                .storage_multiproof(HashSet::from_iter([target_key]))?;
 
                 // The subtree only contains the proof for a single target.
                 let node =
-                    proof.subtree.remove(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
+                    proof.subtree.get(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
                 self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
-                Ok(node)
+                Ok(node.clone())
             })?;
         }
 
@@ -160,19 +181,17 @@ where
             // Right pad the target with 0s.
             let mut padded_key = key.pack();
             padded_key.resize(32, 0);
-            let mut proof =
+            let targets = HashMap::from_iter([(B256::from_slice(&padded_key), HashSet::default())]);
+            let proof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .with_target((B256::from_slice(&padded_key), HashSet::default()))
-                    .multiproof()?;
+                    .multiproof(targets)?;
 
             // The subtree only contains the proof for a single target.
-            let node = proof
-                .account_subtree
-                .remove(&key)
-                .ok_or(TrieWitnessError::MissingTargetNode(key))?;
+            let node =
+                proof.account_subtree.get(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
             self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
-            Ok(node)
+            Ok(node.clone())
         })?;
 
         Ok(self.witness)
@@ -185,9 +204,10 @@ where
         key: Nibbles,
         value: Option<Vec<u8>>,
         proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
-    ) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, StateProofError> {
+    ) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, TrieWitnessError> {
         let mut trie_nodes = BTreeMap::default();
-        for (path, encoded) in proof {
+        let mut proof_iter = proof.into_iter().enumerate().peekable();
+        while let Some((idx, (path, encoded))) = proof_iter.next() {
             // Record the node in witness.
             self.witness.insert(keccak256(encoded.as_ref()), encoded.clone());
 
@@ -208,7 +228,15 @@ where
                 TrieNode::Leaf(leaf) => {
                     next_path.extend_from_slice(&leaf.key);
                     if next_path != key {
-                        trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                        trie_nodes.insert(
+                            next_path.clone(),
+                            Either::Right(leaf.value.as_slice().to_vec()),
+                        );
+                    }
+                }
+                TrieNode::EmptyRoot => {
+                    if idx != 0 || proof_iter.peek().is_some() {
+                        return Err(TrieWitnessError::UnexpectedEmptyRoot(next_path))
                     }
                 }
             };
@@ -219,6 +247,36 @@ where
         }
 
         Ok(trie_nodes)
+    }
+
+    /// Retrieve proof targets for incoming hashed state.
+    /// This method will aggregate all accounts and slots present in the hash state as well as
+    /// select all existing slots from the database for the accounts that have been destroyed.
+    fn get_proof_targets(
+        &self,
+        state: &HashedPostState,
+    ) -> Result<HashMap<B256, HashSet<B256>>, StateProofError> {
+        let mut proof_targets = HashMap::default();
+        for hashed_address in state.accounts.keys() {
+            proof_targets.insert(*hashed_address, HashSet::default());
+        }
+        for (hashed_address, storage) in &state.storages {
+            let mut storage_keys = storage.storage.keys().copied().collect::<HashSet<_>>();
+            if storage.wiped {
+                // storage for this account was destroyed, gather all slots from the current state
+                let mut storage_cursor =
+                    self.hashed_cursor_factory.hashed_storage_cursor(*hashed_address)?;
+                // position cursor at the start
+                if let Some((hashed_slot, _)) = storage_cursor.seek(B256::ZERO)? {
+                    storage_keys.insert(hashed_slot);
+                }
+                while let Some((hashed_slot, _)) = storage_cursor.next()? {
+                    storage_keys.insert(hashed_slot);
+                }
+            }
+            proof_targets.insert(*hashed_address, storage_keys);
+        }
+        Ok(proof_targets)
     }
 
     fn next_root_from_proofs(
@@ -267,6 +325,9 @@ where
                                 }
                                 TrieNode::Extension(ext) => {
                                     path.extend_from_slice(&ext.key);
+                                }
+                                TrieNode::EmptyRoot => {
+                                    return Err(TrieWitnessError::UnexpectedEmptyRoot(path))
                                 }
                             }
                         }

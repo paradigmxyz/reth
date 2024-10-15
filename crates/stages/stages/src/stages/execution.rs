@@ -1,4 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
+use alloy_primitives::{BlockNumber, Sealable};
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
@@ -8,8 +9,8 @@ use reth_evm::{
     metrics::ExecutorMetrics,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{BlockNumber, Header, StaticFileSegment};
+use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
+use reth_primitives::{Header, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -269,14 +270,17 @@ where
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.transactions.len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered((&block, td).into(), |input| {
+            self.metrics.metered_one((&block, td).into(), |input| {
+                let sealed = block.header.clone().seal_slow();
+                let (header, seal) = sealed.into_parts();
+
                 executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(block.header.clone().seal_slow()),
+                    block: Box::new(SealedHeader::new(header, seal)),
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
@@ -346,12 +350,13 @@ where
 
             let previous_input =
                 self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
-            debug_assert!(
-                previous_input.is_none(),
-                "Previous post execute commit input wasn't processed"
-            );
-            if let Some(previous_input) = previous_input {
-                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+
+            if previous_input.is_some() {
+                // Not processing the previous post execute commit input is a critical error, as it
+                // means that we didn't send the notification to ExExes
+                return Err(StageError::PostExecuteCommit(
+                    "Previous post execute commit input wasn't processed",
+                ))
             }
         }
 
@@ -384,9 +389,10 @@ where
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
-        let _ = self
-            .exex_manager_handle
-            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) });
+        let _ = self.exex_manager_handle.send(
+            ExExNotificationSource::Pipeline,
+            ExExNotification::ChainCommitted { new: Arc::new(chain) },
+        );
 
         Ok(())
     }
@@ -472,8 +478,10 @@ where
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
-        let _ =
-            self.exex_manager_handle.send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+        let _ = self.exex_manager_handle.send(
+            ExExNotificationSource::Pipeline,
+            ExExNotification::ChainReverted { old: Arc::new(chain) },
+        );
 
         Ok(())
     }
@@ -654,16 +662,14 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::TestStageDB;
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
-    use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, Address, Bytecode, SealedBlock,
-        StorageEntry, B256, U256,
-    };
+    use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
         ReceiptProvider, StaticFileProviderFactory,

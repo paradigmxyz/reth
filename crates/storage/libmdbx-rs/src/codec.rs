@@ -22,7 +22,7 @@ pub trait TableObject: Sized {
     }
 }
 
-impl<'tx> TableObject for Cow<'tx, [u8]> {
+impl TableObject for Cow<'_, [u8]> {
     fn decode(_: &[u8]) -> Result<Self, Error> {
         unreachable!()
     }

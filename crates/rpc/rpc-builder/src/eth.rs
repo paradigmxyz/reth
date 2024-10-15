@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use reth_evm::ConfigureEvm;
 use reth_primitives::Header;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
@@ -11,9 +9,8 @@ use reth_rpc_eth_types::{
 use reth_tasks::TaskSpawner;
 
 /// Alias for `eth` namespace API builder.
-pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> = Box<
-    dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>) -> EthApi,
->;
+pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
+    Box<dyn FnOnce(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
@@ -30,11 +27,17 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
 
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
 where
-    EthApi: EthApiTypes,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+    Pool: Send + Sync + Clone + 'static,
+    Network: Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
+    EthApi: EthApiTypes + 'static,
 {
-    /// Returns a new [`EthHandlers`] builder.
+    /// Returns a new instance with handlers for `eth` namespace.
+    ///
+    /// This will spawn all necessary tasks for the handlers.
     #[allow(clippy::too_many_arguments)]
-    pub fn builder<EvmConfig, Tasks>(
+    pub fn bootstrap<EvmConfig, Tasks>(
         provider: Provider,
         pool: Pool,
         network: Network,
@@ -51,49 +54,11 @@ where
             Events,
             EthApi,
         >,
-    ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
-        EthHandlersBuilder {
-            provider,
-            pool,
-            network,
-            evm_config,
-            config,
-            executor,
-            events,
-            eth_api_builder,
-        }
-    }
-}
-
-/// Builds [`EthHandlers`] for core, filter, and pubsub `eth_` apis.
-#[allow(missing_debug_implementations)]
-pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
-    provider: Provider,
-    pool: Pool,
-    network: Network,
-    evm_config: EvmConfig,
-    config: EthConfig,
-    executor: Tasks,
-    events: Events,
-    eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
-}
-
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
-    EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
-where
-    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-    Pool: Send + Sync + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
-    Network: Clone + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: EthApiTypes + 'static,
-{
-    /// Returns a new instance with handlers for `eth` namespace.
-    pub fn build(self) -> EthHandlers<Provider, Pool, Network, Events, EthApi> {
-        let Self { provider, pool, network, evm_config, config, executor, events, eth_api_builder } =
-            self;
-
+    ) -> Self
+    where
+        EvmConfig: ConfigureEvm<Header = Header>,
+        Tasks: TaskSpawner + Clone + 'static,
+    {
         let cache = EthStateCache::spawn_with(
             provider.clone(),
             config.cache,
@@ -119,67 +84,26 @@ where
             executor,
             events,
             cache,
-            _rpc_ty_builders: PhantomData,
         };
 
         let api = eth_api_builder(&ctx);
 
-        let filter = EthFilterApiBuilder::build(&ctx);
-
-        let pubsub = EthPubSubApiBuilder::build(&ctx);
-
-        EthHandlers { api, cache: ctx.cache, filter, pubsub }
-    }
-}
-
-/// Builds the `eth_` namespace API [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer).
-#[derive(Debug)]
-pub struct EthFilterApiBuilder;
-
-impl EthFilterApiBuilder {
-    /// Builds the [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer), for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
-    ) -> EthFilter<Provider, Pool, Eth>
-    where
-        Provider: Send + Sync + Clone + 'static,
-        Pool: Send + Sync + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Eth: EthApiTypes + 'static,
-    {
-        EthFilter::new(
+        let filter = EthFilter::new(
             ctx.provider.clone(),
             ctx.pool.clone(),
             ctx.cache.clone(),
             ctx.config.filter_config(),
             Box::new(ctx.executor.clone()),
-        )
-    }
-}
+        );
 
-/// Builds the `eth_` namespace API [`EthPubSubApiServer`](reth_rpc_eth_api::EthFilterApiServer).
-#[derive(Debug)]
-pub struct EthPubSubApiBuilder;
-
-impl EthPubSubApiBuilder {
-    /// Builds the [`EthPubSubApiServer`](reth_rpc_eth_api::EthPubSubApiServer), for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
-    ) -> EthPubSub<Provider, Pool, Events, Network, Eth>
-    where
-        Provider: Clone,
-        Pool: Clone,
-        Events: Clone,
-        Network: Clone,
-        Tasks: TaskSpawner + Clone + 'static,
-        Eth: EthApiTypes + 'static,
-    {
-        EthPubSub::with_spawner(
+        let pubsub = EthPubSub::with_spawner(
             ctx.provider.clone(),
             ctx.pool.clone(),
             ctx.events.clone(),
             ctx.network.clone(),
             Box::new(ctx.executor.clone()),
-        )
+        );
+
+        Self { api, cache: ctx.cache, filter, pubsub }
     }
 }

@@ -2,21 +2,29 @@
 
 To sync OP mainnet, bedrock state needs to be imported as a starting point. There are currently two ways:
 
-* Minimal bootstrap: only state snapshot at Bedrock block is imported without any OVM historical data.
-* Full bootstrap: state, blocks and receipts are imported.
+* Minimal bootstrap **(recommended)**: only state snapshot at Bedrock block is imported without any OVM historical data.
+* Full bootstrap **(not recommended)**: state, blocks and receipts are imported. *Not recommended for now: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node
 
-## Minimal bootstrap
+## Minimal bootstrap (recommended)
 
 **The state snapshot at Bedrock block is required.** It can be exported from [op-geth](https://github.com/testinprod-io/op-erigon/blob/pcw109550/bedrock-db-migration/bedrock-migration.md#export-state) (**.jsonl**) or downloaded directly from [here](https://mega.nz/file/GdZ1xbAT#a9cBv3AqzsTGXYgX7nZc_3fl--tcBmOAIwIA5ND6kwc).
 
+Import the state snapshot
+
 ```sh
 $ op-reth init-state --without-ovm --chain optimism --datadir op-mainnet world_trie_state.jsonl
+```
 
+Sync the node to a recent finalized block (e.g. 125200000) to catch up close to the tip, before pairing with op-node.
+
+```sh
 $ op-reth node --chain optimism --datadir op-mainnet --debug.tip 0x098f87b75c8b861c775984f9d5dbe7b70cbbbc30fc15adb03a5044de0144f2d0 # block #125200000
 ```
 
 
-## Full bootstrap
+## Full bootstrap (not recommended)
+
+**Not recommended for now**: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node.
 
 ### Import state 
 
@@ -47,7 +55,7 @@ Imports a `.rlp` file of blocks.
 Import of >100 million OVM blocks, from genesis to Bedrock, completes in 45 minutes.
 
 ```bash
-$ op-reth import-op <exported-blocks>
+$ op-reth import-op --chain optimism <exported-blocks>
 ```
 
 #### 2. Import Receipts
@@ -61,7 +69,7 @@ Imports a `.rlp` file of receipts, that has been exported with command specified
 Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
 
 ```bash
-$ op-reth import-receipts-op <exported-receipts>
+$ op-reth import-receipts-op --chain optimism <exported-receipts>
 ```
 
 #### 3. Import State

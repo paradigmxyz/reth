@@ -46,6 +46,12 @@ pub use event::*;
 mod manager;
 pub use manager::*;
 
+mod notifications;
+pub use notifications::*;
+
+mod wal;
+pub use wal::*;
+
 // Re-export exex types
 #[doc(inline)]
 pub use reth_exex_types::*;

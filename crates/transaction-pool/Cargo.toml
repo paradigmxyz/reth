@@ -27,6 +27,7 @@ revm.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-consensus.workspace = true
 
 # async/futures
 futures-util.workspace = true

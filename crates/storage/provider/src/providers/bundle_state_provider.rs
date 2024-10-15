@@ -1,14 +1,16 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, B256,
+};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
-use std::collections::{HashMap, HashSet};
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
 /// or an underlying state provider.
@@ -28,6 +30,20 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BundleStateProvider<SP, EDP>
     /// Create new bundle state provider
     pub const fn new(state_provider: SP, block_execution_data_provider: EDP) -> Self {
         Self { state_provider, block_execution_data_provider }
+    }
+
+    /// Retrieve hashed storage for target address.
+    fn get_hashed_storage(&self, address: Address) -> HashedStorage {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        bundle_state
+            .account(&address)
+            .map(|account| {
+                HashedStorage::from_plain_storage(
+                    account.status,
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            })
+            .unwrap_or_else(|| HashedStorage::new(false))
     }
 }
 
@@ -107,18 +123,20 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut storage = bundle_state
-            .account(&address)
-            .map(|account| {
-                HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                )
-            })
-            .unwrap_or_else(|| HashedStorage::new(false));
+        let mut storage = self.get_hashed_storage(address);
         storage.extend(&hashed_storage);
         self.state_provider.storage_root(address, storage)
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let mut storage = self.get_hashed_storage(address);
+        storage.extend(&hashed_storage);
+        self.state_provider.storage_proof(address, slot, storage)
     }
 }
 

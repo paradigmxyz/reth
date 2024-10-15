@@ -386,7 +386,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[1], Some((types[1], sizes[1])));
 
         assert_eq!(expected_data, valid_data.into_data())
@@ -426,7 +426,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::Ok);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
         assert_eq!(expected_data, valid_data.into_data())
@@ -465,7 +465,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[3], Some((types[3], sizes[3])));
         expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
@@ -509,7 +509,7 @@ mod test {
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        let mut expected_data = HashMap::new();
+        let mut expected_data = HashMap::default();
         expected_data.insert(hashes[1], None);
         expected_data.insert(hashes[0], None);
 

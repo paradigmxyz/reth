@@ -7,7 +7,8 @@ use reth_primitives::{
     constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
     EIP4844_TX_TYPE_ID,
 };
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Mul};
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -107,6 +108,15 @@ impl SubPoolLimit {
     }
 }
 
+impl Mul<usize> for SubPoolLimit {
+    type Output = Self;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        let Self { max_txs, max_size } = self;
+        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
+    }
+}
+
 impl Default for SubPoolLimit {
     fn default() -> Self {
         // either 10k transactions or 20MB
@@ -157,7 +167,7 @@ pub struct LocalTransactionConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
-    /// Addresses that will be considered as local . Above exemptions apply
+    /// Addresses that will be considered as local. Above exemptions apply.
     pub local_addresses: HashSet<Address>,
     /// Flag indicating whether local transactions should be propagated.
     pub propagate_local_transactions: bool,
@@ -266,7 +276,7 @@ mod tests {
     #[test]
     fn test_contains_local_address() {
         let address = Address::new([1; 20]);
-        let mut local_addresses = HashSet::new();
+        let mut local_addresses = HashSet::default();
         local_addresses.insert(address);
 
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
@@ -283,7 +293,7 @@ mod tests {
         let address = Address::new([1; 20]);
         let config = LocalTransactionConfig {
             no_exemptions: true,
-            local_addresses: HashSet::new(),
+            local_addresses: HashSet::default(),
             ..Default::default()
         };
 
@@ -294,7 +304,7 @@ mod tests {
     #[test]
     fn test_is_local_without_no_exemptions() {
         let address = Address::new([1; 20]);
-        let mut local_addresses = HashSet::new();
+        let mut local_addresses = HashSet::default();
         local_addresses.insert(address);
 
         let config =
@@ -317,5 +327,15 @@ mod tests {
 
         let new_config = config.set_propagate_local_transactions(false);
         assert!(!new_config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn scale_pool_limit() {
+        let limit = SubPoolLimit::default();
+        let double = limit * 2;
+        assert_eq!(
+            double,
+            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
+        )
     }
 }

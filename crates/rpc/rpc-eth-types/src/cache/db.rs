@@ -2,7 +2,10 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, B256, U256,
+};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_storage_api::StateProvider;
@@ -17,7 +20,7 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 #[allow(missing_debug_implementations)]
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
-impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
     fn state_root(
         &self,
         hashed_state: reth_trie::HashedPostState,
@@ -47,7 +50,7 @@ impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a
     }
 }
 
-impl<'a> reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<'_> {
     fn storage_root(
         &self,
         address: Address,
@@ -55,9 +58,18 @@ impl<'a> reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<
     ) -> ProviderResult<B256> {
         self.0.storage_root(address, hashed_storage)
     }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        self.0.storage_proof(address, slot, hashed_storage)
+    }
 }
 
-impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
     fn proof(
         &self,
         input: reth_trie::TrieInput,
@@ -70,7 +82,7 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
     fn multiproof(
         &self,
         input: reth_trie::TrieInput,
-        targets: std::collections::HashMap<B256, std::collections::HashSet<B256>>,
+        targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<reth_trie::MultiProof> {
         self.0.multiproof(input, targets)
     }
@@ -79,12 +91,13 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
         &self,
         input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, alloy_primitives::Bytes>> {
+    ) -> reth_errors::ProviderResult<alloy_primitives::map::HashMap<B256, alloy_primitives::Bytes>>
+    {
         self.0.witness(input, target)
     }
 }
 
-impl<'a> reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'_> {
     fn basic_account(
         &self,
         address: revm_primitives::Address,
@@ -93,7 +106,7 @@ impl<'a> reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'a> {
     }
 }
 
-impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> {
+impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
     fn block_hash(
         &self,
         block_number: alloy_primitives::BlockNumber,
@@ -117,7 +130,7 @@ impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> 
     }
 }
 
-impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
+impl StateProvider for StateProviderTraitObjWrapper<'_> {
     fn account_balance(
         &self,
         addr: revm_primitives::Address,
@@ -160,7 +173,7 @@ impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
 #[allow(missing_debug_implementations)]
 pub struct StateCacheDbRefMutWrapper<'a, 'b>(pub &'b mut StateCacheDb<'a>);
 
-impl<'a, 'b> Database for StateCacheDbRefMutWrapper<'a, 'b> {
+impl<'a> Database for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
     fn basic(
         &mut self,
@@ -186,7 +199,7 @@ impl<'a, 'b> Database for StateCacheDbRefMutWrapper<'a, 'b> {
     }
 }
 
-impl<'a, 'b> DatabaseRef for StateCacheDbRefMutWrapper<'a, 'b> {
+impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
 
     fn basic_ref(

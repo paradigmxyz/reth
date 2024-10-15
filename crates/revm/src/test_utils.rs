@@ -1,17 +1,18 @@
-use std::collections::HashSet;
-
-use crate::precompile::HashMap;
 use alloc::vec::Vec;
-use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
+use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
+    TrieInput,
 };
 
 /// Mock state for testing
@@ -102,6 +103,15 @@ impl StorageRootProvider for StateProviderTest {
     ) -> ProviderResult<B256> {
         unimplemented!("storage root is not supported")
     }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        _slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        unimplemented!("proof generation is not supported")
+    }
 }
 
 impl StateProofProvider for StateProviderTest {
@@ -136,7 +146,7 @@ impl StateProvider for StateProviderTest {
         &self,
         account: Address,
         storage_key: StorageKey,
-    ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 

@@ -4,8 +4,9 @@ use crate::OptimismBlockExecutionError;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::Block;
+use reth_primitives::BlockBody;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
@@ -30,9 +31,9 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 /// transaction in the L2 block.
 ///
 /// Returns an error if the L1 info transaction is not found, if the block is empty.
-pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
-    let l1_info_tx_data = block
-        .body
+pub fn extract_l1_info(body: &BlockBody) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
+    let l1_info_tx_data = body
+        .transactions
         .first()
         .ok_or_else(|| OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not find l1 block info tx in the L2 block".to_string(),
@@ -259,7 +260,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 /// deployer contract. This is done by directly setting the code of the create2 deployer account
 /// prior to executing any transactions on the timestamp activation of the fork.
 pub fn ensure_create2_deployer<DB>(
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
 ) -> Result<(), DB::Error>
@@ -288,7 +289,7 @@ where
         revm_acc.mark_touch();
 
         // Commit the create2 deployer account to the database.
-        db.commit(HashMap::from([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
+        db.commit(HashMap::from_iter([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
         return Ok(())
     }
 
@@ -297,9 +298,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloy_eips::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OptimismHardforks;
-    use reth_primitives::TransactionSigned;
+    use reth_primitives::{Block, BlockBody, TransactionSigned};
 
     use super::*;
 
@@ -309,16 +311,13 @@ mod tests {
         use reth_primitives::{Header, TransactionSigned};
 
         let bytes = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
-        let l1_info_tx = TransactionSigned::decode_enveloped(&mut bytes.as_ref()).unwrap();
+        let l1_info_tx = TransactionSigned::decode_2718(&mut bytes.as_ref()).unwrap();
         let mock_block = Block {
             header: Header::default(),
-            body: vec![l1_info_tx],
-            ommers: Vec::default(),
-            withdrawals: None,
-            requests: None,
+            body: BlockBody { transactions: vec![l1_info_tx], ..Default::default() },
         };
 
-        let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
+        let l1_info: L1BlockInfo = extract_l1_info(&mock_block.body).unwrap();
         assert_eq!(l1_info.l1_base_fee, U256::from(652_114));
         assert_eq!(l1_info.l1_fee_overhead, Some(U256::from(2100)));
         assert_eq!(l1_info.l1_base_fee_scalar, U256::from(1_000_000));
@@ -340,8 +339,11 @@ mod tests {
         // https://optimistic.etherscan.io/getRawTx?tx=0x88501da5d5ca990347c2193be90a07037af1e3820bb40774c8154871c7669150
         const TX: [u8; 251] = hex!("7ef8f8a0a539eb753df3b13b7e386e147d45822b67cb908c9ddc5618e3dbaa22ed00850b94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e2000000558000c5fc50000000000000000000000006605a89f00000000012a10d90000000000000000000000000000000000000000000000000000000af39ac3270000000000000000000000000000000000000000000000000000000d5ea528d24e582fa68786f080069bdbfe06a43f8e67bfd31b8e4d8a8837ba41da9a82a54a0000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
 
-        let tx = TransactionSigned::decode_enveloped(&mut TX.as_slice()).unwrap();
-        let block = Block { body: vec![tx], ..Default::default() };
+        let tx = TransactionSigned::decode_2718(&mut TX.as_slice()).unwrap();
+        let block = Block {
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+            ..Default::default()
+        };
 
         // expected l1 block info
         let expected_l1_base_fee = U256::from_be_bytes(hex!(
@@ -351,16 +353,16 @@ mod tests {
         let expected_l1_blob_base_fee = U256::from_be_bytes(hex!(
             "0000000000000000000000000000000000000000000000000000000d5ea528d2" // 57422457042
         ));
-        let expecte_l1_blob_base_fee_scalar = U256::from(810949);
+        let expected_l1_blob_base_fee_scalar = U256::from(810949);
 
         // test
 
-        let l1_block_info: L1BlockInfo = extract_l1_info(&block).unwrap();
+        let l1_block_info: L1BlockInfo = extract_l1_info(&block.body).unwrap();
 
         assert_eq!(l1_block_info.l1_base_fee, expected_l1_base_fee);
         assert_eq!(l1_block_info.l1_base_fee_scalar, expected_l1_base_fee_scalar);
         assert_eq!(l1_block_info.l1_blob_base_fee, Some(expected_l1_blob_base_fee));
-        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, Some(expecte_l1_blob_base_fee_scalar));
+        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, Some(expected_l1_blob_base_fee_scalar));
     }
 
     #[test]
