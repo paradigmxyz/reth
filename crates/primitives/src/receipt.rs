@@ -14,11 +14,6 @@ use derive_more::{DerefMut, From, IntoIterator};
 use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
 
-pub trait Encodable2718: Encodable {
-    fn encode_envelope(&self, out: &mut dyn BufMut);
-    fn envelope_length(&self) -> usize;
-}
-
 /// Receipt containing result of transaction execution.
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
@@ -209,21 +204,29 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-impl ReceiptWithBloom {
+/// A trait for enveloped encoding of receipts.
+pub trait EnvelopedEncoding {
+    /// Returns the enveloped encoded receipt.
+    fn envelope_encoded(&self) -> Bytes;
 
     /// Encodes the receipt into its "raw" format.
-    /// This format is also referred to as "binary" encoding.
-    ///
-    /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
-    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
-    /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
-    /// of the receipt:
-    /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
-    ///   logsBloom, logs])`
-    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
-        self.encode_inner(out, false)
+    fn encode_enveloped(&self, out: &mut dyn bytes::BufMut);
+}
+
+// Implement the trait for ReceiptWithBloom
+impl EnvelopedEncoding for ReceiptWithBloom {
+    fn envelope_encoded(&self) -> Bytes {
+        let mut buf = Vec::new();
+        self.encode_enveloped(&mut buf);
+        buf.into()
     }
 
+    fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, false)
+    }
+}
+
+impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
@@ -283,16 +286,6 @@ impl ReceiptWithBloom {
         }
         *buf = *b;
         Ok(this)
-    }
-}
-
-impl Encodable2718 for ReceiptWithBloom {
-    fn encode_envelope(&self, out: &mut dyn BufMut) {
-        self.encode_enveloped(out)
-    }
-
-    fn envelope_length(&self) -> usize {
-        self.as_encoder().length()
     }
 }
 

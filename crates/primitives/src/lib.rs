@@ -28,7 +28,7 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod proofs;
-mod receipt;
+pub mod receipt;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]

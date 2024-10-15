@@ -11,6 +11,7 @@ use alloy_rpc_types_trace::geth::{
     GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     NoopFrame, TraceResult,
 };
+use reth_primitives::receipt::EnvelopedEncoding;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
@@ -891,11 +892,7 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| {
-                let mut buf = Vec::new();
-                receipt.with_bloom().encode(&mut buf);
-                buf.into()
-            })
+            .map(|receipt| receipt.with_bloom().envelope_encoded())
             .collect())
     }
 
