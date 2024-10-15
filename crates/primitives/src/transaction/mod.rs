@@ -2172,7 +2172,7 @@ mod tests {
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
         assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
-        assert_eq!(tx.input(), hex!("1b55ba3a"));
+assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
     }
