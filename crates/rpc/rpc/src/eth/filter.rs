@@ -540,9 +540,8 @@ where
         let cached_range = best_number.saturating_sub(4)..=best_number;
         let receipts_block = if cached_range.contains(&block_num_hash.number) {
             self.eth_cache
-                .get_block_and_receipts(block_num_hash.hash)
+                .get_receipts_and_maybe_block(block_num_hash.hash)
                 .await?
-                .map(|(b, r)| (r, Some(b)))
         } else {
             self.eth_cache.get_receipts(block_num_hash.hash).await?.map(|r| (r, None))
         };
