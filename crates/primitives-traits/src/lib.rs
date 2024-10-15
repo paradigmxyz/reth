@@ -41,6 +41,7 @@ pub use log::{logs_bloom, Log, LogData};
 mod storage;
 pub use storage::StorageEntry;
 
+/// Transaction types
 pub mod tx_type;
 pub use tx_type::TxType;
 
