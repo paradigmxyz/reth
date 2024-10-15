@@ -147,7 +147,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .into(),
         )?;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
-        let hashed_post_state = provider.execution_outcome_hashed_post_state(&execution_outcome);
+        let hashed_post_state =
+            provider.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates, _) =

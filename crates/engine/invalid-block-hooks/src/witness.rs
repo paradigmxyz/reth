@@ -130,7 +130,7 @@ where
         //
         // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
         // referenced accounts + storage slots.
-        let mut hashed_state = self.provider.bundle_state_hashed_post_state(&bundle_state);
+        let mut hashed_state = self.provider.hashed_post_state_from_bundle_state(&bundle_state);
         for (address, account) in db.cache.accounts {
             let hashed_address = keccak256(address);
             hashed_state

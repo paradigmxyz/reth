@@ -1444,14 +1444,9 @@ mod tests {
             assert_eq!(
                 provider_rw
                     .latest_ref()
-                    .state_root(provider_rw.execution_outcome_hashed_post_state(
-                        &ExecutionOutcome::new(
-                            state.bundle_state.clone(),
-                            Receipts::default(),
-                            0,
-                            Vec::new()
-                        )
-                    ))
+                    .state_root(
+                        provider_rw.hashed_post_state_from_bundle_state(&state.bundle_state)
+                    )
                     .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,

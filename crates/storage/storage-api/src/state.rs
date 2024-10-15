@@ -102,14 +102,8 @@ pub trait ToLatestStateProviderRef {
 /// Trait that provides the `HashedPostState` from various sources.
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait HashedPostStateProvider {
-    /// Returns the `HashedPostState` of the `ExecutionOutcome`
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &ExecutionOutcome,
-    ) -> HashedPostState;
-
     /// Returns the `HashedPostState` of the `BundleState`.
-    fn bundle_state_hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+    fn hashed_post_state_from_bundle_state(&self, bundle_state: &BundleState) -> HashedPostState;
 
     /// Returns the `HashedPostState` for the given block number.
     fn hashed_post_state_from_reverts(

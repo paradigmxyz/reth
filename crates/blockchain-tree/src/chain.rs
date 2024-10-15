@@ -232,7 +232,7 @@ impl AppendableChain {
                     TrieInput::from_state(
                         externals
                             .provider_factory
-                            .execution_outcome_hashed_post_state(&execution_outcome),
+                            .hashed_post_state_from_bundle_state(&execution_outcome.bundle),
                     ),
                 )
                 .incremental_root_with_updates()
@@ -241,7 +241,7 @@ impl AppendableChain {
             } else {
                 let hashed_state = externals
                     .provider_factory
-                    .execution_outcome_hashed_post_state(&initial_execution_outcome);
+                    .hashed_post_state_from_bundle_state(&initial_execution_outcome.bundle);
                 let state_root = provider.state_root(hashed_state)?;
                 (state_root, None)
             };

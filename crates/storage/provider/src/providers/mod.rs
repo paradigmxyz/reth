@@ -198,18 +198,11 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> HashedPostStateProvider for BlockchainProvider<N> {
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         bundle_state: &revm::db::BundleState,
     ) -> reth_trie::HashedPostState {
-        self.database.bundle_state_hashed_post_state(bundle_state)
-    }
-
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &reth_execution_types::ExecutionOutcome,
-    ) -> reth_trie::HashedPostState {
-        self.database.execution_outcome_hashed_post_state(execution_outcome)
+        self.database.hashed_post_state_from_bundle_state(bundle_state)
     }
 
     fn hashed_post_state_from_reverts(

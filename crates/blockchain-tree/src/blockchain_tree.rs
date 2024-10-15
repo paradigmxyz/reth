@@ -1216,7 +1216,7 @@ where
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
         let hashed_state =
-            self.externals.provider_factory.execution_outcome_hashed_post_state(&state);
+            self.externals.provider_factory.hashed_post_state_from_bundle_state(&state.bundle);
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
         let block_hash_numbers =
@@ -1868,7 +1868,7 @@ mod tests {
 
         let provider = tree.externals.provider_factory.provider().unwrap();
         let prefix_sets =
-            provider.execution_outcome_hashed_post_state(&exec5).construct_prefix_sets();
+            provider.hashed_post_state_from_bundle_state(&exec5.bundle).construct_prefix_sets();
         let state_root_input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
         let state_root = provider.latest_ref().state_root_from_nodes(state_root_input).unwrap();
         assert_eq!(state_root, block5.state_root);

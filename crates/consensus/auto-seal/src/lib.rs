@@ -392,7 +392,7 @@ impl StorageInner {
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let gas_used = block_execution_output.gas_used;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
-        let hashed_state = provider.execution_outcome_hashed_post_state(&execution_outcome);
+        let hashed_state = provider.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
 
         // todo(onbjerg): we should not pass requests around as this is building a block, which
         // means we need to extract the requests from the execution output and compute the requests

@@ -191,18 +191,11 @@ impl<TX, Spec, DS> AsRef<Self> for DatabaseProvider<TX, Spec, DS> {
 impl<TX: DbTx, Spec: Send + Sync, DS: DatabaseState> HashedPostStateProvider
     for DatabaseProvider<TX, Spec, DS>
 {
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         bundle_state: &revm::db::BundleState,
     ) -> HashedPostState {
         HashedPostState::from_bundle_state::<DS::KeyHasher>(&bundle_state.state)
-    }
-
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &ExecutionOutcome,
-    ) -> HashedPostState {
-        execution_outcome.hash_state_slow::<DS::KeyHasher>()
     }
 
     fn hashed_post_state_from_reverts(

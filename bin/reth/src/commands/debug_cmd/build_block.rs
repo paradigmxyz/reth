@@ -267,7 +267,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                 let provider = provider_factory.provider()?;
                 let hashed_post_state =
-                    provider.execution_outcome_hashed_post_state(&execution_outcome);
+                    provider.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
                 let (state_root, trie_updates, _) =
                     provider.latest_ref().state_root_with_updates(hashed_post_state.clone())?;
 

@@ -138,18 +138,11 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
 }
 
 impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         bundle_state: &revm::db::BundleState,
     ) -> reth_trie::HashedPostState {
-        self.0.bundle_state_hashed_post_state(bundle_state)
-    }
-
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &reth_execution_types::ExecutionOutcome,
-    ) -> reth_trie::HashedPostState {
-        self.0.execution_outcome_hashed_post_state(execution_outcome)
+        self.0.hashed_post_state_from_bundle_state(bundle_state)
     }
 
     fn hashed_post_state_from_reverts(

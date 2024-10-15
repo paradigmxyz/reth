@@ -353,7 +353,7 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let hashed_state = client.execution_outcome_hashed_post_state(&execution_outcome);
+    let hashed_state = client.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
     let (state_root, trie_output, _) = {
         let state_provider = db.database.0.inner.borrow_mut();
         state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {

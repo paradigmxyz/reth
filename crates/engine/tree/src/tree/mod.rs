@@ -1526,7 +1526,8 @@ where
             .provider
             .get_state(block.number)?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
-        let hashed_state = self.provider.execution_outcome_hashed_post_state(&execution_output);
+        let hashed_state =
+            self.provider.hashed_post_state_from_bundle_state(&execution_output.bundle);
 
         Ok(Some(ExecutedBlock {
             block: Arc::new(block),
@@ -2193,7 +2194,7 @@ where
             return Err(err.into())
         }
 
-        let hashed_state = self.provider.bundle_state_hashed_post_state(&output.state);
+        let hashed_state = self.provider.hashed_post_state_from_bundle_state(&output.state);
 
         trace!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Calculating block state root");
         let root_time = Instant::now();

@@ -147,13 +147,6 @@ impl StateProofProvider for StateProviderTest {
 }
 
 impl HashedPostStateProvider for StateProviderTest {
-    fn execution_outcome_hashed_post_state(
-        &self,
-        _execution_outcome: &reth_execution_types::ExecutionOutcome,
-    ) -> HashedPostState {
-        unimplemented!("execution outcome is not supported")
-    }
-
     fn hashed_post_state_from_reverts(
         &self,
         _block_number: BlockNumber,
@@ -161,7 +154,7 @@ impl HashedPostStateProvider for StateProviderTest {
         unimplemented!("reverts are not supported")
     }
 
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         _bundle_state: &revm::db::BundleState,
     ) -> HashedPostState {

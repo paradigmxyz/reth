@@ -452,7 +452,7 @@ where
     let (state_root, trie_output, hashed_state) = {
         let state_provider = db.database.0.inner.borrow_mut();
         let hashed_state =
-            state_provider.db.execution_outcome_hashed_post_state(&execution_outcome);
+            state_provider.db.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
         let (state_root, trie_output, _) =
             state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
                 warn!(target: "payload_builder",

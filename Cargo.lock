@@ -8438,7 +8438,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-ethereum-forks",
  "reth-execution-errors",
- "reth-execution-types",
  "reth-primitives",
  "reth-prune-types",
  "reth-storage-api",

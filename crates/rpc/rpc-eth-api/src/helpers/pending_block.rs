@@ -398,7 +398,8 @@ pub trait LoadPendingBlock: EthApiTypes {
             block_number,
             Vec::new(),
         );
-        let hashed_state = self.provider().execution_outcome_hashed_post_state(&execution_outcome);
+        let hashed_state =
+            self.provider().hashed_post_state_from_bundle_state(&execution_outcome.bundle);
 
         let receipts_root = self.receipts_root(&block_env, &execution_outcome, block_number);
 

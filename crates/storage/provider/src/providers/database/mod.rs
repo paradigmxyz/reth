@@ -630,20 +630,13 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         bundle_state: &revm::db::BundleState,
     ) -> reth_trie::HashedPostState {
         HashedPostState::from_bundle_state::<<N::State as DatabaseState>::KeyHasher>(
             &bundle_state.state,
         )
-    }
-
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &reth_execution_types::ExecutionOutcome,
-    ) -> HashedPostState {
-        execution_outcome.hash_state_slow::<<N::State as DatabaseState>::KeyHasher>()
     }
 
     fn hashed_post_state_from_reverts(

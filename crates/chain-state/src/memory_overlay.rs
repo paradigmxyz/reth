@@ -191,18 +191,11 @@ impl StateProofProvider for MemoryOverlayStateProvider {
 }
 
 impl HashedPostStateProvider for MemoryOverlayStateProvider {
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         bundle_state: &reth_revm::db::BundleState,
     ) -> HashedPostState {
-        self.historical.bundle_state_hashed_post_state(bundle_state)
-    }
-
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &reth_execution_types::ExecutionOutcome,
-    ) -> HashedPostState {
-        self.historical.execution_outcome_hashed_post_state(execution_outcome)
+        self.historical.hashed_post_state_from_bundle_state(bundle_state)
     }
 
     fn hashed_post_state_from_reverts(

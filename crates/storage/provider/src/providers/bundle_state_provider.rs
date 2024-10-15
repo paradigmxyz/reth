@@ -185,18 +185,11 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> StateProo
 impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> HashedPostStateProvider
     for BundleStateProvider<SP, EDP, DS>
 {
-    fn bundle_state_hashed_post_state(
+    fn hashed_post_state_from_bundle_state(
         &self,
         bundle_state: &revm::db::BundleState,
     ) -> HashedPostState {
         HashedPostState::from_bundle_state::<DS::KeyHasher>(&bundle_state.state)
-    }
-
-    fn execution_outcome_hashed_post_state(
-        &self,
-        execution_outcome: &reth_execution_types::ExecutionOutcome,
-    ) -> HashedPostState {
-        execution_outcome.hash_state_slow::<DS::KeyHasher>()
     }
 
     fn hashed_post_state_from_reverts(

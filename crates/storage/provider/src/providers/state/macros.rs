@@ -58,9 +58,8 @@ macro_rules! delegate_provider_impls {
                 fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::map::HashMap<alloy_primitives::B256, alloy_primitives::Bytes>>;
             }
             HashedPostStateProvider $(where [$($generics)*])? {
-                fn execution_outcome_hashed_post_state(&self, execution_outcome: &reth_execution_types::ExecutionOutcome) -> reth_trie::HashedPostState;
                 fn hashed_post_state_from_reverts(&self, block_number: alloy_primitives::BlockNumber) -> reth_storage_errors::provider::ProviderResult<reth_trie::HashedPostState>;
-                fn bundle_state_hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> reth_trie::HashedPostState;
+                fn hashed_post_state_from_bundle_state(&self, bundle_state: &revm::db::BundleState) -> reth_trie::HashedPostState;
             }
         );
     }
