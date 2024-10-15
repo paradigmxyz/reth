@@ -27,6 +27,7 @@ revm.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-consensus.workspace = true
 
 # async/futures
 futures-util.workspace = true
@@ -54,7 +55,6 @@ rand = { workspace = true, optional = true }
 paste = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
-alloy-consensus = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -69,12 +69,11 @@ pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
-alloy-consensus.workspace = true
 
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
-test-utils = ["rand", "paste", "serde", "alloy-consensus"]
+test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary", "proptest-arbitrary-interop"]
 
 [[bench]]
