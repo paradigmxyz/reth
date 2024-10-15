@@ -20,12 +20,15 @@ pub fn from_block<T: TransactionCompat>(
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
+    tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction>, BlockError> {
     match kind {
         BlockTransactionsKind::Hashes => {
             Ok(from_block_with_tx_hashes::<T::Transaction>(block, total_difficulty, block_hash))
         }
-        BlockTransactionsKind::Full => from_block_full::<T>(block, total_difficulty, block_hash),
+        BlockTransactionsKind::Full => {
+            from_block_full::<T>(block, total_difficulty, block_hash, tx_resp_builder)
+        }
     }
 }
 
@@ -60,6 +63,7 @@ pub fn from_block_full<T: TransactionCompat>(
     mut block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
+    tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction>, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
     let block_number = block.block.number;
@@ -83,7 +87,7 @@ pub fn from_block_full<T: TransactionCompat>(
                 index: Some(idx as u64),
             };
 
-            from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info)
+            from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info, tx_resp_builder)
         })
         .collect::<Vec<_>>();
 

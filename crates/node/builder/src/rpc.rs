@@ -379,15 +379,15 @@ where
 pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> + EthApiTypes {
     /// Returns the eth api builder.
     #[allow(clippy::type_complexity)]
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Self>) -> Self + Send>;
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
 }
 
 impl<N, F> EthApiBuilderProvider<N> for F
 where
     N: FullNodeComponents,
-    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N, Self>> + EthApiTypes,
+    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>> + EthApiTypes,
 {
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Self>) -> Self + Send> {
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {
         F::builder()
     }
 }
