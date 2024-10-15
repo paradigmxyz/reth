@@ -407,9 +407,10 @@ impl RevealedSparseTrie {
                 SparseNode::Hash(hash) => {
                     return Err(SparseTrieError::BlindedNode { path: current, hash: *hash })
                 }
-                SparseNode::Leaf { .. } => {
+                SparseNode::Leaf { key, .. } => {
                     // Leaf node is always the one that we're deleting, and no other leaf nodes can
                     // be found during traversal.
+                    current.extend_from_slice_unchecked(key);
 
                     debug_assert_eq!(&current, path);
 
@@ -671,7 +672,7 @@ struct RemovedSparseNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::U256;
+    use alloy_primitives::{b256, U256};
     use itertools::Itertools;
     use proptest::prelude::*;
     use reth_trie_common::HashBuilder;
@@ -816,5 +817,65 @@ mod tests {
                 assert_eq!(root, expected);
             }
         });
+    }
+
+    #[test]
+    fn sparse_trie_remove_leaf() {
+        let mut sparse = RevealedSparseTrie::default();
+
+        sparse
+            .update_leaf(
+                Nibbles::unpack(b256!(
+                    "0000000000000000000000000000000000000000000000000000000000000231"
+                )),
+                alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec(),
+            )
+            .unwrap();
+        sparse
+            .update_leaf(
+                Nibbles::unpack(b256!(
+                    "0000000000000000000000000000000000000000000000000000000000000233"
+                )),
+                alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec(),
+            )
+            .unwrap();
+        sparse
+            .update_leaf(
+                Nibbles::unpack(b256!(
+                    "0000000000000000000000000000000000000000000000000000000000002013"
+                )),
+                alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec(),
+            )
+            .unwrap();
+        sparse
+            .update_leaf(
+                Nibbles::unpack(b256!(
+                    "0000000000000000000000000000000000000000000000000000000000003102"
+                )),
+                alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec(),
+            )
+            .unwrap();
+        sparse
+            .update_leaf(
+                Nibbles::unpack(b256!(
+                    "0000000000000000000000000000000000000000000000000000000000003302"
+                )),
+                alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec(),
+            )
+            .unwrap();
+        sparse
+            .update_leaf(
+                Nibbles::unpack(b256!(
+                    "0000000000000000000000000000000000000000000000000000000000003320"
+                )),
+                alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec(),
+            )
+            .unwrap();
+
+        sparse
+            .remove_leaf(Nibbles::unpack(b256!(
+                "0000000000000000000000000000000000000000000000000000000000002013"
+            )))
+            .unwrap();
     }
 }
