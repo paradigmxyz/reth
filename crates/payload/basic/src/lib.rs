@@ -44,6 +44,9 @@ use tokio::{
 use tracing::{debug, trace, warn};
 
 mod metrics;
+mod builder_stack;
+
+pub use builder_stack::PayloadBuilderStack;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
