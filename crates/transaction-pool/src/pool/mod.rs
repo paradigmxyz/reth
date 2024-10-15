@@ -785,6 +785,16 @@ where
         self.get_pool_data().get_highest_transaction_by_sender(sender_id)
     }
 
+    /// Returns the next valid transaction for the given sender.
+    pub(crate) fn get_next_valid_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_next_valid_transaction_by_sender(sender_id, on_chain_nonce)
+    }
+
     /// Returns all transactions that where submitted with the given [`TransactionOrigin`]
     pub(crate) fn get_transactions_by_origin(
         &self,

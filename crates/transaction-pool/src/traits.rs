@@ -356,6 +356,9 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns the next free nonce for the given sender.
+    fn get_next_valid_transaction_by_sender(&self, sender: Address, on_chain_nonce: u64) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns a transaction sent by a given user and a nonce
     fn get_transaction_by_sender_and_nonce(
         &self,

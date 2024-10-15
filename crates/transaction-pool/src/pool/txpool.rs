@@ -108,6 +108,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all().txs_iter(sender).last().map(|(_, tx)| Arc::clone(&tx.transaction))
     }
 
+    /// Returns the next valid transaction for the given sender.
+    pub(crate) fn get_next_valid_transaction_by_sender(
+        &self,
+        sender: SenderId,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all().txs_iter(sender).filter(|(_, tx)| tx.transaction.nonce() > on_chain_nonce).map(|(_, tx)| Arc::clone(&tx.transaction)).next()
+    }
+
     /// Returns access to the [`AllTransactions`] container.
     pub(crate) const fn all(&self) -> &AllTransactions<T::Transaction> {
         &self.all_transactions
