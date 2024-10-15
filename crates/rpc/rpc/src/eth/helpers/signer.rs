@@ -255,6 +255,6 @@ mod tests {
         let txn_signed = signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
-        assert_eq!(message.to_vec(), txn_signed.unwrap().input().to_vec());
+        assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);
     }
 }
