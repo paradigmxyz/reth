@@ -124,7 +124,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
-        cfg_env.handler_cfg.is_optimism = self.chain_spec.is_optimism();
+        cfg_env.handler_cfg.is_optimism = true;
     }
 
     fn next_cfg_and_block_env(

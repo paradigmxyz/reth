@@ -33,7 +33,7 @@ pub use reth_ethereum_forks::*;
 
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
-#[cfg(feature = "test-utils")]
+#[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;
 pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
