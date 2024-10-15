@@ -139,7 +139,6 @@ where
     ///
     /// This transforms the node command into a node config and launches the node using the given
     /// closure.
-    /// <R as RethCli>::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec: reth_chainspec::EthChainSpec
     pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, <R::ChainSpecParser as ChainSpecParser>::ChainSpec>>, Ext) -> Fut,
