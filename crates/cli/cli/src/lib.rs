@@ -11,6 +11,8 @@
 use clap::{Error, Parser};
 use reth_cli_runner::CliRunner;
 use std::{borrow::Cow, ffi::OsString};
+use reth_db::ClientVersion;
+use reth_node_core::version::default_client_version;
 
 /// The chainspec module defines the different chainspecs that can be used by the node.
 pub mod chainspec;
@@ -65,5 +67,10 @@ pub trait RethCli: Sized {
         let cli = Self::parse_args()?;
 
         Ok(cli.with_runner(f))
+    }
+
+    /// The default client version accessing the database. ref: reth_node_core::version::default_client_version
+    fn default_client_version() -> ClientVersion {
+        default_client_version()
     }
 }

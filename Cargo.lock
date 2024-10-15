@@ -6551,6 +6551,8 @@ dependencies = [
  "clap",
  "eyre",
  "reth-cli-runner",
+ "reth-db",
+ "reth-node-core",
  "serde_json",
  "shellexpand",
 ]
