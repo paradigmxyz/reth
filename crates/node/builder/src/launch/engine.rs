@@ -29,7 +29,8 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::EthereumHardforks;
-use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
+use reth_provider::providers::{BlockchainProviderFactory, ProviderNodeTypes};
+use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -71,7 +72,7 @@ impl EngineNodeLauncher {
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     Types: ProviderNodeTypes + NodeTypesWithEngine,
-    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
+    T: FullNodeTypes<Types = Types, Provider = BlockchainProviderFactory<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
@@ -130,7 +131,7 @@ where
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                Ok(BlockchainProvider2::new(provider_factory)?)
+                Ok(BlockchainProviderFactory::new(provider_factory)?)
             }, tree_config, canon_state_notification_sender)?
             .with_components(components_builder, on_component_initialized).await?;
 

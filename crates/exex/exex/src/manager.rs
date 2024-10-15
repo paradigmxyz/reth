@@ -642,8 +642,8 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::SealedBlockWithSenders;
     use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DatabaseProviderFactory, TransactionVariant,
+        providers::BlockchainProviderFactory, test_utils::create_test_provider_factory,
+        BlockReader, BlockWriter, Chain, DatabaseProviderFactory, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
@@ -1019,7 +1019,7 @@ mod tests {
     async fn exex_handle_new() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
+        let provider = BlockchainProviderFactory::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1074,7 +1074,7 @@ mod tests {
     async fn test_notification_if_finished_height_gt_chain_tip() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
+        let provider = BlockchainProviderFactory::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1124,7 +1124,7 @@ mod tests {
     async fn test_sends_chain_reorged_notification() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
+        let provider = BlockchainProviderFactory::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1167,7 +1167,7 @@ mod tests {
     async fn test_sends_chain_reverted_notification() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
+        let provider = BlockchainProviderFactory::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1227,7 +1227,7 @@ mod tests {
         provider_rw.insert_block(block.clone()).unwrap();
         provider_rw.commit().unwrap();
 
-        let provider = BlockchainProvider2::new(provider_factory).unwrap();
+        let provider = BlockchainProviderFactory::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();

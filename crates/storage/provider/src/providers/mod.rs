@@ -62,6 +62,7 @@ mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
 
 mod factories;
+pub use factories::BlockchainProviderFactory;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
 pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
