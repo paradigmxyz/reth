@@ -1,4 +1,10 @@
 //! Traits for configuring an EVM specifics.
+//!
+//! # Revm features
+//!
+//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
+//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
+//! proper features are selected.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -11,11 +17,9 @@
 
 extern crate alloc;
 
-use core::ops::Deref;
-
 use crate::builder::RethEvmBuilder;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
@@ -111,10 +115,10 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
-    /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
-    fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
+    /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
+    fn tx_env(&self, transaction: &TransactionSigned, signer: Address) -> TxEnv {
         let mut tx_env = TxEnv::default();
-        self.fill_tx_env(&mut tx_env, transaction.deref(), transaction.signer());
+        self.fill_tx_env(&mut tx_env, transaction, signer);
         tx_env
     }
 

@@ -194,7 +194,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     )
                     .expect("should not fail to convert blob tx if it is already eip4844");
                     let pooled = PooledTransactionsElement::BlobTransaction(tx);
-                    let encoded_length = pooled.length_without_header();
+                    let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
                     blob_store.insert(transaction.hash, sidecar)?;

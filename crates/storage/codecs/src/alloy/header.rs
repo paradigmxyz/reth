@@ -181,4 +181,14 @@ mod tests {
         let len = header.to_compact(&mut encoded_header);
         assert_eq!(header, Header::from_compact(&encoded_header, len).0);
     }
+
+    #[test]
+    fn test_extra_fields_missing() {
+        let mut header = HOLESKY_BLOCK;
+        header.extra_fields = None;
+
+        let mut encoded_header = vec![];
+        let len = header.to_compact(&mut encoded_header);
+        assert_eq!(header, Header::from_compact(&encoded_header, len).0);
+    }
 }

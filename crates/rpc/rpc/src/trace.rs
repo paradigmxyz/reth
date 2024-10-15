@@ -118,14 +118,14 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction(tx)?;
+        let tx = recover_raw_transaction(tx)?.into_ecrecovered_transaction();
 
         let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block,
-            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction()),
+            Call::evm_config(self.eth_api()).tx_env(tx.as_signed(), tx.signer()),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
@@ -251,7 +251,8 @@ where
         &self,
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
-        let matcher = filter.matcher();
+        // We'll reuse the matcher across multiple blocks that are traced in parallel
+        let matcher = Arc::new(filter.matcher());
         let TraceFilter { from_block, to_block, after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
         let end = if let Some(to_block) = to_block {
@@ -321,13 +322,18 @@ where
             }
         }
 
-        // apply after and count to traces if specified, this allows for a pagination style.
-        // only consider traces after
-        if let Some(after) = after.map(|a| a as usize).filter(|a| *a < all_traces.len()) {
-            all_traces = all_traces.split_off(after);
+        // Skips the first `after` number of matching traces.
+        // If `after` is greater than or equal to the number of matched traces, it returns an empty
+        // array.
+        if let Some(after) = after.map(|a| a as usize) {
+            if after < all_traces.len() {
+                all_traces.drain(..after);
+            } else {
+                return Ok(vec![])
+            }
         }
 
-        // at most, return count of traces
+        // Return at most `count` of traces
         if let Some(count) = count {
             let count = count as usize;
             if count < all_traces.len() {
@@ -371,7 +377,7 @@ where
             },
         );
 
-        let block = self.eth_api().block(block_id);
+        let block = self.eth_api().block_with_senders(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -467,7 +473,9 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.eth_api().block(block_id).await? else { return Ok(None) };
+        let Some(block) = self.eth_api().block_with_senders(block_id).await? else {
+            return Ok(None)
+        };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),

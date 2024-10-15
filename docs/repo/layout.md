@@ -168,7 +168,7 @@ Small utility crates.
 
 - [`tasks`](../../crates/tasks): An executor-agnostic task abstraction, used to spawn tasks on different async executors. Supports blocking tasks and handles panics gracefully. A tokio implementation is provided by default.
 - [`metrics/common`](../../crates/metrics/src/common): Common metrics types (e.g. metered channels)
-- [`metrics/metrics-derive`](../../crates/metrics/metrics-derive): A derive-style API for creating metrics
+- [`metrics/metrics-derive`](https://github.com/rkrasiuk/metrics-derive): A derive-style API for creating metrics
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 
 [libmdbx-rs]: https://crates.io/crates/libmdbx

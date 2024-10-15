@@ -195,7 +195,7 @@ where
     pub(crate) fn block_info(&self) -> BlockInfo {
         self.get_pool_data().block_info()
     }
-    /// Returns the currently tracked block
+    /// Sets the currently tracked block
     pub(crate) fn set_block_info(&self, info: BlockInfo) {
         self.pool.write().set_block_info(info)
     }
@@ -715,6 +715,38 @@ where
         removed
     }
 
+    /// Removes and returns all matching transactions and their dependent transactions from the
+    /// pool.
+    pub(crate) fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
+        let removed = self.pool.write().remove_transactions_and_descendants(hashes);
+
+        let mut listener = self.event_listener.write();
+
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        removed
+    }
+
+    pub(crate) fn remove_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        let removed = self.pool.write().remove_transactions_by_sender(sender_id);
+
+        let mut listener = self.event_listener.write();
+
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        removed
+    }
+
     /// Removes and returns all transactions that are present in the pool.
     pub(crate) fn retain_unknown<A>(&self, announcement: &mut A)
     where
@@ -742,6 +774,15 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().get_transactions_by_sender(sender_id)
+    }
+
+    /// Returns the highest transaction of the address
+    pub(crate) fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_highest_transaction_by_sender(sender_id)
     }
 
     /// Returns all transactions that where submitted with the given [`TransactionOrigin`]
