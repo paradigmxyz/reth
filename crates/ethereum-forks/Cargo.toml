@@ -41,5 +41,10 @@ proptest.workspace = true
 default = ["std", "serde", "rustc-hash"]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 serde = ["dep:serde"]
-std = ["thiserror-no-std/std", "rustc-hash/std"]
+std = [
+    "alloy-chains/std",
+    "alloy-primitives/std",
+    "thiserror-no-std/std",
+    "rustc-hash/std",
+]
 rustc-hash = ["dep:rustc-hash"]
