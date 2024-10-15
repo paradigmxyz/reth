@@ -35,6 +35,7 @@ serde_json.workspace = true
 # misc
 derive_more.workspace = true
 once_cell.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
