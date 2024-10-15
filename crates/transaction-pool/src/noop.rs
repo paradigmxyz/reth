@@ -227,7 +227,7 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
-    fn get_next_valid_transaction_by_sender(
+    fn get_highest_consecutive_transaction_by_sender(
         &self,
         _sender: Address,
         _on_chain_nonce: u64,

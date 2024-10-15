@@ -510,12 +510,12 @@ where
         self.pool.get_highest_transaction_by_sender(sender)
     }
 
-    fn get_next_valid_transaction_by_sender(
+    fn get_highest_consecutive_transaction_by_sender(
         &self,
         sender: Address,
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_next_valid_transaction_by_sender(sender, on_chain_nonce)
+        self.pool.get_highest_consecutive_transaction_by_sender(sender, on_chain_nonce)
     }
 
     fn get_transaction_by_sender_and_nonce(
