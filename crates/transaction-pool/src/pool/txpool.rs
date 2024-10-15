@@ -114,28 +114,26 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut current_nonce = on_chain_nonce;
+        let mut next_expected_nonce = on_chain_nonce + 1;
         let mut last_connected_tx = None;
-
+    
         for (_, tx) in self.all().txs_iter(sender) {
             let tx_nonce = tx.transaction.nonce();
-            
-            match tx_nonce.cmp(&(current_nonce + 1)) {
+    
+            match tx_nonce.cmp(&next_expected_nonce) {
                 std::cmp::Ordering::Equal => {
-                    // This transaction is connected to the previous one
+                    // This transaction is the next expected one
                     last_connected_tx = Some(Arc::clone(&tx.transaction));
-                    current_nonce = tx_nonce;
+                    next_expected_nonce += 1;
                 }
                 std::cmp::Ordering::Greater => {
                     // We've found a gap, so we stop here
                     break;
                 }
-                std::cmp::Ordering::Less => {
-                    // Transaction nonce is less than or equal to current_nonce, continue
-                }
+                _ => {}
             }
         }
-
+    
         last_connected_tx
     }
 
