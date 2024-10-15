@@ -347,6 +347,15 @@ impl HashedStorageSorted {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::Bytes;
+    use revm::{
+        db::{
+            states::{plain_account::PlainStorage, StorageSlot},
+            PlainAccount, StorageWithOriginalValues,
+        },
+        primitives::{AccountInfo, Bytecode},
+    };
+
     use super::*;
 
     #[test]
@@ -421,5 +430,144 @@ mod tests {
             Some(&updated_slot_value)
         );
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+    }
+
+    #[test]
+    fn test_hashed_post_state_from_bundle_state() {
+        // Prepare a random Ethereum address as a key for the account.
+        let address = Address::random();
+
+        // Create a mock account info object.
+        let account_info = AccountInfo {
+            balance: U256::from(123),
+            nonce: 42,
+            code_hash: B256::random(),
+            code: Some(Bytecode::LegacyRaw(Bytes::from(vec![1, 2]))),
+        };
+
+        let mut storage = StorageWithOriginalValues::default();
+        storage.insert(
+            U256::from(1),
+            StorageSlot { present_value: U256::from(4), ..Default::default() },
+        );
+
+        // Create a `BundleAccount` struct to represent the account and its storage.
+        let account = BundleAccount {
+            status: AccountStatus::Changed,
+            info: Some(account_info.clone()),
+            storage,
+            original_info: None,
+        };
+
+        // Create a vector of tuples representing the bundle state.
+        let state = vec![(&address, &account)];
+
+        // Convert the bundle state into a hashed post state.
+        let hashed_state = HashedPostState::from_bundle_state(state);
+
+        // Validate the hashed post state.
+        assert_eq!(hashed_state.accounts.len(), 1);
+        assert_eq!(hashed_state.storages.len(), 1);
+
+        // Validate the account info.
+        assert_eq!(
+            *hashed_state.accounts.get(&keccak256(address)).unwrap(),
+            Some(account_info.into())
+        );
+    }
+
+    #[test]
+    fn test_hashed_post_state_from_cache_state() {
+        // Prepare a random Ethereum address.
+        let address = Address::random();
+
+        // Create mock account info.
+        let account_info = AccountInfo {
+            balance: U256::from(500),
+            nonce: 5,
+            code_hash: B256::random(),
+            code: None,
+        };
+
+        let mut storage = PlainStorage::default();
+        storage.insert(U256::from(1), U256::from(35636));
+
+        // Create a `CacheAccount` with the mock account info.
+        let account = CacheAccount {
+            account: Some(PlainAccount { info: account_info.clone(), storage }),
+            status: AccountStatus::Changed,
+        };
+
+        // Create a vector of tuples representing the cache state.
+        let state = vec![(&address, &account)];
+
+        // Convert the cache state into a hashed post state.
+        let hashed_state = HashedPostState::from_cache_state(state);
+
+        // Validate the hashed post state.
+        assert_eq!(hashed_state.accounts.len(), 1);
+        assert_eq!(hashed_state.storages.len(), 1);
+
+        // Validate the account info.
+        assert_eq!(
+            *hashed_state.accounts.get(&keccak256(address)).unwrap(),
+            Some(account_info.into())
+        );
+    }
+
+    #[test]
+    fn test_hashed_post_state_with_accounts() {
+        // Prepare random addresses and mock account info.
+        let address_1 = Address::random();
+        let address_2 = Address::random();
+
+        let account_info_1 = AccountInfo {
+            balance: U256::from(1000),
+            nonce: 1,
+            code_hash: B256::random(),
+            code: None,
+        };
+
+        // Create hashed accounts with addresses.
+        let account_1 = (keccak256(address_1), Some(account_info_1.into()));
+        let account_2 = (keccak256(address_2), None);
+
+        // Add accounts to the hashed post state.
+        let hashed_state = HashedPostState::default().with_accounts(vec![account_1, account_2]);
+
+        // Validate the hashed post state.
+        assert_eq!(hashed_state.accounts.len(), 2);
+        assert!(hashed_state.accounts.contains_key(&keccak256(address_1)));
+        assert!(hashed_state.accounts.contains_key(&keccak256(address_2)));
+    }
+
+    #[test]
+    fn test_hashed_post_state_with_storages() {
+        // Prepare random addresses and mock storage entries.
+        let address_1 = Address::random();
+        let address_2 = Address::random();
+
+        let storage_1 = (keccak256(address_1), HashedStorage::new(false));
+        let storage_2 = (keccak256(address_2), HashedStorage::new(true));
+
+        // Add storages to the hashed post state.
+        let hashed_state = HashedPostState::default().with_storages(vec![storage_1, storage_2]);
+
+        // Validate the hashed post state.
+        assert_eq!(hashed_state.storages.len(), 2);
+        assert!(hashed_state.storages.contains_key(&keccak256(address_1)));
+        assert!(hashed_state.storages.contains_key(&keccak256(address_2)));
+    }
+
+    #[test]
+    fn test_hashed_post_state_is_empty() {
+        // Create an empty hashed post state and validate it's empty.
+        let empty_state = HashedPostState::default();
+        assert!(empty_state.is_empty());
+
+        // Add an account and validate the state is no longer empty.
+        let non_empty_state = HashedPostState::default()
+            .with_accounts(vec![(keccak256(Address::random()), Some(Account::default()))]);
+        assert!(!non_empty_state.is_empty());
     }
 }
