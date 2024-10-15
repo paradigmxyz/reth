@@ -424,7 +424,7 @@ alloy-dyn-abi = "0.8.0"
 alloy-primitives = { version = "0.8.7", default-features = false }
 alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
-alloy-trie = { version = "0.6", default-features = false }
+alloy-trie = { version = "0.7", default-features = false }
 
 alloy-consensus = { version = "0.4.2", default-features = false }
 alloy-eips = { version = "0.4.2", default-features = false }
