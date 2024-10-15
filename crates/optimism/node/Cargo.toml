@@ -27,7 +27,7 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
-reth-revm.workspace = true
+reth-revm = { workspace = true, features = ["std"] }
 reth-beacon-consensus.workspace = true
 reth-discv5.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -41,6 +41,9 @@ reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
+
+# revm with required optimism features
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # ethereum
 alloy-eips.workspace = true
@@ -85,6 +88,7 @@ optimism = [
     "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",
     "reth-revm/optimism",
+    "revm/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-optimism-rpc/optimism",
     "reth-engine-local/optimism",
