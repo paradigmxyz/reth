@@ -114,7 +114,23 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.all().txs_iter(sender).filter(|(_, tx)| tx.transaction.nonce() > on_chain_nonce).map(|(_, tx)| Arc::clone(&tx.transaction)).next()
+        let mut current_nonce = on_chain_nonce;
+        let mut last_connected_tx = None;
+
+        for (_, tx) in self.all().txs_iter(sender) {
+            let tx_nonce = tx.transaction.nonce();
+            
+            if tx_nonce == current_nonce + 1 {
+                // This transaction is connected to the previous one
+                last_connected_tx = Some(Arc::clone(&tx.transaction));
+                current_nonce = tx_nonce;
+            } else if tx_nonce > current_nonce + 1 {
+                // We've found a gap, so we stop here
+                break;
+            }
+        }
+
+        last_connected_tx
     }
 
     /// Returns access to the [`AllTransactions`] container.
