@@ -28,7 +28,7 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod proofs;
-pub mod receipt;
+mod receipt;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -44,7 +44,7 @@ pub use constants::{
     MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use receipt::{
-    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
+    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts, EnvelopedEncoding
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,

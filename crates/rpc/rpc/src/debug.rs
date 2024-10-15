@@ -11,7 +11,7 @@ use alloy_rpc_types_trace::geth::{
     GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     NoopFrame, TraceResult,
 };
-use reth_primitives::receipt::EnvelopedEncoding;
+use reth_primitives::EnvelopedEncoding;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
