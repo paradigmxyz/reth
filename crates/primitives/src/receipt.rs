@@ -14,6 +14,11 @@ use derive_more::{DerefMut, From, IntoIterator};
 use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
 
+pub trait Encodable2718: Encodable {
+    fn encode_envelope(&self, out: &mut dyn BufMut);
+    fn envelope_length(&self) -> usize;
+}
+
 /// Receipt containing result of transaction execution.
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
@@ -205,14 +210,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 }
 
 impl ReceiptWithBloom {
-    /// Returns the enveloped encoded receipt.
-    ///
-    /// See also [`ReceiptWithBloom::encode_enveloped`]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
-    }
 
     /// Encodes the receipt into its "raw" format.
     /// This format is also referred to as "binary" encoding.
@@ -286,6 +283,16 @@ impl ReceiptWithBloom {
         }
         *buf = *b;
         Ok(this)
+    }
+}
+
+impl Encodable2718 for ReceiptWithBloom {
+    fn encode_envelope(&self, out: &mut dyn BufMut) {
+        self.encode_enveloped(out)
+    }
+
+    fn envelope_length(&self) -> usize {
+        self.as_encoder().length()
     }
 }
 
