@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types::{
     state::{EvmOverrides, StateOverride},
@@ -37,6 +35,7 @@ use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
+use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -278,14 +277,21 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_eth_err)?;
+        let blocks = self
+            .provider()
+            .sealed_block_with_senders_range(start..=end)
+            .map_err(Eth::Error::from_eth_err)?
+            .into_iter()
+            .map(Arc::new)
+            .collect::<Vec<_>>();
 
         // trace all blocks
         let mut block_traces = Vec::with_capacity(blocks.len());
         for block in &blocks {
             let matcher = matcher.clone();
             let traces = self.eth_api().trace_block_until(
-                block.number.into(),
+                block.hash().into(),
+                Some(block.clone()),
                 None,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _, _| {
@@ -322,13 +328,18 @@ where
             }
         }
 
-        // apply after and count to traces if specified, this allows for a pagination style.
-        // only consider traces after
-        if let Some(after) = after.map(|a| a as usize).filter(|a| *a < all_traces.len()) {
-            all_traces = all_traces.split_off(after);
+        // Skips the first `after` number of matching traces.
+        // If `after` is greater than or equal to the number of matched traces, it returns an empty
+        // array.
+        if let Some(after) = after.map(|a| a as usize) {
+            if after < all_traces.len() {
+                all_traces.drain(..after);
+            } else {
+                return Ok(vec![])
+            }
         }
 
-        // at most, return count of traces
+        // Return at most `count` of traces
         if let Some(count) = count {
             let count = count as usize;
             if count < all_traces.len() {
@@ -364,6 +375,7 @@ where
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
         let traces = self.eth_api().trace_block_with(
             block_id,
+            None,
             TracingInspectorConfig::default_parity(),
             |tx_info, inspector, _, _, _| {
                 let traces =
@@ -400,6 +412,7 @@ where
         self.eth_api()
             .trace_block_with(
                 block_id,
+                None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, inspector, res, state, db| {
                     let mut full_trace =
@@ -455,6 +468,7 @@ where
             .eth_api()
             .trace_block_inspector(
                 block_id,
+                None,
                 OpcodeGasInspector::default,
                 move |tx_info, inspector, _res, _, _| {
                     let trace = TransactionOpcodeGas {

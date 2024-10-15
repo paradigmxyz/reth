@@ -463,6 +463,20 @@ where
         self.pool.remove_transactions(hashes)
     }
 
+    fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.remove_transactions_and_descendants(hashes)
+    }
+
+    fn remove_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.remove_transactions_by_sender(sender)
+    }
+
     fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,

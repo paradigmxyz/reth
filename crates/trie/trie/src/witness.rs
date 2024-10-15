@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
@@ -19,6 +17,7 @@ use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
+use std::collections::BTreeMap;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -111,14 +110,13 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
-            let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
-                account_rlp.clear();
-                TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
-                    .encode(&mut account_rlp as &mut dyn BufMut);
-                Some(account_rlp.clone())
-            } else {
-                None
-            };
+            let value =
+                (account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH).then(|| {
+                    account_rlp.clear();
+                    TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
+                        .encode(&mut account_rlp as &mut dyn BufMut);
+                    account_rlp.clone()
+                });
             let key = Nibbles::unpack(hashed_address);
             account_trie_nodes.extend(
                 self.target_nodes(
@@ -230,7 +228,10 @@ where
                 TrieNode::Leaf(leaf) => {
                     next_path.extend_from_slice(&leaf.key);
                     if next_path != key {
-                        trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                        trie_nodes.insert(
+                            next_path.clone(),
+                            Either::Right(leaf.value.as_slice().to_vec()),
+                        );
                     }
                 }
                 TrieNode::EmptyRoot => {

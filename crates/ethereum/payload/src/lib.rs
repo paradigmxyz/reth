@@ -160,7 +160,7 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 
     // apply eip-4788 pre block contract call
     system_caller

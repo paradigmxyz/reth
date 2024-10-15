@@ -31,16 +31,14 @@ where
             timestamp,
             prev_randao: B256::random(),
             suggested_fee_recipient: Address::random(),
-            withdrawals: if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-                Some(Default::default())
-            } else {
-                None
-            },
-            parent_beacon_block_root: if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
-                Some(B256::random())
-            } else {
-                None
-            },
+            withdrawals: self
+                .chain_spec
+                .is_shanghai_active_at_timestamp(timestamp)
+                .then(Default::default),
+            parent_beacon_block_root: self
+                .chain_spec
+                .is_cancun_active_at_timestamp(timestamp)
+                .then(B256::random),
         }
     }
 }

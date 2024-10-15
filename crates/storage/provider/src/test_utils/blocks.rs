@@ -5,7 +5,7 @@ use alloy_primitives::{
     b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Parity, Sealable,
     TxKind, B256, U256,
 };
-use once_cell::sync::Lazy;
+
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
@@ -14,7 +14,7 @@ use reth_primitives::{
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{db::BundleState, primitives::AccountInfo};
-use std::str::FromStr;
+use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
@@ -61,7 +61,7 @@ pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
     // StageCheckpoints is not updated in tests
 }
 
-pub(crate) static TEST_BLOCK: Lazy<SealedBlock> = Lazy::new(|| SealedBlock {
+pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlock {
     header: SealedHeader::new(
         Header {
             parent_hash: hex!("c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f")
