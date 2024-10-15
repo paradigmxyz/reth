@@ -371,9 +371,11 @@ impl RevealedSparseTrie {
                                 new_key.extend_from_slice_unchecked(&key);
                                 SparseNode::new_ext(new_key)
                             }
-                            // If the only child is a branch node, we downgrade the branch node into
-                            // a one-nibble extension node.
+                            // If the only child is a branch node, we insert it back and we
+                            // downgrade the current branch node into a one-nibble extension node.
                             SparseNode::Branch { .. } => {
+                                // TODO: Do not insert back but rather not delete in the first place
+                                self.nodes.insert(child_path, child);
                                 SparseNode::new_ext(Nibbles::from_nibbles_unchecked([child_nibble]))
                             }
                         }
@@ -958,6 +960,29 @@ mod tests {
                     Nibbles::from_nibbles([0x3, 0x1]),
                     SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
                 ),
+                (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x3, 0x3, 0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x3, 0x3, 0x2]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                )
+            ])
+        );
+
+        sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x1, 0x0, 0x2])).unwrap();
+
+        pretty_assertions::assert_eq!(
+            sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from_iter([
+                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                ),
+                (Nibbles::from_nibbles([0x3]), SparseNode::new_ext(Nibbles::from_nibbles([0x3]))),
                 (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
                     Nibbles::from_nibbles([0x3, 0x3, 0x0]),
