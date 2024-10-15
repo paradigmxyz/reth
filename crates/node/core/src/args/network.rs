@@ -172,7 +172,7 @@ impl NetworkArgs {
 
                     DEFAULT_DISCOVERY_ADDR
                 }
-            }
+            };
         }
 
         self.addr
@@ -355,6 +355,10 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub enable_discv5_discovery: bool,
 
+    /// Disable Nat discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_nat: bool,
+
     /// The UDP address to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: IpAddr,
@@ -416,6 +420,10 @@ impl DiscoveryArgs {
 
         if self.disable_discovery || self.disable_discv4_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
+        }
+
+        if self.disable_discovery || self.disable_nat {
+            network_config_builder = network_config_builder.disable_nat();
         }
 
         if !self.disable_discovery && self.enable_discv5_discovery {
@@ -494,6 +502,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,

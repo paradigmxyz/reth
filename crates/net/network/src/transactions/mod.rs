@@ -153,6 +153,14 @@ impl TransactionsHandle {
         self.send(TransactionsCommand::PropagateTransactionsTo(transactions, peer))
     }
 
+    /// Manually propagate the given transactions to all peers.
+    ///
+    /// It's up to the [`TransactionsManager`] whether the transactions are sent as hashes or in
+    /// full.
+    pub fn propagate_transactions(&self, transactions: Vec<TxHash>) {
+        self.send(TransactionsCommand::PropagateTransactions(transactions))
+    }
+
     /// Request the transaction hashes known by specific peers.
     pub async fn get_transaction_hashes(
         &self,
@@ -398,8 +406,14 @@ where
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
 
-        // This fetches all transaction from the pool, including the 4844 blob transactions but
-        // __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
+        self.propagate_all(hashes);
+    }
+
+    /// Propagates the given transactions to the peers
+    ///
+    /// This fetches all transaction from the pool, including the 4844 blob transactions but
+    /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
+    fn propagate_all(&mut self, hashes: Vec<TxHash>) {
         let propagated = self.propagate_transactions(
             self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect(),
         );
@@ -872,11 +886,12 @@ where
                 let peers = self.peers.keys().copied().collect::<HashSet<_>>();
                 tx.send(peers).ok();
             }
-            TransactionsCommand::PropagateTransactionsTo(txs, _peer) => {
-                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, _peer) {
+            TransactionsCommand::PropagateTransactionsTo(txs, peer) => {
+                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, peer) {
                     self.pool.on_propagated(propagated);
                 }
             }
+            TransactionsCommand::PropagateTransactions(txs) => self.propagate_all(txs),
             TransactionsCommand::GetTransactionHashes { peers, tx } => {
                 let mut res = HashMap::with_capacity(peers.len());
                 for peer_id in peers {
@@ -1240,29 +1255,6 @@ where
         // yield back control to tokio. See `NetworkManager` for more context on the design
         // pattern.
 
-        // Advance pool imports (flush txns to pool).
-        //
-        // Note, this is done in batches. A batch is filled from one `Transactions`
-        // broadcast messages or one `PooledTransactions` response at a time. The
-        // minimum batch size is 1 transaction (and might often be the case with blob
-        // transactions).
-        //
-        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-        // (2 MiB / 10 bytes > 200k transactions).
-        //
-        // Since transactions aren't validated until they are inserted into the pool,
-        // this can potentially validate >200k transactions. More if the message size
-        // is bigger than the soft limit on a `PooledTransactions` response which is
-        // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
-        let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
-            poll_durations.acc_pending_imports,
-            "net::tx",
-            "Batched pool imports stream",
-            DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
-            this.pool_imports.poll_next_unpin(cx),
-            |batch_results| this.on_batch_import_result(batch_results)
-        );
-
         // Advance network/peer related events (update peers map).
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_network_events,
@@ -1334,6 +1326,29 @@ where
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
             this.transaction_events.poll_next_unpin(cx),
             |event| this.on_network_tx_event(event),
+        );
+
+        // Advance pool imports (flush txns to pool).
+        //
+        // Note, this is done in batches. A batch is filled from one `Transactions`
+        // broadcast messages or one `PooledTransactions` response at a time. The
+        // minimum batch size is 1 transaction (and might often be the case with blob
+        // transactions).
+        //
+        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+        // (2 MiB / 10 bytes > 200k transactions).
+        //
+        // Since transactions aren't validated until they are inserted into the pool,
+        // this can potentially validate >200k transactions. More if the message size
+        // is bigger than the soft limit on a `PooledTransactions` response which is
+        // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
+        let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
+            poll_durations.acc_pending_imports,
+            "net::tx",
+            "Batched pool imports stream",
+            DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+            this.pool_imports.poll_next_unpin(cx),
+            |batch_results| this.on_batch_import_result(batch_results)
         );
 
         // Tries to drain hashes pending fetch cache if the tx manager currently has
@@ -1653,6 +1668,8 @@ enum TransactionsCommand {
     GetActivePeers(oneshot::Sender<HashSet<PeerId>>),
     /// Propagate a collection of full transactions to a specific peer.
     PropagateTransactionsTo(Vec<TxHash>, PeerId),
+    /// Propagate a collection of full transactions to all peers.
+    PropagateTransactions(Vec<TxHash>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
     GetTransactionHashes {
         peers: Vec<PeerId>,

@@ -4,18 +4,17 @@ use alloc::sync::Arc;
 
 use alloy_chains::Chain;
 use alloy_primitives::U256;
-use once_cell::sync::Lazy;
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_optimism_forks::DEV_HARDFORKS;
 use reth_primitives_traits::constants::DEV_GENESIS_HASH;
 
-use crate::OpChainSpec;
+use crate::{LazyLock, OpChainSpec};
 
 /// OP dev testnet specification
 ///
 /// Includes 20 prefunded accounts with `10_000` ETH each derived from mnemonic "test test test test
 /// test test test test test test test junk".
-pub static OP_DEV: Lazy<Arc<OpChainSpec>> = Lazy::new(|| {
+pub static OP_DEV: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     OpChainSpec {
         inner: ChainSpec {
             chain: Chain::dev(),

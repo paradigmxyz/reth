@@ -222,7 +222,7 @@ impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
-            Some(StorageLock::try_acquire(path.as_ref())?)
+            StorageLock::try_acquire(path.as_ref())?.into()
         } else {
             None
         };

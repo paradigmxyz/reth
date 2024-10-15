@@ -113,7 +113,6 @@ where
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
-                let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let executor = this.block_executor.clone();
 
@@ -139,11 +138,6 @@ where
                         &executor,
                     ) {
                         Ok((new_header, _bundle_state)) => {
-                            // clear all transactions from pool
-                            pool.remove_transactions(
-                                transactions.iter().map(|tx| tx.hash()).collect(),
-                            );
-
                             let state = ForkchoiceState {
                                 head_block_hash: new_header.hash(),
                                 finalized_block_hash: new_header.hash(),
