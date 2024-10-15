@@ -37,9 +37,8 @@ use tracing::trace;
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
+pub(crate) mod metrics;
 use super::ProviderNodeTypes;
-
-mod metrics;
 
 /// A common provider that fetches data from a database or static file.
 ///

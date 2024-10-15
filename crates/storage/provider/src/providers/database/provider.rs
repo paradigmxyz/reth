@@ -19,6 +19,7 @@ use crate::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::{izip, Itertools};
+use metrics::DurationsRecorder;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db::{
@@ -3352,23 +3353,23 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
     /// * [`Transactions`](tables::Transactions)
     /// * [`TransactionBlocks`](tables::TransactionBlocks)
     ///
-    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
-    /// If withdrawals are not empty, this will modify
-    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
-    /// If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
-    ///
     /// If the provider has __not__ configured full sender pruning, this will modify
     /// [`TransactionSenders`](tables::TransactionSenders).
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
-    fn insert_block(
+    ///
+    /// # Arguments
+    /// * `block` - Reference to the [`SealedBlockWithSenders`] to be inserted
+    ///
+    /// # Returns
+    /// * `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
+    fn insert_block_header_and_transaction_data(
         &self,
-        block: SealedBlockWithSenders,
+        block: &SealedBlockWithSenders,
+        durations_recorder: &mut DurationsRecorder,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
-
-        let mut durations_recorder = metrics::DurationsRecorder::default();
 
         self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
         durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
@@ -3393,15 +3394,7 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderTerminalDifficulties);
 
-        // insert body ommers data
-        if !block.body.ommers.is_empty() {
-            self.tx.put::<tables::BlockOmmers>(
-                block_number,
-                StoredBlockOmmers { ommers: block.block.body.ommers },
-            )?;
-            durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
-        }
-
+        // Transaction data
         let mut next_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
@@ -3419,7 +3412,7 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         let mut tx_hash_numbers_elapsed = Duration::default();
 
         for (transaction, sender) in
-            block.block.body.transactions.into_iter().zip(block.senders.iter())
+            block.block.body.transactions.clone().into_iter().zip(block.senders.iter())
         {
             let hash = transaction.hash();
 
@@ -3471,6 +3464,49 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
             tx_hash_numbers_elapsed,
         );
 
+        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
+        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
+        durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
+
+        if !block_indices.is_empty() {
+            self.tx.put::<tables::TransactionBlocks>(block_indices.last_tx_num(), block_number)?;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
+        }
+
+        Ok(block_indices)
+    }
+
+    /// Insert additional block data that is not part of the header or transactions.
+    ///
+    /// This function handles the insertion of ommers, withdrawals, and requests data.
+    ///
+    /// # Tables modified
+    /// * If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// * If withdrawals are not empty, this will modify
+    ///   [`BlockWithdrawals`](tables::BlockWithdrawals).
+    /// * If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
+    ///
+    /// # Arguments
+    /// * `block` - Reference to the [`SealedBlockWithSenders`] containing the additional data
+    ///
+    /// # Returns
+    /// * `ProviderResult<()>` - Ok if the insertion was successful, or an error if it failed
+    fn insert_block_additional_data(
+        &self,
+        block: SealedBlockWithSenders,
+        durations_recorder: &mut DurationsRecorder,
+    ) -> ProviderResult<()> {
+        let block_number = block.number;
+
+        // insert body ommers data
+        if !block.body.ommers.is_empty() {
+            self.tx.put::<tables::BlockOmmers>(
+                block_number,
+                StoredBlockOmmers { ommers: block.block.body.ommers },
+            )?;
+            durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
+        }
+
         if let Some(withdrawals) = block.block.body.withdrawals {
             if !withdrawals.is_empty() {
                 self.tx.put::<tables::BlockWithdrawals>(
@@ -3486,14 +3522,40 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
             durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
         }
 
-        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
-        durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
+        Ok(())
+    }
 
-        if !block_indices.is_empty() {
-            self.tx.put::<tables::TransactionBlocks>(block_indices.last_tx_num(), block_number)?;
-            durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
-        }
+    /// Inserts the block into the database, always modifying the following tables:
+    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
+    /// * [`Headers`](tables::Headers)
+    /// * [`HeaderNumbers`](tables::HeaderNumbers)
+    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
+    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    ///
+    /// If there are transactions in the block, the following tables will be modified:
+    /// * [`Transactions`](tables::Transactions)
+    /// * [`TransactionBlocks`](tables::TransactionBlocks)
+    ///
+    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// If withdrawals are not empty, this will modify
+    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
+    /// If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
+    ///
+    /// If the provider has __not__ configured full sender pruning, this will modify
+    /// [`TransactionSenders`](tables::TransactionSenders).
+    ///
+    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
+    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> ProviderResult<StoredBlockBodyIndices> {
+        let block_number = block.number;
+        let mut durations_recorder = DurationsRecorder::default();
+
+        let block_indices =
+            self.insert_block_header_and_transaction_data(&block, &mut durations_recorder)?;
+        self.insert_block_additional_data(block, &mut durations_recorder)?;
 
         debug!(
             target: "providers::db",
