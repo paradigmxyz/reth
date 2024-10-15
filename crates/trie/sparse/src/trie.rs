@@ -876,6 +876,17 @@ mod tests {
         sparse.update_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2]), value.clone()).unwrap();
         sparse.update_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
+        // Branch (Mask = 1011)
+        // ├── 0 -> Extension (Key = 23)
+        // │        └── Branch (Mask = 0101)
+        // │              ├── 1 -> Leaf (Key = 0231)
+        // │              └── 3 -> Leaf (Key = 0233)
+        // ├── 2 -> Leaf (Key = 2013)
+        // └── 3 -> Branch (Mask = 0101)
+        //            ├── 1 -> Leaf (Key = 3102)
+        //            └── 3 -> Branch (Mask = 1010)
+        //                   ├── 0 -> Leaf (Key = 3302)
+        //                   └── 2 -> Leaf (Key = 3320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
@@ -910,6 +921,16 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x2, 0x0, 0x1, 0x3])).unwrap();
 
+        // Branch (Mask = 1001)
+        // ├── 0 -> Extension (Key = 23)
+        // │        └── Branch (Mask = 0101)
+        // │              ├── 1 -> Leaf (Key = 0231)
+        // │              └── 3 -> Leaf (Key = 0233)
+        // └── 3 -> Branch (Mask = 0101)
+        //            ├── 1 -> Leaf (Key = 3102)
+        //            └── 3 -> Branch (Mask = 1010)
+        //                   ├── 0 -> Leaf (Key = 3302)
+        //                   └── 2 -> Leaf (Key = 3320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
@@ -940,6 +961,13 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1])).unwrap();
 
+        // Branch (Mask = 1001)
+        // ├── 0 -> Leaf (Key = 0233)
+        // └── 3 -> Branch (Mask = 0101)
+        //            ├── 1 -> Leaf (Key = 3102)
+        //            └── 3 -> Branch (Mask = 1010)
+        //                   ├── 0 -> Leaf (Key = 3302)
+        //                   └── 2 -> Leaf (Key = 3320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
@@ -967,6 +995,11 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x1, 0x0, 0x2])).unwrap();
 
+        // Branch (Mask = 1001)
+        // ├── 0 -> Leaf (Key = 0233)
+        // └── 3 -> Branch (Mask = 1010)
+        //            ├── 0 -> Leaf (Key = 3302)
+        //            └── 2 -> Leaf (Key = 3320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
@@ -990,6 +1023,9 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x2, 0x0])).unwrap();
 
+        // Branch (Mask = 1001)
+        // ├── 0 -> Leaf (Key = 0233)
+        // └── 3 -> Leaf (Key = 3302)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
@@ -1007,6 +1043,7 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3])).unwrap();
 
+        // Leaf (Key = 3302)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([(
@@ -1017,6 +1054,7 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2])).unwrap();
 
+        // (Empty Trie)
         assert!(sparse.nodes.is_empty());
     }
 }
