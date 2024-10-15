@@ -6,6 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
@@ -16,14 +17,17 @@ mod dev;
 mod op;
 mod op_sepolia;
 
+use alloc::{vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
+use core::fmt::Display;
 use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
-use once_cell::sync::OnceCell;
+#[cfg(not(feature = "std"))]
+pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
@@ -33,7 +37,8 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
-use std::fmt::Display;
+#[cfg(feature = "std")]
+pub(crate) use std::sync::LazyLock;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -345,7 +350,6 @@ impl From<Genesis> for OpChainSpec {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
                 genesis,
-                genesis_hash: OnceCell::new(),
                 hardforks: ChainHardforks::new(ordered_hardforks),
                 paris_block_and_final_difficulty,
                 base_fee_params: optimism_genesis_info.base_fee_params,
