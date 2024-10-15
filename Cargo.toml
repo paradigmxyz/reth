@@ -622,3 +622,5 @@ tracy-client = "0.17.3"
 #alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
 #alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "8c499409"}
+
+alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/tree-mask-unset-bit" }
