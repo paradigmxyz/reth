@@ -12,7 +12,8 @@ use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorage,
-    IntermediateStateRootState, KeyHasher, StateRoot, StateRootProgress, TrieInput,
+    IntermediateStateRootState, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress,
+    TrieInput,
 };
 use std::{
     collections::{hash_map, HashMap},
@@ -144,8 +145,8 @@ pub trait DatabaseHashedPostState<TX>: Sized {
     fn from_reverts<KH: KeyHasher>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError>;
 }
 
-impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
-    for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, KH>
+impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
+    for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -159,7 +160,7 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::<TX, KH>::new(tx).load(range)?;
+        let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
         Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -190,7 +191,7 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
     fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
-        StateRoot::<_, _, KH>::new(
+        StateRoot::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
@@ -204,7 +205,7 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
     ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
-        let (root, updates) = StateRoot::<_, _, KH>::new(
+        let (root, updates) = StateRoot::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
@@ -216,7 +217,7 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
-        StateRoot::<_, _, KH>::new(
+        StateRoot::new(
             InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
@@ -230,7 +231,7 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStateRoot<'a, TX>
     ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
-        let (root, updates) = StateRoot::<_, _, KH>::new(
+        let (root, updates) = StateRoot::new(
             InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
@@ -329,7 +330,7 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx().expect("failed to create transaction");
         assert_eq!(
-            StateRoot::<_, _, KeccakKeyHasher>::overlay_root(&tx, post_state).unwrap(),
+            StateRoot::overlay_root(&tx, post_state).unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
     }

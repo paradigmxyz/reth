@@ -1,7 +1,7 @@
 use std::collections::hash_map;
 
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256};
 use reth_db::{cursor::DbCursorRO, models::BlockNumberAddress, tables, DatabaseError};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StorageRootError;
@@ -40,8 +40,8 @@ pub trait DatabaseHashedStorage<TX>: Sized {
     ) -> Result<Self, DatabaseError>;
 }
 
-impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStorageRoot<'a, TX>
-    for StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, KH>
+impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
+    for StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(
@@ -70,13 +70,8 @@ impl<'a, TX: DbTx, KH: KeyHasher> DatabaseStorageRoot<'a, TX>
     ) -> Result<B256, StorageRootError> {
         let prefix_set = hashed_storage.construct_prefix_set().freeze();
         let state_sorted =
-            HashedPostState::from_hashed_storage(KH::hash_key(address), hashed_storage)
-                .into_sorted();
-        StorageRoot::<
-            DatabaseTrieCursorFactory<'_, TX>,
-            HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, TX>>,
-            KH,
-        >::new(
+            HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
+        StorageRoot::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,

@@ -37,25 +37,13 @@ pub trait DatabaseState: std::fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 impl DatabaseState for () {
-    type StateRoot<'a, TX: DbTx + 'a> = StateRoot<
-        DatabaseTrieCursorFactory<'a, TX>,
-        DatabaseHashedCursorFactory<'a, TX>,
-        Self::KeyHasher,
-    >;
-    type StorageRoot<'a, TX: DbTx + 'a> = StorageRoot<
-        DatabaseTrieCursorFactory<'a, TX>,
-        DatabaseHashedCursorFactory<'a, TX>,
-        Self::KeyHasher,
-    >;
-    type StateProof<'a, TX: DbTx + 'a> = Proof<
-        DatabaseTrieCursorFactory<'a, TX>,
-        DatabaseHashedCursorFactory<'a, TX>,
-        Self::KeyHasher,
-    >;
-    type StateWitness<'a, TX: DbTx + 'a> = TrieWitness<
-        DatabaseTrieCursorFactory<'a, TX>,
-        DatabaseHashedCursorFactory<'a, TX>,
-        Self::KeyHasher,
-    >;
+    type StateRoot<'a, TX: DbTx + 'a> =
+        StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+    type StorageRoot<'a, TX: DbTx + 'a> =
+        StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+    type StateProof<'a, TX: DbTx + 'a> =
+        Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+    type StateWitness<'a, TX: DbTx + 'a> =
+        TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type KeyHasher = KeccakKeyHasher;
 }

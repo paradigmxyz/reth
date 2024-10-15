@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::collections::BTreeMap;
 
 use crate::{
     hashed_cursor::HashedCursorFactory,
@@ -8,6 +8,7 @@ use crate::{
     HashedPostState,
 };
 use alloy_primitives::{
+    keccak256,
     map::{HashMap, HashSet},
     Bytes, B256,
 };
@@ -16,13 +17,12 @@ use itertools::{Either, Itertools};
 use reth_execution_errors::TrieWitnessError;
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
-    BranchNode, HashBuilder, KeyHasher, Nibbles, StorageMultiProof, TrieAccount, TrieNode,
-    CHILD_INDEX_RANGE,
+    BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
 
 /// State transition witness for the trie.
 #[derive(Debug)]
-pub struct TrieWitness<T, H, KH> {
+pub struct TrieWitness<T, H> {
     /// The cursor factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -31,11 +31,9 @@ pub struct TrieWitness<T, H, KH> {
     prefix_sets: TriePrefixSetsMut,
     /// Recorded witness.
     witness: HashMap<B256, Bytes>,
-    /// The key hasher.
-    _key_hasher: PhantomData<KH>,
 }
 
-impl<T, H, KH> TrieWitness<T, H, KH> {
+impl<T, H> TrieWitness<T, H> {
     /// Creates a new witness generator.
     pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
         Self {
@@ -43,32 +41,26 @@ impl<T, H, KH> TrieWitness<T, H, KH> {
             hashed_cursor_factory,
             prefix_sets: TriePrefixSetsMut::default(),
             witness: HashMap::default(),
-            _key_hasher: PhantomData,
         }
     }
 
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H, KH> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H> {
         TrieWitness {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             witness: self.witness,
-            _key_hasher: self._key_hasher,
         }
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
-        self,
-        hashed_cursor_factory: HF,
-    ) -> TrieWitness<T, HF, KH> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> TrieWitness<T, HF> {
         TrieWitness {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             witness: self.witness,
-            _key_hasher: self._key_hasher,
         }
     }
 
@@ -79,11 +71,10 @@ impl<T, H, KH> TrieWitness<T, H, KH> {
     }
 }
 
-impl<T, H, KH> TrieWitness<T, H, KH>
+impl<T, H> TrieWitness<T, H>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
-    KH: KeyHasher,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.
@@ -109,12 +100,10 @@ where
                 })),
         );
 
-        let mut account_multiproof = Proof::<T, H, KH>::new(
-            self.trie_cursor_factory.clone(),
-            self.hashed_cursor_factory.clone(),
-        )
-        .with_prefix_sets_mut(self.prefix_sets.clone())
-        .multiproof(proof_targets.clone())?;
+        let mut account_multiproof =
+            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .multiproof(proof_targets.clone())?;
 
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
@@ -183,7 +172,7 @@ where
                     .get(&hashed_address)
                     .cloned()
                     .unwrap_or_default();
-                let proof = StorageProof::<T, H, KH>::new_hashed(
+                let proof = StorageProof::new_hashed(
                     self.trie_cursor_factory.clone(),
                     self.hashed_cursor_factory.clone(),
                     hashed_address,
@@ -194,7 +183,7 @@ where
                 // The subtree only contains the proof for a single target.
                 let node =
                     proof.subtree.get(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
-                self.witness.insert(KH::hash_key(node.as_ref()), node.clone()); // record in witness
+                self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
                 Ok(node.clone())
             })?;
         }
@@ -204,17 +193,15 @@ where
             let mut padded_key = key.pack();
             padded_key.resize(32, 0);
             let targets = HashMap::from_iter([(B256::from_slice(&padded_key), HashSet::default())]);
-            let proof = Proof::<T, H, KH>::new(
-                self.trie_cursor_factory.clone(),
-                self.hashed_cursor_factory.clone(),
-            )
-            .with_prefix_sets_mut(self.prefix_sets.clone())
-            .multiproof(targets)?;
+            let proof =
+                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                    .with_prefix_sets_mut(self.prefix_sets.clone())
+                    .multiproof(targets)?;
 
             // The subtree only contains the proof for a single target.
             let node =
                 proof.account_subtree.get(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
-            self.witness.insert(KH::hash_key(node.as_ref()), node.clone()); // record in witness
+            self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
             Ok(node.clone())
         })?;
 
@@ -233,7 +220,7 @@ where
         let mut proof_iter = proof.into_iter().enumerate().peekable();
         while let Some((idx, (path, encoded))) = proof_iter.next() {
             // Record the node in witness.
-            self.witness.insert(KH::hash_key(encoded.as_ref()), encoded.clone());
+            self.witness.insert(keccak256(encoded.as_ref()), encoded.clone());
 
             let mut next_path = path.clone();
             match TrieNode::decode(&mut &encoded[..])? {

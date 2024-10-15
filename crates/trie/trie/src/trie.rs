@@ -9,12 +9,10 @@ use crate::{
     walker::TrieWalker,
     HashBuilder, Nibbles, TrieAccount,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::constants::EMPTY_ROOT_HASH;
-use reth_trie_common::KeyHasher;
-use std::marker::PhantomData;
 use tracing::trace;
 
 #[cfg(feature = "metrics")]
@@ -22,7 +20,7 @@ use crate::metrics::{StateRootMetrics, TrieRootMetrics};
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
-pub struct StateRoot<T, H, KH> {
+pub struct StateRoot<T, H> {
     /// The factory for trie cursors.
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -36,11 +34,9 @@ pub struct StateRoot<T, H, KH> {
     #[cfg(feature = "metrics")]
     /// State root metrics.
     metrics: StateRootMetrics,
-    /// The key hasher.
-    _key_hasher: PhantomData<KH>,
 }
 
-impl<T, H, KH> StateRoot<T, H, KH> {
+impl<T, H> StateRoot<T, H> {
     /// Creates [`StateRoot`] with `trie_cursor_factory` and `hashed_cursor_factory`. All other
     /// parameters are set to reasonable defaults.
     ///
@@ -55,7 +51,6 @@ impl<T, H, KH> StateRoot<T, H, KH> {
             threshold: 100_000,
             #[cfg(feature = "metrics")]
             metrics: StateRootMetrics::default(),
-            _key_hasher: PhantomData,
         }
     }
 
@@ -84,7 +79,7 @@ impl<T, H, KH> StateRoot<T, H, KH> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF, KH> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF> {
         StateRoot {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
@@ -93,12 +88,11 @@ impl<T, H, KH> StateRoot<T, H, KH> {
             previous_state: self.previous_state,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
-            _key_hasher: self._key_hasher,
         }
     }
 
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StateRoot<TF, H, KH> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StateRoot<TF, H> {
         StateRoot {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
@@ -107,16 +101,14 @@ impl<T, H, KH> StateRoot<T, H, KH> {
             previous_state: self.previous_state,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
-            _key_hasher: self._key_hasher,
         }
     }
 }
 
-impl<T, H, KH> StateRoot<T, H, KH>
+impl<T, H> StateRoot<T, H>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
-    KH: KeyHasher,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -206,7 +198,7 @@ where
                     // progress.
                     // TODO: We can consider introducing the TrieProgress::Progress/Complete
                     // abstraction inside StorageRoot, but let's give it a try as-is for now.
-                    let storage_root_calculator = StorageRoot::<_, _, KH>::new_hashed(
+                    let storage_root_calculator = StorageRoot::new_hashed(
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
@@ -292,7 +284,7 @@ where
 
 /// `StorageRoot` is used to compute the root node of an account storage trie.
 #[derive(Debug)]
-pub struct StorageRoot<T, H, KH> {
+pub struct StorageRoot<T, H> {
     /// A reference to the database transaction.
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -304,11 +296,9 @@ pub struct StorageRoot<T, H, KH> {
     /// Storage root metrics.
     #[cfg(feature = "metrics")]
     metrics: TrieRootMetrics,
-    /// The key hasher.
-    _key_hasher: PhantomData<KH>,
 }
 
-impl<T, H, KH: KeyHasher> StorageRoot<T, H, KH> {
+impl<T, H> StorageRoot<T, H> {
     /// Creates a new storage root calculator given a raw address.
     pub fn new(
         trie_cursor_factory: T,
@@ -319,7 +309,7 @@ impl<T, H, KH: KeyHasher> StorageRoot<T, H, KH> {
         Self::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
-            KH::hash_key(address),
+            keccak256(address),
             #[cfg(feature = "metrics")]
             metrics,
         )
@@ -339,7 +329,6 @@ impl<T, H, KH: KeyHasher> StorageRoot<T, H, KH> {
             prefix_set: PrefixSet::default(),
             #[cfg(feature = "metrics")]
             metrics,
-            _key_hasher: PhantomData,
         }
     }
 
@@ -350,10 +339,7 @@ impl<T, H, KH: KeyHasher> StorageRoot<T, H, KH> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
-        self,
-        hashed_cursor_factory: HF,
-    ) -> StorageRoot<T, HF, KH> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageRoot<T, HF> {
         StorageRoot {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
@@ -361,12 +347,11 @@ impl<T, H, KH: KeyHasher> StorageRoot<T, H, KH> {
             prefix_set: self.prefix_set,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
-            _key_hasher: self._key_hasher,
         }
     }
 
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageRoot<TF, H, KH> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageRoot<TF, H> {
         StorageRoot {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
@@ -374,12 +359,11 @@ impl<T, H, KH: KeyHasher> StorageRoot<T, H, KH> {
             prefix_set: self.prefix_set,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
-            _key_hasher: self._key_hasher,
         }
     }
 }
 
-impl<T, H, KH> StorageRoot<T, H, KH>
+impl<T, H> StorageRoot<T, H>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,

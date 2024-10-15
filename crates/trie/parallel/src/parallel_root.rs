@@ -15,7 +15,7 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, KeccakKeyHasher, Nibbles, StorageRoot, TrieAccount, TrieInput,
+    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
@@ -116,7 +116,7 @@ where
                         &hashed_state_sorted,
                     );
                     // TODO: Provider correct impl
-                    Ok(StorageRoot::<_, _, KeccakKeyHasher>::new_hashed(
+                    Ok(StorageRoot::new_hashed(
                         trie_cursor_factory,
                         hashed_state,
                         hashed_address,
@@ -174,7 +174,7 @@ where
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
-                            StorageRoot::<_, _, KeccakKeyHasher>::new_hashed(
+                            StorageRoot::new_hashed(
                                 trie_cursor_factory.clone(),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,

@@ -7,7 +7,7 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::Proof,
-    trie_cursor::InMemoryTrieCursorFactory, KeyHasher, MultiProof, TrieInput,
+    trie_cursor::InMemoryTrieCursorFactory, MultiProof, TrieInput,
 };
 use reth_trie_common::AccountProof;
 
@@ -32,8 +32,8 @@ pub trait DatabaseProof<'a, TX> {
     ) -> Result<MultiProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx, KH: KeyHasher> DatabaseProof<'a, TX>
-    for Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, KH>
+impl<'a, TX: DbTx> DatabaseProof<'a, TX>
+    for Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     /// Create a new [Proof] instance from database transaction.
     fn from_tx(tx: &'a TX) -> Self {

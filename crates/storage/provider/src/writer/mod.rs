@@ -558,7 +558,7 @@ mod tests {
     };
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot, StorageRoot,
+        HashedPostState, HashedStorage, StateRoot, StorageRoot,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm::{
@@ -1435,8 +1435,7 @@ mod tests {
             }
         }
 
-        let (_, updates) =
-            StateRoot::<_, _, KeccakKeyHasher>::from_tx(tx).root_with_updates().unwrap();
+        let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
         provider_rw.write_trie_updates(&updates).unwrap();
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1641,9 +1640,7 @@ mod tests {
 
         // calculate database storage root and write intermediate storage nodes.
         let (storage_root, _, storage_updates) =
-            StorageRoot::<_, _, KeccakKeyHasher>::from_tx_hashed(tx, hashed_address)
-                .calculate(true)
-                .unwrap();
+            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
@@ -1665,12 +1662,7 @@ mod tests {
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
         // re-calculate database storage root
-        let storage_root = StorageRoot::<_, _, KeccakKeyHasher>::overlay_root(
-            tx,
-            address,
-            updated_storage.clone(),
-        )
-        .unwrap();
+        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
         assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }
