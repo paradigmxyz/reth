@@ -108,7 +108,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all().txs_iter(sender).last().map(|(_, tx)| Arc::clone(&tx.transaction))
     }
 
-    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain nonce without a nonce gap.
+    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain
+    /// nonce without a nonce gap.
     pub(crate) fn get_highest_consecutive_transaction_by_sender(
         &self,
         sender: SenderId,

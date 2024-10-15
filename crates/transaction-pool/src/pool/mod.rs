@@ -785,7 +785,8 @@ where
         self.get_pool_data().get_highest_transaction_by_sender(sender_id)
     }
 
-    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain nonce without a nonce gap.
+    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain
+    /// nonce without a nonce gap.
     pub(crate) fn get_highest_consecutive_transaction_by_sender(
         &self,
         sender: Address,
