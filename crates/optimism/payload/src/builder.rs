@@ -36,6 +36,8 @@ use crate::{
     error::OptimismPayloadBuilderError,
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::DepositTransaction;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]

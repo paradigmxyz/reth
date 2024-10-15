@@ -2,6 +2,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
+use op_alloy_consensus::DepositTransaction;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;

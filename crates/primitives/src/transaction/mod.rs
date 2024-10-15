@@ -1,16 +1,13 @@
 //! Transaction types.
 
 use crate::BlockHashOrNumber;
-use alloy_eips::eip7702::SignedAuthorization;
-use alloy_primitives::{keccak256, Address, ChainId, TxKind, B256, U256};
-use op_alloy_consensus::transaction::deposit::DepositTransaction;
-
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
+    eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Bytes, TxHash};
+use alloy_primitives::{keccak256, Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
@@ -55,6 +52,8 @@ mod tx_type;
 pub(crate) mod util;
 mod variant;
 
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
@@ -138,6 +137,34 @@ pub enum Transaction {
     /// Optimism deposit transaction.
     #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
+}
+
+#[cfg(feature = "optimism")]
+impl DepositTransaction for Transaction {
+    fn source_hash(&self) -> Option<B256> {
+        match self {
+            Self::Deposit(tx) => tx.source_hash(),
+            _ => None,
+        }
+    }
+
+    fn mint(&self) -> Option<u128> {
+        match self {
+            Self::Deposit(tx) => tx.mint(),
+            _ => None,
+        }
+    }
+
+    fn is_system_transaction(&self) -> bool {
+        match self {
+            Self::Deposit(tx) => tx.is_system_transaction(),
+            _ => false,
+        }
+    }
+
+    fn is_deposit(&self) -> bool {
+        matches!(self, Self::Deposit(_))
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -481,42 +508,6 @@ impl Transaction {
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { input, .. }) => input,
         }
-    }
-
-    /// Returns the source hash of the transaction, which uniquely identifies its source.
-    /// If not a deposit transaction, this will always return `None`.
-    #[cfg(feature = "optimism")]
-    pub const fn source_hash(&self) -> Option<B256> {
-        match self {
-            Self::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
-            _ => None,
-        }
-    }
-
-    /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
-    /// is not a deposit transaction, this will always return `None`.
-    #[cfg(feature = "optimism")]
-    pub const fn mint(&self) -> Option<u128> {
-        match self {
-            Self::Deposit(TxDeposit { mint, .. }) => *mint,
-            _ => None,
-        }
-    }
-
-    /// Returns whether or not the transaction is a system transaction. If the transaction
-    /// is not a deposit transaction, this will always return `false`.
-    #[cfg(feature = "optimism")]
-    pub const fn is_system_transaction(&self) -> bool {
-        match self {
-            Self::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
-            _ => false,
-        }
-    }
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    pub const fn is_deposit(&self) -> bool {
-        matches!(self, Self::Deposit(_))
     }
 
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a

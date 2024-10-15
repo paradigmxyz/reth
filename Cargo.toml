@@ -463,10 +463,15 @@ alloy-transport-ipc = { version = "0.4.2", default-features = false }
 alloy-transport-ws = { version = "0.4.2", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.4"
-op-alloy-rpc-types-engine = "0.4"
-op-alloy-network = "0.4"
-op-alloy-consensus = "0.4"
+op-alloy-rpc-types = { git = "https://github.com/hoank101/op-alloy.git", tag = "v0.4.0-1"}
+op-alloy-rpc-types-engine = { git = "https://github.com/hoank101/op-alloy.git", tag = "v0.4.0-1"}
+op-alloy-network = { git = "https://github.com/hoank101/op-alloy.git", tag = "v0.4.0-1"}
+op-alloy-consensus = { git = "https://github.com/hoank101/op-alloy.git", tag = "v0.4.0-1"}
+#op-alloy-rpc-types = "0.4.0"
+#op-alloy-rpc-types-engine = "0.4.0"
+#op-alloy-network = "0.4.0"
+#op-alloy-consensus = "0.4.0"
+
 
 # misc
 aquamarine = "0.5"

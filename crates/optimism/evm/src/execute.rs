@@ -4,6 +4,8 @@ use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
 use alloy_primitives::{BlockNumber, U256};
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::DepositTransaction;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
