@@ -1,5 +1,6 @@
 //! L1 `eth` API types.
 
+use alloy_consensus::Transaction as _;
 use alloy_network::{AnyNetwork, Network};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{Transaction, TransactionInfo};
