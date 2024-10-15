@@ -388,13 +388,6 @@ impl RevealedSparseTrie {
                 }
             };
 
-            // if let Some(RemovedSparseNode {
-            //     branch_nibble: ref mut branch_nibble @ Some(_), ..
-            // }) = removed_nodes.back_mut()
-            // {
-            //     *branch_nibble = None;
-            // }
-
             child = RemovedSparseNode {
                 path: removed_path.clone(),
                 node: new_node.clone(),
@@ -995,6 +988,35 @@ mod tests {
             ])
         );
 
-        // TODO: delete more nodes
+        sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x2, 0x0])).unwrap();
+
+        pretty_assertions::assert_eq!(
+            sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from_iter([
+                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x0, 0x2]))
+                ),
+            ])
+        );
+
+        sparse.remove_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3])).unwrap();
+
+        pretty_assertions::assert_eq!(
+            sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from_iter([(
+                Nibbles::new(),
+                SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2]))
+            ),])
+        );
+
+        sparse.remove_leaf(Nibbles::from_nibbles([0x3, 0x3, 0x0, 0x2])).unwrap();
+
+        assert!(sparse.nodes.is_empty());
     }
 }
