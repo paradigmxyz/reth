@@ -65,7 +65,7 @@ async fn main() -> eyre::Result<()> {
         // Rest is just noops that do nothing
         .with_noop_pool()
         .with_noop_network()
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::new(spec))
         .with_events(TestCanonStateSubscriptions::default())
         .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()));
