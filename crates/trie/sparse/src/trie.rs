@@ -268,12 +268,14 @@ impl RevealedSparseTrie {
             return Ok(())
         }
 
-        let mut stack = self.take_nodes_for_path(&path)?;
+        let mut removed_nodes = self.take_nodes_for_path(&path)?;
         // Pop the first node from the stack which is the leaf node we want to remove.
-        let Some(mut child) = stack.pop_back() else { return Ok(()) };
+        let Some(mut child) = removed_nodes.pop_back() else { return Ok(()) };
         debug_assert_eq!(child.path, path);
 
-        while let Some(removed_node) = stack.pop_back() {
+        // Walk the stack of removed nodes from the back and re-insert them back into the trie,
+        // adjusting the node type as needed.
+        while let Some(removed_node) = removed_nodes.pop_back() {
             let removed_path = removed_node.path;
 
             let new_node = match &removed_node.node {
