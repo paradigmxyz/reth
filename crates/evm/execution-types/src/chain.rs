@@ -656,7 +656,6 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_primitives::{Receipt, Receipts, TxType};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
@@ -791,6 +790,8 @@ mod tests {
     #[test]
     #[cfg(not(feature = "optimism"))]
     fn receipts_by_block_hash() {
+        use reth_primitives::{Receipt, Receipts, TxType};
+
         // Create a default SealedBlockWithSenders object
         let block = SealedBlockWithSenders::default();
 
