@@ -96,7 +96,7 @@ where
         state: HashedPostState,
     ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
         if state.is_empty() {
-            return Ok(self.witness);
+            return Ok(self.witness)
         }
 
         let proof_targets = HashMap::from_iter(
@@ -257,7 +257,7 @@ where
                 }
                 TrieNode::EmptyRoot => {
                     if idx != 0 || proof_iter.peek().is_some() {
-                        return Err(TrieWitnessError::UnexpectedEmptyRoot(next_path));
+                        return Err(TrieWitnessError::UnexpectedEmptyRoot(next_path))
                     }
                 }
             };
@@ -306,13 +306,13 @@ where
                                     for (child_path, branch_hash) in children {
                                         hash_builder.add_branch(child_path, branch_hash, false);
                                     }
-                                    break;
+                                    break
                                 }
                                 TrieNode::Leaf(leaf) => {
                                     let mut child_path = path;
                                     child_path.extend_from_slice(&leaf.key);
                                     hash_builder.add_leaf(child_path, &leaf.value);
-                                    break;
+                                    break
                                 }
                                 TrieNode::Extension(ext) => {
                                     path.extend_from_slice(&ext.key);

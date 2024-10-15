@@ -85,7 +85,7 @@ where
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         if input.target_reached() || self.buffer.is_some() {
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(Ok(()))
         }
 
         // Update the header range on the downloader
@@ -111,7 +111,7 @@ where
     /// header, limited by the stage's batch size.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
@@ -189,7 +189,7 @@ where
                         segment: StaticFileSegment::Transactions,
                         database: block_number,
                         static_file: appended_block_number,
-                    });
+                    })
                 }
             }
 
@@ -212,7 +212,7 @@ where
                                 segment: StaticFileSegment::Transactions,
                                 database: next_tx_num,
                                 static_file: appended_tx_number,
-                            });
+                            })
                         }
 
                         // Increment transaction id for each transaction.
@@ -283,7 +283,7 @@ where
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
-                break;
+                break
             }
 
             // Delete the ommers entry if any
@@ -330,7 +330,7 @@ where
                 static_file_tx_num,
                 &static_file_provider,
                 provider,
-            )?);
+            )?)
         }
 
         // Unwinds static file
@@ -361,11 +361,11 @@ where
     loop {
         if let Some(indices) = provider.block_body_indices(last_block)? {
             if indices.last_tx_num() <= last_tx_num {
-                break;
+                break
             }
         }
         if last_block == 0 {
-            break;
+            break
         }
         last_block -= 1;
     }
@@ -928,7 +928,7 @@ mod tests {
                 let this = self.get_mut();
 
                 if this.headers.is_empty() {
-                    return Poll::Ready(None);
+                    return Poll::Ready(None)
                 }
 
                 let mut response = Vec::default();
@@ -942,12 +942,12 @@ mod tests {
                     }
 
                     if response.len() as u64 >= this.batch_size {
-                        break;
+                        break
                     }
                 }
 
                 if !response.is_empty() {
-                    return Poll::Ready(Some(Ok(response)));
+                    return Poll::Ready(Some(Ok(response)))
                 }
 
                 panic!("requested bodies without setting headers")

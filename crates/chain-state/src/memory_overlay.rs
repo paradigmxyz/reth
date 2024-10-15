@@ -62,7 +62,7 @@ impl BlockHashReader for MemoryOverlayStateProvider {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in &self.in_memory {
             if block.block.number == number {
-                return Ok(Some(block.block.hash()));
+                return Ok(Some(block.block.hash()))
             }
         }
 
@@ -95,7 +95,7 @@ impl AccountReader for MemoryOverlayStateProvider {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         for block in &self.in_memory {
             if let Some(account) = block.execution_output.account(&address) {
-                return Ok(account);
+                return Ok(account)
             }
         }
 
@@ -221,7 +221,7 @@ impl StateProvider for MemoryOverlayStateProvider {
     ) -> ProviderResult<Option<StorageValue>> {
         for block in &self.in_memory {
             if let Some(value) = block.execution_output.storage(&address, storage_key.into()) {
-                return Ok(Some(value));
+                return Ok(Some(value))
             }
         }
 
@@ -231,7 +231,7 @@ impl StateProvider for MemoryOverlayStateProvider {
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
             if let Some(contract) = block.execution_output.bytecode(&code_hash) {
-                return Ok(Some(contract));
+                return Ok(Some(contract))
             }
         }
 

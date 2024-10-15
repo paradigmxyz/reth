@@ -251,7 +251,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td));
+            return Ok(Some(td))
         }
 
         self.static_file_provider.get_with_static_file_or_database(

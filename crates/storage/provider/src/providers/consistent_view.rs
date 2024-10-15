@@ -77,7 +77,7 @@ where
             return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
             }
-            .into());
+            .into())
         }
 
         // Check that the best block number is the same as the latest stored header.
@@ -88,7 +88,7 @@ where
             return Err(ConsistentViewError::Syncing {
                 best_block: GotExpected { got: best_block_number, expected: last_num },
             }
-            .into());
+            .into())
         }
 
         Ok(provider_ro)

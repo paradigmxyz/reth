@@ -48,7 +48,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> BlockHash
     fn block_hash(&self, block_number: BlockNumber) -> ProviderResult<Option<B256>> {
         let block_hash = self.block_execution_data_provider.block_hash(block_number);
         if block_hash.is_some() {
-            return Ok(block_hash);
+            return Ok(block_hash)
         }
         self.state_provider.block_hash(block_number)
     }
@@ -221,7 +221,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> StateProv
             .execution_outcome()
             .storage(&account, u256_storage_key)
         {
-            return Ok(Some(value));
+            return Ok(Some(value))
         }
 
         self.state_provider.storage(account, storage_key)
@@ -231,7 +231,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> StateProv
         if let Some(bytecode) =
             self.block_execution_data_provider.execution_outcome().bytecode(&code_hash)
         {
-            return Ok(Some(bytecode));
+            return Ok(Some(bytecode))
         }
 
         self.state_provider.bytecode_by_hash(code_hash)

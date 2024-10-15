@@ -163,7 +163,7 @@ where
     pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "provider::storage_writer", "Attempted to write empty block range");
-            return Ok(());
+            return Ok(())
         }
 
         // NOTE: checked non-empty above
@@ -542,7 +542,8 @@ where
 mod tests {
     use super::*;
     use crate::{
-        test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
+        test_utils::create_test_provider_factory, AccountReader, StateRootProvider,
+        StorageTrieWriter, TrieWriter,
     };
     use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
     use reth_db::tables;
@@ -552,7 +553,9 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
-    use reth_storage_api::DatabaseProviderFactory;
+    use reth_storage_api::{
+        DatabaseProviderFactory, HashedPostStateProvider, ToLatestStateProviderRef,
+    };
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot, StorageRoot,
@@ -1440,17 +1443,17 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                StateRoot::<_, _, KeccakKeyHasher>::overlay_root(
-                    tx,
-                    ExecutionOutcome::new(
-                        state.bundle_state.clone(),
-                        Receipts::default(),
-                        0,
-                        Vec::new()
-                    )
-                    .hash_state_slow::<KeccakKeyHasher>(),
-                )
-                .unwrap(),
+                provider_rw
+                    .latest_ref()
+                    .state_root(provider_rw.execution_outcome_hashed_post_state(
+                        &ExecutionOutcome::new(
+                            state.bundle_state.clone(),
+                            Receipts::default(),
+                            0,
+                            Vec::new()
+                        )
+                    ))
+                    .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())
