@@ -4,6 +4,7 @@ mod signature;
 pub use signature::*;
 use std::fmt;
 
+use alloy_consensus::Transaction as _;
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     Transaction, TransactionInfo,
