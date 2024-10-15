@@ -785,8 +785,7 @@ where
         self.get_pool_data().get_highest_transaction_by_sender(sender_id)
     }
 
-    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain
-    /// nonce without a nonce gap.
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
     pub(crate) fn get_highest_consecutive_transaction_by_sender(
         &self,
         sender: Address,
@@ -794,7 +793,7 @@ where
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data()
-            .get_highest_consecutive_transaction_by_sender(sender_id, on_chain_nonce)
+            .get_highest_consecutive_transaction_by_sender(sender_id.into_id(on_chain_nonce))
     }
 
     /// Returns all transactions that where submitted with the given [`TransactionOrigin`]

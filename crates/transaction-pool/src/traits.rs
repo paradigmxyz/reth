@@ -356,8 +356,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns the transaction with the highest nonce that is a direct ancestor of the on chain
-    /// nonce without a nonce gap.
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    /// In other words the highest non nonce gapped transaction.
+    ///
+    /// Note: The next pending pooled transaction must have the on chain nonce.
+    ///
+    /// For example, for a given on chain nonce of `5`, the next transaction must have that nonce.
+    /// If the pool contains txs `[5,6,7]` this returns tx `7`.
+    /// If the pool contains txs `[6,7]` this returns `None` because the next valid nonce (5) is
+    /// missing, which means txs `[6,7]` are nonce gapped.
     fn get_highest_consecutive_transaction_by_sender(
         &self,
         sender: Address,
