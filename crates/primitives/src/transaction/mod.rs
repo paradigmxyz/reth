@@ -4,7 +4,10 @@ use crate::BlockHashOrNumber;
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{keccak256, Address, ChainId, TxKind, B256, U256};
 
-use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+use alloy_consensus::{
+    SignableTransaction, Transaction as AlloyTransaction, TxEip1559, TxEip2930, TxEip4844,
+    TxEip7702, TxLegacy,
+};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
@@ -194,19 +197,6 @@ impl Transaction {
             Self::Eip7702(tx) => tx.signature_hash(),
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => B256::ZERO,
-        }
-    }
-
-    /// Get `chain_id`.
-    pub const fn chain_id(&self) -> Option<u64> {
-        match self {
-            Self::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
-            Self::Eip2930(TxEip2930 { chain_id, .. }) |
-            Self::Eip1559(TxEip1559 { chain_id, .. }) |
-            Self::Eip4844(TxEip4844 { chain_id, .. }) |
-            Self::Eip7702(TxEip7702 { chain_id, .. }) => Some(*chain_id),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => None,
         }
     }
 
@@ -824,7 +814,7 @@ impl Encodable for Transaction {
     }
 }
 
-impl alloy_consensus::Transaction for Transaction {
+impl AlloyTransaction for Transaction {
     fn chain_id(&self) -> Option<ChainId> {
         match self {
             Self::Legacy(tx) => tx.chain_id(),
@@ -1974,6 +1964,7 @@ mod tests {
         transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     };
+    use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
     use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
