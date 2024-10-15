@@ -11,7 +11,6 @@ use alloy_rpc_types_trace::geth::{
     GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     NoopFrame, TraceResult,
 };
-use reth_primitives::EnvelopedEncoding;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
@@ -19,7 +18,9 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
+use reth_primitives::{
+    Block, BlockId, BlockNumberOrTag, EnvelopedEncoding, TransactionSignedEcRecovered,
+};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,

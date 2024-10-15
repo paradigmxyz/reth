@@ -44,7 +44,8 @@ pub use constants::{
     MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use receipt::{
-    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts, EnvelopedEncoding
+    gas_spent_by_transactions, EnvelopedEncoding, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
+    Receipts,
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
