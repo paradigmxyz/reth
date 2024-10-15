@@ -2783,13 +2783,12 @@ mod tests {
 
     #[test]
     fn get_highest_consecutive_transaction_by_sender() {
+        // Set up a mock transaction factory and a new transaction pool.
         let mut pool = TxPool::new(MockOrdering::default(), PoolConfig::default());
         let mut f = MockTransactionFactory::default();
-        
-        // Get sender id
-        let sender = Address::random();
 
-        // Create transactions with nonces 0, 1, 2, 4, 5
+        // Create transactions with nonces 0, 1, 2, 4, 5.
+        let sender = Address::random();
         let txs: Vec<_> = vec![0, 1, 2, 4, 5];
         for nonce in txs {
             let mut mock_tx = MockTransaction::eip1559();
