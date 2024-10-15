@@ -1184,7 +1184,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input()
+        self.transaction.input().as_ref()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.
