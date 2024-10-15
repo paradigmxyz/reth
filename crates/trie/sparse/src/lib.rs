@@ -5,3 +5,6 @@ pub use state::*;
 
 mod trie;
 pub use trie::*;
+
+mod errors;
+pub use errors::*;

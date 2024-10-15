@@ -1,4 +1,4 @@
-use crate::SparseTrie;
+use crate::{SparseStateTrieError, SparseStateTrieResult, SparseTrie};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
@@ -36,26 +36,27 @@ impl SparseStateTrie {
     }
 
     /// Reveal unknown trie paths from provided leaf path and its proof.
-    ///
-    /// # Panics
-    ///
-    /// This method panics on invalid proof if `debug_assertions` are enabled.
-    /// However, it does not extensively validate the proof.
+    /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_account(
         &mut self,
         account: B256,
         proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> alloy_rlp::Result<()> {
+    ) -> SparseStateTrieResult<()> {
         let mut proof = proof.into_iter().peekable();
 
-        // reveal root and initialize the trie of not already
-        let Some((path, root)) = proof.next() else { return Ok(()) };
-        debug_assert!(path.is_empty(), "first proof node is not root");
-        let root_node = TrieNode::decode(&mut &root[..])?;
-        debug_assert!(
-            !matches!(root_node, TrieNode::EmptyRoot) || proof.peek().is_none(),
-            "invalid proof"
-        );
+        // reveal root and initialize the trie if not already
+        let Some((path, node)) = proof.next() else { return Ok(()) };
+        if !path.is_empty() {
+            return Err(SparseStateTrieError::InvalidRootNode { path, node })
+        }
+
+        // Decode root node and perform sanity check.
+        let root_node = TrieNode::decode(&mut &node[..])?;
+        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
+            return Err(SparseStateTrieError::InvalidRootNode { path, node })
+        }
+
+        // Reveal root node if it wasn't already.
         let trie = self.state.reveal_root(root_node)?;
 
         // add the remaining proof nodes
@@ -70,20 +71,24 @@ impl SparseStateTrie {
         Ok(())
     }
 
-    /// Returns sparse trie root if the the trie has been revealed.
-    pub fn root(&mut self) -> Option<B256> {
-        self.state.root()
+    /// Update the leaf node.
+    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseStateTrieResult<()> {
+        self.state.update_leaf(path, value)?;
+        Ok(())
     }
 
-    /// Update the leaf node
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) {
-        self.state.as_revealed_mut().unwrap().update_leaf(path, value);
+    /// Returns sparse trie root if the trie has been revealed.
+    pub fn root(&mut self) -> Option<B256> {
+        self.state.root()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Bytes;
+    use alloy_rlp::EMPTY_STRING_CODE;
+    use assert_matches::assert_matches;
     use reth_trie::HashBuilder;
     use reth_trie_common::proof::ProofRetainer;
 
@@ -101,29 +106,26 @@ mod tests {
         assert_eq!(sparse.state, SparseTrie::revealed_empty());
     }
 
-    #[cfg(debug_assertions)]
-    mod debug_assertions {
-        use super::*;
-        use alloy_primitives::Bytes;
-        use alloy_rlp::EMPTY_STRING_CODE;
+    #[test]
+    fn reveal_first_node_not_root() {
+        let mut sparse = SparseStateTrie::default();
+        let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
+        assert_matches!(
+            sparse.reveal_account(Default::default(), proof),
+            Err(SparseStateTrieError::InvalidRootNode { .. })
+        );
+    }
 
-        #[test]
-        #[should_panic]
-        fn reveal_first_node_not_root() {
-            let mut sparse = SparseStateTrie::default();
-            let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
-            sparse.reveal_account(Default::default(), proof).unwrap();
-        }
-
-        #[test]
-        #[should_panic]
-        fn reveal_invalid_proof_with_empty_root() {
-            let mut sparse = SparseStateTrie::default();
-            let proof = [
-                (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
-                (Nibbles::from_nibbles([0x1]), Bytes::new()),
-            ];
-            sparse.reveal_account(Default::default(), proof).unwrap();
-        }
+    #[test]
+    fn reveal_invalid_proof_with_empty_root() {
+        let mut sparse = SparseStateTrie::default();
+        let proof = [
+            (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
+            (Nibbles::from_nibbles([0x1]), Bytes::new()),
+        ];
+        assert_matches!(
+            sparse.reveal_account(Default::default(), proof),
+            Err(SparseStateTrieError::InvalidRootNode { .. })
+        );
     }
 }

@@ -1,3 +1,4 @@
+use crate::{SparseTrieError, SparseTrieResult};
 use alloy_primitives::{hex, keccak256, map::HashMap, B256};
 use alloy_rlp::Decodable;
 use reth_trie::prefix_set::{PrefixSet, PrefixSetMut};
@@ -44,11 +45,18 @@ impl SparseTrie {
     /// # Returns
     ///
     /// Mutable reference to [`RevealedSparseTrie`].
-    pub fn reveal_root(&mut self, root: TrieNode) -> alloy_rlp::Result<&mut RevealedSparseTrie> {
+    pub fn reveal_root(&mut self, root: TrieNode) -> SparseTrieResult<&mut RevealedSparseTrie> {
         if self.is_blind() {
             *self = Self::Revealed(RevealedSparseTrie::from_root(root)?)
         }
         Ok(self.as_revealed_mut().unwrap())
+    }
+
+    /// Update the leaf node.
+    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        revealed.update_leaf(path, value)?;
+        Ok(())
     }
 
     /// Calculates and returns the trie root if the trie has been revealed.
@@ -94,7 +102,7 @@ impl Default for RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_root(node: TrieNode) -> alloy_rlp::Result<Self> {
+    pub fn from_root(node: TrieNode) -> SparseTrieResult<Self> {
         let mut this = Self {
             nodes: HashMap::default(),
             values: HashMap::default(),
@@ -106,7 +114,7 @@ impl RevealedSparseTrie {
     }
 
     /// Reveal the trie node only if it was not known already.
-    pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> alloy_rlp::Result<()> {
+    pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
         // TODO: revise all inserts to not overwrite existing entries
         match node {
             TrieNode::EmptyRoot => {
@@ -143,7 +151,7 @@ impl RevealedSparseTrie {
         Ok(())
     }
 
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> alloy_rlp::Result<()> {
+    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             // TODO: revise insert to not overwrite existing entries
             self.nodes.insert(path, SparseNode::Hash(B256::from_slice(&child[1..])));
@@ -154,12 +162,12 @@ impl RevealedSparseTrie {
     }
 
     /// Update the leaf node with provided value.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) {
+    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
         let existing = self.values.insert(path.clone(), value);
         if existing.is_some() {
             // trie structure unchanged, return immediately
-            return
+            return Ok(())
         }
 
         let mut current = Nibbles::default();
@@ -169,16 +177,15 @@ impl RevealedSparseTrie {
                     *node = SparseNode::new_leaf(path);
                     break
                 }
-                SparseNode::Hash(_) => {
-                    unimplemented!() // TODO: error out
+                SparseNode::Hash(hash) => {
+                    return Err(SparseTrieError::BlindedNode { path: current, hash: *hash })
                 }
                 SparseNode::Leaf { key: current_key, .. } => {
                     current.extend_from_slice_unchecked(current_key);
 
                     // this leaf is being updated
                     if current == path {
-                        // TODO: unreachable
-                        break
+                        unreachable!("we already checked leaf presence in the beginning");
                     }
 
                     // find the common prefix
@@ -242,6 +249,8 @@ impl RevealedSparseTrie {
                 }
             };
         }
+
+        Ok(())
     }
 
     /// Remove leaf node from the trie.
@@ -487,7 +496,7 @@ mod tests {
         let expected = hash_builder.root();
 
         let mut sparse = RevealedSparseTrie::default();
-        sparse.update_leaf(path, value.to_vec());
+        sparse.update_leaf(path, value.to_vec()).unwrap();
         let root = sparse.root();
         assert_eq!(root, expected);
     }
@@ -505,7 +514,7 @@ mod tests {
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), value.to_vec());
+            sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
         }
         let root = sparse.root();
         assert_eq!(root, expected);
@@ -524,7 +533,7 @@ mod tests {
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), value.to_vec());
+            sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
         }
         let root = sparse.root();
         assert_eq!(root, expected);
@@ -551,7 +560,7 @@ mod tests {
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), value.to_vec());
+            sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
         }
         let root = sparse.root();
         assert_eq!(root, expected);
@@ -571,7 +580,7 @@ mod tests {
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
-            sparse.update_leaf(path.clone(), old_value.to_vec());
+            sparse.update_leaf(path.clone(), old_value.to_vec()).unwrap();
         }
         let root = sparse.root();
         assert_eq!(root, expected);
@@ -583,7 +592,7 @@ mod tests {
         let expected = hash_builder.root();
 
         for path in &paths {
-            sparse.update_leaf(path.clone(), new_value.to_vec());
+            sparse.update_leaf(path.clone(), new_value.to_vec()).unwrap();
         }
         let root = sparse.root();
         assert_eq!(root, expected);
@@ -597,7 +606,7 @@ mod tests {
 
             for update in updates {
                 for (key, value) in &update {
-                    sparse.update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec());
+                    sparse.update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec()).unwrap();
                 }
                 let root = sparse.root();
 
