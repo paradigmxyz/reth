@@ -9,7 +9,7 @@ use http::{header::CONTENT_TYPE, HeaderValue, Response};
 use metrics::describe_gauge;
 use metrics_process::Collector;
 use reth_metrics::metrics::Unit;
-use reth_tasks::TaskExecutor;
+use reth_tasks::TaskSpawner;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 /// Configuration for the [`MetricServer`]
@@ -18,7 +18,7 @@ pub struct MetricServerConfig {
     listen_addr: SocketAddr,
     version_info: VersionInfo,
     chain_spec_info: ChainSpecInfo,
-    task_executor: TaskExecutor,
+    task_executor: Box<dyn TaskSpawner>,
     hooks: Hooks,
 }
 
@@ -28,7 +28,7 @@ impl MetricServerConfig {
         listen_addr: SocketAddr,
         version_info: VersionInfo,
         chain_spec_info: ChainSpecInfo,
-        task_executor: TaskExecutor,
+        task_executor: Box<dyn TaskSpawner>,
         hooks: Hooks,
     ) -> Self {
         Self { listen_addr, hooks, task_executor, version_info, chain_spec_info }
@@ -78,7 +78,7 @@ impl MetricServer {
         &self,
         listen_addr: SocketAddr,
         hook: Arc<F>,
-        task_executor: TaskExecutor,
+        task_executor: Box<dyn TaskSpawner>,
     ) -> eyre::Result<()> {
         let listener = tokio::net::TcpListener::bind(listen_addr)
             .await

@@ -35,7 +35,7 @@ use reth_payload_primitives::PayloadBuilder;
 use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskExecutor, TaskSpawner};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
 use std::sync::Arc;
@@ -65,7 +65,7 @@ pub struct EngineNodeLauncher {
 impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
     pub const fn new(
-        task_executor: TaskExecutor,
+        task_executor: Box<dyn TaskSpawner>,
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
     ) -> Self {
