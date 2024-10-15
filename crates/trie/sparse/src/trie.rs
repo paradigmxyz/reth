@@ -1,6 +1,7 @@
 use crate::{SparseTrieError, SparseTrieResult};
 use alloy_primitives::{hex, keccak256, map::HashMap, B256};
 use alloy_rlp::Decodable;
+use reth_tracing::tracing::debug;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut},
     RlpNode,
@@ -269,6 +270,7 @@ impl RevealedSparseTrie {
         }
 
         let mut removed_nodes = self.take_nodes_for_path(&path)?;
+        debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
         let Some(mut child) = removed_nodes.pop_back() else { return Ok(()) };
         #[cfg(debug_assertions)]
@@ -332,11 +334,9 @@ impl RevealedSparseTrie {
                     // If the node is a branch node, we need to check the number of children left
                     // after deleting the child at the given nibble.
 
-                    let nibble = removed_node
-                        .branch_nibble
-                        .expect("branch node should have a nibble attached");
-
-                    state_mask.unset_bit(nibble);
+                    if let Some(removed_nibble) = removed_node.unset_branch_nibble {
+                        state_mask.unset_bit(removed_nibble);
+                    }
 
                     // If only one child is left set in the branch node, we need to collapse it.
                     if state_mask.count_bits() == 1 {
@@ -346,22 +346,21 @@ impl RevealedSparseTrie {
                         let mut child_path = removed_path.clone();
                         child_path.push_unchecked(child_nibble);
 
-                        // Get the only child node itself.
-                        let child = self.nodes.get(&child_path).unwrap();
+                        // Remove the only child node.
+                        let child = self.nodes.remove(&child_path).unwrap();
+
+                        debug!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
 
                         match child {
                             SparseNode::Empty => return Err(SparseTrieError::Blind),
                             SparseNode::Hash(hash) => {
-                                return Err(SparseTrieError::BlindedNode {
-                                    path: child_path,
-                                    hash: *hash,
-                                })
+                                return Err(SparseTrieError::BlindedNode { path: child_path, hash })
                             }
                             // If the only child is a leaf node, we downgrade the branch node into a
                             // leaf node, prepending the nibble to the key.
                             SparseNode::Leaf { key, .. } => {
                                 let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend_from_slice_unchecked(key);
+                                new_key.extend_from_slice_unchecked(&key);
                                 SparseNode::new_leaf(new_key)
                             }
                             // If the only child node is an extension node, we downgrade the branch
@@ -369,7 +368,7 @@ impl RevealedSparseTrie {
                             // key.
                             SparseNode::Extension { key, .. } => {
                                 let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend_from_slice_unchecked(key);
+                                new_key.extend_from_slice_unchecked(&key);
                                 SparseNode::new_ext(new_key)
                             }
                             // If the only child is a branch node, we downgrade the branch node into
@@ -387,11 +386,19 @@ impl RevealedSparseTrie {
                 }
             };
 
+            // if let Some(RemovedSparseNode {
+            //     branch_nibble: ref mut branch_nibble @ Some(_), ..
+            // }) = removed_nodes.back_mut()
+            // {
+            //     *branch_nibble = None;
+            // }
+
             child = RemovedSparseNode {
                 path: removed_path.clone(),
                 node: new_node.clone(),
-                branch_nibble: None,
+                unset_branch_nibble: None,
             };
+            debug!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
             self.nodes.insert(removed_path, new_node);
         }
 
@@ -426,7 +433,7 @@ impl RevealedSparseTrie {
                     nodes.push_back(RemovedSparseNode {
                         path: current.clone(),
                         node,
-                        branch_nibble: None,
+                        unset_branch_nibble: None,
                     });
                     break
                 }
@@ -443,7 +450,7 @@ impl RevealedSparseTrie {
                     nodes.push_back(RemovedSparseNode {
                         path: current.clone(),
                         node,
-                        branch_nibble: None,
+                        unset_branch_nibble: None,
                     });
 
                     current.extend_from_slice_unchecked(&key);
@@ -452,10 +459,30 @@ impl RevealedSparseTrie {
                     let nibble = path[current.len()];
                     debug_assert!(state_mask.is_bit_set(nibble));
 
+                    // If the branch node has a child that is a leaf node that we're removing,
+                    // we need to unset this nibble.
+                    // Any other branch nodes will not require unsetting the nibble, because
+                    // deleting one leaf node can not remove the whole path
+                    // where the branch node is located.
+                    let mut child_path =
+                        Nibbles::from_nibbles([current.as_slice(), &[nibble]].concat());
+                    let unset_branch_nibble = self
+                        .nodes
+                        .get(&child_path)
+                        .map_or(false, move |node| match node {
+                            SparseNode::Leaf { key, .. } => {
+                                // Get full path of the leaf node
+                                child_path.extend_from_slice_unchecked(key);
+                                &child_path == path
+                            }
+                            _ => false,
+                        })
+                        .then_some(nibble);
+
                     nodes.push_back(RemovedSparseNode {
                         path: current.clone(),
                         node,
-                        branch_nibble: Some(nibble),
+                        unset_branch_nibble,
                     });
 
                     current.push_unchecked(nibble);
@@ -684,7 +711,7 @@ impl SparseNode {
 struct RemovedSparseNode {
     path: Nibbles,
     node: SparseNode,
-    branch_nibble: Option<u8>,
+    unset_branch_nibble: Option<u8>,
 }
 
 #[cfg(test)]
@@ -692,7 +719,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use alloy_primitives::{b256, U256};
+    use alloy_primitives::U256;
     use itertools::Itertools;
     use proptest::prelude::*;
     use reth_trie_common::HashBuilder;
@@ -841,6 +868,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_remove_leaf() {
+        reth_tracing::init_test_tracing();
+
         let mut sparse = RevealedSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -897,6 +926,33 @@ mod tests {
                 (Nibbles::from_nibbles([0x0, 0x2, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1]), SparseNode::new_leaf(Nibbles::new())),
                 (Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x3]), SparseNode::new_leaf(Nibbles::new())),
+                (Nibbles::from_nibbles([0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                ),
+                (Nibbles::from_nibbles([0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x3, 0x3, 0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x3, 0x3, 0x2]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                )
+            ])
+        );
+
+        sparse.remove_leaf(Nibbles::from_nibbles([0x0, 0x2, 0x3, 0x1])).unwrap();
+
+        pretty_assertions::assert_eq!(
+            sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from_iter([
+                (Nibbles::new(), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                ),
                 (Nibbles::from_nibbles([0x3]), SparseNode::new_branch(0b1010.into())),
                 (
                     Nibbles::from_nibbles([0x3, 0x1]),

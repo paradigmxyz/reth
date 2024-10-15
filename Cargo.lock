@@ -9230,6 +9230,7 @@ dependencies = [
  "proptest",
  "rayon",
  "reth-primitives",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "smallvec",
