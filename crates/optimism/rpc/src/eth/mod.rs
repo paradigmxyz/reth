@@ -60,7 +60,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone, Deref)]
+#[derive(Deref)]
 pub struct OpEthApi<N: FullNodeComponents> {
     /// Gateway to node's core components.
     #[deref]
@@ -69,13 +69,13 @@ pub struct OpEthApi<N: FullNodeComponents> {
     /// network.
     sequencer_client: Arc<OnceCell<SequencerClient>>,
     /// Builds RPC transaction response (transaction + block/chain metadata).
-    tx_resp_builder: OpTxBuilder,
+    tx_resp_builder: OpTxBuilder<<N::Types as NodeTypes>::ChainSpec>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
     /// Creates a new instance for given context.
     #[allow(clippy::type_complexity)]
-    pub fn with_spawner(ctx: &EthApiBuilderCtx<N, Self>) -> Self {
+    pub fn with_spawner(ctx: &EthApiBuilderCtx<N>) -> Self {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
@@ -95,7 +95,7 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        let tx_resp_builder = OpTxBuilder::new(inner.provider().chain_spec().clone());
+        let tx_resp_builder = OpTxBuilder::new(inner.provider().chain_spec());
 
         Self {
             inner: Arc::new(inner),
@@ -112,7 +112,7 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
-    type TransactionCompat = OpTxBuilder;
+    type TransactionCompat = OpTxBuilder<<N::Types as NodeTypes>::ChainSpec>;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder
@@ -261,7 +261,7 @@ where
 impl<N> BuilderProvider<N> for OpEthApi<N>
 where
     Self: Send,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: Clone>>,
 {
     type Ctx<'a> = &'a EthApiBuilderCtx<N>;
 
@@ -273,5 +273,18 @@ where
 impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
+    }
+}
+
+impl<N> Clone for OpEthApi<N>
+where
+    N: FullNodeComponents,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            sequencer_client: self.sequencer_client.clone(),
+            tx_resp_builder: self.tx_resp_builder.clone(),
+        }
     }
 }

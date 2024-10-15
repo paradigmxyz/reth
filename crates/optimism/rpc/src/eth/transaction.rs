@@ -1,7 +1,10 @@
 //! Loads and formats OP transaction RPC response.
 
+use alloc::{fmt, sync::Arc};
+
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
+use derive_more::Constructor;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
@@ -96,13 +99,17 @@ where
 }
 
 /// Builds OP transaction response type.
-#[derive(Clone, Debug, Copy)]
-pub struct OpTxBuilder {
+#[derive(Debug, Constructor)]
+pub struct OpTxBuilder<T> {
     /// Chain spec.
-    pub chain_spec: Arc<ChainSpec>,
+    pub chain_spec: Arc<T>,
 }
 
-impl TransactionCompat for OpTxBuilder {
+impl<T> TransactionCompat for OpTxBuilder<T>
+where
+    Self: Send + Sync,
+    T: fmt::Debug,
+{
     type Transaction = Transaction;
 
     fn fill(
@@ -112,7 +119,7 @@ impl TransactionCompat for OpTxBuilder {
     ) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
 
-        let mut inner = EthTxBuilder::fill(tx, tx_info).inner;
+        let mut inner = EthTxBuilder.fill(tx, tx_info).inner;
 
         if signed_tx.is_deposit() {
             inner.gas_price = Some(signed_tx.max_fee_per_gas())
@@ -135,5 +142,11 @@ impl TransactionCompat for OpTxBuilder {
 
     fn tx_type(tx: &Self::Transaction) -> u8 {
         tx.inner.transaction_type.unwrap_or_default()
+    }
+}
+
+impl<T> Clone for OpTxBuilder<T> {
+    fn clone(&self) -> Self {
+        Self { chain_spec: self.chain_spec.clone() }
     }
 }
