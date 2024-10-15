@@ -354,6 +354,19 @@ impl Transaction {
         }
     }
 
+    /// Get the transaction's input field.
+    pub const fn input(&self) -> &Bytes {
+        match self {
+            Self::Legacy(TxLegacy { input, .. }) |
+            Self::Eip2930(TxEip2930 { input, .. }) |
+            Self::Eip1559(TxEip1559 { input, .. }) |
+            Self::Eip4844(TxEip4844 { input, .. }) |
+            Self::Eip7702(TxEip7702 { input, .. }) => input,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(TxDeposit { input, .. }) => input,
+        }
+    }
+
     /// Returns the source hash of the transaction, which uniquely identifies its source.
     /// If not a deposit transaction, this will always return `None`.
     #[cfg(feature = "optimism")]
@@ -2172,7 +2185,7 @@ mod tests {
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
         assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
-assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
+        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
     }
