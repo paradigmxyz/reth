@@ -3,6 +3,7 @@
 use crate::BlockHashOrNumber;
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{keccak256, Address, ChainId, TxKind, B256, U256};
+use op_alloy_consensus::transaction::deposit::DepositTransaction;
 
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_eips::{
