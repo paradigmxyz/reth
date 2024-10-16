@@ -61,7 +61,7 @@ impl SenderId {
     }
 
     /// Converts the sender to a [`TransactionId`] with the given nonce.
-    pub const fn into_id(self, nonce: u64) -> TransactionId {
+    pub const fn into_transaction_id(self, nonce: u64) -> TransactionId {
         TransactionId::new(self, nonce)
     }
 }
