@@ -170,10 +170,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_accounts_and_storages(final_state).unwrap();
 
         // make last block have valid state root
-        let root = {
-            let root = db.factory.provider_rw().unwrap().state_root().unwrap();
-            root
-        };
+        let root = db.factory.provider_rw().unwrap().state_root().unwrap();
 
         let last_block = blocks.last_mut().unwrap();
         let cloned_last = last_block.clone();
