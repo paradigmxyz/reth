@@ -2,7 +2,8 @@
 
 use crate::{
     execute::{
-        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutionStrategy,
+        BlockExecutorProvider, Executor, GenericBatchExecutor, GenericBlockExecutor,
     },
     system_calls::OnStateHook,
 };
@@ -108,5 +109,47 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
 
     fn size_hint(&self) -> Option<usize> {
         None
+    }
+}
+
+impl<S, DB> GenericBlockExecutor<S, DB>
+where
+    S: BlockExecutionStrategy<DB>,
+{
+    /// Provides safe read access to the state
+    pub fn with_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&State<DB>) -> R,
+    {
+        f(self.strategy.state_ref())
+    }
+
+    /// Provides safe write access to the state
+    pub fn with_state_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut State<DB>) -> R,
+    {
+        f(self.strategy.state_mut())
+    }
+}
+
+impl<S, DB> GenericBatchExecutor<S, DB>
+where
+    S: BlockExecutionStrategy<DB>,
+{
+    /// Provides safe read access to the state
+    pub fn with_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&State<DB>) -> R,
+    {
+        f(self.strategy.state_ref())
+    }
+
+    /// Provides safe write access to the state
+    pub fn with_state_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut State<DB>) -> R,
+    {
+        f(self.strategy.state_mut())
     }
 }
