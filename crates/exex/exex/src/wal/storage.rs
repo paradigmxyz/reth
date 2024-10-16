@@ -172,7 +172,7 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{fs::File, sync::Arc};
 
     use eyre::OptionExt;
     use reth_exex_types::ExExNotification;
@@ -208,6 +208,26 @@ mod tests {
             deserialized_notification.map(|(notification, _)| notification),
             Some(notification)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_files_range() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let storage = Storage::new(&temp_dir)?;
+
+        // Create WAL files
+        File::create(storage.file_path(1))?;
+        File::create(storage.file_path(2))?;
+        File::create(storage.file_path(3))?;
+
+        // Create non-WAL files that should be ignored
+        File::create(temp_dir.path().join("0.tmp"))?;
+        File::create(temp_dir.path().join("4.tmp"))?;
+
+        // Check files range
+        assert_eq!(storage.files_range()?, Some(1..=3));
 
         Ok(())
     }
