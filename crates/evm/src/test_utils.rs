@@ -2,8 +2,8 @@
 
 use crate::{
     execute::{
-        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutionStrategy,
-        BlockExecutorProvider, Executor, GenericBatchExecutor, GenericBlockExecutor,
+        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
+        BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     system_calls::OnStateHook,
 };
@@ -11,7 +11,7 @@ use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt, Receipts};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
@@ -112,7 +112,7 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S, DB> GenericBlockExecutor<S, DB>
+impl<S, DB> BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
 {
@@ -133,7 +133,7 @@ where
     }
 }
 
-impl<S, DB> GenericBatchExecutor<S, DB>
+impl<S, DB> BasicBatchExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
 {
@@ -151,5 +151,10 @@ where
         F: FnOnce(&mut State<DB>) -> R,
     {
         f(self.strategy.state_mut())
+    }
+
+    /// Accessor for batch executor receipts.
+    pub const fn receipts(&self) -> &Receipts {
+        self.batch_record.receipts()
     }
 }
