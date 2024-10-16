@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 
-use alloy_consensus::EMPTY_ROOT_HASH;
+use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
@@ -22,7 +22,6 @@ use reth_primitives::{
     Block, BlockBody, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
     TransactionSignedEcRecovered,
 };
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
     ReceiptProvider, StateProviderFactory,
