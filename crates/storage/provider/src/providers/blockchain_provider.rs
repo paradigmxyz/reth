@@ -402,7 +402,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<MemoryOverlayStateProvider> {
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
+        Ok(state.state_provider(latest_historical))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
