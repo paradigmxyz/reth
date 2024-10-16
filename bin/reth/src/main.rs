@@ -41,8 +41,6 @@ fn main() {
                 provider_factory,
                 blockchain_provider,
             );
-
-            import.update_chain_info()?;
             let _import_handle = import.schedule_execution().await?;
         }
 
