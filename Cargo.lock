@@ -7158,6 +7158,7 @@ dependencies = [
 name = "reth-engine-util"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
@@ -8240,6 +8241,7 @@ dependencies = [
 name = "reth-optimism-rpc"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -9122,6 +9124,7 @@ dependencies = [
 name = "reth-trie"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "auto_impl",
@@ -9177,6 +9180,7 @@ dependencies = [
 name = "reth-trie-db"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "auto_impl",

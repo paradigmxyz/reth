@@ -1,5 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
+use alloy_consensus::Transaction;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
