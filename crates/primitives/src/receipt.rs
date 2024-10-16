@@ -6,7 +6,7 @@ use crate::{
 };
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Bloom, Bytes, Log, B256};
+use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
