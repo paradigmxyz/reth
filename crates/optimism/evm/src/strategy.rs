@@ -278,7 +278,7 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::execute::{BatchExecutor, BlockExecutorProvider, GenericBlockExecutorProvider};
+    use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
@@ -315,11 +315,11 @@ mod tests {
 
     fn executor_provider(
         chain_spec: Arc<OpChainSpec>,
-    ) -> GenericBlockExecutorProvider<OpExecutionStrategyFactory> {
+    ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory> {
         let strategy_factory =
             OpExecutionStrategyFactory::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec));
 
-        GenericBlockExecutorProvider::new(strategy_factory)
+        BasicBlockExecutorProvider::new(strategy_factory)
     }
 
     #[test]

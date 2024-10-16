@@ -2,8 +2,8 @@
 
 use crate::{
     execute::{
-        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutionStrategy,
-        BlockExecutorProvider, Executor, GenericBatchExecutor, GenericBlockExecutor,
+        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
+        BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     system_calls::OnStateHook,
 };
@@ -112,7 +112,7 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S, DB> GenericBlockExecutor<S, DB>
+impl<S, DB> BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
 {
@@ -133,7 +133,7 @@ where
     }
 }
 
-impl<S, DB> GenericBatchExecutor<S, DB>
+impl<S, DB> BasicBatchExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
 {
