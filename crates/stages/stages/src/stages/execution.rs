@@ -45,8 +45,9 @@ use tracing::*;
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
-/// For state access [`LatestStateProviderRef`] provides us latest state and history state
-/// For latest most recent state [`LatestStateProviderRef`] would need (Used for execution Stage):
+/// For state access [`reth_provider::LatestStateProviderRef`] provides us latest state and history
+/// state For latest most recent state [`reth_provider::LatestStateProviderRef`] would need (Used
+/// for execution Stage):
 /// - [`tables::PlainAccountState`]
 /// - [`tables::Bytecodes`]
 /// - [`tables::PlainStorageState`]
