@@ -2820,7 +2820,8 @@ mod tests {
         let mut info = SenderInfo::default();
         info.update(8, U256::ZERO);
         pool.sender_info.insert(sender_id, info);
-        let next_tx = pool.get_highest_consecutive_transaction_by_sender(sender_id.into_id(5));
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
         assert_eq!(next_tx.map(|tx| tx.nonce()), Some(9), "Expected nonce 9 for on-chain nonce 8");
     }
 
