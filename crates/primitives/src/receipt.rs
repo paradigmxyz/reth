@@ -445,7 +445,7 @@ impl ReceiptWithBloomEncoder<'_> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return;
+            return
         }
 
         let mut payload = Vec::new();
