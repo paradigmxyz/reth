@@ -368,8 +368,8 @@ mod tests {
         let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
-        let _ = executor.with_state_mut(|state| {
-            state.storage(L1_BLOCK_CONTRACT, StorageKey::with_last_byte(1).into()).unwrap()
+        executor.with_state_mut(|state| {
+            state.load_cache_account(L1_BLOCK_CONTRACT).unwrap();
         });
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
@@ -452,8 +452,8 @@ mod tests {
         let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
-        let _ = executor.with_state_mut(|state| {
-            state.storage(L1_BLOCK_CONTRACT, StorageKey::with_last_byte(1).into()).unwrap()
+        executor.with_state_mut(|state| {
+            state.load_cache_account(L1_BLOCK_CONTRACT).unwrap();
         });
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
