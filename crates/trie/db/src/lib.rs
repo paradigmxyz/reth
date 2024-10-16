@@ -12,7 +12,7 @@ pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
 };
 pub use prefix_set::PrefixSetLoader;
-pub use proof::DatabaseProof;
+pub use proof::{DatabaseProof, DatabaseStorageProof};
 use reth_db::transaction::DbTx;
 use reth_trie::{proof::Proof, witness::TrieWitness, KeccakKeyHasher, StateRoot, StorageRoot};
 pub use state::{DatabaseHashedPostState, DatabaseStateRoot};

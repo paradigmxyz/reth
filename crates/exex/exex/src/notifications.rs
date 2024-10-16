@@ -338,9 +338,11 @@ where
         }
 
         if let Some(backfill_job) = &mut this.backfill_job {
-            if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)) {
+            debug!(target: "exex::notifications", "Polling backfill job");
+            if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)).transpose()? {
+                debug!(target: "exex::notifications", range = ?chain.range(), "Backfill job returned a chain");
                 return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
-                    new: Arc::new(chain?),
+                    new: Arc::new(chain),
                 })))
             }
 

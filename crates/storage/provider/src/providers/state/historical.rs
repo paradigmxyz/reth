@@ -17,12 +17,12 @@ use reth_primitives::{constants::EPOCH_SLOTS, Account, Bytecode, StaticFileSegme
 use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
-    MultiProof, TrieInput,
+    proof::StorageProof, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedPostStateSorted, HashedStorage, MultiProof, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseState,
-    DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 use std::{fmt::Debug, marker::PhantomData, ops::RangeInclusive};
 
@@ -380,6 +380,18 @@ impl<TX: DbTx, DS: DatabaseState> StorageRootProvider for HistoricalStateProvide
         revert_storage.extend(&hashed_storage);
         DS::StorageRoot::overlay_root(self.tx, address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageProof::overlay_storage_proof(self.tx, address, slot, revert_storage)
+            .map_err(Into::<ProviderError>::into)
     }
 }
 

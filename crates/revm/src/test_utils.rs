@@ -12,7 +12,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
-    IntermediateStateRootState, MultiProof, StateRootProgress, TrieInput,
+    IntermediateStateRootState, MultiProof, StateRootProgress, StorageProof, TrieInput,
 };
 
 /// Mock state for testing
@@ -120,6 +120,15 @@ impl StorageRootProvider for StateProviderTest {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         unimplemented!("storage root is not supported")
+    }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        _slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        unimplemented!("proof generation is not supported")
     }
 }
 

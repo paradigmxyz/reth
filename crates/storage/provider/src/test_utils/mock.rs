@@ -33,7 +33,8 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
-    IntermediateStateRootState, KeccakKeyHasher, MultiProof, StateRootProgress, TrieInput,
+    IntermediateStateRootState, KeccakKeyHasher, MultiProof, StateRootProgress, StorageProof,
+    TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -361,13 +362,8 @@ impl TransactionsProvider for MockEthProvider {
             .values()
             .flat_map(|block| &block.body.transactions)
             .enumerate()
-            .filter_map(|(tx_number, tx)| {
-                if range.contains(&(tx_number as TxNumber)) {
-                    Some(tx.clone().into())
-                } else {
-                    None
-                }
-            })
+            .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
+            .map(|(_, tx)| tx.clone().into())
             .collect();
 
         Ok(transactions)
@@ -383,11 +379,7 @@ impl TransactionsProvider for MockEthProvider {
             .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
-                if range.contains(&(tx_number as TxNumber)) {
-                    Some(tx.recover_signer()?)
-                } else {
-                    None
-                }
+                range.contains(&(tx_number as TxNumber)).then(|| tx.recover_signer()).flatten()
             })
             .collect();
 
@@ -676,6 +668,15 @@ impl StorageRootProvider for MockEthProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(EMPTY_ROOT_HASH)
+    }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(StorageProof::new(slot))
     }
 }
 

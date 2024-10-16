@@ -58,6 +58,7 @@ derive_more.workspace = true
 schnellru.workspace = true
 rand.workspace = true
 tracing.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

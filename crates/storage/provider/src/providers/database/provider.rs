@@ -7,14 +7,14 @@ use crate::{
     },
     writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, DBProvider, EvmEnvProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HistoricalStateProvider, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RequestsProvider, RevertsInit, StageCheckpointReader, StateChangeWriter, StateProviderBox,
-    StateReader, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter, WithdrawalsProvider,
+    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
+    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RequestsProvider, RevertsInit, StageCheckpointReader, StateChangeWriter,
+    StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory, StatsReader,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -589,18 +589,18 @@ impl<TX: DbTx, Spec: Send + Sync, DS: Send + Sync> DatabaseProvider<TX, Spec, DS
                 // even if empty
                 let withdrawals =
                     if self.chain_spec.is_shanghai_active_at_timestamp(header_ref.timestamp) {
-                        Some(
-                            withdrawals_cursor
-                                .seek_exact(header_ref.number)?
-                                .map(|(_, w)| w.withdrawals)
-                                .unwrap_or_default(),
-                        )
+                        withdrawals_cursor
+                            .seek_exact(header_ref.number)?
+                            .map(|(_, w)| w.withdrawals)
+                            .unwrap_or_default()
+                            .into()
                     } else {
                         None
                     };
                 let requests =
                     if self.chain_spec.is_prague_active_at_timestamp(header_ref.timestamp) {
-                        Some(requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                        (requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                            .into()
                     } else {
                         None
                     };
@@ -2215,10 +2215,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks, DS: Send + Sync> RequestsP
     ) -> ProviderResult<Option<Requests>> {
         if self.chain_spec.is_prague_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
-                // If we are past Prague, then all blocks should have a requests list, even if
-                // empty
-                let requests = self.tx.get::<tables::BlockRequests>(number)?.unwrap_or_default();
-                return Ok(Some(requests))
+                let requests = self.tx.get::<tables::BlockRequests>(number)?;
+                return Ok(requests)
             }
         }
         Ok(None)
@@ -3052,10 +3050,10 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync, DS: DatabaseState> HashingWriter
                 map
             });
 
-        let hashed_storage_keys =
-            HashMap::from_iter(hashed_storages.iter().map(|(hashed_address, entries)| {
-                (*hashed_address, BTreeSet::from_iter(entries.keys().copied()))
-            }));
+        let hashed_storage_keys = hashed_storages
+            .iter()
+            .map(|(hashed_address, entries)| (*hashed_address, entries.keys().copied().collect()))
+            .collect();
 
         let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
         // Hash the address and key and apply them to HashedStorage (if Storage is None
@@ -3621,10 +3619,8 @@ impl<
         }
 
         if let Some(requests) = block.block.body.requests {
-            if !requests.0.is_empty() {
-                self.tx.put::<tables::BlockRequests>(block_number, requests)?;
-                durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
-            }
+            self.tx.put::<tables::BlockRequests>(block_number, requests)?;
+            durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
@@ -3744,7 +3740,7 @@ impl<TX: DbTx, Spec: Send + Sync, DS: DatabaseState> StatsReader
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync, DS: Send + Sync> FinalizedBlockReader
+impl<TX: DbTx, Spec: Send + Sync, DS: Send + Sync> ChainStateBlockReader
     for DatabaseProvider<TX, Spec, DS>
 {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
@@ -3758,15 +3754,33 @@ impl<TX: DbTx, Spec: Send + Sync, DS: Send + Sync> FinalizedBlockReader
         let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
         Ok(last_finalized_block_number)
     }
+
+    fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
+        let mut finalized_blocks = self
+            .tx
+            .cursor_read::<tables::ChainState>()?
+            .walk(Some(tables::ChainStateKey::LastSafeBlockBlock))?
+            .take(1)
+            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
+
+        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
+        Ok(last_finalized_block_number)
+    }
 }
 
-impl<TX: DbTxMut, Spec: Send + Sync, DS: Send + Sync> FinalizedBlockWriter
+impl<TX: DbTxMut, Spec: Send + Sync, DS: Send + Sync> ChainStateBlockWriter
     for DatabaseProvider<TX, Spec, DS>
 {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+
+    fn save_safe_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        Ok(self
+            .tx
+            .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
     }
 }
 

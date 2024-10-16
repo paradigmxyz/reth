@@ -65,6 +65,5 @@ optimism = [
     "reth-optimism-evm/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "reth-rpc-eth-api/optimism",
     "revm/optimism",
 ]

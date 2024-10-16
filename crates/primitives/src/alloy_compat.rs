@@ -5,7 +5,7 @@ use crate::{
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+use alloy_consensus::{Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxLegacy};
 use alloy_primitives::{Parity, TxKind};
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;
@@ -194,7 +194,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 let fields = other
-                    .deserialize_into::<op_alloy_rpc_types::OptimismTransactionFields>()
+                    .deserialize_into::<op_alloy_rpc_types::OpTransactionFields>()
                     .map_err(|e| ConversionError::Custom(e.to_string()))?;
                 Ok(Self::Deposit(op_alloy_consensus::TxDeposit {
                     source_hash: fields
@@ -278,9 +278,8 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigne
 #[cfg(feature = "optimism")]
 mod tests {
     use super::*;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{address, Address, B256, U256};
     use alloy_rpc_types::Transaction as AlloyTransaction;
-    use revm_primitives::{address, Address};
 
     #[test]
     fn optimism_deposit_tx_conversion_no_mint() {

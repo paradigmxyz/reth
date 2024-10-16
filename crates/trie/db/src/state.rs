@@ -273,22 +273,24 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
             }
         }
 
-        let hashed_accounts = HashMap::from_iter(
-            accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)),
-        );
+        let hashed_accounts =
+            accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
 
-        let hashed_storages = HashMap::from_iter(storages.into_iter().map(|(address, storage)| {
-            (
-                KH::hash_key(address),
-                HashedStorage::from_iter(
-                    // The `wiped` flag indicates only whether previous storage entries
-                    // should be looked up in db or not. For reverts it's a noop since all
-                    // wiped changes had been written as storage reverts.
-                    false,
-                    storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
-                ),
-            )
-        }));
+        let hashed_storages = storages
+            .into_iter()
+            .map(|(address, storage)| {
+                (
+                    KH::hash_key(address),
+                    HashedStorage::from_iter(
+                        // The `wiped` flag indicates only whether previous storage entries
+                        // should be looked up in db or not. For reverts it's a noop since all
+                        // wiped changes had been written as storage reverts.
+                        false,
+                        storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
+                    ),
+                )
+            })
+            .collect();
 
         Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
     }

@@ -200,7 +200,7 @@ where
     );
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(&evm_config, &chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), &chain_spec);
 
     system_caller
         .pre_block_beacon_root_contract_call(
@@ -274,7 +274,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            evm_config.tx_env(&sequencer_tx),
+            evm_config.tx_env(sequencer_tx.as_signed(), sequencer_tx.signer()),
         );
 
         let mut evm = evm_config.evm_with_env(&mut db, env);
@@ -355,7 +355,7 @@ where
             let env = EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
-                evm_config.tx_env(&tx),
+                evm_config.tx_env(tx.as_signed(), tx.signer()),
             );
 
             // Configure the environment for the block.
