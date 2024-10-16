@@ -414,7 +414,7 @@ where
     // ... existing methods ...
 
     /// Checks if the payload is frozen.
-    fn is_payload_frozen(&self) -> bool {
+    const fn is_payload_frozen(&self) -> bool {
         matches!(self.best_payload, PayloadState::Frozen(_))
     }
 }
