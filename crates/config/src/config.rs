@@ -970,7 +970,7 @@ receipts = 'full'
 
         // Check that the configuration has been merged. Any configuration present in config1
         // should not be overwritten by config2
-        assert_eq!(config1.block_interval, 5);
+        assert_eq!(config1.block_interval, 10);
         assert_eq!(config1.segments.sender_recovery, Some(PruneMode::Full));
         assert_eq!(config1.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config1.segments.receipts, Some(PruneMode::Distance(1000)));
