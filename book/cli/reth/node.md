@@ -616,8 +616,6 @@ Pruning:
       --block-interval <BLOCK_INTERVAL>
           Minimum pruning interval measured in blocks
 
-          [default: 0]
-
       --prune.senderrecovery.full
           Prunes all sender recovery data
 
