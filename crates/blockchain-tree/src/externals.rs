@@ -2,13 +2,13 @@
 
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::Consensus;
-use reth_db::{static_file::HeaderMask, tables};
+use reth_db::{static_file::HeaderMask, tables, Database};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-use reth_node_types::NodeTypesWithDB;
-use reth_primitives::StaticFileSegment;
+use reth_node_types::{NodeTypes, NodeTypesWithDB};
+use reth_primitives::{StaticFileSegment, EthereumHardforks};
 use reth_provider::{
-    providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory,
-    StaticFileProviderFactory, StatsReader,
+    providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, DatabaseProvider,
+    DatabaseProviderRW, ProviderFactory, StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -30,6 +30,8 @@ pub struct TreeExternals<N: NodeTypesWithDB, E> {
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
+
+    pub disable_transaction_timeout: bool,
 }
 
 impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
@@ -38,8 +40,38 @@ impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
         provider_factory: ProviderFactory<N>,
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
+        disable_transaction_timeout: bool,
     ) -> Self {
-        Self { provider_factory, consensus, executor_factory }
+        Self { provider_factory, consensus, executor_factory, disable_transaction_timeout }
+    }
+}
+
+impl<N, E> TreeExternals<N, E>
+where
+    N: NodeTypesWithDB + ProviderNodeTypes,
+    <N as NodeTypes>::ChainSpec: EthereumHardforks,
+{
+    pub fn get_provider(
+        &self,
+    ) -> DatabaseProvider<<<N as NodeTypesWithDB>::DB as Database>::TX, <N as NodeTypes>::ChainSpec>
+    {
+        let mut provider = self.provider_factory.provider().unwrap();
+        if self.disable_transaction_timeout {
+            provider = provider.disable_long_read_transaction_safety();
+        }
+        provider
+    }
+
+    pub fn get_provider_rw(
+        &self,
+    ) -> DatabaseProviderRW<<N as NodeTypesWithDB>::DB, <N as NodeTypes>::ChainSpec> {
+        let mut provider = self.provider_factory.provider_rw().unwrap();
+        if self.disable_transaction_timeout {
+            provider = reth_provider::DatabaseProviderRW(
+                provider.0.disable_long_read_transaction_safety(),
+            );
+        }
+        provider
     }
 }
 

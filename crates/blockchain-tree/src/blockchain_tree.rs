@@ -1420,7 +1420,7 @@ mod tests {
         let executor_factory = MockExecutorProvider::default();
         executor_factory.extend(exec_res);
 
-        TreeExternals::new(provider_factory, consensus, executor_factory)
+        TreeExternals::new(provider_factory, consensus, executor_factory, true)
     }
 
     fn setup_genesis<N: ProviderNodeTypes>(factory: &ProviderFactory<N>, mut genesis: SealedBlock) {
@@ -1655,7 +1655,7 @@ mod tests {
             mock_block(3, Some(sidechain_block_1.hash()), Vec::from([mock_tx(2)]), 3);
 
         let mut tree = BlockchainTree::new(
-            TreeExternals::new(provider_factory, consensus, executor_provider),
+            TreeExternals::new(provider_factory, consensus, executor_provider, false),
             BlockchainTreeConfig::default(),
         )
         .expect("failed to create tree");
@@ -2375,11 +2375,13 @@ mod tests {
             provider_factory: externals.provider_factory.clone(),
             executor_factory: externals.executor_factory.clone(),
             consensus: externals.consensus.clone(),
+            disable_transaction_timeout: true,
         };
         let cloned_externals_2 = TreeExternals {
             provider_factory: externals.provider_factory.clone(),
             executor_factory: externals.executor_factory.clone(),
             consensus: externals.consensus.clone(),
+            disable_transaction_timeout: true,
         };
 
         // last finalized block would be number 9.
