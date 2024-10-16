@@ -33,6 +33,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
@@ -41,6 +42,7 @@ criterion.workspace = true
 itertools.workspace = true
 pretty_assertions = "1.4"
 proptest.workspace = true
+rand.workspace = true
 
 [[bench]]
 name = "root"
