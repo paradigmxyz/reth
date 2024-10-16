@@ -274,7 +274,7 @@ mod tests {
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_evm::execute::{
-        BatchExecutor, BlockExecutorProvider, Executor, GenericBlockExecutorProvider,
+        BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
     use reth_primitives::{
@@ -328,11 +328,11 @@ mod tests {
 
     fn executor_provider(
         chain_spec: Arc<ChainSpec>,
-    ) -> GenericBlockExecutorProvider<EthExecutionStrategyFactory> {
+    ) -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
         let strategy_factory =
             EthExecutionStrategyFactory::new(chain_spec.clone(), EthEvmConfig::new(chain_spec));
 
-        GenericBlockExecutorProvider::new(strategy_factory)
+        BasicBlockExecutorProvider::new(strategy_factory)
     }
 
     #[test]
