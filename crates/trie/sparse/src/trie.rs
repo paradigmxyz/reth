@@ -421,14 +421,14 @@ impl RevealedSparseTrie {
                 SparseNode::Hash(hash) => {
                     return Err(SparseTrieError::BlindedNode { path: current, hash: *hash })
                 }
-                SparseNode::Leaf { key, .. } => {
+                SparseNode::Leaf { key: _key, .. } => {
                     // Leaf node is always the one that we're deleting, and no other leaf nodes can
                     // be found during traversal.
 
                     #[cfg(debug_assertions)]
                     {
                         let mut current = current.clone();
-                        current.extend_from_slice_unchecked(key);
+                        current.extend_from_slice_unchecked(_key);
                         assert_eq!(&current, path);
                     }
 
