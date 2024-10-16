@@ -47,6 +47,7 @@ itertools.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 rmp-serde = "1.3"
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
