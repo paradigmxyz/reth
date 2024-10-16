@@ -23,7 +23,7 @@ use crate::chainspec::ChainSpecParser;
 /// It provides commonly used functionality for running commands and information about the CL, such
 /// as the name and version.
 pub trait RethCli: Sized {
-    /// The associated ChainSpecParser type
+    /// The associated `ChainSpecParser` type
     type ChainSpecParser: ChainSpecParser;
 
     /// The name of the implementation, eg. `reth`, `op-reth`, etc.
