@@ -741,8 +741,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.7.1"
-source = "git+https://github.com/alloy-rs/trie?branch=alexey/tree-mask-unset-bit#34c61580c695d3d52758205309663cb526d07d8d"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdd7f8b3a7c65ca09b3c7bdd7c7d72d7423d026f5247eda96af53d24e58315c1"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
