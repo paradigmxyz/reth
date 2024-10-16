@@ -5,6 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
