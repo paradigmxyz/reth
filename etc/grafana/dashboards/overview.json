@@ -1009,9 +1009,8 @@
     },
     {
       "datasource": {
-        "default": true,
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "${DS_PROMETHEUS}"
       },
       "description": "Tracks the number of critical tasks currently ran by the executor.",
       "fieldConfig": {
@@ -1093,7 +1092,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_executor_spawn_critical_tasks_total{instance=\"$instance\"}- reth_executor_spawn_finished_critical_tasks_total{instance=\"$instance\"}",
@@ -1109,9 +1108,8 @@
     },
     {
       "datasource": {
-        "default": true,
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "${DS_PROMETHEUS}"
       },
       "description": "Tracks the number of regular tasks currently being spawned or finished by the executor.",
       "fieldConfig": {
@@ -1218,7 +1216,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -1236,7 +1234,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -1253,7 +1251,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_executor_spawn_regular_tasks_total{instance=\"$instance\"}- reth_executor_spawn_finished_regular_tasks_total{instance=\"$instance\"}",
