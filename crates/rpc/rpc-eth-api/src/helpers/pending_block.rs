@@ -19,8 +19,9 @@ use reth_primitives::{
         ResultAndState, SpecId,
     },
     Block, BlockBody, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
-    TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    TransactionSignedEcRecovered,
 };
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
     ReceiptProvider, StateProviderFactory,
