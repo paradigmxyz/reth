@@ -28,6 +28,12 @@ pub trait Block:
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;
 
+    /// A block and block hash.
+    type SealedBlock<H = Self::Header, B = Self::Body>;
+
+    /// A block and addresses of senders of transactions in it.
+    type BlockWithSenders<T = Self>;
+
     /// Returns reference to [`BlockHeader`] type.
     fn header(&self) -> &Self::Header;
 
@@ -35,20 +41,16 @@ pub trait Block:
     fn body(&self) -> &Self::Body;
 
     /// Calculate the header hash and seal the block so that it can't be changed.
-    fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.into();
-        let sealed = header.seal_slow();
-        let (header, seal) = sealed.into_parts();
-        SealedBlock { header: SealedHeader::new(header, seal), body }
-    }
+    // todo: can be default impl if sealed block type is made generic over header and body and 
+    // migrated to alloy
+    fn seal_slow(self) -> Self::SealedBlock;
 
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.into();
-        SealedBlock { header: SealedHeader::new(header, hash), body }
-    }
+    // todo: can be default impl if sealed block type is made generic over header and body and 
+    // migrated to alloy
+    fn seal(self, hash: B256) -> Self::SealedBlock;
 
     /// Expensive operation that recovers transaction signer. See
     /// [`SealedBlockWithSenders`](reth_primitives::SealedBlockWithSenders).
@@ -65,7 +67,7 @@ pub trait Block:
     ///
     /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders<Self> {
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> Self::BlockWithSenders {
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
@@ -76,62 +78,22 @@ pub trait Block:
     /// See also [`TransactionSigned::recover_signer_unchecked`]
     ///
     /// Returns an error if a signature is invalid.
+    // todo: can be default impl if block with senders type is made generic over block and migrated 
+    // to alloy
     #[track_caller]
     fn try_with_senders_unchecked(
         self,
         senders: Vec<Address>,
-    ) -> Result<BlockWithSenders<Self>, Self> {
-        let senders = if self.body().transactions().len() == senders.len() {
-            senders
-        } else {
-            let Some(senders) = self.body().recover_signers() else { return Err(self) };
-            senders
-        };
-
-        Ok(BlockWithSenders { block: self, senders })
-    }
+    ) -> Result<Self::BlockWithSenders, Self>;
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<BlockWithSenders<Self>> {
-        let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
-    }
+    // todo: can be default impl if sealed block type is made generic over header and body and 
+    // migrated to alloy
+    fn with_recovered_senders(self) -> Option<Self::BlockWithSenders>;
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     fn size(&self) -> usize;
-}
-
-impl<T> Block for T
-where
-    T: ops::Deref<Target: Block>
-        + fmt::Debug
-        + Clone
-        + PartialEq
-        + Eq
-        + Default
-        + serde::Serialize
-        + for<'a> serde::Deserialize<'a>
-        + From<(<T::Target as Block>::Header, <T::Target as Block>::Body)>
-        + Into<(<T::Target as Block>::Header, <T::Target as Block>::Body)>,
-{
-    type Header = <T::Target as Block>::Header;
-    type Body = <T::Target as Block>::Body;
-
-    #[inline]
-    fn header(&self) -> &Self::Header {
-        self.deref().header()
-    }
-
-    #[inline]
-    fn body(&self) -> &Self::Body {
-        self.deref().body()
-    }
-
-    #[inline]
-    fn size(&self) -> usize {
-        self.deref().size()
-    }
 }

@@ -20,6 +20,7 @@ reth-revm.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-prune-types.workspace = true
 reth-execution-types.workspace = true
+reth-consensus.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
@@ -31,6 +32,7 @@ alloy-sol-types.workspace = true
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["secp256k1"] }
 secp256k1.workspace = true

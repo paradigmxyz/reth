@@ -16,7 +16,6 @@ use reth_node_core::{
     node_config::NodeConfig,
     version,
 };
-use reth_node_metrics::recorder::install_prometheus_recorder;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -179,10 +178,6 @@ impl<
             dev,
             pruning,
         };
-
-        // Register the prometheus recorder before creating the database,
-        // because database init needs it to register metrics.
-        let _ = install_prometheus_recorder();
 
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();

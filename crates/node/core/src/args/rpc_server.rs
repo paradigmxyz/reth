@@ -135,6 +135,11 @@ pub struct RpcServerArgs {
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
+    ///
+    /// By default this chooses a sensible value based on the number of available cores.
+    /// Tracing requests are generally CPU bound.
+    /// Choosing a value that is higher than the available CPU cores can have a negative impact on
+    /// the performance of the node and affect the node's ability to maintain sync.
     #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
 
