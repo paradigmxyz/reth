@@ -205,6 +205,33 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
+// Implement the trait for ReceiptWithBloom
+impl Encodable2718 for ReceiptWithBloom {
+    /// Encodes the receipt into its "raw" format.
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
+    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
+    /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
+    /// of the receipt:
+    /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
+    ///   logsBloom, logs])`
+    fn type_flag(&self) -> Option<u8> {
+        match self.receipt.tx_type {
+            TxType::Legacy => None,
+            tx_type => Some(tx_type as u8),
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        self.as_encoder().length()
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.encode_inner(out, false)
+    }
+}
+
 impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
@@ -220,7 +247,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -265,7 +292,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         *buf = *b;
         Ok(this)
@@ -457,7 +484,7 @@ impl ReceiptWithBloomEncoder<'_> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
+            return;
         }
 
         let mut payload = Vec::new();
