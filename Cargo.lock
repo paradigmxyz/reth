@@ -7158,6 +7158,7 @@ dependencies = [
 name = "reth-engine-util"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
@@ -8235,6 +8236,7 @@ dependencies = [
 name = "reth-optimism-rpc"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -8726,6 +8728,7 @@ dependencies = [
 name = "reth-rpc-eth-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-eips",
  "alloy-json-rpc",
