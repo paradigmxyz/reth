@@ -65,7 +65,8 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{constants::EMPTY_ROOT_HASH, Block};
+    use crate::Block;
+    use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_genesis::GenesisAccount;
     use alloy_primitives::{b256, hex_literal::hex, Address, U256};
     use alloy_rlp::Decodable;

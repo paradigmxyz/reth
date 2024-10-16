@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
@@ -8,7 +9,7 @@ use alloy_primitives::{
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_db::{cursor::DbCursorRW, tables};
 use reth_db_api::transaction::DbTxMut;
-use reth_primitives::{constants::EMPTY_ROOT_HASH, Account, StorageEntry};
+use reth_primitives::{Account, StorageEntry};
 use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
 use reth_trie::{proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, StateRoot};
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
