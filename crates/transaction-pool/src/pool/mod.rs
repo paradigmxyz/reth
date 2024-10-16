@@ -792,8 +792,9 @@ where
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
-        self.get_pool_data()
-            .get_highest_consecutive_transaction_by_sender(sender_id.into_id(on_chain_nonce))
+        self.get_pool_data().get_highest_consecutive_transaction_by_sender(
+            sender_id.into_transaction_id(on_chain_nonce),
+        )
     }
 
     /// Returns all transactions that where submitted with the given [`TransactionOrigin`]
