@@ -5,6 +5,7 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     HashedPostState,
 };
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
@@ -13,7 +14,6 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::{Either, Itertools};
 use reth_execution_errors::{StateProofError, TrieWitnessError};
-use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
