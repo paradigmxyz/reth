@@ -1444,7 +1444,7 @@ mod tests {
             assert_eq!(
                 provider_rw
                     .latest_ref()
-                    .state_root(
+                    .state_root_from_post_state(
                         provider_rw.hashed_post_state_from_bundle_state(&state.bundle_state)
                     )
                     .unwrap(),

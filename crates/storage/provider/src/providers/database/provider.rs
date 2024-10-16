@@ -48,8 +48,8 @@ use reth_primitives::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    HashedPostStateProvider, StateProvider, StorageChangeSetReader, ToLatestStateProviderRef,
-    TryIntoHistoricalStateProvider,
+    HashedPostStateProvider, StateProvider, StateRootProvider, StorageChangeSetReader,
+    ToLatestStateProviderRef, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
@@ -2288,6 +2288,60 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks, DS: Send + Sync> EvmEnvPro
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
         evm_config.fill_cfg_env(cfg, header, total_difficulty);
         Ok(())
+    }
+}
+
+impl<TX: DbTx, Spec: Send + Sync, DS: DatabaseState> StateRootProvider
+    for DatabaseProvider<TX, Spec, DS>
+{
+    fn state_root(&self) -> ProviderResult<B256> {
+        DS::StateRoot::from_tx(self.tx_ref())
+            .root()
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_post_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        DS::StateRoot::overlay_root(self.tx_ref(), hashed_state)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        DS::StateRoot::overlay_root_from_nodes(self.tx_ref(), input)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+        DS::StateRoot::overlay_root_with_updates(self.tx_ref(), hashed_state)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+        DS::StateRoot::overlay_root_from_nodes_with_updates(self.tx_ref(), input)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_progress(
+        &self,
+        state: Option<reth_trie::IntermediateStateRootState>,
+    ) -> ProviderResult<reth_trie::StateRootProgress> {
+        DS::StateRoot::from_tx(self.tx_ref())
+            .with_intermediate_state(state)
+            .root_with_progress()
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        DS::StateRoot::incremental_root_with_updates(self.tx_ref(), range)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

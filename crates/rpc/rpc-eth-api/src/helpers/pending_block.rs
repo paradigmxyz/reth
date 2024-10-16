@@ -408,8 +408,9 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // calculate the state root
         let state_provider = &db.database;
-        let state_root =
-            state_provider.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
+        let state_root = state_provider
+            .state_root_from_post_state(hashed_state)
+            .map_err(Self::Error::from_eth_err)?;
 
         // create the block header
         let transactions_root = calculate_transaction_root(&executed_txs);

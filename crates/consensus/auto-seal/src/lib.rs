@@ -404,7 +404,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
         // now we need to update certain header fields with the results of the execution
-        header.state_root = db.state_root(hashed_state)?;
+        header.state_root = db.state_root_from_post_state(hashed_state)?;
         header.gas_used = gas_used;
 
         let receipts = execution_outcome.receipts_by_block(header.number);

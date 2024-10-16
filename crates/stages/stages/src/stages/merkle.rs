@@ -6,7 +6,7 @@ use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
-    StateRootProvider, StatsReader, ToLatestStateProviderRef, TrieWriter,
+    StateRootProvider, StatsReader, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
@@ -137,7 +137,7 @@ where
         + HeaderProvider
         + StageCheckpointReader
         + StageCheckpointWriter
-        + ToLatestStateProviderRef,
+        + StateRootProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -210,7 +210,7 @@ where
                     as u64,
             });
 
-            let progress = provider.latest_ref().state_root_with_progress(checkpoint.map(IntermediateStateRootState::from))
+            let progress = provider.state_root_with_progress(checkpoint.map(IntermediateStateRootState::from))
             .map_err(|e| {
                 error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                 StageError::Fatal(Box::new(e))
@@ -246,7 +246,7 @@ where
             }
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
-            let (root, updates) = provider.latest_ref().incremental_root_with_updates(range)
+            let (root, updates) = provider.incremental_root_with_updates(range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
@@ -321,7 +321,6 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             let (block_root, updates) = provider
-                .latest_ref()
                 .incremental_root_with_updates(range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 

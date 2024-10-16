@@ -152,7 +152,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates, _) =
-            provider.latest_ref().state_root_with_updates(hashed_post_state)?;
+            provider.state_root_with_updates(hashed_post_state)?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");

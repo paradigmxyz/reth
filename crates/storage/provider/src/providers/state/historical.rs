@@ -319,7 +319,11 @@ impl<TX: DbTx, DS: DatabaseState> HashedPostStateProvider
 }
 
 impl<TX: DbTx, DS: DatabaseState> StateRootProvider for HistoricalStateProviderRef<'_, TX, DS> {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self) -> ProviderResult<B256> {
+        DS::StateRoot::from_tx(self.tx).root().map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_post_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
         DS::StateRoot::overlay_root(self.tx, revert_state)

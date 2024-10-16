@@ -25,7 +25,6 @@ use reth_provider::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HashedPostStateProvider,
     HeaderProvider, ProviderError, StateRootProvider, StaticFileProviderFactory,
-    ToLatestStateProviderRef,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1237,7 +1236,7 @@ where
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
                 let (state_root, trie_updates, hashed_state_sorted) =
-                    provider.latest_ref().state_root_with_updates(hashed_state)?;
+                    provider.state_root_with_updates(hashed_state)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1870,7 +1869,7 @@ mod tests {
         let prefix_sets =
             provider.hashed_post_state_from_bundle_state(&exec5.bundle).construct_prefix_sets();
         let state_root_input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
-        let state_root = provider.latest_ref().state_root_from_nodes(state_root_input).unwrap();
+        let state_root = provider.state_root_from_nodes(state_root_input).unwrap();
         assert_eq!(state_root, block5.state_root);
     }
 

@@ -242,7 +242,7 @@ impl AppendableChain {
                 let hashed_state = externals
                     .provider_factory
                     .hashed_post_state_from_bundle_state(&initial_execution_outcome.bundle);
-                let state_root = provider.state_root(hashed_state)?;
+                let state_root = provider.state_root_from_post_state(hashed_state)?;
                 (state_root, None)
             };
             if block.state_root != state_root {

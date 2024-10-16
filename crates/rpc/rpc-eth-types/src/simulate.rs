@@ -273,7 +273,7 @@ pub fn build_block<T: TransactionCompat>(
         }
     }
 
-    let state_root = db.db.0.state_root(hashed_state)?;
+    let state_root = db.db.0.state_root_from_post_state(hashed_state)?;
 
     let header = reth_primitives::Header {
         beneficiary: block_env.coinbase,

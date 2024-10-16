@@ -104,7 +104,11 @@ impl AccountReader for MemoryOverlayStateProvider {
 }
 
 impl StateRootProvider for MemoryOverlayStateProvider {
-    fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn state_root_from_post_state(&self, state: HashedPostState) -> ProviderResult<B256> {
         self.state_root_from_nodes(TrieInput::from_state(state))
     }
 

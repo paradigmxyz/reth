@@ -405,7 +405,7 @@ where
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            state_root: state_provider.state_root(hashed_state)?,
+            state_root: state_provider.state_root_from_post_state(hashed_state)?,
         },
         body: BlockBody {
             transactions,

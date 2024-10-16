@@ -8,10 +8,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{Account, SealedBlock, SealedHeader};
-use reth_provider::{
-    DatabaseProvider, DatabaseProviderFactory, StateRootProvider, ToLatestStateProviderRef,
-    TrieWriter,
-};
+use reth_provider::{DatabaseProvider, DatabaseProviderFactory, StateRootProvider, TrieWriter};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
@@ -139,13 +136,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates, _) = db
-            .factory
-            .provider_rw()
-            .unwrap()
-            .latest_ref()
-            .state_root_with_updates(Default::default())
-            .unwrap();
+        let (root, updates, _) =
+            db.factory.provider_rw().unwrap().state_root_with_updates(Default::default()).unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -175,13 +167,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         // make last block have valid state root
         let root = {
-            let root = db
-                .factory
-                .provider_rw()
-                .unwrap()
-                .latest_ref()
-                .state_root(Default::default())
-                .unwrap();
+            let root = db.factory.provider_rw().unwrap().state_root().unwrap();
             root
         };
 

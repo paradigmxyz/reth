@@ -104,7 +104,11 @@ impl<TX: DbTx, DS: DatabaseState> HashedPostStateProvider for LatestStateProvide
 }
 
 impl<TX: DbTx, DS: DatabaseState> StateRootProvider for LatestStateProviderRef<'_, TX, DS> {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self) -> ProviderResult<B256> {
+        DS::StateRoot::from_tx(self.tx).root().map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_from_post_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         DS::StateRoot::overlay_root(self.tx, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }

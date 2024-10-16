@@ -79,11 +79,15 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> AccountRe
 impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> StateRootProvider
     for BundleStateProvider<SP, EDP, DS>
 {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn state_root_from_post_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state::<DS::KeyHasher>(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.state_root(state)
+        self.state_provider.state_root_from_post_state(state)
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {

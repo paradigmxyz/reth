@@ -945,7 +945,14 @@ mod tests {
     }
 
     impl StateRootProvider for MockStateProvider {
-        fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+        fn state_root(&self) -> ProviderResult<B256> {
+            unimplemented!()
+        }
+
+        fn state_root_from_post_state(
+            &self,
+            _hashed_state: HashedPostState,
+        ) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 

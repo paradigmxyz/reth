@@ -1,6 +1,5 @@
 use crate::{
-    providers::StaticFileProvider, HashingWriter, ProviderFactory, StateRootProvider,
-    ToLatestStateProviderRef, TrieWriter,
+    providers::StaticFileProvider, HashingWriter, ProviderFactory, StateRootProvider, TrieWriter,
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -74,7 +73,7 @@ pub fn insert_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates, _) = provider.latest_ref().state_root_with_updates(Default::default())?;
+    let (root, updates, _) = provider.state_root_with_updates(Default::default())?;
     provider.write_trie_updates(&updates).unwrap();
 
     provider.commit()?;

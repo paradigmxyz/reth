@@ -21,11 +21,15 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
 impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
-    fn state_root(
+    fn state_root(&self) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn state_root_from_post_state(
         &self,
         hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<B256> {
-        self.0.state_root(hashed_state)
+        self.0.state_root_from_post_state(hashed_state)
     }
 
     fn state_root_from_nodes(
