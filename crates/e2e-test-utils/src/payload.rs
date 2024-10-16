@@ -28,7 +28,7 @@ impl<E: EngineTypes> PayloadTestContext<E> {
     ) -> eyre::Result<E::PayloadBuilderAttributes> {
         self.timestamp += 1;
         let attributes: E::PayloadBuilderAttributes = attributes_generator(self.timestamp);
-        self.payload_builder.new_payload(attributes.clone()).await.unwrap();
+        self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
         Ok(attributes)
     }
 

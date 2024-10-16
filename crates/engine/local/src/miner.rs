@@ -131,6 +131,7 @@ where
             tokio::select! {
                 // Wait for the interval or the pool to receive a transaction
                 _ = &mut self.mode => {
+                    println!("RECEIVED");
                     if let Err(e) = self.advance().await {
                         error!(target: "engine::local", "Error advancing the chain: {:?}", e);
                     }
@@ -202,10 +203,7 @@ where
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
 
-        // wait for some time to let the payload be built
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        let Some(Ok(payload)) = self.payload_builder.best_payload(payload_id).await else {
+        let Some(Ok(payload)) = self.payload_builder.resolve(payload_id, true).await else {
             eyre::bail!("No payload")
         };
 

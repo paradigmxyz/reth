@@ -53,7 +53,13 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// If this returns [`KeepPayloadJobAlive::Yes`], then the [`PayloadJob`] will be polled
     /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
     /// dropped after this call.
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+    ///
+    /// If `wait_for_pending` is provided and there's a payload building job in progress, returned
+    /// future will first poll it until completion to get a potentially better payload.
+    fn resolve(
+        &mut self,
+        wait_for_pending: bool,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
 }
 
 /// Whether the payload job should be kept alive or terminated after the payload was requested by

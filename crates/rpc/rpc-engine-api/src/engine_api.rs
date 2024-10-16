@@ -260,7 +260,7 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadV1> {
         self.inner
             .payload_store
-            .resolve(payload_id)
+            .resolve(payload_id, false)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?
@@ -295,7 +295,7 @@ where
         // Now resolve the payload
         self.inner
             .payload_store
-            .resolve(payload_id)
+            .resolve(payload_id, false)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?
@@ -330,7 +330,7 @@ where
         // Now resolve the payload
         self.inner
             .payload_store
-            .resolve(payload_id)
+            .resolve(payload_id, false)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?
@@ -365,7 +365,7 @@ where
         // Now resolve the payload
         self.inner
             .payload_store
-            .resolve(payload_id)
+            .resolve(payload_id, false)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?

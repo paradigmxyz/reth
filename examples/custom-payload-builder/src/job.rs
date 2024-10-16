@@ -52,7 +52,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve(
+        &mut self,
+        _wait_for_pending: bool,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let payload = self.best_payload();
         (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
     }

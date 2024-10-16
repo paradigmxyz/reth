@@ -473,7 +473,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve(
+        &mut self,
+        wait_for_pending: bool,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.take();
 
         if best_payload.is_none() && self.pending_block.is_none() {
@@ -529,7 +532,8 @@ where
             };
         }
 
-        let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
+        let fut =
+            ResolveBestPayload { best_payload, maybe_better, empty_payload, wait_for_pending };
 
         (fut, KeepPayloadJobAlive::No)
     }
@@ -552,6 +556,8 @@ pub struct ResolveBestPayload<Payload> {
     pub maybe_better: Option<PendingPayload<Payload>>,
     /// The empty payload building job in progress, if any.
     pub empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
+    /// Whether to wait for the pending payload to finish.
+    pub wait_for_pending: bool,
 }
 
 impl<Payload> ResolveBestPayload<Payload> {
@@ -577,6 +583,8 @@ where
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
+            } else if this.wait_for_pending {
+                return Poll::Pending
             }
         }
 
