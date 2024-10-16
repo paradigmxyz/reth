@@ -29,7 +29,7 @@ impl<E: EngineTypes> EngineApiTestContext<E> {
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> eyre::Result<E::ExecutionPayloadV3> {
+    ) -> eyre::Result<E::ExecutionPayloadEnvelopeV3> {
         Ok(EngineApiClient::<E>::get_payload_v3(&self.engine_api_client, payload_id).await?)
     }
 
@@ -50,10 +50,10 @@ impl<E: EngineTypes> EngineApiTestContext<E> {
         versioned_hashes: Vec<B256>,
     ) -> eyre::Result<B256>
     where
-        E::ExecutionPayloadV3: From<E::BuiltPayload> + PayloadEnvelopeExt,
+        E::ExecutionPayloadEnvelopeV3: From<E::BuiltPayload> + PayloadEnvelopeExt,
     {
         // setup payload for submission
-        let envelope_v3: <E as EngineTypes>::ExecutionPayloadV3 = payload.into();
+        let envelope_v3: <E as EngineTypes>::ExecutionPayloadEnvelopeV3 = payload.into();
 
         // submit payload to engine api
         let submission = EngineApiClient::<E>::new_payload_v3(
