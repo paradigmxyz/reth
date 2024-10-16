@@ -2,7 +2,7 @@
 
 use crate::args::error::ReceiptsLogError;
 use alloy_primitives::{Address, BlockNumber};
-use clap::Args;
+use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthChainSpec;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
@@ -17,7 +17,7 @@ pub struct PruningArgs {
     pub full: bool,
 
     /// Minimum pruning interval measured in blocks.
-    #[arg(long, default_value = None)]
+    #[arg(long, value_parser = RangedU64ValueParser::<u64>::new().range(1..),)]
     pub block_interval: Option<u64>,
 
     // Sender Recovery
@@ -99,7 +99,7 @@ impl PruningArgs {
         // If --full is set, use full node defaults.
         if self.full {
             config = PruneConfig {
-                block_interval: 5,
+                block_interval: config.block_interval,
                 segments: PruneModes {
                     sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
@@ -123,6 +123,9 @@ impl PruningArgs {
         }
 
         // Override with any explicitly set prune.* flags.
+        if let Some(block_interval) = self.block_interval {
+            config.block_interval = block_interval as usize;
+        }
         if let Some(mode) = self.sender_recovery_prune_mode() {
             config.segments.sender_recovery = Some(mode);
         }
