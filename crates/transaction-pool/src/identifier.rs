@@ -59,6 +59,11 @@ impl SenderId {
     pub const fn start_bound(self) -> std::ops::Bound<TransactionId> {
         std::ops::Bound::Included(TransactionId::new(self, 0))
     }
+
+    /// Converts the sender to a [`TransactionId`] with the given nonce.
+    pub const fn into_id(self, nonce: u64) -> TransactionId {
+        TransactionId::new(self, nonce)
+    }
 }
 
 impl From<u64> for SenderId {
