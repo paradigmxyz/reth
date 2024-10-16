@@ -337,7 +337,8 @@ impl RevealedSparseTrie {
 
                     // If only one child is left set in the branch node, we need to collapse it.
                     if state_mask.count_bits() == 1 {
-                        let child_nibble = state_mask.first_set_bit_index();
+                        let child_nibble =
+                            state_mask.first_set_bit_index().expect("state mask is not empty");
 
                         // Get full path of the only child node left.
                         let mut child_path = removed_path.clone();
@@ -448,12 +449,8 @@ impl RevealedSparseTrie {
                     }
 
                     let path = current.clone();
-                    current.extend_from_slice_unchecked(&key);
-                    nodes.push(RemovedSparseNode {
-                        path,
-                        node,
-                        unset_branch_nibble: None,
-                    });
+                    current.extend_from_slice_unchecked(key);
+                    nodes.push(RemovedSparseNode { path, node, unset_branch_nibble: None });
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path[current.len()];
