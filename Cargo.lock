@@ -8105,6 +8105,7 @@ dependencies = [
  "alloy-primitives",
  "op-alloy-consensus",
  "reth-chainspec",
+ "reth-consensus",
  "reth-ethereum-forks",
  "reth-evm",
  "reth-execution-errors",
