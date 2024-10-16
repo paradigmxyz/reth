@@ -447,15 +447,13 @@ impl RevealedSparseTrie {
                         assert!(path.starts_with(&current));
                     }
 
-                    let key = key.clone();
-
+                    let path = current.clone();
+                    current.extend_from_slice_unchecked(&key);
                     nodes.push(RemovedSparseNode {
-                        path: current.clone(),
+                        path,
                         node,
                         unset_branch_nibble: None,
                     });
-
-                    current.extend_from_slice_unchecked(&key);
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path[current.len()];
