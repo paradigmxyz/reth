@@ -17,8 +17,8 @@ pub struct PruningArgs {
     pub full: bool,
 
     /// Minimum pruning interval measured in blocks.
-    #[arg(long, default_value_t = 0)]
-    pub block_interval: u64,
+    #[arg(long, default_value = None)]
+    pub block_interval: Option<u64>,
 
     // Sender Recovery
     /// Prunes all sender recovery data.
