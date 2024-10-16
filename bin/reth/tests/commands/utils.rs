@@ -56,6 +56,7 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
 pub struct ImportData {
     pub chain: Arc<ChainSpec>,
     pub data_dir: ChainPath<DataDirPath>,
+    pub database: Arc<DatabaseEnv>,
     pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
     pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
     pub bitfinity_args: BitfinityImportArgs,
@@ -112,9 +113,9 @@ pub async fn bitfinity_import_config_data(
 
     let db_path = data_dir.db();
 
-    let db = Arc::new(init_db(db_path, Default::default())?);
+    let database = Arc::new(init_db(db_path, Default::default())?);
     let provider_factory = ProviderFactory::new(
-        db,
+        database.clone(),
         chain.clone(),
         StaticFileProvider::read_write(data_dir.static_files())?,
     );
@@ -144,7 +145,7 @@ pub async fn bitfinity_import_config_data(
         ic_root_key: IC_MAINNET_KEY.to_string(),
     };
 
-    Ok((temp_dir, ImportData { data_dir, chain, provider_factory, blockchain_db, bitfinity_args }))
+    Ok((temp_dir, ImportData { data_dir, database, chain, provider_factory, blockchain_db, bitfinity_args }))
 }
 
 /// Waits until the block is imported.

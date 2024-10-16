@@ -13,10 +13,11 @@ use jsonrpsee::{
 use rand::RngCore;
 use reth::{args::{DatadirArgs, RpcServerArgs}, dirs::{ChainPath, DataDirPath, MaybePlatformPath}};
 use reth_consensus::Consensus;
+use reth_db::init_db;
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
-use std::{net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 use std::time::Duration;
 
 #[tokio::test]
@@ -32,12 +33,17 @@ async fn bitfinity_test_finalized_and_safe_query_params_works() {
     import_data.bitfinity_args.batch_size = (end_block as usize) * 10;
 
     // Act
-    import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
+    import_blocks(import_data.clone(), Duration::from_secs(20), true).await;
 
     let data_dir = temp_dir.path().to_path_buf();
-    let (reth_client, _reth_node) = start_reth_testing_node(None, Some(data_dir)).await;
+    let data_dir = Some(import_data.data_dir.clone());
+    // drop(import_data);
+    println!("temp_dir: {:?}", temp_dir);
+    println!("data_dir: {:?}", data_dir);
+    let (reth_client, _reth_node) = start_reth_node(None, Some(import_data)).await;
 
     reth_client.get_block_by_number(0u64.into()).await.unwrap();
+
     // reth_client.get_block_by_number(BlockNumber::Number(10u64.into())).await.unwrap();
 
     // reth_client.get_block_by_number(BlockNumber::Finalized).await.unwrap();
@@ -117,6 +123,55 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Assert
     assert_eq!(result.unwrap(), expected_tx_hash.0);
 }
+
+/// Start a local reth node
+async fn start_reth_node(
+    bitfinity_evm_url: Option<String>,
+    import_data: Option<ImportData>) -> (
+    EthJsonRpcClient<ReqwestClient>,
+    NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, Arc<reth_db::DatabaseEnv>, reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, Arc<reth_db::DatabaseEnv>, reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider, Arc<dyn Consensus>>>>,
+    ) {
+
+        let tasks = TaskManager::current();
+
+        // create node config
+        let mut node_config =
+            NodeConfig::test().dev().with_rpc(RpcServerArgs::default().with_http()).with_unused_ports();
+    
+        // if let Some(data_dir) = data_dir {
+        //     let data_dir = MaybePlatformPath::<DataDirPath>::from_str(data_dir.as_path().to_str().unwrap()).unwrap();
+        //     let mut data_dir_args = node_config.datadir.clone();
+        //     data_dir_args.datadir = data_dir;
+        //     node_config = node_config.with_datadir_args(data_dir_args);
+        // }
+    
+        let mut chain = node_config.chain.as_ref().clone();
+        chain.bitfinity_evm_url = bitfinity_evm_url;
+    
+        let node_config = node_config.with_chain(chain);
+    
+        let TEMP = 0;
+
+        let import_data = import_data.unwrap();
+        // println!("DB PATH: {:?}", db_path);
+        // println!("db_path.exists(): {}", db_path.exists());
+        // let db = Arc::new(init_db(db_path, Default::default()).unwrap());
+
+        let node_handle = NodeBuilder::new(node_config)
+            .with_database(import_data.database.clone())
+            .with_launch_context(tasks.executor())
+            .launch_node(EthereumNode::default())
+            .await
+            .unwrap();
+    
+        let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
+    
+        let client: EthJsonRpcClient<ReqwestClient> =
+            EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
+    
+        (client, node_handle)
+
+    }
 
 /// Start a local reth node
 async fn start_reth_testing_node(
