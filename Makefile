@@ -1,6 +1,7 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 .DEFAULT_GOAL := help
 
+GIT_SHA ?= $(shell git rev-parse HEAD)
 GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
 
@@ -203,6 +204,14 @@ docker-build-push: ## Build and push a cross-arch Docker image tagged with the l
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: docker-build-push-git-sha
+docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call docker_build_push,$(GIT_SHA),$(GIT_SHA))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
 .PHONY: docker-build-push-latest
 docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
 	$(call docker_build_push,$(GIT_TAG),latest)
@@ -242,6 +251,14 @@ endef
 .PHONY: op-docker-build-push
 op-docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
 	$(call op_docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push-git-sha
+op-docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call op_docker_build_push,$(GIT_SHA),$(GIT_SHA))
 
 # Note: This requires a buildx builder with emulation support. For example:
 #

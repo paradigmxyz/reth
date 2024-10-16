@@ -1,7 +1,5 @@
-use std::collections::BTreeMap;
-
 use crate::{
-    hashed_cursor::HashedCursorFactory,
+    hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
     proof::{Proof, StorageProof},
     trie_cursor::TrieCursorFactory,
@@ -14,11 +12,12 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::{Either, Itertools};
-use reth_execution_errors::TrieWitnessError;
+use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
+use std::collections::BTreeMap;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -90,16 +89,7 @@ where
             return Ok(self.witness)
         }
 
-        let proof_targets = HashMap::from_iter(
-            state
-                .accounts
-                .keys()
-                .map(|hashed_address| (*hashed_address, HashSet::default()))
-                .chain(state.storages.iter().map(|(hashed_address, storage)| {
-                    (*hashed_address, storage.storage.keys().copied().collect())
-                })),
-        );
-
+        let proof_targets = self.get_proof_targets(&state)?;
         let mut account_multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
@@ -120,14 +110,13 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
-            let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
-                account_rlp.clear();
-                TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
-                    .encode(&mut account_rlp as &mut dyn BufMut);
-                Some(account_rlp.clone())
-            } else {
-                None
-            };
+            let value =
+                (account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH).then(|| {
+                    account_rlp.clear();
+                    TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
+                        .encode(&mut account_rlp as &mut dyn BufMut);
+                    account_rlp.clone()
+                });
             let key = Nibbles::unpack(hashed_address);
             account_trie_nodes.extend(
                 self.target_nodes(
@@ -244,7 +233,10 @@ where
                 TrieNode::Leaf(leaf) => {
                     next_path.extend_from_slice(&leaf.key);
                     if next_path != key {
-                        trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                        trie_nodes.insert(
+                            next_path.clone(),
+                            Either::Right(leaf.value.as_slice().to_vec()),
+                        );
                     }
                 }
                 TrieNode::EmptyRoot => {
@@ -260,6 +252,36 @@ where
         }
 
         Ok(trie_nodes)
+    }
+
+    /// Retrieve proof targets for incoming hashed state.
+    /// This method will aggregate all accounts and slots present in the hash state as well as
+    /// select all existing slots from the database for the accounts that have been destroyed.
+    fn get_proof_targets(
+        &self,
+        state: &HashedPostState,
+    ) -> Result<HashMap<B256, HashSet<B256>>, StateProofError> {
+        let mut proof_targets = HashMap::default();
+        for hashed_address in state.accounts.keys() {
+            proof_targets.insert(*hashed_address, HashSet::default());
+        }
+        for (hashed_address, storage) in &state.storages {
+            let mut storage_keys = storage.storage.keys().copied().collect::<HashSet<_>>();
+            if storage.wiped {
+                // storage for this account was destroyed, gather all slots from the current state
+                let mut storage_cursor =
+                    self.hashed_cursor_factory.hashed_storage_cursor(*hashed_address)?;
+                // position cursor at the start
+                if let Some((hashed_slot, _)) = storage_cursor.seek(B256::ZERO)? {
+                    storage_keys.insert(hashed_slot);
+                }
+                while let Some((hashed_slot, _)) = storage_cursor.next()? {
+                    storage_keys.insert(hashed_slot);
+                }
+            }
+            proof_targets.insert(*hashed_address, storage_keys);
+        }
+        Ok(proof_targets)
     }
 
     fn next_root_from_proofs(

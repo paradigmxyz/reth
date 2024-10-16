@@ -24,6 +24,7 @@ alloy-rpc-types.workspace = true
 alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
 alloy-serde.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

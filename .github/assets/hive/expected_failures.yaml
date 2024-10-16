@@ -20,7 +20,7 @@ rpc-compat:
   - eth_getBlockByNumber/get-latest (reth)
   - eth_getBlockByNumber/get-safe (reth)
 
-  # https://github.com/paradigmxyz/reth/issues/8732
+# https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
   - Withdrawals Fork On Genesis (Paris) (reth)
   - Withdrawals Fork on Block 1 (Paris) (reth)
@@ -43,15 +43,7 @@ engine-withdrawals:
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
-engine-api:
-  - Inconsistent Head in ForkchoiceState (Paris) (reth)
-  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=True, DynFeeTxs=False (Paris) (reth)
-  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Paris) (reth)
-  - Invalid NewPayload, PrevRandao, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Paris) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+engine-api: []
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
@@ -59,17 +51,12 @@ engine-api:
 # https://github.com/paradigmxyz/reth/issues/7144
 engine-cancun:
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
-  - Inconsistent Head in ForkchoiceState (Cancun) (reth)
-  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=True, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, PrevRandao, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
-  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
-  - Invalid NewPayload, ParentBeaconBlockRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, VersionedHashes Version, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, Incomplete VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, Extra VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8579
 sync:
