@@ -1236,7 +1236,7 @@ where
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
                 let (state_root, trie_updates, hashed_state_sorted) =
-                    provider.state_root_with_updates(hashed_state)?;
+                    provider.state_root_from_post_state_with_updates(hashed_state)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {

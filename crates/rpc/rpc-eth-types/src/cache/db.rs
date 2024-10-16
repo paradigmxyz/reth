@@ -39,12 +39,12 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
         self.0.state_root_from_nodes(input)
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates, HashedPostStateSorted)>
     {
-        self.0.state_root_with_updates(hashed_state)
+        self.0.state_root_from_post_state_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(

@@ -73,7 +73,7 @@ pub fn insert_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates, _) = provider.state_root_with_updates(Default::default())?;
+    let (root, updates, _) = provider.state_root_from_post_state_with_updates(Default::default())?;
     provider.write_trie_updates(&updates).unwrap();
 
     provider.commit()?;

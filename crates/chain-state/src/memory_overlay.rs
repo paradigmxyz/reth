@@ -118,7 +118,7 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         self.historical.state_root_from_nodes(input)
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {

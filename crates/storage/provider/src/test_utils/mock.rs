@@ -636,7 +636,7 @@ impl StateRootProvider for MockEthProvider {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {

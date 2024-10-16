@@ -44,8 +44,8 @@ macro_rules! delegate_provider_impls {
             StateRootProvider $(where [$($generics)*])? {
                 fn state_root(&self,) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
                 fn state_root_from_post_state(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
+                fn state_root_from_post_state_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates, reth_trie::HashedPostStateSorted)>;
                 fn state_root_from_nodes(&self, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
-                fn state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates, reth_trie::HashedPostStateSorted)>;
                 fn state_root_from_nodes_with_updates(&self, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates, reth_trie::HashedPostStateSorted)>;
                 fn state_root_with_progress(&self, state: Option<reth_trie::IntermediateStateRootState>) -> reth_storage_errors::provider::ProviderResult<reth_trie::StateRootProgress>;
                 fn incremental_root_with_updates(&self, range: std::ops::RangeInclusive<alloy_primitives::BlockNumber>) -> reth_storage_errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;

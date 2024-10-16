@@ -26,9 +26,6 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
     fn from_tx(tx: &'a TX) -> Self;
 
-    /// Set the previously recorded intermediate state.
-    fn with_intermediate_state(self, state: Option<IntermediateStateRootState>) -> Self;
-
     /// Given a block number range, identifies all the accounts and storage keys that
     /// have changed.
     ///
@@ -132,7 +129,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// # Returns
     ///
     /// The intermediate progress of state root computation.
-    fn root_with_progress(self) -> Result<StateRootProgress, StateRootError>;
+    fn root_with_progress(
+        self,
+        state: Option<IntermediateStateRootState>,
+    ) -> Result<StateRootProgress, StateRootError>;
 
     /// Computes the state root using the current configuration of the state root calculator.
     fn root(self) -> Result<B256, StateRootError>;
@@ -150,10 +150,6 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
-    }
-
-    fn with_intermediate_state(self, state: Option<IntermediateStateRootState>) -> Self {
-        self.with_intermediate_state(state)
     }
 
     fn incremental_root_calculator(
@@ -240,8 +236,11 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         Ok((root, updates, state_sorted))
     }
 
-    fn root_with_progress(self) -> Result<StateRootProgress, StateRootError> {
-        self.root_with_progress()
+    fn root_with_progress(
+        self,
+        state: Option<IntermediateStateRootState>,
+    ) -> Result<StateRootProgress, StateRootError> {
+        self.with_intermediate_state(state).root_with_progress()
     }
 
     fn root(self) -> Result<B256, StateRootError> {

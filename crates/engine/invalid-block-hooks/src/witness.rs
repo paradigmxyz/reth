@@ -237,7 +237,7 @@ where
         // Calculate the state root and trie updates after re-execution. They should match
         // the original ones.
         let (re_executed_root, trie_output, _) =
-            state_provider.state_root_with_updates(hashed_state)?;
+            state_provider.state_root_from_post_state_with_updates(hashed_state)?;
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
                 let filename = format!("{}_{}.state_root.diff", block.number, block.hash());

@@ -336,7 +336,7 @@ impl<TX: DbTx, DS: DatabaseState> StateRootProvider for HistoricalStateProviderR
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {

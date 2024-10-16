@@ -24,17 +24,17 @@ pub trait StateRootProvider: Send + Sync {
     /// computation.
     fn state_root_from_post_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
+    /// Returns the state root of the `HashedPostState` on top of the current state with trie
+    /// updates to be committed to the database.
+    fn state_root_from_post_state_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)>;
+
     /// Returns the state root of the `HashedPostState` on top of the current state but re-uses the
     /// intermediate nodes to speed up the computation. It's up to the caller to construct the
     /// prefix sets and inform the provider of the trie paths that have changes.
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256>;
-
-    /// Returns the state root of the `HashedPostState` on top of the current state with trie
-    /// updates to be committed to the database.
-    fn state_root_with_updates(
-        &self,
-        hashed_state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)>;
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.

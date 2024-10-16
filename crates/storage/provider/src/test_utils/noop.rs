@@ -338,7 +338,7 @@ impl StateRootProvider for NoopProvider {
         Ok(B256::default())
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {

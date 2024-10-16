@@ -2224,7 +2224,7 @@ where
         } else {
             debug!(target: "engine::tree", persistence_in_progress, "Failed to compute state root in parallel");
             let (state_root, trie_updates, _) =
-                state_provider.state_root_with_updates(hashed_state.clone())?;
+                state_provider.state_root_from_post_state_with_updates(hashed_state.clone())?;
             (state_root, trie_updates)
         };
 

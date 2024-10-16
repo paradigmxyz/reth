@@ -136,8 +136,12 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates, _) =
-            db.factory.provider_rw().unwrap().state_root_with_updates(Default::default()).unwrap();
+        let (root, updates, _) = db
+            .factory
+            .provider_rw()
+            .unwrap()
+            .state_root_from_post_state_with_updates(Default::default())
+            .unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();

@@ -94,14 +94,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider, DS: DatabaseState> StateRoot
         unimplemented!()
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state::<DS::KeyHasher>(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.state_root_with_updates(state)
+        self.state_provider.state_root_from_post_state_with_updates(state)
     }
 
     fn state_root_from_nodes_with_updates(

@@ -453,8 +453,10 @@ where
         let state_provider = db.database.0.inner.borrow_mut();
         let hashed_state =
             state_provider.db.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
-        let (state_root, trie_output, _) =
-            state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+        let (state_root, trie_output, _) = state_provider
+            .db
+            .state_root_from_post_state_with_updates(hashed_state.clone())
+            .inspect_err(|err| {
                 warn!(target: "payload_builder",
                     parent_hash=%parent_block.hash(),
                     %err,

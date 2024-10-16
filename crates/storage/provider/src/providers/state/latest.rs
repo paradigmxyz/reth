@@ -118,7 +118,7 @@ impl<TX: DbTx, DS: DatabaseState> StateRootProvider for LatestStateProviderRef<'
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
@@ -139,8 +139,7 @@ impl<TX: DbTx, DS: DatabaseState> StateRootProvider for LatestStateProviderRef<'
         state: Option<IntermediateStateRootState>,
     ) -> ProviderResult<StateRootProgress> {
         DS::StateRoot::from_tx(self.tx)
-            .with_intermediate_state(state)
-            .root_with_progress()
+            .root_with_progress(state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 

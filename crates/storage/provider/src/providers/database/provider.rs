@@ -2310,7 +2310,7 @@ impl<TX: DbTx, Spec: Send + Sync, DS: DatabaseState> StateRootProvider
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
@@ -2331,8 +2331,7 @@ impl<TX: DbTx, Spec: Send + Sync, DS: DatabaseState> StateRootProvider
         state: Option<reth_trie::IntermediateStateRootState>,
     ) -> ProviderResult<reth_trie::StateRootProgress> {
         DS::StateRoot::from_tx(self.tx_ref())
-            .with_intermediate_state(state)
-            .root_with_progress()
+            .root_with_progress(state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 

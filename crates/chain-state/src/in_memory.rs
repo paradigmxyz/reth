@@ -960,7 +960,7 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn state_root_with_updates(
+        fn state_root_from_post_state_with_updates(
             &self,
             _hashed_state: HashedPostState,
         ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
