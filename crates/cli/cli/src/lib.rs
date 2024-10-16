@@ -69,8 +69,6 @@ pub trait RethCli: Sized {
         Ok(cli.with_runner(f))
     }
 
-    /// The default client version accessing the database. ref: reth_node_core::version::default_client_version
-    fn default_client_version() -> ClientVersion {
-        default_client_version()
-    }
+    /// The client version of the node.
+    fn client_version() -> ClientVersion;
 }
