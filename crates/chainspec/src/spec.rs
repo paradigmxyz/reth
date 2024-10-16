@@ -208,7 +208,7 @@ pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 Hardfork::Ontake,
                 ForkCondition::Block(
                     std::env::var("MAINNET_ONTAKE_HEIGHT")
-                        .map_or(9999999, |h| h.parse().unwrap_or(9999999)),
+                        .map_or(538304, |h| h.parse().unwrap_or(538304)),
                 ),
             ),
         ]),
