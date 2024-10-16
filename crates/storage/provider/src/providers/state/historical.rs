@@ -227,6 +227,24 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             Ok(HistoryInfo::NotYetWritten)
         }
     }
+
+    /// Set the lowest block number at which the account history is available.
+    pub const fn with_lowest_available_account_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.account_history_block_number = Some(block_number);
+        self
+    }
+
+    /// Set the lowest block number at which the storage history is available.
+    pub const fn with_lowest_available_storage_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
+        self
+    }
 }
 
 impl<TX: DbTx> AccountReader for HistoricalStateProviderRef<'_, TX> {

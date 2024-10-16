@@ -52,6 +52,8 @@ pub struct PoolBuilderConfigOverrides {
     pub minimal_protocol_basefee: Option<u64>,
     /// Addresses that will be considered as local. Above exemptions apply.
     pub local_addresses: HashSet<Address>,
+    /// Additional tasks to validate new transactions.
+    pub additional_validation_tasks: Option<usize>,
 }
 
 impl PoolBuilderConfigOverrides {
@@ -65,6 +67,7 @@ impl PoolBuilderConfigOverrides {
             max_account_slots,
             minimal_protocol_basefee,
             local_addresses,
+            additional_validation_tasks: _,
         } = self;
 
         if let Some(pending_limit) = pending_limit {

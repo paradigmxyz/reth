@@ -183,6 +183,20 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn remove_transactions_and_descendants(
+        &self,
+        _hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn remove_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn retain_unknown<A>(&self, _announcement: &mut A)
     where
         A: HandleMempoolData,
@@ -209,6 +223,14 @@ impl TransactionPool for NoopTransactionPool {
     fn get_highest_transaction_by_sender(
         &self,
         _sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
+    }
+
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        _sender: Address,
+        _on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
     }

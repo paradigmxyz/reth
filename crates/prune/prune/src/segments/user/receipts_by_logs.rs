@@ -267,11 +267,7 @@ mod tests {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
                     &mut rng,
-                    if txi == (block.body.transactions.len() - 1) {
-                        Some(deposit_contract_addr)
-                    } else {
-                        None
-                    },
+                    (txi == (block.body.transactions.len() - 1)).then_some(deposit_contract_addr),
                     Some(1),
                 ));
                 receipts.push((receipts.len() as u64, receipt));

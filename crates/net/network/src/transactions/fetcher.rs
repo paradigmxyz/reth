@@ -912,17 +912,6 @@ impl TransactionFetcher {
         // fallback peers
         let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
 
-        debug_assert!(
-            self.active_peers.get(&peer_id).is_some(),
-            "`{}` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`, `%peer_id`: {}, `@hashes_fetch_inflight_and_pending_fetch` for `%requested_hashes`: {:?}",
-            peer_id,
-            peer_id,
-            requested_hashes.iter().map(|hash| {
-                let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
-                (*hash, metadata.map(|m| (m.retries, m.tx_encoded_length)))
-            }).collect::<Vec<(TxHash, Option<(u8, Option<usize>)>)>>()
-        );
-
         self.decrement_inflight_request_count_for(&peer_id);
 
         match result {

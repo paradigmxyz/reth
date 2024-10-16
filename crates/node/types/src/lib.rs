@@ -40,7 +40,6 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
-    // type Engine: EngineTypes;
 }
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the

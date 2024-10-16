@@ -284,8 +284,8 @@ pub trait LoadState: EthApiTypes {
         Self: SpawnBlocking,
     {
         self.spawn_blocking_io(move |this| {
-            // first fetch the on chain nonce
-            let nonce = this
+            // first fetch the on chain nonce of the account
+            let on_chain_account_nonce = this
                 .state_at_block_id_or_latest(block_id)?
                 .account_nonce(address)
                 .map_err(Self::Error::from_eth_err)?
@@ -297,20 +297,24 @@ pub trait LoadState: EthApiTypes {
                     this.pool().get_highest_transaction_by_sender(address)
                 {
                     {
-                        // and the corresponding txcount is nonce + 1
-                        let next_nonce =
-                            nonce.max(highest_pool_tx.nonce()).checked_add(1).ok_or_else(|| {
+                        // and the corresponding txcount is nonce + 1 of the highest tx in the pool
+                        // (on chain nonce is increased after tx)
+                        let next_tx_nonce =
+                            highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
                                 Self::Error::from(EthApiError::InvalidTransaction(
                                     RpcInvalidTransactionError::NonceMaxValue,
                                 ))
                             })?;
 
-                        let tx_count = nonce.max(next_nonce);
+                        // guard against drifts in the pool
+                        let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
+
+                        let tx_count = on_chain_account_nonce.max(next_tx_nonce);
                         return Ok(U256::from(tx_count));
                     }
                 }
             }
-            Ok(U256::from(nonce))
+            Ok(U256::from(on_chain_account_nonce))
         })
     }
 

@@ -236,7 +236,7 @@ mod serde_nibbles_set {
         S: Serializer,
     {
         let mut storage_nodes =
-            Vec::from_iter(map.iter().map(|elem| alloy_primitives::hex::encode(elem.pack())));
+            map.iter().map(|elem| alloy_primitives::hex::encode(elem.pack())).collect::<Vec<_>>();
         storage_nodes.sort_unstable();
         storage_nodes.serialize(serializer)
     }
