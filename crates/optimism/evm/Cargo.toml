@@ -25,6 +25,7 @@ reth-consensus.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
+alloy-consensus.workspace = true
 
 # Optimism
 reth-optimism-consensus.workspace = true
