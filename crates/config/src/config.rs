@@ -14,6 +14,9 @@ use std::{
 
 const EXTENSION: &str = "toml";
 
+/// The default prune block interval
+pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
+
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
@@ -383,7 +386,7 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 5, segments: PruneModes::none() }
+        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::none() }
     }
 }
 
@@ -410,8 +413,8 @@ impl PruneConfig {
                 },
         } = other;
 
-        // Merge block_interval
-        if block_interval != 0 {
+        // Merge block_interval, only update if it's the default interval
+        if self.block_interval == DEFAULT_BLOCK_INTERVAL {
             self.block_interval = block_interval;
         }
 

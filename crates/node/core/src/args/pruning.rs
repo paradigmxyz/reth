@@ -18,7 +18,7 @@ pub struct PruningArgs {
 
     /// Minimum pruning interval measured in blocks.
     #[arg(long, default_value = None)]
-    pub block_interval: Option<u64>,
+    pub block_interval: Option<usize>,
 
     // Sender Recovery
     /// Prunes all sender recovery data.
@@ -99,7 +99,7 @@ impl PruningArgs {
         // If --full is set, use full node defaults.
         if self.full {
             config = PruneConfig {
-                block_interval: 5,
+                block_interval: config.block_interval,
                 segments: PruneModes {
                     sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
@@ -123,6 +123,9 @@ impl PruningArgs {
         }
 
         // Override with any explicitly set prune.* flags.
+        if let Some(block_interval) = self.block_interval {
+            config.block_interval = block_interval;
+        }
         if let Some(mode) = self.sender_recovery_prune_mode() {
             config.segments.sender_recovery = Some(mode);
         }
