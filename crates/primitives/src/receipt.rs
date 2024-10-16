@@ -227,8 +227,14 @@ impl Encodable2718 for ReceiptWithBloom {
         self.as_encoder().length()
     }
 
-    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+    fn encode_2718(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, false)
+    }
+
+    fn encoded_2718(&self) -> Vec<u8> {
+        let mut out = vec![];
+        self.encode_2718(&mut out);
+        out
     }
 }
 

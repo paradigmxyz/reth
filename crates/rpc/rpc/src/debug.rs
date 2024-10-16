@@ -891,11 +891,7 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| {
-                let mut out = vec![];
-                receipt.with_bloom().encode_2718(&mut out);
-                out.into()
-            })
+            .map(|receipt| receipt.with_bloom().encoded_2718().into())
             .collect())
     }
 
