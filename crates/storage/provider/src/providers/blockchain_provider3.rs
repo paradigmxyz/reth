@@ -3,15 +3,13 @@ use crate::{
     providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
     HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    RequestsProvider, StageCheckpointReader, StateReader, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use parking_lot::RwLock;
-use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider, MemoryOverlayStateProviderRef,
-};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
@@ -43,9 +41,6 @@ use tracing::trace;
 pub struct BlockchainProvider3<N: ProviderNodeTypes> {
     /// Storage provider.
     storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
-    /// Storage provider factory. Necessary for `StateProviderFactory` since it takes ownership of
-    /// a read tx.
-    storage_provider_factory: ProviderFactory<N>,
     /// Head block at time of [`Self`] creation
     head_block: Option<Arc<BlockState>>,
     /// Snapshotted chain. It starts as empty, requiring [`Self::in_memory_chain()`] to be called.
@@ -76,7 +71,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
         let storage_provider = storage_provider_factory.database_provider_ro()?;
         Ok(Self {
             storage_provider,
-            storage_provider_factory,
             head_block,
             canonical_in_memory_state: state,
             memory_chain: RwLock::new(Arc::new(vec![])),
@@ -139,18 +133,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
         }
     }
 
-    fn history_by_block_number_ref<'a>(
-        &'a self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
-        self.ensure_canonical_block(block_number)?;
-        let hash = self
-            .block_hash(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        self.history_by_block_hash_ref(hash)
-    }
-
     fn history_by_block_hash_ref<'a>(
         &'a self,
         block_hash: BlockHash,
@@ -159,10 +141,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
 
         self.get_in_memory_or_storage_by_block(
             block_hash.into(),
-            |_| {
-                // TODO(joshie): port history_by_block_hash to DatabaseProvider and use db_provider
-                self.history_by_block_hash_ref(block_hash)
-            },
+            |_| self.storage_provider.history_by_block_hash(block_hash),
             |block_state| {
                 let state_provider = self.block_state_provider_ref(block_state)?;
                 Ok(Box::new(state_provider))
@@ -170,50 +149,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
         )
     }
 
-    fn state_by_block_hash_ref<'a>(
-        &'a self,
-        hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
-        if let Ok(state) = self.history_by_block_hash_ref(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
-        }
-    }
-
     /// Returns a state provider indexed by the given block number or tag.
-    fn state_by_block_number_or_tag_ref<'a>(
+    fn state_by_block_number_ref<'a>(
         &'a self,
-        number_or_tag: BlockNumberOrTag,
+        number: BlockNumber,
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        match number_or_tag {
-            BlockNumberOrTag::Latest => self.latest_ref(),
-            BlockNumberOrTag::Finalized => {
-                // we can only get the finalized state by hash, not by num
-                let hash =
-                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
-                self.state_by_block_hash_ref(hash)
-            }
-            BlockNumberOrTag::Safe => {
-                // we can only get the safe state by hash, not by num
-                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
-                self.state_by_block_hash_ref(hash)
-            }
-            BlockNumberOrTag::Earliest => self.history_by_block_number_ref(0),
-            BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => {
-                let hash = self
-                    .block_hash(num)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
-                self.state_by_block_hash_ref(hash)
-            }
-        }
+        let hash =
+            self.block_hash(number)?.ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+        self.history_by_block_hash_ref(hash)
     }
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
@@ -301,7 +244,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
         let mut state: BundleStateInit = HashMap::new();
         let mut reverts: RevertsInit = HashMap::new();
-        let state_provider = self.state_by_block_number_or_tag_ref(block_range_end.into())?;
+        let state_provider = self.state_by_block_number_ref(block_range_end)?;
 
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
@@ -467,16 +410,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
         }
 
         Ok(items)
-    }
-
-    /// This uses a given [`BlockState`] to initialize a state provider for that block.
-    fn block_state_provider(
-        &self,
-        state: &BlockState,
-    ) -> ProviderResult<MemoryOverlayStateProvider> {
-        let anchor_hash = state.anchor().hash;
-        let latest_historical = self.storage_provider_factory.history_by_block_hash(anchor_hash)?;
-        Ok(state.state_provider(latest_historical))
     }
 
     /// This uses a given [`BlockState`] to initialize a state provider for that block.
@@ -661,7 +594,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
     }
 
     /// Fetches data from either in-memory state or persistent storage by [`BlockHashOrNumber`].
-    fn get_in_memory_or_storage_by_block<S, M, R>(
+    pub(crate) fn get_in_memory_or_storage_by_block<S, M, R>(
         &self,
         id: BlockHashOrNumber,
         fetch_from_db: S,
@@ -688,7 +621,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
     /// Instead, we ensure that the `block_number` is within the range of the
     /// [`Self::best_block_number`] which is updated when a block is synced.
     #[inline]
-    fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
+    pub(crate) fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
         let latest = self.best_block_number()?;
         if block_number > latest {
             Err(ProviderError::HeaderNotFound(block_number.into()))
@@ -1375,115 +1308,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for BlockchainProvider3<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
-        self.storage_provider_factory.chain_spec()
-    }
-}
-
-impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider3<N> {
-    /// Storage provider for latest block
-    fn latest(&self) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", "Getting latest block state provider");
-        // use latest state provider if the head state exists
-        if let Some(state) = &self.head_block {
-            trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            Ok(self.block_state_provider(state)?.boxed())
-        } else {
-            trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            self.storage_provider_factory.latest()
-        }
-    }
-
-    fn history_by_block_number(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
-        self.ensure_canonical_block(block_number)?;
-        let hash = self
-            .block_hash(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        self.history_by_block_hash(hash)
-    }
-
-    fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-
-        self.get_in_memory_or_storage_by_block(
-            block_hash.into(),
-            |_| self.storage_provider_factory.history_by_block_hash(block_hash),
-            |block_state| {
-                let state_provider = self.block_state_provider(block_state)?;
-                Ok(Box::new(state_provider))
-            },
-        )
-    }
-
-    fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
-        if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
-        }
-    }
-
-    /// Returns the state provider for pending state.
-    ///
-    /// If there's no pending block available then the latest state provider is returned:
-    /// [`Self::latest`]
-    fn pending(&self) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", "Getting provider for pending state");
-
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            // we have a pending block
-            return Ok(Box::new(self.block_state_provider(&pending)?));
-        }
-
-        // fallback to latest state if the pending block is not available
-        self.latest()
-    }
-
-    fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            if pending.hash() == block_hash {
-                return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
-            }
-        }
-        Ok(None)
-    }
-
-    /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
-    fn state_by_block_number_or_tag(
-        &self,
-        number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<StateProviderBox> {
-        match number_or_tag {
-            BlockNumberOrTag::Latest => self.latest(),
-            BlockNumberOrTag::Finalized => {
-                // we can only get the finalized state by hash, not by num
-                let hash =
-                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
-                self.state_by_block_hash(hash)
-            }
-            BlockNumberOrTag::Safe => {
-                // we can only get the safe state by hash, not by num
-                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
-                self.state_by_block_hash(hash)
-            }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
-            BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => {
-                let hash = self
-                    .block_hash(num)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
-                self.state_by_block_hash(hash)
-            }
-        }
+        ChainSpecProvider::chain_spec(&self.storage_provider)
     }
 }
 

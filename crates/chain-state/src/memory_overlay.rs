@@ -40,7 +40,6 @@ pub struct MemoryOverlayStateProvider {
 }
 
 macro_rules! impl_state_provider {
-    // Non-lifetime version
     ([$($tokens:tt)*],$type:ty, $historical_type:ty) => {
         impl $($tokens)*  $type {
             /// Create new memory overlay state provider.
