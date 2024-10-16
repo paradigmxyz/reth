@@ -286,10 +286,12 @@ impl DiskFileBlobStoreInner {
         let blob = self.read_one(tx)?;
 
         if let Some(blob) = &blob {
-            self.blob_cache.lock().insert(tx, Arc::new(blob.clone()));
+            let blob_arc = Arc::new(blob.clone());
+            self.blob_cache.lock().insert(tx, blob_arc.clone());
+            return Ok(Some(blob_arc.clone()))
         }
 
-        Ok(blob.map(|e| Arc::new(e)))
+        Ok(None)
     }
 
     /// Returns the path to the blob file for the given transaction hash.
