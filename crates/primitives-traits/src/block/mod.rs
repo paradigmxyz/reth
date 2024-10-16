@@ -60,12 +60,12 @@ pub trait Block:
     fn seal(self, hash: B256) -> Self::SealedBlock<Self::Header, Self::Body>;
 
     /// Expensive operation that recovers transaction signer. See
-    /// [`SealedBlockWithSenders`](crate::SealedBlockWithSenders).
+    /// `SealedBlockWithSenders`.
     fn senders(&self) -> Option<Vec<Address>> {
         self.body().recover_signers()
     }
 
-    /// Transform into a [`BlockWithSenders`].
+    /// Transform into a `BlockWithSenders`.
     ///
     /// # Panics
     ///
@@ -78,11 +78,11 @@ pub trait Block:
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
-    /// Transform into a [`BlockWithSenders`] using the given senders.
+    /// Transform into a `BlockWithSenders` using the given senders.
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`TransactionSigned::recover_signer_unchecked`](crate::TransactionSigned).
+    /// See also `SignedTransaction::recover_signer_unchecked`.
     ///
     /// Returns an error if a signature is invalid.
     // todo: can be default impl if block with senders type is made generic over block and migrated
@@ -93,7 +93,7 @@ pub trait Block:
         senders: Vec<Address>,
     ) -> Result<Self::BlockWithSenders<Self>, Self>;
 
-    /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
+    /// **Expensive**. Transform into a `BlockWithSenders` by recovering senders in the contained
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.

@@ -36,7 +36,7 @@ pub trait BlockBody:
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::SignedTransaction];
 
-    /// Returns [`Withdrawals`] in the block, if any.
+    /// Returns `Withdrawals` in the block, if any.
     // todo: branch out into extension trait
     fn withdrawals(&self) -> Option<&Self::Withdrawals>;
 
