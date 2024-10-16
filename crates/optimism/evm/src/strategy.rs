@@ -1,6 +1,7 @@
 //! Optimism block execution strategy,
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use alloy_consensus::Transaction as _;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
