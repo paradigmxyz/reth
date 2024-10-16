@@ -375,7 +375,7 @@ where
     /// Batch execution strategy.
     pub(crate) strategy: S,
     /// Keeps track of batch execution receipts and requests.
-    batch_record: BlockBatchRecord,
+    pub(crate) batch_record: BlockBatchRecord,
     _phantom: PhantomData<DB>,
 }
 
