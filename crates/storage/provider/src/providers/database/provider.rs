@@ -9,12 +9,12 @@ use crate::{
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RequestsProvider, RevertsInit, StageCheckpointReader, StateChangeWriter, StateProviderBox,
-    StateReader, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter, WithdrawalsProvider,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
+    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -47,7 +47,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StorageChangeSetReader, TryIntoHistoricalStateProvider};
+use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -68,7 +68,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, Spec> = DatabaseProvider<<DB as Database>::TX, Spec>;
@@ -142,6 +142,64 @@ impl<TX, Spec> DatabaseProvider<TX, Spec> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+}
+
+impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
+    /// State provider for latest block
+    pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
+        trace!(target: "providers::db", "Returning latest state provider");
+        Ok(Box::new(LatestStateProviderRef::new(&self.tx, self.static_file_provider.clone())))
+    }
+
+    /// Storage provider for state at that given block hash
+    pub fn history_by_block_hash<'a>(
+        &'a self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
+        let mut block_number =
+            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        if block_number == self.best_block_number().unwrap_or_default() &&
+            block_number == self.last_block_number().unwrap_or_default()
+        {
+            return Ok(Box::new(LatestStateProviderRef::new(
+                &self.tx,
+                self.static_file_provider.clone(),
+            )))
+        }
+
+        // +1 as the changeset that we want is the one that was applied after this block.
+        block_number += 1;
+
+        let account_history_prune_checkpoint =
+            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
+        let storage_history_prune_checkpoint =
+            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+
+        let mut state_provider = HistoricalStateProviderRef::new(
+            &self.tx,
+            block_number,
+            self.static_file_provider.clone(),
+        );
+
+        // If we pruned account or storage history, we can't return state on every historical block.
+        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
+        if let Some(prune_checkpoint_block_number) =
+            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
+            state_provider = state_provider.with_lowest_available_account_history_block_number(
+                prune_checkpoint_block_number + 1,
+            );
+        }
+        if let Some(prune_checkpoint_block_number) =
+            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
+            state_provider = state_provider.with_lowest_available_storage_history_block_number(
+                prune_checkpoint_block_number + 1,
+            );
+        }
+
+        Ok(Box::new(state_provider))
     }
 }
 
