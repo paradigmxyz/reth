@@ -356,13 +356,16 @@ where
     let hashed_state = client.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
     let (state_root, trie_output, _) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root_from_post_state_with_updates(hashed_state.clone()).inspect_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for payload"
-            );
-        })?
+        state_provider
+            .db
+            .state_root_from_post_state_with_updates(hashed_state.clone())
+            .inspect_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for payload"
+                );
+            })?
     };
 
     // create the block header
