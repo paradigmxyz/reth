@@ -216,9 +216,14 @@ where
                 TrieNode::Branch(branch) => {
                     next_path.push(key[path.len()]);
                     let children = branch_node_children(path.clone(), &branch);
-                    for (child_path, node_hash) in children {
+                    for (child_path, value) in children {
                         if !key.starts_with(&child_path) {
-                            trie_nodes.insert(child_path, Either::Left(node_hash));
+                            let value = if value.len() < B256::len_bytes() {
+                                Either::Right(value.to_vec())
+                            } else {
+                                Either::Left(B256::from_slice(&value[1..]))
+                            };
+                            trie_nodes.insert(child_path, value);
                         }
                     }
                 }
@@ -312,8 +317,13 @@ where
                             match TrieNode::decode(&mut &node[..])? {
                                 TrieNode::Branch(branch) => {
                                     let children = branch_node_children(path, &branch);
-                                    for (child_path, branch_hash) in children {
-                                        hash_builder.add_branch(child_path, branch_hash, false);
+                                    for (child_path, value) in children {
+                                        if value.len() < B256::len_bytes() {
+                                            hash_builder.add_leaf(child_path, value);
+                                        } else {
+                                            let hash = B256::from_slice(&value[1..]);
+                                            hash_builder.add_branch(child_path, hash, false);
+                                        }
                                     }
                                     break
                                 }
@@ -343,14 +353,14 @@ where
 }
 
 /// Returned branch node children with keys in order.
-fn branch_node_children(prefix: Nibbles, node: &BranchNode) -> Vec<(Nibbles, B256)> {
+fn branch_node_children(prefix: Nibbles, node: &BranchNode) -> Vec<(Nibbles, &[u8])> {
     let mut children = Vec::with_capacity(node.state_mask.count_ones() as usize);
     let mut stack_ptr = node.as_ref().first_child_index();
     for index in CHILD_INDEX_RANGE {
         if node.state_mask.is_bit_set(index) {
             let mut child_path = prefix.clone();
             child_path.push(index);
-            children.push((child_path, B256::from_slice(&node.stack[stack_ptr][1..])));
+            children.push((child_path, &node.stack[stack_ptr][..]));
             stack_ptr += 1;
         }
     }
