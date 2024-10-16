@@ -263,7 +263,7 @@ mod tests {
         );
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;
         for block in &blocks {
             let mut block_receipts = Vec::with_capacity(block.body.transactions.len());

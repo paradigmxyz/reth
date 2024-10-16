@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
@@ -19,6 +17,7 @@ use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
+use std::collections::BTreeMap;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -229,7 +228,10 @@ where
                 TrieNode::Leaf(leaf) => {
                     next_path.extend_from_slice(&leaf.key);
                     if next_path != key {
-                        trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                        trie_nodes.insert(
+                            next_path.clone(),
+                            Either::Right(leaf.value.as_slice().to_vec()),
+                        );
                     }
                 }
                 TrieNode::EmptyRoot => {

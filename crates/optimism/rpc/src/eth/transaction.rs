@@ -40,7 +40,7 @@ where
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
-            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
             let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
                 });
@@ -81,17 +81,9 @@ impl<N> OpEthApi<N>
 where
     N: FullNodeComponents,
 {
-    /// Sets a [`SequencerClient`] for `eth_sendRawTransaction` to forward transactions to.
-    pub fn set_sequencer_client(
-        &self,
-        sequencer_client: SequencerClient,
-    ) -> Result<(), tokio::sync::SetError<SequencerClient>> {
-        self.sequencer_client.set(sequencer_client)
-    }
-
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.get().cloned()
+        self.sequencer_client.clone()
     }
 }
 

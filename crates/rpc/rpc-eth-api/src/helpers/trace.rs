@@ -1,12 +1,14 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
+use std::sync::Arc;
+
 use crate::FromEvmError;
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::Header;
+use reth_primitives::{Header, SealedBlockWithSenders};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -247,6 +249,7 @@ pub trait Trace: LoadState {
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
@@ -266,6 +269,7 @@ pub trait Trace: LoadState {
     {
         self.trace_block_until_with_inspector(
             block_id,
+            block,
             highest_index,
             move || TracingInspector::new(config),
             f,
@@ -285,6 +289,7 @@ pub trait Trace: LoadState {
     fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -305,8 +310,15 @@ pub trait Trace: LoadState {
         R: Send + 'static,
     {
         async move {
+            let block = async {
+                if block.is_some() {
+                    return Ok(block)
+                }
+                self.block_with_senders(block_id).await
+            };
+
             let ((cfg, block_env, _), block) =
-                futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
+                futures::try_join!(self.evm_env_at(block_id), block)?;
 
             let Some(block) = block else { return Ok(None) };
 
@@ -409,6 +421,7 @@ pub trait Trace: LoadState {
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         config: TracingInspectorConfig,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -427,7 +440,7 @@ pub trait Trace: LoadState {
             + 'static,
         R: Send + 'static,
     {
-        self.trace_block_until(block_id, None, config, f)
+        self.trace_block_until(block_id, block, None, config, f)
     }
 
     /// Executes all transactions of a block and returns a list of callback results invoked for each
@@ -447,6 +460,7 @@ pub trait Trace: LoadState {
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         insp_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -467,6 +481,6 @@ pub trait Trace: LoadState {
         Insp: for<'a, 'b> Inspector<StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
-        self.trace_block_until_with_inspector(block_id, None, insp_setup, f)
+        self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
 }
