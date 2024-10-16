@@ -656,7 +656,6 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_primitives::{Receipt, Receipts, TxType};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
@@ -789,7 +788,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn receipts_by_block_hash() {
+        use reth_primitives::{Receipt, Receipts, TxType};
+
         // Create a default SealedBlockWithSenders object
         let block = SealedBlockWithSenders::default();
 
@@ -811,10 +813,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create another random receipt object, receipt2
@@ -823,10 +821,6 @@ mod tests {
             cumulative_gas_used: 1325345,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors

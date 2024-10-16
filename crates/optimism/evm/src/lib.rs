@@ -204,12 +204,13 @@ mod tests {
     use super::*;
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, KECCAK_EMPTY,
+        Header, Receipt, Receipts, SealedBlockWithSenders, TxType, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
@@ -237,7 +238,7 @@ mod tests {
         // Build the ChainSpec for Ethereum mainnet, activating London, Paris, and Shanghai
         // hardforks
         let chain_spec = ChainSpec::builder()
-            .chain(Chain::mainnet())
+            .chain(0.into())
             .genesis(Genesis::default())
             .london_activated()
             .paris_activated()
@@ -539,5 +540,80 @@ mod tests {
 
         // Optimism in handler
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::ECOTONE, is_optimism: true });
+    }
+
+    #[test]
+    fn receipts_by_block_hash() {
+        // Create a default SealedBlockWithSenders object
+        let block = SealedBlockWithSenders::default();
+
+        // Define block hashes for block1 and block2
+        let block1_hash = B256::new([0x01; 32]);
+        let block2_hash = B256::new([0x02; 32]);
+
+        // Clone the default block into block1 and block2
+        let mut block1 = block.clone();
+        let mut block2 = block;
+
+        // Set the hashes of block1 and block2
+        block1.block.header.set_block_number(10);
+        block1.block.header.set_hash(block1_hash);
+
+        block2.block.header.set_block_number(11);
+        block2.block.header.set_hash(block2_hash);
+
+        // Create a random receipt object, receipt1
+        let receipt1 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create another random receipt object, receipt2
+        let receipt2 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 1325345,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts =
+            Receipts { receipt_vec: vec![vec![Some(receipt1.clone())], vec![Some(receipt2)]] };
+
+        // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
+        // vector, and first_block set to 10
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
+        // including block1_hash and block2_hash, and the execution_outcome
+        let chain = Chain::new([block1, block2], execution_outcome.clone(), None);
+
+        // Assert that the proper receipt vector is returned for block1_hash
+        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
+
+        // Create an ExecutionOutcome object with a single receipt vector containing receipt1
+        let execution_outcome1 = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts { receipt_vec: vec![vec![Some(receipt1)]] },
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Assert that the execution outcome at the first block contains only the first receipt
+        assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));
+
+        // Assert that the execution outcome at the tip block contains the whole execution outcome
+        assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
     }
 }

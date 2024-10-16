@@ -1,4 +1,10 @@
 //! EVM config for vanilla ethereum.
+//!
+//! # Revm features
+//!
+//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
+//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
+//! proper features are selected.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
