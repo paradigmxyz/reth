@@ -243,7 +243,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = b.len();
 
