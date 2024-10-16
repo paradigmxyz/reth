@@ -11,10 +11,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{
-    collections::{HashSet, VecDeque},
-    fmt,
-};
+use std::{collections::HashSet, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -272,7 +269,7 @@ impl RevealedSparseTrie {
         let mut removed_nodes = self.take_nodes_for_path(&path)?;
         debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
-        let Some(mut child) = removed_nodes.pop_back() else { return Ok(()) };
+        let Some(mut child) = removed_nodes.pop() else { return Ok(()) };
         #[cfg(debug_assertions)]
         {
             let mut child_path = child.path.clone();
@@ -283,7 +280,7 @@ impl RevealedSparseTrie {
 
         // Walk the stack of removed nodes from the back and re-insert them back into the trie,
         // adjusting the node type as needed.
-        while let Some(removed_node) = removed_nodes.pop_back() {
+        while let Some(removed_node) = removed_nodes.pop() {
             let removed_path = removed_node.path;
 
             let new_node = match &removed_node.node {
@@ -414,12 +411,9 @@ impl RevealedSparseTrie {
     }
 
     /// Traverse trie nodes down to the leaf node and collect all nodes along the path.
-    fn take_nodes_for_path(
-        &mut self,
-        path: &Nibbles,
-    ) -> SparseTrieResult<VecDeque<RemovedSparseNode>> {
+    fn take_nodes_for_path(&mut self, path: &Nibbles) -> SparseTrieResult<Vec<RemovedSparseNode>> {
         let mut current = Nibbles::default(); // Start traversal from the root
-        let mut nodes = VecDeque::new(); // Collect traversed nodes
+        let mut nodes = Vec::new(); // Collect traversed nodes
 
         while let Some(node) = self.nodes.remove(&current) {
             match &node {
@@ -438,7 +432,7 @@ impl RevealedSparseTrie {
                         assert_eq!(&current, path);
                     }
 
-                    nodes.push_back(RemovedSparseNode {
+                    nodes.push(RemovedSparseNode {
                         path: current.clone(),
                         node,
                         unset_branch_nibble: None,
@@ -455,7 +449,7 @@ impl RevealedSparseTrie {
 
                     let key = key.clone();
 
-                    nodes.push_back(RemovedSparseNode {
+                    nodes.push(RemovedSparseNode {
                         path: current.clone(),
                         node,
                         unset_branch_nibble: None,
@@ -487,7 +481,7 @@ impl RevealedSparseTrie {
                         })
                         .then_some(nibble);
 
-                    nodes.push_back(RemovedSparseNode {
+                    nodes.push(RemovedSparseNode {
                         path: current.clone(),
                         node,
                         unset_branch_nibble,
