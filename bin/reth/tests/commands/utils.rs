@@ -21,12 +21,12 @@ use reth_db_common::init::init_genesis;
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
 use reth_errors::BlockExecutionError;
 use reth_evm::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-    BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider}, BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_tracing::{FileWorkerGuard, LayerInfo, LogFormat, RethTracer, Tracer};
@@ -38,13 +38,12 @@ pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 /// EVM block extractor for devnet running on Digital Ocean.
 pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
 
-
 pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
     let stdout = LayerInfo::new(
         LogFormat::Terminal,
         "info".to_string(),
-        "".to_string(),
+        String::new(),
         Some("always".to_string()),
     );
     tracer = tracer.with_stdout(stdout);
@@ -57,6 +56,7 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
 pub struct ImportData {
     pub chain: Arc<ChainSpec>,
     pub data_dir: ChainPath<DataDirPath>,
+    pub database: Arc<DatabaseEnv>,
     pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
     pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
     pub bitfinity_args: BitfinityImportArgs,
@@ -96,7 +96,7 @@ pub async fn import_blocks(
 }
 
 /// Initializes the database and the blockchain tree for the bitfinity import tests.
-/// If a data_dir is provided, it will be used, otherwise a temporary directory will be created.
+/// If a `data_dir` is provided, it will be used, otherwise a temporary directory will be created.
 pub async fn bitfinity_import_config_data(
     evm_datasource_url: &str,
     data_dir: Option<PathBuf>,
@@ -106,16 +106,19 @@ pub async fn bitfinity_import_config_data(
 
     let temp_dir = TempDir::new().unwrap();
 
-    let data_dir = data_dir.unwrap_or(temp_dir.path().to_path_buf());
+    let data_dir = data_dir.unwrap_or_else(|| temp_dir.path().to_path_buf());
     let data_dir: PlatformPath<DataDirPath> =
         PlatformPath::from_str(data_dir.as_os_str().to_str().unwrap())?;
-    let data_dir = ChainPath::new(data_dir, chain.chain.clone(), Default::default());
+    let data_dir = ChainPath::new(data_dir, chain.chain, Default::default());
 
     let db_path = data_dir.db();
 
-    let db = Arc::new(init_db(db_path, Default::default())?);
-    let provider_factory =
-        ProviderFactory::new(db.clone(), chain.clone(), StaticFileProvider::read_write(data_dir.static_files())?);
+    let database = Arc::new(init_db(db_path, Default::default())?);
+    let provider_factory = ProviderFactory::new(
+        database.clone(),
+        chain.clone(),
+        StaticFileProvider::read_write(data_dir.static_files())?,
+    );
 
     init_genesis(provider_factory.clone())?;
 
@@ -125,14 +128,12 @@ pub async fn bitfinity_import_config_data(
 
     let blockchain_tree =
         Arc::new(ShareableBlockchainTree::new(reth_blockchain_tree::BlockchainTree::new(
-            TreeExternals::new(provider_factory.clone(), consensus.clone(), executor),
+            TreeExternals::new(provider_factory.clone(), consensus, executor),
             BlockchainTreeConfig::default(),
             None,
         )?));
 
     let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
-
-    // blockchain_db.update_chain_info()?;
 
     let bitfinity_args = BitfinityImportArgs {
         rpc_url: evm_datasource_url.to_string(),
@@ -144,7 +145,7 @@ pub async fn bitfinity_import_config_data(
         ic_root_key: IC_MAINNET_KEY.to_string(),
     };
 
-    Ok((temp_dir, ImportData { data_dir, chain, provider_factory, blockchain_db, bitfinity_args }))
+    Ok((temp_dir, ImportData { data_dir, database, chain, provider_factory, blockchain_db, bitfinity_args }))
 }
 
 /// Waits until the block is imported.
@@ -161,9 +162,7 @@ pub async fn wait_until_local_block_imported(
             break;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        if now.elapsed() > timeout {
-            panic!("Timeout waiting for the last block to be imported. Waiting for block: {} but last block found was {}", block, last_block);
-        }
+        assert!(now.elapsed() <= timeout, "Timeout waiting for the last block to be imported. Waiting for block: {} but last block found was {}", block, last_block)
     }
 }
 
@@ -180,8 +179,8 @@ pub fn get_dfx_local_port() -> u16 {
     u16::from_str(port.trim()).unwrap()
 }
 
-/// A [BlockExecutorProvider] that returns mocked execution results.
-/// Original code taken from ./crates/evm/src/test_utils.rs
+/// A [`BlockExecutorProvider`] that returns mocked execution results.
+/// Original code taken from ./`crates/evm/src/test_utils.rs`
 #[derive(Clone, Debug, Default)]
 struct MockExecutorProvider {
     exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
@@ -194,14 +193,14 @@ impl BlockExecutorProvider for MockExecutorProvider {
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
-    DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         self.clone()
     }
 
     fn batch_executor<DB>(&self, _: DB, _: PruneModes) -> Self::BatchExecutor<DB>
     where
-    DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         self.clone()
     }
@@ -214,7 +213,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
-        self.exec_results.lock().pop().unwrap();
+            self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),

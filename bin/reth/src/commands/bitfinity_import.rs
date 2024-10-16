@@ -55,7 +55,7 @@ pub struct BitfinityImportCommand {
     blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
 }
 
-/// Manually implement `Debug` for `ImportCommand` because BlockchainProvider doesn't implement it.
+/// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement it.
 impl std::fmt::Debug for BitfinityImportCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ImportCommand")
@@ -78,7 +78,7 @@ impl BitfinityImportCommand {
         blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
     ) -> Self {
         // add network name to data dir
-        let config_path = config.clone().unwrap_or(datadir.config());
+        let config_path = config.unwrap_or_else(|| datadir.config());
 
         info!(target: "reth::cli - BitfinityImportCommand", path = ?config_path, "Configuration loaded");
         let mut config: Config = confy::load_path(config_path)
@@ -181,9 +181,13 @@ impl BitfinityImportCommand {
     fn update_chain_info(&self) -> eyre::Result<()> {
         let provider = self.blockchain_provider.database_provider_ro()?;
         let chain_info = provider.chain_info()?;
+
         match provider.header_by_number(chain_info.best_number)? {
             Some(header) => {
-                self.blockchain_provider.set_canonical_head(header.seal(chain_info.best_hash));
+                let sealed_header = header.seal(chain_info.best_hash);
+                self.blockchain_provider.set_canonical_head(sealed_header.clone());
+                self.blockchain_provider.set_finalized(sealed_header.clone());
+                self.blockchain_provider.set_safe(sealed_header);
                 Ok(())
             }
             None => Err(ProviderError::HeaderNotFound(chain_info.best_number.into()))?,
