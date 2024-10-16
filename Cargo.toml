@@ -530,14 +530,14 @@ iai-callgrind = "0.11"
 # Bitfinity Deps
 async-channel = "2"
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", features = ["alloy-primitives-07"], branch = "alloy_types_08" }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", features = ["alloy-primitives-07"], tag = "v0.34.x" }
 dirs = "5.0.1"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch = "alloy_types_08", features = [
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.34.x", features = [
     "reqwest",
 ] }
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
-], branch = "alloy_types_08" }
+], tag = "v0.34.x" }
 ic-cbor = "2.3"
 ic-certificate-verification = "2.3"
 ic-certification = "2.3"
