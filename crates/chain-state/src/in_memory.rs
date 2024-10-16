@@ -713,7 +713,7 @@ impl BlockState {
     /// This merges the state of all blocks that are part of the chain that the this block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider {
-        let in_memory = self.chain().into_iter().map(|block_state| block_state.block()).collect();
+        let in_memory = self.chain().map(|block_state| block_state.block()).collect();
 
         MemoryOverlayStateProvider::new(historical, in_memory)
     }

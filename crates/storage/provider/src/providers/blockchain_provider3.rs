@@ -60,24 +60,6 @@ pub struct BlockchainProvider3<N: ProviderNodeTypes> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
-    fn in_memory_chain(&self) -> Arc<Vec<Arc<BlockState>>> {
-        let chain = self.memory_chain.read();
-        if let Some(head_block) = &self.head_block {
-            if chain.is_empty() {
-                drop(chain);
-                let mut chain = self.memory_chain.write();
-                *chain = Arc::new(head_block.clone().iter().collect::<Vec<_>>());
-                return chain.clone()
-            }
-        }
-        chain.clone()
-    }
-}
-
-impl<N> BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
     /// Create a new provider using only the database, fetching the latest header from
     /// the database to initialize the provider.
     pub fn new(
@@ -93,6 +75,19 @@ where
             canonical_in_memory_state: state,
             memory_chain: RwLock::new(Arc::new(vec![])),
         })
+    }
+
+    fn in_memory_chain(&self) -> Arc<Vec<Arc<BlockState>>> {
+        let chain = self.memory_chain.read();
+        if let Some(head_block) = &self.head_block {
+            if chain.is_empty() {
+                drop(chain);
+                let mut chain = self.memory_chain.write();
+                *chain = Arc::new(head_block.clone().iter().collect::<Vec<_>>());
+                return chain.clone()
+            }
+        }
+        chain.clone()
     }
 
     // Helper function to convert range bounds
@@ -118,12 +113,7 @@ where
 
         (start, end)
     }
-}
 
-impl<N> BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
     ///
     /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
@@ -197,12 +187,73 @@ where
             Vec::new(),
         )))
     }
-}
 
-impl<N> BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
+    /// [`reth_db::PlainAccountState`] and [`reth_db::PlainStorageState`] tables, based on the given
+    /// storage and account changesets.
+    fn populate_bundle_state(
+        &self,
+        account_changeset: Vec<(u64, AccountBeforeTx)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+        block_range_end: BlockNumber,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+        let mut state: BundleStateInit = HashMap::new();
+        let mut reverts: RevertsInit = HashMap::new();
+        let state_provider = self.state_by_block_number_or_tag(block_range_end.into())?;
+
+        // add account changeset changes
+        for (block_number, account_before) in account_changeset.into_iter().rev() {
+            let AccountBeforeTx { info: old_info, address } = account_before;
+            match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_info = state_provider.basic_account(address)?;
+                    entry.insert((old_info, new_info, HashMap::new()));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    // overwrite old account state.
+                    entry.get_mut().0 = old_info;
+                }
+            }
+            // insert old info into reverts.
+            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+        }
+
+        // add storage changeset changes
+        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
+            let BlockNumberAddress((block_number, address)) = block_and_address;
+            // get account state or insert from plain state.
+            let account_state = match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let present_info = state_provider.basic_account(address)?;
+                    entry.insert((present_info, present_info, HashMap::new()))
+                }
+                hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            };
+
+            // match storage.
+            match account_state.2.entry(old_storage.key) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_storage_value =
+                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
+                    entry.insert((old_storage.value, new_storage_value));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().0 = old_storage.value;
+                }
+            };
+
+            reverts
+                .entry(block_number)
+                .or_default()
+                .entry(address)
+                .or_default()
+                .1
+                .push(old_storage);
+        }
+
+        Ok((state, reverts))
+    }
+
     /// Fetches a range of data from both in-memory state and persistent storage while a predicate
     /// is met.
     ///
@@ -314,6 +365,16 @@ where
         }
 
         Ok(items)
+    }
+
+    /// This uses a given [`BlockState`] to initialize a state provider for that block.
+    fn block_state_provider(
+        &self,
+        state: &BlockState,
+    ) -> ProviderResult<MemoryOverlayStateProvider> {
+        let anchor_hash = state.anchor().hash;
+        let latest_historical = self.storage_provider_factory.history_by_block_hash(anchor_hash)?;
+        Ok(state.state_provider(latest_historical))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
@@ -499,7 +560,6 @@ where
         S: FnOnce(&DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
         M: Fn(&BlockState) -> ProviderResult<R>,
     {
-        dbg!(&self.head_block.is_some());
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
             return fetch_from_block_state(block_state)
         }
@@ -507,92 +567,7 @@ where
     }
 }
 
-impl<N> BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
-    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
-    /// [`reth_db::PlainAccountState`] and [`reth_db::PlainStorageState`] tables, based on the given
-    /// storage and account changesets.
-    fn populate_bundle_state(
-        &self,
-        account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        block_range_end: BlockNumber,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        let mut state: BundleStateInit = HashMap::new();
-        let mut reverts: RevertsInit = HashMap::new();
-        let state_provider = self.state_by_block_number_or_tag(block_range_end.into())?;
-
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = state_provider.basic_account(address)?;
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = state_provider.basic_account(address)?;
-                    entry.insert((present_info, present_info, HashMap::new()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage_value =
-                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage_value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
-
-        Ok((state, reverts))
-    }
-
-    /// This uses a given [`BlockState`] to initialize a state provider for that block.
-    fn block_state_provider(
-        &self,
-        state: &BlockState,
-    ) -> ProviderResult<MemoryOverlayStateProvider> {
-        let anchor_hash = state.anchor().hash;
-        let latest_historical = self.storage_provider_factory.history_by_block_hash(anchor_hash)?;
-        // TODO (joshie): mv state_provider_from_state to BlockState and/or block_state_provider
-        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
-    }
-}
-
-impl<N> BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> BlockchainProvider3<N> {
     /// Ensures that the given block number is canonical (synced)
     ///
     /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
@@ -612,19 +587,13 @@ where
     }
 }
 
-impl<N> StaticFileProviderFactory for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider3<N> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.storage_provider.static_file_provider()
     }
 }
 
-impl<N> HeaderProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider3<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
@@ -650,8 +619,8 @@ where
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        // TODO(joshie): this needs to search our head.chain() for number
-        let number = if self.canonical_in_memory_state.hash_by_number(number).is_some() {
+        let number = if self.head_block.as_ref().map(|b| b.block_on_chain(number.into())).is_some()
+        {
             // If the block exists in memory, we should return a TD for it.
             //
             // The canonical in memory state should only store post-merge blocks. Post-merge blocks
@@ -718,10 +687,7 @@ where
     }
 }
 
-impl<N> BlockHashReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider3<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
@@ -747,10 +713,7 @@ where
     }
 }
 
-impl<N> BlockNumReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider3<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         Ok(self.canonical_in_memory_state.chain_info())
     }
@@ -761,7 +724,6 @@ where
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        // TODO(joshie): self.head?
         self.storage_provider.last_block_number()
     }
 
@@ -774,10 +736,7 @@ where
     }
 }
 
-impl<N> BlockIdReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider3<N> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.canonical_in_memory_state.pending_block_num_hash())
     }
@@ -791,10 +750,7 @@ where
     }
 }
 
-impl<N> BlockReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider3<N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
@@ -944,10 +900,7 @@ where
     }
 }
 
-impl<N> TransactionsProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider3<N> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.get_in_memory_or_storage_by_tx(
             tx_hash.into(),
@@ -1075,10 +1028,7 @@ where
     }
 }
 
-impl<N> ReceiptProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider3<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
@@ -1090,25 +1040,22 @@ where
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        if let Some(head_block) = &self.head_block {
-            for block_state in head_block.chain() {
-                let executed_block = block_state.block_ref();
-                let block = executed_block.block();
-                let receipts = block_state.executed_block_receipts();
+        for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
+            let executed_block = block_state.block_ref();
+            let block = executed_block.block();
+            let receipts = block_state.executed_block_receipts();
 
-                // assuming 1:1 correspondence between transactions and receipts
-                debug_assert_eq!(
-                    block.body.transactions.len(),
-                    receipts.len(),
-                    "Mismatch between transaction and receipt count"
-                );
+            // assuming 1:1 correspondence between transactions and receipts
+            debug_assert_eq!(
+                block.body.transactions.len(),
+                receipts.len(),
+                "Mismatch between transaction and receipt count"
+            );
 
-                if let Some(tx_index) =
-                    block.body.transactions.iter().position(|tx| tx.hash() == hash)
-                {
-                    // safe to use tx_index for receipts due to 1:1 correspondence
-                    return Ok(receipts.get(tx_index).cloned());
-                }
+            if let Some(tx_index) = block.body.transactions.iter().position(|tx| tx.hash() == hash)
+            {
+                // safe to use tx_index for receipts due to 1:1 correspondence
+                return Ok(receipts.get(tx_index).cloned());
             }
         }
 
@@ -1137,10 +1084,7 @@ where
     }
 }
 
-impl<N> ReceiptProviderIdExt for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider3<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
@@ -1171,10 +1115,7 @@ where
     }
 }
 
-impl<N> WithdrawalsProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider3<N> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1210,10 +1151,7 @@ where
     }
 }
 
-impl<N> RequestsProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider3<N> {
     fn requests_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1231,10 +1169,7 @@ where
     }
 }
 
-impl<N> StageCheckpointReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider3<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.storage_provider.get_stage_checkpoint(id)
     }
@@ -1248,10 +1183,7 @@ where
     }
 }
 
-impl<N> EvmEnvProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider3<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -1315,10 +1247,7 @@ where
     }
 }
 
-impl<N> PruneCheckpointReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider3<N> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -1331,10 +1260,7 @@ where
     }
 }
 
-impl<N> ChainSpecProvider for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> ChainSpecProvider for BlockchainProvider3<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
@@ -1342,14 +1268,10 @@ where
     }
 }
 
-impl<N> StateProviderFactory for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider3<N> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
-
         // use latest state provider if the head state exists
         if let Some(state) = &self.head_block {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
@@ -1377,10 +1299,7 @@ where
 
         self.get_in_memory_or_storage_by_block(
             block_hash.into(),
-            |_| {
-                // TODO(joshie): port history_by_block_hash to DatabaseProvider and use db_provider
-                self.storage_provider_factory.history_by_block_hash(block_hash)
-            },
+            |_| self.storage_provider_factory.history_by_block_hash(block_hash),
             |block_state| {
                 let state_provider = self.block_state_provider(block_state)?;
                 Ok(Box::new(state_provider))
@@ -1457,10 +1376,7 @@ where
     }
 }
 
-impl<N> CanonChainTracker for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider3<N> {
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
         // update timestamp
         self.canonical_in_memory_state.on_forkchoice_update_received();
@@ -1491,10 +1407,7 @@ where
     }
 }
 
-impl<N> BlockReaderIdExt for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider3<N> {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
@@ -1593,19 +1506,13 @@ where
     }
 }
 
-impl<N> CanonStateSubscriptions for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider3<N> {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
 }
 
-impl<N> ForkChoiceSubscriptions for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider3<N> {
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let receiver = self.canonical_in_memory_state.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
@@ -1617,10 +1524,7 @@ where
     }
 }
 
-impl<N> StorageChangeSetReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider3<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
@@ -1673,10 +1577,7 @@ where
     }
 }
 
-impl<N> ChangeSetReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider3<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -1722,10 +1623,7 @@ where
     }
 }
 
-impl<N> AccountReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider3<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         // use latest state provider
@@ -1734,10 +1632,7 @@ where
     }
 }
 
-impl<N> StateReader for BlockchainProvider3<N>
-where
-    N: ProviderNodeTypes,
-{
+impl<N: ProviderNodeTypes> StateReader for BlockchainProvider3<N> {
     /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
     ///
     /// If data for the block does not exist, this will return [`None`].
@@ -1986,7 +1881,7 @@ mod tests {
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
     fn persist_block_after_db_tx_creation(
-        provider: Arc<BlockchainProviderFactory<MockNodeTypesWithDB>>,
+        provider: BlockchainProviderFactory<MockNodeTypesWithDB>,
         block_number: BlockNumber,
     ) {
         let hook_provider = provider.clone();
@@ -3204,7 +3099,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3319,7 +3213,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3445,7 +3338,6 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let provider = Arc::new(provider);
 
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
@@ -3747,8 +3639,6 @@ mod tests {
             },
         )?;
 
-        let provider = Arc::new(provider);
-
         // Old implementation was querying the database first. This is problematic, if there are
         // changes AFTER the database transaction is created.
         let old_transaction_hash_fn =
@@ -3801,7 +3691,7 @@ mod tests {
                 correct_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
-                    provider.database.clone()
+                    provider.database
                 ),
                 Ok(Some(to_be_persisted_tx))
             );
