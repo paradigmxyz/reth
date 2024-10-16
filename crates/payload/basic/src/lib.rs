@@ -321,8 +321,8 @@ where
     deadline: Pin<Box<Sleep>>,
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
-    /// The best payload so far, including its state (current or frozen).
-    best_payload: Option<BestPayloadState<Builder::BuiltPayload>>,
+    /// The best payload so far.
+    best_payload: Option<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -715,13 +715,6 @@ pub enum BuildOutcome<Payload> {
     },
     /// Build job was cancelled
     Cancelled,
-    Freeze(Payload),
-}
-
-pub enum BestPayloadState<Payload> {
-    None,
-    Current(Payload),
-    Frozen(Payload),
 }
 
 impl<Payload> BuildOutcome<Payload> {
