@@ -269,7 +269,7 @@ impl RevealedSparseTrie {
         let mut removed_nodes = self.take_nodes_for_path(&path)?;
         debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
-        let mut child = removed_nodes.pop().expect("trie has at least a root node");
+        let mut child = removed_nodes.pop().expect("leaf exists");
         #[cfg(debug_assertions)]
         {
             let mut child_path = child.path.clone();
