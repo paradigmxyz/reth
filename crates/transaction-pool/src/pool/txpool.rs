@@ -2804,20 +2804,24 @@ mod tests {
 
         // Get last consecutive transaction
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let next_tx = pool.get_highest_consecutive_transaction_by_sender(sender_id.into_id(0));
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(0));
         assert_eq!(next_tx.map(|tx| tx.nonce()), Some(2), "Expected nonce 2 for on-chain nonce 0");
 
-        let next_tx = pool.get_highest_consecutive_transaction_by_sender(sender_id.into_id(4));
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(4));
         assert_eq!(next_tx.map(|tx| tx.nonce()), Some(5), "Expected nonce 5 for on-chain nonce 4");
 
-        let next_tx = pool.get_highest_consecutive_transaction_by_sender(sender_id.into_id(5));
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
         assert_eq!(next_tx.map(|tx| tx.nonce()), Some(5), "Expected nonce 5 for on-chain nonce 5");
 
         // update the tracked nonce
         let mut info = SenderInfo::default();
         info.update(8, U256::ZERO);
         pool.sender_info.insert(sender_id, info);
-        let next_tx = pool.get_highest_consecutive_transaction_by_sender(sender_id.into_id(5));
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
         assert_eq!(next_tx.map(|tx| tx.nonce()), Some(9), "Expected nonce 9 for on-chain nonce 8");
     }
 
