@@ -5,6 +5,7 @@ use crate::{
     EIP7702_TX_TYPE_ID,
 };
 use alloc::{vec, vec::Vec};
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Bytes, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
@@ -204,41 +205,14 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-/// A trait for enveloped encoding of receipts.
-pub trait EnvelopedEncoding {
-    /// Returns the enveloped encoded receipt.
-    fn envelope_encoded(&self) -> Bytes;
-
-    /// Encodes the receipt into its "raw" format.
-    fn encode_enveloped(&self, out: &mut dyn bytes::BufMut);
-}
-
-// Implement the trait for ReceiptWithBloom
-impl EnvelopedEncoding for ReceiptWithBloom {
-    /// Encodes the receipt into its "raw" format.
-    /// This format is also referred to as "binary" encoding.
-    ///
-    /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
-    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
-    /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
-    /// of the receipt:
-    /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
-    ///   logsBloom, logs])`
-    fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
-    }
-
-    fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
-        self.encode_inner(out, false)
-    }
-}
-
 impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
+    }
+
+    fn encode_inner_len(&self, _with_header: bool) -> usize {
+        self.as_encoder().length()
     }
 
     /// Decodes the receipt payload
@@ -295,6 +269,41 @@ impl ReceiptWithBloom {
         }
         *buf = *b;
         Ok(this)
+    }
+}
+
+impl Encodable2718 for ReceiptWithBloom {
+    /// Return the type flag for the receipt.
+    /// This could be `None` for legacy receipts or a specific byte for typed receipts.
+    fn type_flag(&self) -> Option<u8> {
+        match self.receipt.tx_type {
+            TxType::Legacy => None,
+            TxType::Eip2930 => Some(EIP2930_TX_TYPE_ID),
+            TxType::Eip1559 => Some(EIP1559_TX_TYPE_ID),
+            TxType::Eip4844 => Some(EIP4844_TX_TYPE_ID),
+            TxType::Eip7702 => Some(EIP7702_TX_TYPE_ID),
+            #[cfg(feature = "optimism")]
+            TxType::Deposit => Some(crate::transaction::DEPOSIT_TX_TYPE_ID),
+        }
+    }
+
+    /// Calculate the length of the 2718 encoded envelope.
+    fn encode_2718_len(&self) -> usize {
+        let payload_len = self.encode_inner_len(false);
+        if self.type_flag().is_some() {
+            // Add 1 for the type flag byte
+            payload_len + 1
+        } else {
+            payload_len
+        }
+    }
+
+    /// Encode the transaction according to EIP-2718 rules.
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        if let Some(type_flag) = self.type_flag() {
+            out.put_u8(type_flag);
+        }
+        self.encode_inner(out, false);
     }
 }
 

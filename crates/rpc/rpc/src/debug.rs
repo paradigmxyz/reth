@@ -18,9 +18,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{
-    Block, BlockId, BlockNumberOrTag, EnvelopedEncoding, TransactionSignedEcRecovered,
-};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
@@ -893,7 +891,11 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| receipt.with_bloom().envelope_encoded())
+            .map(|receipt| {
+                let mut out = vec![];
+                receipt.with_bloom().encode_2718(&mut out);
+                out.into()
+            })
             .collect())
     }
 
