@@ -78,12 +78,12 @@ pub trait EthFees: LoadFee {
             base_fee_per_blob_gas,
             blob_gas_used_ratio,
             rewards,
-            excess_blob_gas: todo!(),
-            blob_gas_used: todo!(),
-            gas_used: todo!(),
-            gas_limit: todo!(),
-            header_hash: todo!(),
-            timestamp: todo!(),
+            excess_blob_gas: header.blob_gas_used,
+            blob_gas_used: header.blob_gas_used,
+            gas_used: header.gas_used,
+            gas_limit: header.gas_limit,
+            header_hash: header.hash(),
+            timestamp: header.timestamp,
         })
     }
 
