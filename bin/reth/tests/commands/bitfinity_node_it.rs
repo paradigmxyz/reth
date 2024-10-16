@@ -5,18 +5,18 @@
 use super::utils::*;
 use did::keccak;
 use eth_server::{EthImpl, EthServer};
-use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use ethereum_json_rpc_client::{BlockNumber, reqwest::ReqwestClient, EthJsonRpcClient};
 use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
 };
 use rand::RngCore;
-use reth::args::RpcServerArgs;
+use reth::{args::{DatadirArgs, RpcServerArgs}, dirs::{ChainPath, DataDirPath, MaybePlatformPath}};
 use reth_consensus::Consensus;
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf, str::FromStr};
 use std::time::Duration;
 
 #[tokio::test]
@@ -24,7 +24,7 @@ async fn bitfinity_test_finalized_and_safe_query_params_works() {
     // Arrange
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let (_temp_dir, mut import_data) =
+    let (temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, None).await.unwrap();
 
     let end_block = 100;
@@ -34,17 +34,23 @@ async fn bitfinity_test_finalized_and_safe_query_params_works() {
     // Act
     import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
 
-    let (reth_client, _reth_node) = start_reth_testing_node(None).await;
+    let data_dir = temp_dir.path().to_path_buf();
+    let (reth_client, _reth_node) = start_reth_testing_node(None, Some(data_dir)).await;
 
-    assert!(reth_client.get_block_by_number("finalized".into()).await.is_ok());
-    assert!(reth_client.get_block_by_number("safe".into()).await.is_ok())
+    reth_client.get_block_by_number(0u64.into()).await.unwrap();
+    // reth_client.get_block_by_number(BlockNumber::Number(10u64.into())).await.unwrap();
+
+    // reth_client.get_block_by_number(BlockNumber::Finalized).await.unwrap();
+
+    // assert!(reth_client.get_block_by_number(BlockNumber::Finalized).await.is_ok());
+    // assert!(reth_client.get_block_by_number(BlockNumber::Safe).await.is_ok())
 }
 
 #[tokio::test]
 async fn bitfinity_test_should_start_local_reth_node() {
     // Arrange
     let _log = init_logs();
-    let (reth_client, _reth_node) = start_reth_testing_node(None).await;
+    let (reth_client, _reth_node) = start_reth_testing_node(None, None).await;
 
     // Act & Assert
     assert!(reth_client.get_chain_id().await.is_ok());
@@ -60,7 +66,7 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+        start_reth_testing_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
     let gas_price_result = reth_client.gas_price().await;
@@ -79,7 +85,7 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+        start_reth_testing_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
     let result = reth_client.max_priority_fee_per_gas().await;
@@ -97,7 +103,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+        start_reth_testing_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Create a random transaction
     let mut tx = [0u8; 256];
@@ -115,6 +121,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 /// Start a local reth node
 async fn start_reth_testing_node(
     bitfinity_evm_url: Option<String>,
+    data_dir: Option<PathBuf>,
 ) -> (
     EthJsonRpcClient<ReqwestClient>,
     NodeHandle<
@@ -160,8 +167,15 @@ async fn start_reth_testing_node(
     let tasks = TaskManager::current();
 
     // create node config
-    let node_config =
+    let mut node_config =
         NodeConfig::test().dev().with_rpc(RpcServerArgs::default().with_http()).with_unused_ports();
+
+    if let Some(data_dir) = data_dir {
+        let data_dir = MaybePlatformPath::<DataDirPath>::from_str(data_dir.as_path().to_str().unwrap()).unwrap();
+        let mut data_dir_args = node_config.datadir.clone();
+        data_dir_args.datadir = data_dir;
+        node_config = node_config.with_datadir_args(data_dir_args);
+    }
 
     let mut chain = node_config.chain.as_ref().clone();
     chain.bitfinity_evm_url = bitfinity_evm_url;

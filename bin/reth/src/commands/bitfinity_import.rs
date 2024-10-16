@@ -181,6 +181,9 @@ impl BitfinityImportCommand {
     pub fn update_chain_info(&self) -> eyre::Result<()> {
         let provider = self.blockchain_provider.database_provider_ro()?;
         let chain_info = provider.chain_info()?;
+
+        println!("update_chain_info to best_number: {:?}", chain_info.best_number);
+
         match provider.header_by_number(chain_info.best_number)? {
             Some(header) => {
                 let sealed_header = header.seal(chain_info.best_hash);
