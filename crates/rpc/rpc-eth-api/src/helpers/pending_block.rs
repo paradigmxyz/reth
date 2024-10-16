@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
@@ -12,7 +13,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs::calculate_transaction_root,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
