@@ -156,7 +156,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(tx).load(range)?;
+        let loaded_prefix_sets = PrefixSetLoader::new(tx).load::<KeccakKeyHasher>(range)?;
         Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 

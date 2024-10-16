@@ -12,25 +12,23 @@ use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use reth_trie_common::{KeyHasher, Nibbles};
 use std::{
     collections::{HashMap, HashSet},
-    marker::PhantomData,
     ops::RangeInclusive,
 };
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
 #[derive(Debug)]
-pub struct PrefixSetLoader<'a, TX, KH> {
+pub struct PrefixSetLoader<'a, TX> {
     tx: &'a TX,
-    _key_hasher: PhantomData<KH>,
 }
 
-impl<'a, TX, KH> PrefixSetLoader<'a, TX, KH> {
+impl<'a, TX> PrefixSetLoader<'a, TX> {
     /// Create a new loader.
     pub const fn new(tx: &'a TX) -> Self {
-        Self { tx, _key_hasher: PhantomData }
+        Self { tx }
     }
 }
 
-impl<DbTx, KH> Deref for PrefixSetLoader<'_, DbTx, KH> {
+impl<DbTx> Deref for PrefixSetLoader<'_, DbTx> {
     type Target = DbTx;
 
     fn deref(&self) -> &Self::Target {
@@ -38,9 +36,12 @@ impl<DbTx, KH> Deref for PrefixSetLoader<'_, DbTx, KH> {
     }
 }
 
-impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
+impl<TX: DbTx> PrefixSetLoader<'_, TX> {
     /// Load all account and storage changes for the given block range.
-    pub fn load(self, range: RangeInclusive<BlockNumber>) -> Result<TriePrefixSets, DatabaseError> {
+    pub fn load<KH: KeyHasher>(
+        self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<TriePrefixSets, DatabaseError> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
         let mut storage_prefix_sets = HashMap::<B256, PrefixSetMut>::default();
