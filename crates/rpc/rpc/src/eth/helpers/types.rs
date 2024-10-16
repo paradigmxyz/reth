@@ -1,5 +1,6 @@
 //! L1 `eth` API types.
 
+use alloy_consensus::Transaction as _;
 use alloy_network::{AnyNetwork, Network};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{Transaction, TransactionInfo};
@@ -37,7 +38,7 @@ where
             Self::gas_price(&signed_tx, base_fee.map(|fee| fee as u64));
 
         let chain_id = signed_tx.chain_id();
-        let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
+        let blob_versioned_hashes = signed_tx.blob_versioned_hashes().map(|hashes| hashes.to_vec());
         let access_list = signed_tx.access_list().cloned();
         let authorization_list = signed_tx.authorization_list().map(|l| l.to_vec());
 
@@ -59,7 +60,7 @@ where
                 max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
                 signature: Some(signature),
                 gas: signed_tx.gas_limit(),
-                input: signed_tx.input().clone(),
+                input: signed_tx.input().to_vec().into(),
                 chain_id,
                 access_list,
                 transaction_type: Some(signed_tx.tx_type() as u8),

@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub use reth_primitives::traits::{Block, BlockBody};
+pub use reth_primitives_traits::{Block, BlockBody};
 
 use std::marker::PhantomData;
 
@@ -45,7 +45,6 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
-    // type Engine: EngineTypes;
 }
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the

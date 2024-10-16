@@ -36,7 +36,8 @@ use reth::{
     builder::{
         components::{ComponentsBuilder, EngineValidatorBuilder, PayloadServiceBuilder},
         node::{NodeTypes, NodeTypesWithEngine},
-        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
+        BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
+        PayloadBuilderConfig,
     },
     providers::{CanonStateSubscriptions, StateProviderFactory},
     tasks::TaskManager,
@@ -241,7 +242,9 @@ where
         EthereumConsensusBuilder,
         CustomEngineValidatorBuilder,
     >;
-    type AddOns = EthereumAddOns;
+    type AddOns = EthereumAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()

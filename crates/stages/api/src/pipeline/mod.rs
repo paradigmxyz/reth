@@ -7,8 +7,8 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
-    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StageCheckpointReader,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
+    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
     StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;

@@ -7,7 +7,7 @@ use alloc::{fmt, vec::Vec};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Sealable, B256};
 
-use crate::{traits::BlockBody, BlockWithSenders, SealedBlock};
+use crate::BlockBody;
 
 /// Helper trait, unifies behaviour required of a block header.
 pub trait Header: BlockHeader + Sealable {}
@@ -35,6 +35,12 @@ pub trait Block:
     /// The block's body contains the transactions in the block.
     type Body: BlockBody;
 
+    /// A block and block hash.
+    type SealedBlock<H, B>;
+
+    /// A block and addresses of senders of transactions in it.
+    type BlockWithSenders<T>;
+
     /// Returns reference to [`BlockHeader`] type.
     fn header(&self) -> &Self::Header;
 
@@ -42,11 +48,16 @@ pub trait Block:
     fn body(&self) -> &Self::Body;
 
     /// Calculate the header hash and seal the block so that it can't be changed.
-    fn seal_slow(self) -> SealedBlock;
+    // todo: can be default impl if sealed block type is made generic over header and body and
+    // migrated to alloy
+    fn seal_slow(self) -> Self::SealedBlock<Self::Header, Self::Body>;
+
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock;
+    // todo: can be default impl if sealed block type is made generic over header and body and
+    // migrated to alloy
+    fn seal(self, hash: B256) -> Self::SealedBlock<Self::Header, Self::Body>;
 
     /// Expensive operation that recovers transaction signer. See
     /// [`SealedBlockWithSenders`](crate::SealedBlockWithSenders).
@@ -63,7 +74,7 @@ pub trait Block:
     ///
     /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> Self::BlockWithSenders<Self> {
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
@@ -74,14 +85,21 @@ pub trait Block:
     /// See also [`TransactionSigned::recover_signer_unchecked`](crate::TransactionSigned).
     ///
     /// Returns an error if a signature is invalid.
+    // todo: can be default impl if block with senders type is made generic over block and migrated
+    // to alloy
     #[track_caller]
-    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<BlockWithSenders, Self>;
+    fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<Self::BlockWithSenders<Self>, Self>;
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<BlockWithSenders>;
+    // todo: can be default impl if sealed block type is made generic over header and body and
+    // migrated to alloy
+    fn with_recovered_senders(self) -> Option<Self::BlockWithSenders<Self>>;
 
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     fn size(&self) -> usize;

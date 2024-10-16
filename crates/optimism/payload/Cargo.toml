@@ -49,9 +49,8 @@ sha2.workspace = true
 
 [features]
 optimism = [
-    "reth-chainspec/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-optimism-evm/optimism",
-    "reth-revm/optimism",
+    "revm/optimism",
 ]
