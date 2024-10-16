@@ -732,10 +732,26 @@ mod tests {
         HashBuilder,
     };
 
-    /// Assert that the proof nodes from the hash builder and the sparse trie nodes are equal.
-    fn assert_eq_proof_nodes_sparse_trie(
-        proof_nodes: ProofNodes,
+    /// Calculate the state root by feeding the provided state to the hash builder and retaining the
+    /// proofs for the provided targets.
+    ///
+    /// Returns the state root and the retained proof nodes.
+    fn hash_builder_root_with_proofs<V: AsRef<[u8]>>(
+        state: impl IntoIterator<Item = (Nibbles, V)>,
+        proof_targets: impl IntoIterator<Item = Nibbles>,
+    ) -> (B256, ProofNodes) {
+        let mut hash_builder =
+            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter(proof_targets));
+        for (key, value) in state {
+            hash_builder.add_leaf(key, value.as_ref());
+        }
+        (hash_builder.root(), hash_builder.take_proof_nodes())
+    }
+
+    /// Assert that the sparse trie nodes and the proof nodes from the hash builder are equal.
+    fn assert_eq_sparse_trie_proof_nodes(
         sparse_trie: &RevealedSparseTrie,
+        proof_nodes: ProofNodes,
     ) {
         let proof_nodes = proof_nodes
             .into_nodes_sorted()
@@ -786,17 +802,15 @@ mod tests {
         let path = Nibbles::unpack(B256::with_last_byte(42));
         let value = alloy_rlp::encode_fixed_size(&U256::from(1));
 
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter([path.clone()]));
-        hash_builder.add_leaf(path.clone(), &value);
-        let hash_builder_root = hash_builder.root();
+        let (hash_builder_root, hash_builder_proof_nodes) =
+            hash_builder_root_with_proofs([(path.clone(), &value)], [path.clone()]);
 
         let mut sparse = RevealedSparseTrie::default();
         sparse.update_leaf(path, value.to_vec()).unwrap();
         let sparse_root = sparse.root();
-        assert_eq!(sparse_root, hash_builder_root);
 
-        assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
     #[test]
@@ -804,21 +818,19 @@ mod tests {
         let paths = (0..=16).map(|b| Nibbles::unpack(B256::with_last_byte(b))).collect::<Vec<_>>();
         let value = alloy_rlp::encode_fixed_size(&U256::from(1));
 
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter(paths.clone()));
-        for path in &paths {
-            hash_builder.add_leaf(path.clone(), &value);
-        }
-        let hash_builder_root = hash_builder.root();
+        let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+            paths.iter().cloned().zip(std::iter::repeat_with(|| value.clone())),
+            paths.clone(),
+        );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
             sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
         }
         let sparse_root = sparse.root();
-        assert_eq!(sparse_root, hash_builder_root);
 
-        assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
     #[test]
@@ -826,21 +838,19 @@ mod tests {
         let paths = (239..=255).map(|b| Nibbles::unpack(B256::repeat_byte(b))).collect::<Vec<_>>();
         let value = alloy_rlp::encode_fixed_size(&U256::from(1));
 
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter(paths.clone()));
-        for path in &paths {
-            hash_builder.add_leaf(path.clone(), &value);
-        }
-        let hash_builder_root = hash_builder.root();
+        let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+            paths.iter().cloned().zip(std::iter::repeat_with(|| value.clone())),
+            paths.clone(),
+        );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
             sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
         }
         let sparse_root = sparse.root();
-        assert_eq!(sparse_root, hash_builder_root);
 
-        assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
     #[test]
@@ -856,21 +866,19 @@ mod tests {
             .collect::<Vec<_>>();
         let value = alloy_rlp::encode_fixed_size(&U256::from(1));
 
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter(paths.clone()));
-        for path in paths.iter().sorted_unstable_by_key(|key| *key) {
-            hash_builder.add_leaf(path.clone(), &value);
-        }
-        let hash_builder_root = hash_builder.root();
+        let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+            paths.iter().sorted_unstable().cloned().zip(std::iter::repeat_with(|| value.clone())),
+            paths.clone(),
+        );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
             sparse.update_leaf(path.clone(), value.to_vec()).unwrap();
         }
         let sparse_root = sparse.root();
-        assert_eq!(sparse_root, hash_builder_root);
 
-        assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
     #[test]
@@ -879,36 +887,32 @@ mod tests {
         let old_value = alloy_rlp::encode_fixed_size(&U256::from(1));
         let new_value = alloy_rlp::encode_fixed_size(&U256::from(2));
 
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter(paths.clone()));
-        for path in paths.iter().sorted_unstable_by_key(|key| *key) {
-            hash_builder.add_leaf(path.clone(), &old_value);
-        }
-        let hash_builder_root = hash_builder.root();
+        let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+            paths.iter().cloned().zip(std::iter::repeat_with(|| old_value.clone())),
+            paths.clone(),
+        );
 
         let mut sparse = RevealedSparseTrie::default();
         for path in &paths {
             sparse.update_leaf(path.clone(), old_value.to_vec()).unwrap();
         }
         let sparse_root = sparse.root();
+
         assert_eq!(sparse_root, hash_builder_root);
+        assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
 
-        assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
-
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter(paths.clone()));
-        for path in paths.iter().sorted_unstable_by_key(|key| *key) {
-            hash_builder.add_leaf(path.clone(), &new_value);
-        }
-        let hash_builder_root = hash_builder.root();
+        let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+            paths.iter().cloned().zip(std::iter::repeat_with(|| new_value.clone())),
+            paths.clone(),
+        );
 
         for path in &paths {
             sparse.update_leaf(path.clone(), new_value.to_vec()).unwrap();
         }
         let sparse_root = sparse.root();
-        assert_eq!(sparse_root, hash_builder_root);
 
-        assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
     #[test]
@@ -1155,52 +1159,64 @@ mod tests {
             let mut rng = generators::rng();
 
             let mut state = BTreeMap::default();
+            let mut unpacked_state = BTreeMap::default();
             let mut sparse = RevealedSparseTrie::default();
 
             for update in updates {
                 let keys_to_delete_len = update.len() / 2;
 
+                let unpacked_update = update.iter().map(|(key, value)| (
+                    Nibbles::unpack(key),
+                    alloy_rlp::encode_fixed_size(value).to_vec()
+                ));
+
                 // Insert state updates into the sparse trie and calculate the root
-                for (key, value) in &update {
-                    sparse.update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec()).unwrap();
+                for (key, value) in unpacked_update.clone() {
+                    sparse.update_leaf(key, value).unwrap();
                 }
                 let sparse_root = sparse.root();
 
                 // Insert state updates into the hash builder and calculate the root
+                unpacked_state.extend(unpacked_update);
                 state.extend(update);
-                let mut hash_builder = HashBuilder::default().with_proof_retainer(
-                    ProofRetainer::from_iter(state.keys().map(Nibbles::unpack).collect::<Vec<_>>())
+                let keys = state.keys().map(Nibbles::unpack).collect::<Vec<_>>();
+                let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+                    unpacked_state.clone(),
+                    keys,
                 );
-                for (key, value) in &state {
-                    hash_builder.add_leaf(Nibbles::unpack(key), &alloy_rlp::encode_fixed_size(value));
-                }
-                let hash_builder_root = hash_builder.root();
 
+                // Assert that the sparse trie root matches the hash builder root
                 assert_eq!(sparse_root, hash_builder_root);
+                // Assert that the sparse trie nodes match the hash builder proof nodes
+                assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
 
-                assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+                // Delete some keys from both the hash builder and the sparse trie and check
+                // that the sparse trie root still matches the hash builder root
 
-                // Delete some keys and check that the sparse trie root still matches the hash builder root
-
-                let keys_to_delete = state.keys().choose_multiple(&mut rng, keys_to_delete_len).into_iter().copied().collect::<Vec<_>>();
+                let keys_to_delete = state
+                    .keys()
+                    .choose_multiple(&mut rng, keys_to_delete_len)
+                    .into_iter()
+                    .copied()
+                    .collect::<Vec<_>>();
                 for key in keys_to_delete {
                     state.remove(&key).unwrap();
+                    unpacked_state.remove(&Nibbles::unpack(key)).unwrap();
                     sparse.remove_leaf(Nibbles::unpack(key)).unwrap();
                 }
 
-                let root = sparse.root();
+                let sparse_root = sparse.root();
 
-                let mut hash_builder = HashBuilder::default().with_proof_retainer(
-                    ProofRetainer::from_iter(state.keys().map(Nibbles::unpack).collect::<Vec<_>>())
+                let keys = state.keys().map(Nibbles::unpack).collect::<Vec<_>>();
+                let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
+                    unpacked_state.clone(),
+                    keys,
                 );
-                for (key, value) in &state {
-                    hash_builder.add_leaf(Nibbles::unpack(key), &alloy_rlp::encode_fixed_size(value));
-                }
-                let hash_builder_root = hash_builder.root();
 
-                assert_eq!(root, hash_builder_root);
-
-                assert_eq_proof_nodes_sparse_trie(hash_builder.take_proof_nodes(), &sparse);
+                // Assert that the sparse trie root matches the hash builder root
+                assert_eq!(sparse_root, hash_builder_root);
+                // Assert that the sparse trie nodes match the hash builder proof nodes
+                assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
             }
         });
     }
