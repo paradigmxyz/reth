@@ -331,9 +331,11 @@ RPC:
           [default: 500]
 
       --rpc.max-tracing-requests <COUNT>
-          Maximum number of concurrent tracing requests
+          Maximum number of concurrent tracing requests.
 
-          [default: <NUM CPU CORES-2>]
+          By default this chooses a sensible value based on the number of available cores. Tracing requests are generally CPU bound. Choosing a value that is higher than the available CPU cores can have a negative impact on the performance of the node and affect the node's ability to maintain sync.
+
+          [default: 10]
 
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
