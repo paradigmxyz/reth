@@ -17,12 +17,14 @@ use reth_primitives::{constants::EPOCH_SLOTS, Account, Bytecode, StaticFileSegme
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
+    proof::{Proof, StorageProof},
+    updates::TrieUpdates,
+    witness::TrieWitness,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 use std::fmt::Debug;
 
@@ -225,6 +227,24 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             Ok(HistoryInfo::NotYetWritten)
         }
     }
+
+    /// Set the lowest block number at which the account history is available.
+    pub const fn with_lowest_available_account_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.account_history_block_number = Some(block_number);
+        self
+    }
+
+    /// Set the lowest block number at which the storage history is available.
+    pub const fn with_lowest_available_storage_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
+        self
+    }
 }
 
 impl<TX: DbTx> AccountReader for HistoricalStateProviderRef<'_, TX> {
@@ -329,6 +349,18 @@ impl<TX: DbTx> StorageRootProvider for HistoricalStateProviderRef<'_, TX> {
         revert_storage.extend(&hashed_storage);
         StorageRoot::overlay_root(self.tx, address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageProof::overlay_storage_proof(self.tx, address, slot, revert_storage)
+            .map_err(Into::<ProviderError>::into)
     }
 }
 

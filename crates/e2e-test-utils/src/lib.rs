@@ -7,15 +7,13 @@ use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
-    rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
     tasks::TaskManager,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeAddOns, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine,
-    RethFullAdapter,
+    components::NodeComponentsBuilder, rpc::RethRpcAddOns, FullNodeTypesAdapter, Node, NodeAdapter,
+    NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -56,10 +54,7 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: NodeAddOns<
-        Adapter<N>,
-        EthApi: FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
-    >,
+    N::AddOns: RethRpcAddOns<Adapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -115,7 +110,8 @@ type TmpNodeAdapter<N> = FullNodeTypesAdapter<
     BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>,
 >;
 
-type Adapter<N> = NodeAdapter<
+/// Type alias for a `NodeAdapter`
+pub type Adapter<N> = NodeAdapter<
     RethFullAdapter<TmpDB, N>,
     <<N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
         RethFullAdapter<TmpDB, N>,

@@ -173,12 +173,13 @@ impl CanonicalInMemoryState {
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
         finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
             .head_state()
             .map_or_else(SealedHeader::default, |state| state.block_ref().block().header.clone());
-        let chain_info_tracker = ChainInfoTracker::new(header, finalized);
+        let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -193,13 +194,17 @@ impl CanonicalInMemoryState {
 
     /// Create an empty state.
     pub fn empty() -> Self {
-        Self::new(HashMap::default(), BTreeMap::new(), None, None)
+        Self::new(HashMap::default(), BTreeMap::new(), None, None, None)
     }
 
     /// Create a new in memory state with the given local head and finalized header
     /// if it exists.
-    pub fn with_head(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head, finalized);
+    pub fn with_head(
+        head: SealedHeader,
+        finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
+    ) -> Self {
+        let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
         let in_memory_state = InMemoryState::default();
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -503,20 +508,6 @@ impl CanonicalInMemoryState {
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    pub fn state_provider_from_state(
-        &self,
-        state: &BlockState,
-        historical: StateProviderBox,
-    ) -> MemoryOverlayStateProvider {
-        let in_memory = state.chain().into_iter().map(|block_state| block_state.block()).collect();
-
-        MemoryOverlayStateProvider::new(historical, in_memory)
-    }
-
-    /// Return state provider with reference to in-memory blocks that overlay database state.
-    ///
-    /// This merges the state of all blocks that are part of the chain that the requested block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(
         &self,
         hash: B256,
@@ -718,6 +709,16 @@ impl BlockState {
     pub fn iter(self: Arc<Self>) -> impl Iterator<Item = Arc<Self>> {
         std::iter::successors(Some(self), |state| state.parent.clone())
     }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the this block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider {
+        let in_memory = self.chain().into_iter().map(|block_state| block_state.block()).collect();
+
+        MemoryOverlayStateProvider::new(historical, in_memory)
+    }
 }
 
 /// Represents an executed block stored in-memory.
@@ -872,7 +873,7 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
+    use reth_trie::{AccountProof, HashedStorage, MultiProof, StorageProof, TrieInput};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -972,6 +973,15 @@ mod tests {
             _hashed_storage: HashedStorage,
         ) -> ProviderResult<B256> {
             Ok(B256::random())
+        }
+
+        fn storage_proof(
+            &self,
+            _address: Address,
+            slot: B256,
+            _hashed_storage: HashedStorage,
+        ) -> ProviderResult<StorageProof> {
+            Ok(StorageProof::new(slot))
         }
     }
 
@@ -1246,7 +1256,7 @@ mod tests {
         numbers.insert(2, block2.block().hash());
         numbers.insert(3, block3.block().hash());
 
-        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
 
         let historical: StateProviderBox = Box::new(MockStateProvider);
 
@@ -1288,7 +1298,7 @@ mod tests {
         let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);
 
-        let state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
         let chain: Vec<_> = state.canonical_chain().collect();
 
         assert_eq!(chain.len(), 1);

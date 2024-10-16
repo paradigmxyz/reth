@@ -56,13 +56,14 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
-notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
+notify = { workspace = true, default-features = false, features = [
+    "macos_fsevent",
+] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils
-once_cell = { workspace = true, optional = true }
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
 alloy-consensus = { workspace = true, optional = true }
 
@@ -79,20 +80,22 @@ parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
-once_cell.workspace = true
 eyre.workspace = true
 
 alloy-consensus.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-execution-types/optimism", "reth-optimism-primitives"]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-execution-types/optimism",
+    "reth-optimism-primitives",
+]
 serde = ["reth-execution-types/serde"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
-    "once_cell",
     "reth-ethereum-engine-primitives",
     "alloy-consensus",
 ]

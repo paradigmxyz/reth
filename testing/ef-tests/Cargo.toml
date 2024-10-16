@@ -23,6 +23,9 @@ reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-evm-ethereum.workspace = true
+reth-revm = { workspace = true, features = ["std"] }
+
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
