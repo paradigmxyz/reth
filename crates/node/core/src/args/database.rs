@@ -6,7 +6,10 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::{ClientVersion, mdbx::{TERABYTE, GIGABYTE}};
+use reth_db::{
+    mdbx::{GIGABYTE, TERABYTE},
+    ClientVersion,
+};
 use reth_storage_errors::db::LogLevel;
 
 const DEFAULT_MAX_SIZE: usize = TERABYTE * 4;
@@ -53,8 +56,7 @@ impl DatabaseArgs {
         &self,
         client_version: ClientVersion,
     ) -> reth_db::mdbx::DatabaseArguments {
-        self.get_const_database_args(client_version)
-        .with_geometry(self.max_size, self.growth_step)
+        self.get_const_database_args(client_version).with_geometry(self.max_size, self.growth_step)
     }
 
     /// Returns the const database arguments with configured log level and given client version.
@@ -127,9 +129,12 @@ mod tests {
 
     #[test]
     fn test_command_parser_with_valid_max_size() {
-        let cmd =
-            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.max-size", "4398046511104"])
-                .unwrap();
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.max-size",
+            "4398046511104",
+        ])
+        .unwrap();
         assert_eq!(cmd.args.max_size, TERABYTE * 4);
     }
 
@@ -142,9 +147,12 @@ mod tests {
 
     #[test]
     fn test_command_parser_with_valid_growth_step() {
-        let cmd =
-            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.growth-step", "4294967296"])
-                .unwrap();
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.growth-step",
+            "4294967296",
+        ])
+        .unwrap();
         assert_eq!(cmd.args.growth_step, GIGABYTE * 4);
     }
 
