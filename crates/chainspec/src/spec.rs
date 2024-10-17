@@ -18,7 +18,8 @@ use reth_network_peers::{
 use reth_primitives_traits::{
     constants::{
         DEV_GENESIS_HASH, EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT,
-        HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH, EIP7783_GAS_LIMIT_CAP, EIP7783_INITIAL_BLOCK_GAS_LIMIT,
+        EIP7783_INCREASE_RATE, EIP7783_START_BLOCK,
     },
     Header, SealedHeader,
 };
@@ -47,8 +48,12 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+        max_gas_limit: 0,
         prune_delete_limit: 20000,
+        eip7783_increase_rate: EIP7783_INCREASE_RATE,
+        eip7783_start_block: EIP7783_START_BLOCK,
+        eip7783_initial_gas: EIP7783_INITIAL_BLOCK_GAS_LIMIT,
+        eip7783_gas_limit_cap: EIP7783_GAS_LIMIT_CAP,
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -72,8 +77,12 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+        max_gas_limit: 0,
         prune_delete_limit: 10000,
+        eip7783_increase_rate: EIP7783_INCREASE_RATE,
+        eip7783_start_block: EIP7783_START_BLOCK,
+        eip7783_initial_gas: EIP7783_INITIAL_BLOCK_GAS_LIMIT,
+        eip7783_gas_limit_cap: EIP7783_GAS_LIMIT_CAP,
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -95,8 +104,12 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+        max_gas_limit: 0,
         prune_delete_limit: 10000,
+        eip7783_increase_rate: EIP7783_INCREASE_RATE,
+        eip7783_start_block: EIP7783_START_BLOCK,
+        eip7783_initial_gas: EIP7783_INITIAL_BLOCK_GAS_LIMIT,
+        eip7783_gas_limit_cap: EIP7783_GAS_LIMIT_CAP,
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -206,6 +219,18 @@ pub struct ChainSpec {
     /// The maximum gas limit
     pub max_gas_limit: u64,
 
+    /// EIP-7783 initial block gas limit.
+    pub eip7783_increase_rate: u64,
+
+    /// EIP-7783 increase rate per block.
+    pub eip7783_start_block: u64,
+
+    /// EIP-7783 start block number.
+    pub eip7783_initial_gas: u64,
+
+    /// EIP-7783 gas limit cap.
+    pub eip7783_gas_limit_cap: u64,
+
     /// The delete limit for pruner, per run.
     pub prune_delete_limit: usize,
 }
@@ -221,8 +246,12 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            max_gas_limit: 0,
             prune_delete_limit: MAINNET.prune_delete_limit,
+            eip7783_gas_limit_cap: EIP7783_GAS_LIMIT_CAP,
+            eip7783_increase_rate: EIP7783_INCREASE_RATE,
+            eip7783_start_block: EIP7783_START_BLOCK,
+            eip7783_initial_gas: EIP7783_INITIAL_BLOCK_GAS_LIMIT,
         }
     }
 }

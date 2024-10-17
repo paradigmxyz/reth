@@ -515,7 +515,7 @@ impl EthTransactionValidatorBuilder {
     ///  - EIP-4844
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
-            block_gas_limit: chain_spec.max_gas_limit,
+            block_gas_limit: chain_spec.max_gas_limit.max(chain_spec.eip7783_initial_gas),
             chain_spec,
             minimum_priority_fee: None,
             additional_tasks: 1,
