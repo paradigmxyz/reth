@@ -32,8 +32,7 @@ reth-ethereum-forks.workspace = true
 alloy-primitives.workspace = true
 
 [features]
-default = ["std", "c-kzg"]
+default = ["std"]
 std = []
-c-kzg = ["revm/c-kzg"]
 test-utils = ["dep:reth-trie"]
 serde = ["revm/serde"]
