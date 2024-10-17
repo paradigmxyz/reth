@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use alloy_network::AnyNetwork;
+use alloy_network::{AnyNetwork, Ethereum};
 use alloy_primitives::U256;
 use derive_more::Deref;
 use reth_primitives::BlockNumberOrTag;
@@ -128,8 +128,7 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    // todo: replace with alloy_network::Ethereum
-    type NetworkTypes = AnyNetwork;
+    type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
 }
 
