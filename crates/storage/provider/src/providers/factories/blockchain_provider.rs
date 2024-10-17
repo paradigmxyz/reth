@@ -12,7 +12,10 @@ use crate::{
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
+    MemoryOverlayStateProvider,
+};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
@@ -34,6 +37,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+use tracing::trace;
 
 use crate::providers::ProviderNodeTypes;
 
@@ -120,6 +124,16 @@ impl<N: ProviderNodeTypes> BlockchainProviderFactory<N> {
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<BlockchainProvider3<N>> {
         BlockchainProvider3::new(self.database.clone(), self.canonical_in_memory_state())
+    }
+
+    /// This uses a given [`BlockState`] to initialize a state provider for that block.
+    fn block_state_provider(
+        &self,
+        state: &BlockState,
+    ) -> ProviderResult<MemoryOverlayStateProvider> {
+        let anchor_hash = state.anchor().hash;
+        let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
+        Ok(state.state_provider(latest_historical))
     }
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
@@ -518,22 +532,55 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProviderFactory<N> {
 impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProviderFactory<N> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
-        self.provider()?.latest()
+        trace!(target: "providers::blockchain", "Getting latest block state provider");
+        // use latest state provider if the head state exists
+        if let Some(state) = self.canonical_in_memory_state.head_state() {
+            trace!(target: "providers::blockchain", "Using head state for latest state provider");
+            Ok(self.block_state_provider(&state)?.boxed())
+        } else {
+            trace!(target: "providers::blockchain", "Using database state for latest state provider");
+            self.database.latest()
+        }
     }
 
     fn history_by_block_number(
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        self.provider()?.history_by_block_number(block_number)
+        trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
+        let provider = self.provider()?;
+        provider.ensure_canonical_block(block_number)?;
+        let hash = provider
+            .block_hash(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        self.history_by_block_hash(hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        self.provider()?.history_by_block_hash(block_hash)
+        trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
+
+        self.provider()?.get_in_memory_or_storage_by_block(
+            block_hash.into(),
+            |_| self.database.history_by_block_hash(block_hash),
+            |block_state| {
+                let state_provider = self.block_state_provider(block_state)?;
+                Ok(Box::new(state_provider))
+            },
+        )
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        self.provider()?.state_by_block_hash(hash)
+        trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
+        if let Ok(state) = self.history_by_block_hash(hash) {
+            // This could be tracked by a historical block
+            Ok(state)
+        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
+            // .. or this could be the pending state
+            Ok(pending)
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(hash))
+        }
     }
 
     /// Returns the state provider for pending state.
@@ -541,11 +588,24 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProviderFactory<N>
     /// If there's no pending block available then the latest state provider is returned:
     /// [`Self::latest`]
     fn pending(&self) -> ProviderResult<StateProviderBox> {
-        self.provider()?.pending()
+        trace!(target: "providers::blockchain", "Getting provider for pending state");
+
+        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
+            // we have a pending block
+            return Ok(Box::new(self.block_state_provider(&pending)?));
+        }
+
+        // fallback to latest state if the pending block is not available
+        self.latest()
     }
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        self.provider()?.pending_state_by_hash(block_hash)
+        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
+            if pending.hash() == block_hash {
+                return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
+            }
+        }
+        Ok(None)
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -553,7 +613,28 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProviderFactory<N>
         &self,
         number_or_tag: BlockNumberOrTag,
     ) -> ProviderResult<StateProviderBox> {
-        self.provider()?.state_by_block_number_or_tag(number_or_tag)
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => {
+                let hash = self
+                    .block_hash(num)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
+                self.state_by_block_hash(hash)
+            }
+        }
     }
 }
 
