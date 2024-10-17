@@ -20,7 +20,10 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{node::EthereumAddOns, EthEvmConfig, EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{
+    node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory,
+    EthereumNode,
+};
 use reth_primitives::{
     revm_primitives::{SpecId, StatefulPrecompileMut},
     Header, TransactionSigned,
@@ -224,7 +227,7 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type EVM = MyEvmConfig;
-    type Executor = EthExecutorProvider<Self::EVM>;
+    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
 
     async fn build_evm(
         self,
@@ -234,7 +237,13 @@ where
             inner: EthEvmConfig::new(ctx.chain_spec()),
             precompile_cache: self.precompile_cache.clone(),
         };
-        Ok((evm_config.clone(), EthExecutorProvider::new(ctx.chain_spec(), evm_config)))
+        Ok((
+            evm_config.clone(),
+            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
+                ctx.chain_spec(),
+                evm_config,
+            )),
+        ))
     }
 }
 
