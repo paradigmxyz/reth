@@ -28,10 +28,10 @@ pub struct DatabaseArgs {
     pub exclusive: Option<bool>,
     /// Maximum database size in bytes
     #[arg(long = "db.max-size", default_value = "4398046511104")]
-    pub max_size: usize,
+    pub max_size: Option<usize>,
     /// Database growth step in bytes
     #[arg(long = "db.growth-step", default_value = "4294967296")]
-    pub growth_step: usize,
+    pub growth_step: Option<usize>,
 }
 
 impl Default for DatabaseArgs {
@@ -39,8 +39,8 @@ impl Default for DatabaseArgs {
         Self {
             log_level: None,
             exclusive: None,
-            max_size: DEFAULT_MAX_SIZE,
-            growth_step: DEFAULT_GROWTH_STEP,
+            max_size: Some(DEFAULT_MAX_SIZE),
+            growth_step: Some(DEFAULT_GROWTH_STEP),
         }
     }
 }
@@ -135,7 +135,7 @@ mod tests {
             "4398046511104",
         ])
         .unwrap();
-        assert_eq!(cmd.args.max_size, TERABYTE * 4);
+        assert_eq!(cmd.args.max_size, Some(TERABYTE * 4));
     }
 
     #[test]
@@ -153,7 +153,7 @@ mod tests {
             "4294967296",
         ])
         .unwrap();
-        assert_eq!(cmd.args.growth_step, GIGABYTE * 4);
+        assert_eq!(cmd.args.growth_step, Some(GIGABYTE * 4));
     }
 
     #[test]
