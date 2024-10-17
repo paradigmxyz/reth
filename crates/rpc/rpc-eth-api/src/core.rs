@@ -319,6 +319,12 @@ pub trait EthApi {
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
+
+    /// Aliases don't use the namespace.
+	/// Thus, this will generate `myapi_ic_getGenesisBalances` and `ic_getGenesisBalances`.
+	#[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
+	async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
+
 }
 
 #[async_trait::async_trait]
@@ -727,5 +733,11 @@ where
             }
             _ => e.into(),
         })?)
+    }
+
+    /// Han
+    async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {
+        trace!(target: "rpc::eth", "Serving ic_getGenesisBalances");
+        BitfinityEvmRpc::get_genesis_balances(self).await
     }
 }

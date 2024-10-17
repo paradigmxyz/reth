@@ -17,6 +17,7 @@ use reth_db::{init_db, test_utils::tempdir_path};
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
+use revm_primitives::{Address, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 
@@ -66,6 +67,64 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
 
     // Assert
     assert_eq!(result.unwrap().as_u128(), max_priority_fee_per_gas);
+}
+
+#[tokio::test]
+async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    // Act
+    let result: Vec<(ethereum_json_rpc_client::H160, ethereum_json_rpc_client::U256)> = 
+        reth_client.single_request("eth_getGenesisBalances".to_owned(), 
+            ethereum_json_rpc_client::Params::None, ethereum_json_rpc_client::Id::Num(1)).await.unwrap();
+
+    // Assert
+    assert_eq!(result.len(), 3);
+
+    assert_eq!(did::H160::from(result[0].0), Address::from_slice(&[1u8; 20]).into());
+    assert_eq!(did::U256::from(result[0].1), U256::from(10).into());
+
+    assert_eq!(did::H160::from(result[1].0), Address::from_slice(&[2u8; 20]).into());
+    assert_eq!(did::U256::from(result[1].1), U256::from(20).into());
+
+    assert_eq!(did::H160::from(result[2].0), Address::from_slice(&[3u8; 20]).into());
+    assert_eq!(did::U256::from(result[2].1), U256::from(30).into());
+
+}
+
+#[tokio::test]
+async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    // Act
+    let result = reth_client.get_genesis_balances().await.unwrap();
+
+    // Assert
+    assert_eq!(result.len(), 3);
+
+    assert_eq!(did::H160::from(result[0].0), Address::from_slice(&[1u8; 20]).into());
+    assert_eq!(did::U256::from(result[0].1), U256::from(10).into());
+
+    assert_eq!(did::H160::from(result[1].0), Address::from_slice(&[2u8; 20]).into());
+    assert_eq!(did::U256::from(result[1].1), U256::from(20).into());
+
+    assert_eq!(did::H160::from(result[2].0), Address::from_slice(&[3u8; 20]).into());
+    assert_eq!(did::U256::from(result[2].1), U256::from(30).into());
+
 }
 
 #[tokio::test]
@@ -164,7 +223,7 @@ pub mod eth_server {
     use alloy_rlp::Bytes;
     use did::keccak;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-    use revm_primitives::{B256, U256};
+    use revm_primitives::{Address, B256, U256};
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
@@ -176,6 +235,9 @@ pub mod eth_server {
 
         #[method(name = "sendRawTransaction")]
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
+
+        #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
+        async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
     }
 
     #[derive(Debug)]
@@ -209,6 +271,14 @@ pub mod eth_server {
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
             let hash = keccak::keccak_hash(&tx);
             Ok(hash.into())
+        }
+
+        async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {
+            Ok(vec![
+                (Address::from_slice(&[1u8; 20]), U256::from(10)),
+                (Address::from_slice(&[2u8; 20]), U256::from(20)),
+                (Address::from_slice(&[3u8; 20]), U256::from(30)),
+            ])
         }
     }
 }
