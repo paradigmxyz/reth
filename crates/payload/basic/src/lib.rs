@@ -316,6 +316,32 @@ pub enum PayloadState<P> {
     Frozen(P),
 }
 
+impl<P> PayloadState<P> {
+    /// Checks if the payload is frozen.
+    pub const fn is_frozen(&self) -> bool {
+        matches!(self, Self::Frozen(_))
+    }
+
+    /// Returns the payload if it exists (either Best or Frozen).
+    pub const fn payload(&self) -> Option<&P> {
+        match self {
+            Self::Missing => None,
+            Self::Best(p) | Self::Frozen(p) => Some(p),
+        }
+    }
+
+    /// Returns a clone of the payload if it exists (either Best or Frozen).
+    pub fn best_payload(&self) -> Option<P>
+    where
+        P: Clone,
+    {
+        match self {
+            Self::Missing => None,
+            Self::Best(p) | Self::Frozen(p) => Some(p.clone()),
+        }
+    }
+}
+
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
 #[derive(Debug)]
 pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
@@ -364,10 +390,6 @@ where
 {
     /// Spawns a new payload build task.
     fn spawn_build_job(&mut self) {
-        if let PayloadState::Frozen(_) = self.best_payload {
-            // Don't spawn a new job if the payload is frozen
-            return;
-        }
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let client = self.client.clone();
@@ -376,10 +398,7 @@ where
         let _cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
-        let best_payload = match &self.best_payload {
-            PayloadState::Best(payload) | PayloadState::Frozen(payload) => Some(payload.clone()),
-            PayloadState::Missing => None,
-        };
+        let best_payload = self.best_payload.best_payload();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
@@ -399,23 +418,6 @@ where
         }));
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
-    }
-}
-
-impl<Client, Pool, Tasks, Builder> BasicPayloadJob<Client, Pool, Tasks, Builder>
-where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
-    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
-{
-    // ... existing methods ...
-
-    /// Checks if the payload is frozen.
-    const fn is_payload_frozen(&self) -> bool {
-        matches!(self.best_payload, PayloadState::Frozen(_))
     }
 }
 
@@ -443,7 +445,7 @@ where
         while this.interval.poll_tick(cx).is_ready() {
             // start a new job if there is no pending block, we haven't reached the deadline,
             // and the payload isn't frozen
-            if this.pending_block.is_none() && !this.is_payload_frozen() {
+            if this.pending_block.is_none() && !this.best_payload.is_frozen() {
                 this.spawn_build_job();
             }
         }
@@ -498,9 +500,9 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        match &self.best_payload {
-            PayloadState::Best(payload) | PayloadState::Frozen(payload) => Ok(payload.clone()),
-            PayloadState::Missing => {
+        match self.best_payload.payload() {
+            Some(payload) => Ok(payload.clone()),
+            None => {
                 // No payload has been built yet, but we need to return something that the CL then
                 // can deliver, so we need to return an empty payload.
                 //
@@ -518,11 +520,7 @@ where
     }
 
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let best_payload = match &self.best_payload {
-            PayloadState::Best(payload) | PayloadState::Frozen(payload) => Some(payload.clone()),
-            PayloadState::Missing => None,
-        };
-
+        let best_payload = self.best_payload.best_payload();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
