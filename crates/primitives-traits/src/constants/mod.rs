@@ -125,15 +125,6 @@ pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeadde
 /// To address from Optimism system txs: `0x4200000000000000000000000000000000000015`
 pub const OP_SYSTEM_TX_TO_ADDR: Address = address!("4200000000000000000000000000000000000015");
 
-/// Transactions root of empty receipts set.
-pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;
-
-/// Transactions root of empty transactions set.
-pub const EMPTY_TRANSACTIONS: B256 = EMPTY_ROOT_HASH;
-
-/// Withdrawals root of empty withdrawals set.
-pub const EMPTY_WITHDRAWALS: B256 = EMPTY_ROOT_HASH;
-
 /// The number of blocks to unwind during a reorg that already became a part of canonical chain.
 ///
 /// In reality, the node can end up in this particular situation very rarely. It would happen only
