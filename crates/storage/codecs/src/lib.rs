@@ -88,7 +88,7 @@ impl Compact for String {
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (vec, buf) = Vec::<u8>::from_compact(buf, len);
-        let string = String::from_utf8(vec).unwrap(); // Safe conversion
+        let string = Self::from_utf8(vec).unwrap(); // Safe conversion
         (string, buf)
     }
 }
