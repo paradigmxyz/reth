@@ -23,7 +23,7 @@ impl Storage {
     /// Creates a new instance of [`Storage`] backed by the file at the given path and creates
     /// it doesn't exist.
     pub(super) fn new(path: impl AsRef<Path>) -> WalResult<Self> {
-        reth_fs_util::create_dir_all(&path).map_err(WalError::DirFsPath)?;
+        reth_fs_util::create_dir_all(&path)?;
 
         Ok(Self { path: path.as_ref().to_path_buf() })
     }
@@ -68,8 +68,8 @@ impl Storage {
         let mut min_id = None;
         let mut max_id = None;
 
-        for entry in reth_fs_util::read_dir(&self.path).map_err(WalError::DirFsPath)? {
-            let entry = entry.map_err(WalError::DirIO)?;
+        for entry in reth_fs_util::read_dir(&self.path)? {
+            let entry = entry.map_err(|err| WalError::DirEntry(self.path.clone(), err))?;
             let file_name = entry.file_name();
             let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
 
@@ -126,14 +126,9 @@ impl Storage {
         let mut file = match File::open(&file_path) {
             Ok(file) => file,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => {
-                return Err(WalError::FileFsPath(
-                    file_id,
-                    reth_fs_util::FsPathError::open(err, &file_path),
-                ))
-            }
+            Err(err) => return Err(reth_fs_util::FsPathError::open(err, &file_path).into()),
         };
-        let size = file.metadata().map_err(|err| WalError::FileIO(file_id, err))?.len();
+        let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
@@ -162,10 +157,9 @@ impl Storage {
 
         reth_fs_util::atomic_write_file(&file_path, |file| {
             rmp_serde::encode::write(file, &notification)
-        })
-        .map_err(|err| WalError::FileFsPath(file_id, err))?;
+        })?;
 
-        Ok(file_path.metadata().map_err(|err| WalError::FileIO(file_id, err))?.len())
+        Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
     }
 }
 
