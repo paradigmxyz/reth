@@ -342,6 +342,16 @@ pub enum EngineApiMessageVersion {
     V4,
 }
 
+/// Determines how we should choose the payload to return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PayloadKind {
+    /// Returns the best available payload, without waiting for pending job to finish.
+    #[default]
+    Earliest,
+    /// Only returns once we have at least one built payload.
+    WaitForPending,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

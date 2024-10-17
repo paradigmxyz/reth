@@ -28,7 +28,7 @@
 //! use std::pin::Pin;
 //! use std::task::{Context, Poll};
 //! use alloy_primitives::U256;
-//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
+//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
 //! use reth_primitives::{Block, Header};
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
@@ -73,7 +73,7 @@
 //!     Ok(self.attributes.clone())
 //! }
 //!
-//! fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+//! fn resolve_kind(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
 //!        let payload = self.best_payload();
 //!        (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
 //!     }
@@ -112,7 +112,7 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types::engine::PayloadId;
-pub use reth_payload_primitives::PayloadBuilderError;
+pub use reth_payload_primitives::{PayloadBuilderError, PayloadKind};
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };

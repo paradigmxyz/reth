@@ -1,6 +1,8 @@
 //! Trait abstractions used by the payload crate.
 
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_primitives::{
+    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
+};
 use reth_provider::CanonStateNotification;
 use std::future::Future;
 
@@ -53,7 +55,15 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// If this returns [`KeepPayloadJobAlive::Yes`], then the [`PayloadJob`] will be polled
     /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
     /// dropped after this call.
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+
+    /// Resolves the payload as fast as possible.
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        self.resolve_kind(PayloadKind::Earliest)
+    }
 }
 
 /// Whether the payload job should be kept alive or terminated after the payload was requested by
