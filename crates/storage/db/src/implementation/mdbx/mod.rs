@@ -23,7 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
-    ops::{Deref, Range, RangeBounds},
+    ops::{Deref, Range},
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -63,11 +63,11 @@ impl DatabaseEnvKind {
 
 /// Arguments for database initialization.
 #[derive(Clone, Debug, Default)]
-pub struct DatabaseArguments<R: RangeBounds<usize> + Clone = Range<usize>> {
+pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
     /// Database geometry settings. If [None], default values will be used.
-    geometry: Option<Geometry<R>>,
+    geometry: Geometry<Range<usize>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -100,7 +100,12 @@ impl DatabaseArguments {
     pub const fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
-            geometry: None,
+            geometry: Geometry {
+                size: Some(0..(4 * TERABYTE)),
+                growth_step: Some(4 * GIGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(4096)),
+            },
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
@@ -108,13 +113,13 @@ impl DatabaseArguments {
     }
 
     /// Set the geometry.
-    pub fn with_geometry(mut self, max_size: usize, growth_step: usize) -> Self {
-        self.geometry = Some(Geometry {
-            size: Some(0..max_size),
-            growth_step: Some(growth_step as isize),
+    pub fn with_geometry(mut self, max_size: Option<usize>, growth_step: Option<usize>) -> Self {
+        self.geometry = Geometry {
+            size: max_size.map(|size| 0..size),
+            growth_step: growth_step.map(|growth_step| growth_step as isize),
             shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
-        });
+        };
         self
     }
 
@@ -145,8 +150,8 @@ impl DatabaseArguments {
     }
 
     /// Returns the geometry if set.
-    pub const fn geometry(&self) -> Option<&Geometry<Range<usize>>> {
-        self.geometry.as_ref()
+    pub const fn geometry(&self) -> &Geometry<Range<usize>> {
+        &self.geometry
     }
 }
 
@@ -299,19 +304,7 @@ impl DatabaseEnv {
         // environment creation.
         debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
         inner_env.set_max_dbs(256);
-        if let Some(geometry) = args.geometry {
-            inner_env.set_geometry(geometry);
-        } else {
-            inner_env.set_geometry(Geometry {
-                // Maximum database size of 4 terabytes
-                size: Some(0..(4 * TERABYTE)),
-                // We grow the database in increments of 4 gigabytes
-                growth_step: Some(4 * GIGABYTE as isize),
-                // The database never shrinks
-                shrink_threshold: Some(0),
-                page_size: Some(PageSize::Set(default_page_size())),
-            });
-        }
+        inner_env.set_geometry(args.geometry);
 
         fn is_current_process(id: u32) -> bool {
             #[cfg(unix)]
