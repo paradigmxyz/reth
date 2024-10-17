@@ -7270,6 +7270,7 @@ dependencies = [
 name = "reth-ethereum-consensus"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-chainspec",
  "reth-consensus",
@@ -7320,6 +7321,7 @@ dependencies = [
 name = "reth-ethereum-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -8086,6 +8088,7 @@ dependencies = [
 name = "reth-optimism-consensus"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-chainspec",
  "reth-consensus",
@@ -8194,6 +8197,7 @@ dependencies = [
 name = "reth-optimism-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
