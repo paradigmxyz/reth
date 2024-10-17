@@ -90,12 +90,23 @@ pub fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                         },
                         |(init_storage, storage_updates, mut trie_updates)| {
                             let mut storage = init_storage;
-                            for update in storage_updates {
+                            let mut storage_updates = storage_updates.into_iter().peekable();
+                            while let Some(update) = storage_updates.next() {
                                 storage.extend(&update);
 
                                 let prefix_set = update.construct_prefix_set().freeze();
-                                let storage_sorted = storage.clone().into_sorted();
-                                let trie_updates_sorted = trie_updates.clone().into_sorted();
+                                let (storage_sorted, trie_updates_sorted) =
+                                    if storage_updates.peek().is_some() {
+                                        (
+                                            storage.clone().into_sorted(),
+                                            trie_updates.clone().into_sorted(),
+                                        )
+                                    } else {
+                                        (
+                                            std::mem::take(&mut storage).into_sorted(),
+                                            std::mem::take(&mut trie_updates).into_sorted(),
+                                        )
+                                    };
 
                                 let walker = TrieWalker::new(
                                     InMemoryStorageTrieCursor::new(
@@ -133,7 +144,9 @@ pub fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                 }
                                 hb.root();
 
-                                trie_updates.finalize(node_iter.walker, hb);
+                                if storage_updates.peek().is_some() {
+                                    trie_updates.finalize(node_iter.walker, hb);
+                                }
                             }
                         },
                     )
