@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
+use alloy_consensus::Transaction;
 use alloy_primitives::Address;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,

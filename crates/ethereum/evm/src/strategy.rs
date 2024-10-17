@@ -5,6 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::sync::Arc;
+use alloy_consensus::Transaction as _;
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;

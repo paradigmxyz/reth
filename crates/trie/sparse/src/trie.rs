@@ -70,6 +70,13 @@ impl SparseTrie {
 }
 
 /// The representation of revealed sparse trie.
+///
+/// ## Invariants
+///
+/// - The root node is always present in `nodes` collection.
+/// - Each leaf entry in `nodes` collection must have a corresponding entry in `values` collection.
+///   The opposite is also true.
+/// - All keys in `values` collection are full leaf paths.
 #[derive(PartialEq, Eq)]
 pub struct RevealedSparseTrie {
     /// All trie nodes.
@@ -504,8 +511,8 @@ impl RevealedSparseTrie {
         // take the current prefix set.
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let root_rlp = self.rlp_node(Nibbles::default(), &mut prefix_set);
-        if root_rlp.len() == B256::len_bytes() + 1 {
-            B256::from_slice(&root_rlp[1..])
+        if let Some(root_hash) = root_rlp.as_hash() {
+            root_hash
         } else {
             keccak256(root_rlp)
         }
@@ -575,9 +582,7 @@ impl RevealedSparseTrie {
                     } else {
                         let value = self.values.get(&path).unwrap();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
-                        if rlp_node.len() == B256::len_bytes() + 1 {
-                            *hash = Some(B256::from_slice(&rlp_node[1..]));
-                        }
+                        *hash = rlp_node.as_hash();
                         rlp_node
                     }
                 }
@@ -590,9 +595,7 @@ impl RevealedSparseTrie {
                         let (_, child) = rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
-                        if rlp_node.len() == B256::len_bytes() + 1 {
-                            *hash = Some(B256::from_slice(&rlp_node[1..]));
-                        }
+                        *hash = rlp_node.as_hash();
                         rlp_node
                     } else {
                         path_stack.extend([path, child_path]); // need to get rlp node for child first
@@ -630,9 +633,7 @@ impl RevealedSparseTrie {
                     self.rlp_buf.clear();
                     let rlp_node = BranchNodeRef::new(&branch_value_stack_buf, *state_mask)
                         .rlp(&mut self.rlp_buf);
-                    if rlp_node.len() == B256::len_bytes() + 1 {
-                        *hash = Some(B256::from_slice(&rlp_node[1..]));
-                    }
+                    *hash = rlp_node.as_hash();
                     rlp_node
                 }
             };

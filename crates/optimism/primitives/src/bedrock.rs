@@ -1,5 +1,6 @@
 //! OP mainnet bedrock related data.
 
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, b256, bloom, bytes, B256, B64, U256};
 use reth_primitives::Header;
 use reth_primitives_traits::constants::EMPTY_OMMER_ROOT_HASH;
@@ -73,10 +74,10 @@ pub const BEDROCK_HEADER: Header = Header {
     nonce: B64::ZERO,
     number: 105235063,
     parent_hash: b256!("21a168dfa5e727926063a28ba16fd5ee84c814e847c81a699c7a0ea551e4ca50"),
-    receipts_root: b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+    receipts_root: EMPTY_ROOT_HASH,
     state_root: b256!("920314c198da844a041d63bf6cbe8b59583165fd2229d1b3f599da812fd424cb"),
     timestamp: 1686068903,
-    transactions_root: b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+    transactions_root: EMPTY_ROOT_HASH,
     ommers_hash: EMPTY_OMMER_ROOT_HASH,
     beneficiary: address!("4200000000000000000000000000000000000011"),
     withdrawals_root: None,
