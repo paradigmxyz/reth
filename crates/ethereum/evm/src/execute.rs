@@ -279,7 +279,8 @@ where
     }
 }
 
-/// Provides backwards compatible methods to obtain executor providers.
+/// Helper type with backwards compatible methods to obtain Ethereum executor
+/// providers.
 #[derive(Debug)]
 pub struct EthExecutorProvider;
 
