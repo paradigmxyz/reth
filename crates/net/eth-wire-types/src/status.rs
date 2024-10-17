@@ -138,10 +138,10 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 /// use alloy_primitives::{B256, U256};
 /// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
-/// use reth_primitives::MAINNET_GENESIS_HASH;
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
