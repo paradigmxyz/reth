@@ -8108,6 +8108,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "derive_more 1.0.0",
  "op-alloy-consensus",
  "reth-chainspec",
  "reth-consensus",
@@ -8123,7 +8124,6 @@ dependencies = [
  "reth-revm",
  "revm",
  "revm-primitives",
- "thiserror",
  "tracing",
 ]
 
