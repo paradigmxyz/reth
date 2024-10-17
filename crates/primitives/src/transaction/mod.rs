@@ -1351,6 +1351,68 @@ impl TransactionSigned {
     }
 }
 
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn to(&self) -> TxKind {
+        alloy_consensus::Transaction::to(self.deref())
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &[u8] {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+}
+
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
     fn from(recovered: TransactionSignedEcRecovered) -> Self {
         recovered.signed_transaction
@@ -2181,8 +2243,8 @@ mod tests {
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
-        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
-        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
+        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")).into());
+        assert_eq!(tx.input(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
     }
