@@ -53,6 +53,10 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     static_file_provider: StaticFileProvider,
     /// Optional pruning configuration
     prune_modes: PruneModes,
+    /// Optional whether to disable long-lived read transaction safety guarantees.
+    /// This should only be used for nodes that need to serve ancient historical state for
+    /// `debug_executionWitness` or `eth_getProof` that don't want to be timed out.
+    disable_long_read_transaction_safety: bool,
 }
 
 impl<N> fmt::Debug for ProviderFactory<N>
@@ -60,12 +64,19 @@ where
     N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { db, chain_spec, static_file_provider, prune_modes } = self;
+        let Self {
+            db,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            disable_long_read_transaction_safety,
+        } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
             .field("chain_spec", &chain_spec)
             .field("static_file_provider", &static_file_provider)
             .field("prune_modes", &prune_modes)
+            .field("disable_long_read_transaction_safety", &disable_long_read_transaction_safety)
             .finish()
     }
 }
@@ -77,7 +88,13 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { db, chain_spec, static_file_provider, prune_modes: PruneModes::none() }
+        Self {
+            db,
+            chain_spec,
+            static_file_provider,
+            prune_modes: PruneModes::none(),
+            disable_long_read_transaction_safety: false,
+        }
     }
 
     /// Enables metrics on the static file provider.
@@ -89,6 +106,16 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
     pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
+        self
+    }
+
+    /// Sets the disable long-lived read transaction safety flag for an existing
+    /// [`ProviderFactory`].
+    pub const fn with_disable_long_read_transaction_safety(
+        mut self,
+        disable_long_read_transaction_safety: bool,
+    ) -> Self {
+        self.disable_long_read_transaction_safety = disable_long_read_transaction_safety;
         self
     }
 
@@ -118,6 +145,7 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::none(),
+            disable_long_read_transaction_safety: false,
         })
     }
 }
@@ -131,12 +159,17 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N::ChainSpec>> {
-        Ok(DatabaseProvider::new(
+        let provider = DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
             self.prune_modes.clone(),
-        ))
+        );
+        if self.disable_long_read_transaction_safety {
+            Ok(provider.disable_long_read_transaction_safety())
+        } else {
+            Ok(provider)
+        }
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -622,6 +655,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
+            disable_long_read_transaction_safety: self.disable_long_read_transaction_safety,
         }
     }
 }
