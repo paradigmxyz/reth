@@ -126,29 +126,68 @@ impl RevealedSparseTrie {
 
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(&mut self, path: Nibbles, node: TrieNode) -> SparseTrieResult<()> {
-        // TODO: revise all inserts to not overwrite existing entries
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());
                 self.nodes.insert(path, SparseNode::Empty);
             }
-            TrieNode::Branch(branch) => {
+            TrieNode::Branch(mut branch) => {
                 let mut stack_ptr = branch.as_ref().first_child_index();
                 for idx in CHILD_INDEX_RANGE {
                     if branch.state_mask.is_bit_set(idx) {
                         let mut child_path = path.clone();
                         child_path.push_unchecked(idx);
-                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                        self.reveal_node_or_hash(
+                            child_path,
+                            Nibbles::from_nibbles_unchecked([idx]),
+                            &branch.stack[stack_ptr],
+                        )?;
                         stack_ptr += 1;
                     }
                 }
+
+                // Before inserting the node at a specified path, we first need to check if we
+                // already have anything at this path.
+                match self.nodes.get(&path) {
+                    // If there's an empty, blinded or non-existing node, it be replaced without any
+                    // modifications.
+                    Some(SparseNode::Empty | SparseNode::Hash(_)) | None => {}
+                    // If there's already a leaf node, we can't do anything.
+                    Some(SparseNode::Leaf { key, hash: _ }) => {
+                        panic!("leaf already exists: {key:?}")
+                    }
+                    // If there's an extension node, we need to remove the first nibble
+                    // from its key and put it under the branch node. If the extension node had a
+                    // key of length 1, then we can remove the node completely.
+                    Some(SparseNode::Extension { key, hash: _ }) => {
+                        // Get the first nibble of the extension node key.
+                        let nibble = key.at(0) as u8;
+                        if key.len() > 1 {
+                            // If the extension node has more than one nibble in the key, insert a
+                            // new extension node at a path with the first nibble of the previously
+                            // set key, and a key without this first nibble.
+                            let mut ext_path = path.clone();
+                            ext_path.push_unchecked(nibble);
+                            let ext_key = key.slice(1..);
+                            self.nodes.insert(ext_path, SparseNode::new_ext(ext_key));
+                        }
+
+                        branch.state_mask.set_bit(nibble);
+                    }
+                    // If there's a branch node at this path, we need to merge its
+                    // state mask with the new branch node's state mask.
+                    Some(SparseNode::Branch { state_mask, hash: _ }) => {
+                        branch.state_mask |= *state_mask
+                    }
+                };
+
                 self.nodes
                     .insert(path, SparseNode::Branch { state_mask: branch.state_mask, hash: None });
             }
             TrieNode::Extension(ext) => {
                 let mut child_path = path.clone();
                 child_path.extend_from_slice_unchecked(&ext.key);
-                self.reveal_node_or_hash(child_path, &ext.child)?;
+                self.reveal_node_or_hash(child_path, Nibbles::default(), &ext.child)?;
                 self.nodes.insert(path, SparseNode::Extension { key: ext.key, hash: None });
             }
             TrieNode::Leaf(leaf) => {
@@ -162,14 +201,19 @@ impl RevealedSparseTrie {
         Ok(())
     }
 
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
+    fn reveal_node_or_hash(
+        &mut self,
+        at: Nibbles,
+        path: Nibbles,
+        child: &[u8],
+    ) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
-            // TODO: revise insert to not overwrite existing entries
+            let (path, _) = self.prepare_node_path(at, path)?;
             self.nodes.insert(path, SparseNode::Hash(B256::from_slice(&child[1..])));
             return Ok(())
         }
 
-        self.reveal_node(path, TrieNode::decode(&mut &child[..])?)
+        self.reveal_node(at, TrieNode::decode(&mut &child[..])?)
     }
 
     /// Update the leaf node with provided value.
@@ -181,13 +225,25 @@ impl RevealedSparseTrie {
             return Ok(())
         }
 
-        let mut current = Nibbles::default();
+        let (path, key) = self.prepare_node_path(Nibbles::default(), path)?;
+        self.nodes.insert(path, SparseNode::new_leaf(key));
+
+        Ok(())
+    }
+
+    /// Prepares the nodes along the path `at` for insertion of a new node with a key `path`.
+    /// `at ++ path` gives the full path to a new node.
+    ///
+    /// Returns the partial path to a new node and the rest of the path as a key.
+    fn prepare_node_path(
+        &mut self,
+        at: Nibbles,
+        path: Nibbles,
+    ) -> SparseTrieResult<(Nibbles, Nibbles)> {
+        let mut current = at;
         while let Some(node) = self.nodes.get_mut(&current) {
             match node {
-                SparseNode::Empty => {
-                    *node = SparseNode::new_leaf(path);
-                    break
-                }
+                SparseNode::Empty => return Ok((current, path)),
                 SparseNode::Hash(hash) => {
                     return Err(SparseTrieError::BlindedNode { path: current, hash: *hash })
                 }
@@ -212,15 +268,11 @@ impl RevealedSparseTrie {
                         SparseNode::new_split_branch(current[common], path[common]),
                     );
                     self.nodes.insert(
-                        path.slice(..=common),
-                        SparseNode::new_leaf(path.slice(common + 1..)),
-                    );
-                    self.nodes.insert(
                         current.slice(..=common),
                         SparseNode::new_leaf(current.slice(common + 1..)),
                     );
 
-                    break;
+                    return Ok((path.slice(..=common), path.slice(common + 1..)))
                 }
                 SparseNode::Extension { key, .. } => {
                     current.extend_from_slice(key);
@@ -235,17 +287,13 @@ impl RevealedSparseTrie {
                         let branch = SparseNode::new_split_branch(current[common], path[common]);
                         self.nodes.insert(current.slice(..common), branch);
 
-                        // create new leaf
-                        let new_leaf = SparseNode::new_leaf(path.slice(common + 1..));
-                        self.nodes.insert(path.slice(..=common), new_leaf);
-
                         // recreate extension to previous child if needed
                         let key = current.slice(common + 1..);
                         if !key.is_empty() {
                             self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
                         }
 
-                        break;
+                        return Ok((path.slice(..=common), path.slice(common + 1..)))
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
@@ -253,15 +301,14 @@ impl RevealedSparseTrie {
                     current.push_unchecked(nibble);
                     if !state_mask.is_bit_set(nibble) {
                         state_mask.set_bit(nibble);
-                        let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
-                        self.nodes.insert(current, new_leaf);
-                        break;
+                        let key = path.slice(current.len()..);
+                        return Ok((current, key))
                     }
                 }
             };
         }
 
-        Ok(())
+        panic!("idk")
     }
 
     /// Remove leaf node from the trie.
