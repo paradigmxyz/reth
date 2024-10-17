@@ -19,8 +19,8 @@ use reth_network_peers::{
 };
 use reth_primitives_traits::{
     constants::{
-        EIP1559_INITIAL_BASE_FEE, ETHEREUM_BLOCK_GAS_LIMIT,
-        HOLESKY_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        EIP1559_INITIAL_BASE_FEE, ETHEREUM_BLOCK_GAS_LIMIT, HOLESKY_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header, SealedHeader,
 };
