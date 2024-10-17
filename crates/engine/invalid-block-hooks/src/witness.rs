@@ -6,10 +6,7 @@ use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{
-    system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
-    ConfigureEvm,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -87,23 +84,11 @@ where
             EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default()),
         );
 
+        let mut system_caller =
+            SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
+
         // Apply pre-block system contract calls.
-        apply_beacon_root_contract_call(
-            &self.evm_config,
-            self.provider.chain_spec().as_ref(),
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
-            &mut evm,
-        )?;
-        apply_blockhashes_contract_call(
-            &self.evm_config,
-            &self.provider.chain_spec(),
-            block.timestamp,
-            block.number,
-            block.parent_hash,
-            &mut evm,
-        )?;
+        system_caller.apply_pre_execution_changes(&block.clone().unseal(), &mut evm)?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
@@ -134,7 +119,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // Take the bundle state
-        let bundle_state = db.take_bundle();
+        let mut bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
         let mut state_preimages = HashMap::default();
@@ -175,7 +160,8 @@ where
 
         // Write the witness to the output directory.
         let response = ExecutionWitness {
-            state: std::collections::HashMap::from_iter(state),
+            state: HashMap::from_iter(state),
+            codes: Default::default(),
             keys: Some(state_preimages),
         };
         let re_executed_witness_path = self.save_file(
@@ -185,12 +171,8 @@ where
         if let Some(healthy_node_client) = &self.healthy_node_client {
             // Compare the witness against the healthy node.
             let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::debug_execution_witness(
-                    healthy_node_client,
-                    block.number.into(),
-                    true,
-                )
-                .await
+                DebugApiClient::debug_execution_witness(healthy_node_client, block.number.into())
+                    .await
             })?;
 
             let healthy_path = self.save_file(
@@ -213,6 +195,21 @@ where
         }
 
         // The bundle state after re-execution should match the original one.
+        //
+        // NOTE: This should not be needed if `Reverts` had a comparison method that sorted first,
+        // or otherwise did not care about order.
+        //
+        // See: https://github.com/bluealloy/revm/issues/1813
+        let mut output = output.clone();
+        for reverts in output.state.reverts.iter_mut() {
+            reverts.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+
+        // We also have to sort the `bundle_state` reverts
+        for reverts in bundle_state.reverts.iter_mut() {
+            reverts.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+
         if bundle_state != output.state {
             let original_path = self.save_file(
                 format!("{}_{}.bundle_state.original.json", block.number, block.hash()),

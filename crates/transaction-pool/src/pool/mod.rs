@@ -88,6 +88,7 @@ use reth_execution_types::ChangedAccount;
 
 use reth_primitives::{
     BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -194,7 +195,7 @@ where
     pub(crate) fn block_info(&self) -> BlockInfo {
         self.get_pool_data().block_info()
     }
-    /// Returns the currently tracked block
+    /// Sets the currently tracked block
     pub(crate) fn set_block_info(&self, info: BlockInfo) {
         self.pool.write().set_block_info(info)
     }
@@ -318,13 +319,19 @@ where
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<PooledTransactionsElement>
+    where
+        <V as TransactionValidator>::Transaction:
+            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         let transactions = self.get_all(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
-            let tx = transaction.to_recovered_transaction().into_signed();
+            let recovered: TransactionSignedEcRecovered =
+                transaction.transaction.clone().into_consensus().into();
+            let tx = recovered.into_signed();
             let pooled = if tx.is_eip4844() {
                 // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
                 if let Some(blob) = self.get_blob_transaction(tx) {
@@ -360,9 +367,15 @@ where
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement> {
+    ) -> Option<PooledTransactionsElement>
+    where
+        <V as TransactionValidator>::Transaction:
+            PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
+    {
         self.get(&tx_hash).and_then(|transaction| {
-            let tx = transaction.to_recovered_transaction().into_signed();
+            let recovered: TransactionSignedEcRecovered =
+                transaction.transaction.clone().into_consensus().into();
+            let tx = recovered.into_signed();
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {
@@ -702,6 +715,38 @@ where
         removed
     }
 
+    /// Removes and returns all matching transactions and their dependent transactions from the
+    /// pool.
+    pub(crate) fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
+        let removed = self.pool.write().remove_transactions_and_descendants(hashes);
+
+        let mut listener = self.event_listener.write();
+
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        removed
+    }
+
+    pub(crate) fn remove_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        let removed = self.pool.write().remove_transactions_by_sender(sender_id);
+
+        let mut listener = self.event_listener.write();
+
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+
+        removed
+    }
+
     /// Removes and returns all transactions that are present in the pool.
     pub(crate) fn retain_unknown<A>(&self, announcement: &mut A)
     where
@@ -729,6 +774,27 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.get_pool_data().get_transactions_by_sender(sender_id)
+    }
+
+    /// Returns the highest transaction of the address
+    pub(crate) fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_highest_transaction_by_sender(sender_id)
+    }
+
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    pub(crate) fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_highest_consecutive_transaction_by_sender(
+            sender_id.into_transaction_id(on_chain_nonce),
+        )
     }
 
     /// Returns all transactions that where submitted with the given [`TransactionOrigin`]

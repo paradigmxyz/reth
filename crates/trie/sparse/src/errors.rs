@@ -1,0 +1,49 @@
+//! Errors for sparse trie.
+
+use alloy_primitives::{Bytes, B256};
+use reth_trie::Nibbles;
+use thiserror::Error;
+
+/// Result type with [`SparseStateTrieError`] as error.
+pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
+
+/// Error encountered in [`crate::SparseStateTrie`].
+#[derive(Error, Debug)]
+pub enum SparseStateTrieError {
+    /// Encountered invalid root node.
+    #[error("invalid root node at {path:?}: {node:?}")]
+    InvalidRootNode {
+        /// Path to first proof node.
+        path: Nibbles,
+        /// Encoded first proof node.
+        node: Bytes,
+    },
+    /// Sparse trie error.
+    #[error(transparent)]
+    Sparse(#[from] SparseTrieError),
+    /// RLP error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+}
+
+/// Result type with [`SparseTrieError`] as error.
+pub type SparseTrieResult<Ok> = Result<Ok, SparseTrieError>;
+
+/// Error encountered in [`crate::SparseTrie`].
+#[derive(Error, Debug)]
+pub enum SparseTrieError {
+    /// Sparse trie is still blind. Thrown on attempt to update it.
+    #[error("sparse trie is blind")]
+    Blind,
+    /// Encountered blinded node on update.
+    #[error("attempted to update blind node at {path:?}: {hash}")]
+    BlindedNode {
+        /// Blind node path.
+        path: Nibbles,
+        /// Node hash
+        hash: B256,
+    },
+    /// RLP error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+}

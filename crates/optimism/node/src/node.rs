@@ -3,16 +3,18 @@
 use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_network::{NetworkHandle, NetworkManager};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager};
 use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
-        NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    BuilderContext, Node, PayloadBuilderConfig,
+    rpc::{RethRpcAddOns, RpcAddOns, RpcHandle},
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
@@ -96,11 +98,17 @@ where
         OptimismEngineValidatorBuilder,
     >;
 
-    type AddOns = OptimismAddOns;
+    type AddOns = OptimismAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
         Self::components(args.clone())
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        OptimismAddOns::new(self.args.sequencer_http.clone())
     }
 }
 
@@ -114,11 +122,43 @@ impl NodeTypesWithEngine for OptimismNode {
 }
 
 /// Add-ons w.r.t. optimism.
-#[derive(Debug, Clone)]
-pub struct OptimismAddOns;
+#[derive(Debug)]
+pub struct OptimismAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>>);
 
-impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
+impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl<N: FullNodeComponents> OptimismAddOns<N> {
+    /// Create a new instance with the given `sequencer_http` URL.
+    pub fn new(sequencer_http: Option<String>) -> Self {
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http)))
+    }
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOns<N>
+    for OptimismAddOns<N>
+{
+    type Handle = RpcHandle<N, OpEthApi<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        self.0.launch_add_ons(ctx).await
+    }
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> RethRpcAddOns<N>
+    for OptimismAddOns<N>
+{
     type EthApi = OpEthApi<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.0.hooks_mut()
+    }
 }
 
 /// A regular optimism evm and executor builder.
@@ -148,9 +188,11 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct OptimismPoolBuilder;
+#[derive(Debug, Default, Clone)]
+pub struct OptimismPoolBuilder {
+    /// Enforced overrides that are applied to the pool config.
+    pub pool_config_overrides: PoolBuilderConfigOverrides,
+}
 
 impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
@@ -159,6 +201,7 @@ where
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+        let Self { pool_config_overrides } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
@@ -167,7 +210,11 @@ where
         ))
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
-        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+        .with_additional_tasks(
+            pool_config_overrides
+                .additional_validation_tasks
+                .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
+        )
         .build_with_tasks(ctx.provider().clone(), ctx.task_executor().clone(), blob_store.clone())
         .map(|validator| {
             OpTransactionValidator::new(validator)
@@ -180,7 +227,7 @@ where
             validator,
             CoinbaseTipOrdering::default(),
             blob_store,
-            ctx.pool_config(),
+            pool_config_overrides.apply(ctx.pool_config()),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
@@ -309,18 +356,18 @@ pub struct OptimismNetworkBuilder {
     pub disable_discovery_v4: bool,
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
-where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    Pool: TransactionPool + Unpin + 'static,
-{
-    async fn build_network(
-        self,
+impl OptimismNetworkBuilder {
+    /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
+    ///
+    /// This applies the configured [`OptimismNetworkBuilder`] settings.
+    pub fn network_config<Node>(
+        &self,
         ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<NetworkHandle> {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self;
-
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider>>
+    where
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+    {
+        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
@@ -353,8 +400,22 @@ where
         // gossip to prevent other parties in the network from learning about them.
         network_config.tx_gossip_disabled = disable_txpool_gossip;
 
-        let network = NetworkManager::builder(network_config).await?;
+        Ok(network_config)
+    }
+}
 
+impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Pool: TransactionPool + Unpin + 'static,
+{
+    async fn build_network(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<NetworkHandle> {
+        let network_config = self.network_config(ctx)?;
+        let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)

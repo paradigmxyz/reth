@@ -398,8 +398,13 @@ where
         let (header, seal) = sealed.into_parts();
         let genesis_block = SealedHeader::new(header, seal);
 
-        let blockchain_provider =
-            BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
+        let blockchain_provider = BlockchainProvider::with_blocks(
+            provider_factory.clone(),
+            tree,
+            genesis_block,
+            None,
+            None,
+        );
 
         let pruner = Pruner::new_with_factory(
             provider_factory.clone(),

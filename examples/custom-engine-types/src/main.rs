@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use alloy_genesis::Genesis;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -36,7 +36,8 @@ use reth::{
     builder::{
         components::{ComponentsBuilder, EngineValidatorBuilder, PayloadServiceBuilder},
         node::{NodeTypes, NodeTypesWithEngine},
-        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
+        BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
+        PayloadBuilderConfig,
     },
     providers::{CanonStateSubscriptions, StateProviderFactory},
     tasks::TaskManager,
@@ -64,7 +65,7 @@ use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Withdrawals, B256};
+use reth_primitives::Withdrawals;
 use reth_tracing::{RethTracer, Tracer};
 
 /// A custom payload attributes type.
@@ -241,7 +242,9 @@ where
         EthereumConsensusBuilder,
         CustomEngineValidatorBuilder,
     >;
-    type AddOns = EthereumAddOns;
+    type AddOns = EthereumAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
@@ -252,6 +255,10 @@ where
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
             .engine_validator(CustomEngineValidatorBuilder::default())
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        EthereumAddOns::default()
     }
 }
 

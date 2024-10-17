@@ -169,7 +169,8 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use reth_primitives::{SealedBlock, B256};
+    use alloy_primitives::B256;
+    use reth_primitives::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };

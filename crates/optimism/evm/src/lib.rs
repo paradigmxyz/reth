@@ -6,9 +6,14 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+#[macro_use]
+extern crate alloc;
+
+use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
@@ -18,7 +23,6 @@ use reth_primitives::{
     Head, Header, TransactionSigned,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use std::sync::Arc;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -32,6 +36,8 @@ pub use error::OptimismBlockExecutionError;
 use revm_primitives::{
     BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
 };
+
+pub mod strategy;
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Clone)]
@@ -124,7 +130,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
-        cfg_env.handler_cfg.is_optimism = self.chain_spec.is_optimism();
+        cfg_env.handler_cfg.is_optimism = true;
     }
 
     fn next_cfg_and_block_env(
@@ -139,18 +145,11 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         let spec_id = revm_spec_by_timestamp_after_bedrock(&self.chain_spec, attributes.timestamp);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
+        // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
             .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id.is_enabled_in(SpecId::CANCUN) {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64));
+            .or_else(|| (spec_id.is_enabled_in(SpecId::CANCUN)).then_some(0))
+            .map(BlobExcessGasAndPrice::new);
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -211,11 +210,13 @@ mod tests {
     use super::*;
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
+    use reth_execution_types::{Chain, ExecutionOutcome};
+    use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, BASE_MAINNET, KECCAK_EMPTY,
+        Header, Receipt, Receipts, SealedBlockWithSenders, TxType, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
@@ -243,7 +244,7 @@ mod tests {
         // Build the ChainSpec for Ethereum mainnet, activating London, Paris, and Shanghai
         // hardforks
         let chain_spec = ChainSpec::builder()
-            .chain(Chain::mainnet())
+            .chain(0.into())
             .genesis(Genesis::default())
             .london_activated()
             .paris_activated()
@@ -545,5 +546,80 @@ mod tests {
 
         // Optimism in handler
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::ECOTONE, is_optimism: true });
+    }
+
+    #[test]
+    fn receipts_by_block_hash() {
+        // Create a default SealedBlockWithSenders object
+        let block = SealedBlockWithSenders::default();
+
+        // Define block hashes for block1 and block2
+        let block1_hash = B256::new([0x01; 32]);
+        let block2_hash = B256::new([0x02; 32]);
+
+        // Clone the default block into block1 and block2
+        let mut block1 = block.clone();
+        let mut block2 = block;
+
+        // Set the hashes of block1 and block2
+        block1.block.header.set_block_number(10);
+        block1.block.header.set_hash(block1_hash);
+
+        block2.block.header.set_block_number(11);
+        block2.block.header.set_hash(block2_hash);
+
+        // Create a random receipt object, receipt1
+        let receipt1 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create another random receipt object, receipt2
+        let receipt2 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 1325345,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts =
+            Receipts { receipt_vec: vec![vec![Some(receipt1.clone())], vec![Some(receipt2)]] };
+
+        // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
+        // vector, and first_block set to 10
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
+        // including block1_hash and block2_hash, and the execution_outcome
+        let chain = Chain::new([block1, block2], execution_outcome.clone(), None);
+
+        // Assert that the proper receipt vector is returned for block1_hash
+        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
+
+        // Create an ExecutionOutcome object with a single receipt vector containing receipt1
+        let execution_outcome1 = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts { receipt_vec: vec![vec![Some(receipt1)]] },
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Assert that the execution outcome at the first block contains only the first receipt
+        assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));
+
+        // Assert that the execution outcome at the tip block contains the whole execution outcome
+        assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
     }
 }

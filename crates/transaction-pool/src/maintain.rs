@@ -7,7 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -17,8 +17,8 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    alloy_primitives::Sealable, BlockNumberOrTag, PooledTransactionsElementEcRecovered,
-    SealedHeader, TransactionSigned,
+    BlockNumberOrTag, PooledTransactionsElementEcRecovered, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -109,12 +109,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = SealedHeader::new(header, seal);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            block_gas_limit: latest.gas_limit as u64,
+            block_gas_limit: latest.gas_limit,
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
                 .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
-                .unwrap_or_default() as u64,
+                .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
         pool.set_block_info(info);
@@ -335,11 +335,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     .ok()
                                 })
                                 .map(|tx| {
-                                    <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled(tx)
+                                    <P as TransactionPool>::Transaction::from_pooled(tx.into())
                                 })
                         } else {
-
-                            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+                            <P as TransactionPool>::Transaction::try_from_consensus(tx.into()).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -347,7 +346,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // update the pool first
                 let update = CanonicalStateUpdate {
                     new_tip: &new_tip.block,
-                    pending_block_base_fee: pending_block_base_fee as u64,
+                    pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
@@ -396,10 +395,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        block_gas_limit: tip.gas_limit as u64,
+                        block_gas_limit: tip.gas_limit,
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
-                        pending_basefee: pending_block_base_fee as u64,
+                        pending_basefee: pending_block_base_fee,
                         pending_blob_fee: pending_block_blob_fee,
                     };
                     pool.set_block_info(info);
@@ -430,7 +429,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // Canonical update
                 let update = CanonicalStateUpdate {
                     new_tip: &tip.block,
-                    pending_block_base_fee: pending_block_base_fee as u64,
+                    pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
@@ -455,21 +454,11 @@ impl FinalizedBlockTracker {
 
     /// Updates the tracked finalized block and returns the new finalized block if it changed
     fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
-        match (self.last_finalized_block, finalized_block) {
-            (Some(last), Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                if last < finalized {
-                    Some(finalized)
-                } else {
-                    None
-                }
-            }
-            (None, Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                Some(finalized)
-            }
-            _ => None,
-        }
+        let finalized = finalized_block?;
+        self.last_finalized_block
+            .replace(finalized)
+            .map_or(true, |last| last < finalized)
+            .then_some(finalized)
     }
 }
 
@@ -491,7 +480,7 @@ impl MaintainedPoolState {
     }
 }
 
-/// A unique `ChangedAccount` identified by its address that can be used for deduplication
+/// A unique [`ChangedAccount`] identified by its address that can be used for deduplication
 #[derive(Eq)]
 struct ChangedAccountEntry(ChangedAccount);
 
@@ -584,7 +573,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
         })
         .collect::<Vec<_>>();
 
@@ -607,7 +596,11 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.to_recovered_transaction().into_signed())
+        .map(|tx| {
+            let recovered: TransactionSignedEcRecovered =
+                tx.transaction.clone().into_consensus().into();
+            recovered.into_signed()
+        })
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
@@ -673,6 +666,7 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
@@ -696,7 +690,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
-        let tx = PooledTransactionsElement::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+        let tx = PooledTransactionsElement::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
         let transaction: EthPooledTransaction = tx.try_into_ecrecovered().unwrap().into();
         let tx_to_cmp = transaction.clone();

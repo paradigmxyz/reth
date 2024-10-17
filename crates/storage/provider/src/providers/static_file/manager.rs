@@ -222,7 +222,7 @@ impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
-            Some(StorageLock::try_acquire(path.as_ref())?)
+            StorageLock::try_acquire(path.as_ref())?.into()
         } else {
             None
         };
@@ -285,7 +285,9 @@ impl StaticFileProvider {
                 let fixed_block_range = self.find_fixed_range(block_range.start());
                 let jar_provider = self
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
-                    .ok_or(ProviderError::MissingStaticFileBlock(segment, block_range.start()))?;
+                    .ok_or_else(|| {
+                        ProviderError::MissingStaticFileBlock(segment, block_range.start())
+                    })?;
 
                 entries += jar_provider.rows();
 
@@ -323,7 +325,7 @@ impl StaticFileProvider {
             || self.get_segment_ranges_from_block(segment, block),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingStaticFileBlock(segment, block))
+        .ok_or(ProviderError::MissingStaticFileBlock(segment, block))
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and transaction.
@@ -338,7 +340,7 @@ impl StaticFileProvider {
             || self.get_segment_ranges_from_transaction(segment, tx),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingStaticFileTx(segment, tx))
+        .ok_or(ProviderError::MissingStaticFileTx(segment, tx))
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block or transaction.

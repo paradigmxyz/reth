@@ -77,9 +77,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// # Example
     ///
     /// ```
+    /// use alloy_primitives::U256;
     /// use reth_db::test_utils::create_test_rw_db;
     /// use reth_db_api::database::Database;
-    /// use reth_primitives::{Account, U256};
+    /// use reth_primitives::Account;
     /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
     /// use reth_trie_db::DatabaseStateRoot;
     ///
@@ -243,22 +244,24 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
             }
         }
 
-        let hashed_accounts = HashMap::from_iter(
-            accounts.into_iter().map(|(address, info)| (keccak256(address), info)),
-        );
+        let hashed_accounts =
+            accounts.into_iter().map(|(address, info)| (keccak256(address), info)).collect();
 
-        let hashed_storages = HashMap::from_iter(storages.into_iter().map(|(address, storage)| {
-            (
-                keccak256(address),
-                HashedStorage::from_iter(
-                    // The `wiped` flag indicates only whether previous storage entries
-                    // should be looked up in db or not. For reverts it's a noop since all
-                    // wiped changes had been written as storage reverts.
-                    false,
-                    storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
-                ),
-            )
-        }));
+        let hashed_storages = storages
+            .into_iter()
+            .map(|(address, storage)| {
+                (
+                    keccak256(address),
+                    HashedStorage::from_iter(
+                        // The `wiped` flag indicates only whether previous storage entries
+                        // should be looked up in db or not. For reverts it's a noop since all
+                        // wiped changes had been written as storage reverts.
+                        false,
+                        storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
+                    ),
+                )
+            })
+            .collect();
 
         Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
     }
@@ -267,10 +270,10 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, Address};
+    use alloy_primitives::{hex, map::HashMap, Address, U256};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
-    use reth_primitives::{hex, revm_primitives::AccountInfo, U256};
+    use reth_primitives::revm_primitives::AccountInfo;
     use revm::db::BundleState;
 
     #[test]

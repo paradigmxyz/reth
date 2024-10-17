@@ -45,7 +45,7 @@ where
             let block = block.unseal();
 
             let l1_block_info =
-                reth_optimism_evm::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+                reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
 
             return block
                 .body
@@ -59,9 +59,8 @@ where
                         index: idx as u64,
                         block_hash,
                         block_number,
-                        base_fee: base_fee.map(|base_fee| base_fee as u64),
-                        excess_blob_gas: excess_blob_gas
-                            .map(|excess_blob_gas| excess_blob_gas as u64),
+                        base_fee,
+                        excess_blob_gas,
                         timestamp,
                     };
 

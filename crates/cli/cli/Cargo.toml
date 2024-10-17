@@ -14,10 +14,14 @@ workspace = true
 [dependencies]
 # reth
 reth-cli-runner.workspace = true
+reth-db.workspace = true
+alloy-genesis.workspace = true
 
 # misc
 clap.workspace = true
+shellexpand.workspace = true
 eyre.workspace = true
+serde_json.workspace = true
 
 
 

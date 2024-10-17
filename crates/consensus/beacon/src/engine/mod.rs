@@ -462,8 +462,7 @@ where
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
-        {
+        if reth_chainspec::EthChainSpec::is_optimism(&self.blockchain.chain_spec()) {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
@@ -945,7 +944,7 @@ where
             let safe = self
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
-                .ok_or_else(|| ProviderError::UnknownBlockHash(safe_block_hash))?;
+                .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
             self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
         }
         Ok(())
@@ -965,7 +964,7 @@ where
             let finalized = self
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
-                .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
+                .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
             self.blockchain.finalize_block(finalized.number)?;
             self.blockchain
                 .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));

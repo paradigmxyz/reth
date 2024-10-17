@@ -2,7 +2,7 @@
 
 use crate::{Nibbles, TrieAccount};
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::{encode_fixed_size, Decodable};
+use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
     proof::{verify_proof, ProofNodes, ProofVerificationError},
@@ -86,13 +86,18 @@ pub struct StorageMultiProof {
     pub subtree: ProofNodes,
 }
 
-impl Default for StorageMultiProof {
-    fn default() -> Self {
-        Self { root: EMPTY_ROOT_HASH, subtree: Default::default() }
-    }
-}
-
 impl StorageMultiProof {
+    /// Create new storage multiproof for empty trie.
+    pub fn empty() -> Self {
+        Self {
+            root: EMPTY_ROOT_HASH,
+            subtree: ProofNodes::from_iter([(
+                Nibbles::default(),
+                Bytes::from([EMPTY_STRING_CODE]),
+            )]),
+        }
+    }
+
     /// Return storage proofs for the target storage slot (unhashed).
     pub fn storage_proof(&self, slot: B256) -> Result<StorageProof, alloy_rlp::Error> {
         let nibbles = Nibbles::unpack(keccak256(slot));
@@ -207,6 +212,12 @@ impl StorageProof {
     /// Create new storage proof from the storage slot and its pre-hashed image.
     pub fn new_with_nibbles(key: B256, nibbles: Nibbles) -> Self {
         Self { key, nibbles, ..Default::default() }
+    }
+
+    /// Set proof nodes on storage proof.
+    pub fn with_proof(mut self, proof: Vec<Bytes>) -> Self {
+        self.proof = proof;
+        self
     }
 
     /// Verify the proof against the provided storage root.

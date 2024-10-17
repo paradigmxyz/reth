@@ -5,52 +5,11 @@ use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
 use crate::ConfigureEvm;
 use alloy_primitives::B256;
-use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::Header;
-use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
-
-/// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block contract call.
-///
-/// This constructs a new [`Evm`] with the given database and environment ([`CfgEnvWithHandlerCfg`]
-/// and [`BlockEnv`]) to execute the pre block contract call.
-///
-/// This uses [`apply_blockhashes_contract_call`] to ultimately apply the
-/// blockhash contract state change.
-pub fn pre_block_blockhashes_contract_call<EvmConfig, DB>(
-    db: &mut DB,
-    evm_config: &EvmConfig,
-    chain_spec: impl EthereumHardforks,
-    initialized_cfg: &CfgEnvWithHandlerCfg,
-    initialized_block_env: &BlockEnv,
-    parent_block_hash: B256,
-) -> Result<(), BlockExecutionError>
-where
-    DB: Database + DatabaseCommit,
-    DB::Error: Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
-{
-    // Apply the pre-block EIP-2935 contract call
-    let mut evm_pre_block = Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            Default::default(),
-        ))
-        .build();
-
-    apply_blockhashes_contract_call(
-        evm_config,
-        chain_spec,
-        initialized_block_env.timestamp.to(),
-        initialized_block_env.number.to(),
-        parent_block_hash,
-        &mut evm_pre_block,
-    )
-}
+use revm::{interpreter::Host, Database, Evm};
+use revm_primitives::ResultAndState;
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
 /// chain specification, and EVM.
@@ -65,7 +24,7 @@ where
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
+pub(crate) fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
     evm_config: &EvmConfig,
     chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
@@ -114,39 +73,4 @@ where
     evm.context.evm.env = previous_env;
 
     Ok(Some(res))
-}
-
-/// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
-/// chain specification, and EVM and commits the relevant state changes.
-///
-/// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
-/// state changes are made.
-///
-/// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
-#[inline]
-pub fn apply_blockhashes_contract_call<EvmConfig, EXT, DB>(
-    evm_config: &EvmConfig,
-    chain_spec: impl EthereumHardforks,
-    block_timestamp: u64,
-    block_number: u64,
-    parent_block_hash: B256,
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
-where
-    DB: Database + DatabaseCommit,
-    DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
-{
-    if let Some(res) = transact_blockhashes_contract_call(
-        evm_config,
-        chain_spec,
-        block_timestamp,
-        block_number,
-        parent_block_hash,
-        evm,
-    )? {
-        evm.context.evm.db.commit(res.state);
-    }
-
-    Ok(())
 }

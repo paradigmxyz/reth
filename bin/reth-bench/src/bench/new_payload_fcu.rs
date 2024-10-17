@@ -11,13 +11,14 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
+use alloy_primitives::B256;
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::{Block, B256};
+use reth_primitives::Block;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -36,9 +37,8 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let cloned_args = self.benchmark.clone();
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&cloned_args, self.rpc_url).await?;
+            BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
@@ -100,8 +100,7 @@ impl Command {
             )
             .await?;
 
-            let new_payload_result =
-                NewPayloadResult { gas_used: gas_used as u64, latency: start.elapsed() };
+            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
             call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
                 .await?;
@@ -119,8 +118,7 @@ impl Command {
             info!(%combined_result);
 
             // record the current result
-            let gas_row =
-                TotalGasRow { block_number, gas_used: gas_used as u64, time: current_duration };
+            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
         }
 

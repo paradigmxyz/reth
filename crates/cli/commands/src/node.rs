@@ -6,22 +6,22 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        utils::DefaultChainSpecParser, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
 };
-use reth_node_metrics::recorder::install_prometheus_recorder;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
 #[derive(Debug, Parser)]
 pub struct NodeCommand<
-    C: ChainSpecParser = DefaultChainSpecParser,
+    C: ChainSpecParser = EthereumChainSpecParser,
     Ext: clap::Args + fmt::Debug = NoArgs,
 > {
     /// The path to the configuration file to use.
@@ -179,10 +179,6 @@ impl<
             pruning,
         };
 
-        // Register the prometheus recorder before creating the database,
-        // because database init needs it to register metrics.
-        let _ = install_prometheus_recorder();
-
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
 
@@ -210,7 +206,7 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,
@@ -218,7 +214,7 @@ mod tests {
 
     #[test]
     fn parse_help_node_command() {
-        let err = NodeCommand::<DefaultChainSpecParser>::try_parse_args_from(["reth", "--help"])
+        let err = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(["reth", "--help"])
             .unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
@@ -359,7 +355,7 @@ mod tests {
 
     #[test]
     fn with_unused_ports_conflicts_with_instance() {
-        let err = NodeCommand::<DefaultChainSpecParser>::try_parse_args_from([
+        let err = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from([
             "reth",
             "--with-unused-ports",
             "--instance",

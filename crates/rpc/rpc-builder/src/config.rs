@@ -6,7 +6,7 @@ use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
 use tower::layer::util::Identity;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     auth::AuthServerConfig, error::RpcError, IpcServerBuilder, RpcModuleConfig, RpcServerConfig,
@@ -167,6 +167,13 @@ impl RethRpcServerConfig for RpcServerArgs {
 
     fn rpc_server_config(&self) -> RpcServerConfig {
         let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
+
+        if self.http_api.is_some() && !self.http {
+            warn!(
+                target: "reth::cli",
+                "The --http.api flag is set but --http is not enabled. HTTP RPC API will not be exposed."
+            );
+        }
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
