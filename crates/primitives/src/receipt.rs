@@ -5,7 +5,8 @@ use crate::{
     EIP7702_TX_TYPE_ID,
 };
 use alloc::{vec, vec::Vec};
-use alloy_primitives::{Bloom, Bytes, Log, B256};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
@@ -204,16 +205,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-impl ReceiptWithBloom {
-    /// Returns the enveloped encoded receipt.
-    ///
-    /// See also [`ReceiptWithBloom::encode_enveloped`]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
-    }
-
+// Implement the trait for ReceiptWithBloom
+impl Encodable2718 for ReceiptWithBloom {
     /// Encodes the receipt into its "raw" format.
     /// This format is also referred to as "binary" encoding.
     ///
@@ -223,10 +216,29 @@ impl ReceiptWithBloom {
     /// of the receipt:
     /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
     ///   logsBloom, logs])`
-    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+    fn type_flag(&self) -> Option<u8> {
+        match self.receipt.tx_type {
+            TxType::Legacy => None,
+            tx_type => Some(tx_type as u8),
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        self.as_encoder().length()
+    }
+
+    fn encode_2718(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, false)
     }
 
+    fn encoded_2718(&self) -> Vec<u8> {
+        let mut out = vec![];
+        self.encode_2718(&mut out);
+        out
+    }
+}
+
+impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
@@ -501,6 +513,7 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::revm_primitives::Bytes;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
