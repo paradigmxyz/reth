@@ -33,7 +33,6 @@ use reth_ethereum_forks::EthereumHardfork;
 use reth_primitives::constants::EIP1559_INITIAL_BASE_FEE;
 
 pub mod execute;
-pub mod strategy;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;

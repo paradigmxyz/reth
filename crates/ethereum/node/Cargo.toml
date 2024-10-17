@@ -21,6 +21,7 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
+reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
