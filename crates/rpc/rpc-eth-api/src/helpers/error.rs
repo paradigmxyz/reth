@@ -59,6 +59,16 @@ pub trait AsEthApiError {
 
         false
     }
+
+    /// Returns `true` if error is
+    /// [`RpcInvalidTransactionError::GasTooLow`](reth_rpc_eth_types::RpcInvalidTransactionError::GasTooLow).
+    fn is_gas_too_low(&self) -> bool {
+        if let Some(err) = self.as_err() {
+            return err.is_gas_too_low()
+        }
+
+        false
+    }
 }
 
 impl AsEthApiError for EthApiError {

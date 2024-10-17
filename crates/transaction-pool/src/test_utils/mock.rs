@@ -1338,10 +1338,8 @@ impl MockTransactionDistribution {
         nonce_range: Range<u64>,
         rng: &mut impl rand::Rng,
     ) -> MockTransactionSet {
-        let mut txs = Vec::new();
-        for nonce in nonce_range {
-            txs.push(self.tx(nonce, rng).with_sender(sender));
-        }
+        let txs =
+            nonce_range.map(|nonce| self.tx(nonce, rng).with_sender(sender)).collect::<Vec<_>>();
         MockTransactionSet::new(txs)
     }
 

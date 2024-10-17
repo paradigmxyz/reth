@@ -26,7 +26,7 @@ pub use traits::{
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
     /// The built payload type.
@@ -125,8 +125,8 @@ pub fn validate_payload_timestamp(
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
 /// After Shanghai, withdrawals field must be [Some].
 /// Before Shanghai, withdrawals field must be [None];
-pub fn validate_withdrawals_presence(
-    chain_spec: &ChainSpec,
+pub fn validate_withdrawals_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
@@ -210,8 +210,8 @@ pub fn validate_withdrawals_presence(
 /// `MessageValidationKind::Payload`, then the error code will be `-32602: Invalid params`. If the
 /// parameter is `MessageValidationKind::PayloadAttributes`, then the error code will be `-38003:
 /// Invalid payload attributes`.
-pub fn validate_parent_beacon_block_root_presence(
-    chain_spec: &ChainSpec,
+pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     validation_kind: MessageValidationKind,
     timestamp: u64,
@@ -298,13 +298,14 @@ impl MessageValidationKind {
 /// either an execution payload, or payload attributes.
 ///
 /// The version is provided by the [`EngineApiMessageVersion`] argument.
-pub fn validate_version_specific_fields<Type>(
-    chain_spec: &ChainSpec,
+pub fn validate_version_specific_fields<Type, T>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), EngineObjectValidationError>
 where
     Type: PayloadAttributes,
+    T: EthereumHardforks,
 {
     validate_withdrawals_presence(
         chain_spec,

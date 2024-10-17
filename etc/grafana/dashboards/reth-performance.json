@@ -15,7 +15,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "11.2.0"
+      "version": "11.1.0"
     },
     {
       "type": "datasource",
@@ -83,7 +83,6 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 25,
             "gradientMode": "none",
@@ -137,9 +136,9 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "hidden",
-          "placement": "right",
-          "showLegend": false
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "single",
@@ -202,7 +201,6 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 25,
             "gradientMode": "none",
@@ -256,9 +254,9 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "hidden",
-          "placement": "right",
-          "showLegend": false
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "single",
@@ -315,7 +313,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values($instance)",
+        "definition": "query_result(reth_info)",
         "hide": 0,
         "includeAll": false,
         "label": "instance",
@@ -323,12 +321,12 @@
         "name": "instance",
         "options": [],
         "query": {
-          "qryType": 1,
-          "query": "label_values($instance)",
+          "qryType": 3,
+          "query": "query_result(reth_info)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
-        "regex": "",
+        "regex": "/.*instance=\\\"([^\\\"]*).*/",
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
@@ -341,7 +339,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Reth Performance",
+  "title": "Reth - Performance",
   "uid": "bdywb3xjphfy8a",
   "version": 2,
   "weekStart": ""

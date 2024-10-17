@@ -23,11 +23,20 @@ pub use account::{Account, Bytecode};
 pub mod signed_tx;
 pub use signed_tx::SignedTransaction;
 
+pub mod receipt;
+pub use receipt::Receipt;
+
+pub mod transaction;
+pub use transaction::Transaction;
+
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod request;
 pub use request::{Request, Requests};
+
+pub mod block;
+pub use block::{body::BlockBody, Block};
 
 mod withdrawal;
 pub use withdrawal::{Withdrawal, Withdrawals};

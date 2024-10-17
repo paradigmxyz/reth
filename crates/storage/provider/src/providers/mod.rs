@@ -1,9 +1,9 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FinalizedBlockReader, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
+    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
@@ -109,8 +109,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         tree: Arc<dyn TreeViewer>,
         latest: SealedHeader,
         finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
     ) -> Self {
-        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) }
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized, safe) }
     }
 
     /// Create a new provider using only the database and the tree, fetching the latest header from
@@ -128,11 +129,18 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .transpose()?
             .flatten();
 
+        let safe_header = provider
+            .last_safe_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+
         Ok(Self::with_blocks(
             database,
             tree,
             SealedHeader::new(latest_header, best.best_hash),
             finalized_header,
+            safe_header,
         ))
     }
 

@@ -1,5 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
+use alloy_consensus::Transaction;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
@@ -286,7 +287,7 @@ where
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config, chain_spec);
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec);
 
     system_caller.apply_beacon_root_contract_call(
         reorg_target.timestamp,
