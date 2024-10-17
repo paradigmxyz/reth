@@ -1,4 +1,4 @@
-//! API of a signed transaction, w.r.t. network stack.
+//! API of a signed transaction.
 
 use alloc::fmt;
 use core::hash::Hash;
