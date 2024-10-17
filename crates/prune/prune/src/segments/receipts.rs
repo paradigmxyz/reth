@@ -77,7 +77,7 @@ pub(crate) fn save_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{receipts, PruneInput, SegmentOutput};
+    use crate::segments::{PruneInput, SegmentOutput};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -109,7 +109,7 @@ mod tests {
 
         let mut receipts = Vec::new();
         for block in &blocks {
-            receipts.reserve_exact(&block.body.transactions.len());
+            receipts.reserve_exact(block.body.transactions.len());
             for transaction in &block.body.transactions {
                 receipts
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
