@@ -1,6 +1,7 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
@@ -9,7 +10,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
 };
 use reth_primitives::{
-    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
+    constants::MAXIMUM_EXTRA_DATA_SIZE,
     proofs::{self},
     Block, BlockBody, Header, Request, SealedBlock, TransactionSigned, Withdrawals,
 };

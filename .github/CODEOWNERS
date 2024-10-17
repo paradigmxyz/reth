@@ -43,6 +43,6 @@ crates/tasks/               @mattsse
 crates/tokio-util/          @fgimenez @emhane
 crates/tracing/             @onbjerg
 crates/transaction-pool/    @mattsse
-crates/trie/                @rkrasiuk @Rjected
+crates/trie/                @rkrasiuk @Rjected @shekhirin
 etc/                        @Rjected @onbjerg @shekhirin
 .github/                    @onbjerg @gakonst @DaniPopes

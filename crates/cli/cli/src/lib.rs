@@ -10,6 +10,7 @@
 
 use clap::{Error, Parser};
 use reth_cli_runner::CliRunner;
+use reth_db::ClientVersion;
 use std::{borrow::Cow, ffi::OsString};
 
 /// The chainspec module defines the different chainspecs that can be used by the node.
@@ -66,4 +67,7 @@ pub trait RethCli: Sized {
 
         Ok(cli.with_runner(f))
     }
+
+    /// The client version of the node.
+    fn client_version() -> ClientVersion;
 }
