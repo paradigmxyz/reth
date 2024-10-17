@@ -590,6 +590,13 @@ Database:
 
           [possible values: true, false]
 
+      --db.disable-long-read-transaction-safety <DISABLE_LONG_READ_TRANSACTION_SAFETY>
+          Disable long-lived read transaction safety guarantees.
+
+          CAUTION: In most of the cases, you want the safety guarantees for long read transactions enabled. Use this only if you're trying to enable node to return historical state for certain rpcs (e.g. `debug_executionWitness` or `eth_getProof`).
+
+          [possible values: true, false]
+
 Dev testnet:
       --dev
           Start the node in dev mode
