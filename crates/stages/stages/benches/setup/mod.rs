@@ -27,7 +27,7 @@ mod constants;
 mod account_hashing;
 pub use account_hashing::*;
 use reth_stages_api::{ExecInput, Stage, UnwindInput};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, MerklePatriciaTrie};
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 

@@ -55,7 +55,7 @@ use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
+use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -64,6 +64,7 @@ use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
+    marker::PhantomData,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
     time::{Duration, Instant},
@@ -137,6 +138,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     static_file_provider: StaticFileProvider,
     /// Pruning configuration
     prune_modes: PruneModes,
+    /// Marker to associate the `StateCommitment` type with this provider.
+    _marker: std::marker::PhantomData<SC>,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -223,7 +226,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes }
+        Self { tx, chain_spec, static_file_provider, prune_modes, _marker: PhantomData }
     }
 }
 
@@ -384,7 +387,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes }
+        Self { tx, chain_spec, static_file_provider, prune_modes, _marker: PhantomData }
     }
 
     /// Consume `DbTx` or `DbTxMut`.

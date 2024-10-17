@@ -13,6 +13,7 @@ use reth_stages::{
     StageCheckpoint,
 };
 use reth_stages_api::{ExecInput, Stage, StageExt, UnwindInput};
+use reth_trie_db::MerklePatriciaTrie;
 use std::ops::RangeInclusive;
 use tokio::runtime::Runtime;
 
