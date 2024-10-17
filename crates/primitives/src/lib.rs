@@ -39,7 +39,7 @@ pub use block::{
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use constants::{DEV_GENESIS_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY, SEPOLIA_GENESIS_HASH};
+pub use constants::{HOLESKY_GENESIS_HASH, KECCAK_EMPTY, SEPOLIA_GENESIS_HASH};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
