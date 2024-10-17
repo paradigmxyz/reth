@@ -303,45 +303,6 @@ impl Default for BasicPayloadJobGeneratorConfig {
     }
 }
 
-/// Represents the current state of a payload being built.
-#[derive(Debug, Clone)]
-pub enum PayloadState<P> {
-    /// No payload has been built yet.
-    Missing,
-    /// The best payload built so far, which may still be improved upon.
-    Best(P),
-    /// The payload is frozen and no further building should occur.
-    ///
-    /// Contains the final payload `P` that should be used.
-    Frozen(P),
-}
-
-impl<P> PayloadState<P> {
-    /// Checks if the payload is frozen.
-    pub const fn is_frozen(&self) -> bool {
-        matches!(self, Self::Frozen(_))
-    }
-
-    /// Returns the payload if it exists (either Best or Frozen).
-    pub const fn payload(&self) -> Option<&P> {
-        match self {
-            Self::Missing => None,
-            Self::Best(p) | Self::Frozen(p) => Some(p),
-        }
-    }
-
-    /// Returns a clone of the payload if it exists (either Best or Frozen).
-    pub fn best_payload(&self) -> Option<P>
-    where
-        P: Clone,
-    {
-        match self {
-            Self::Missing => None,
-            Self::Best(p) | Self::Frozen(p) => Some(p.clone()),
-        }
-    }
-}
-
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
 #[derive(Debug)]
 pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
@@ -577,6 +538,45 @@ where
         let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
 
         (fut, KeepPayloadJobAlive::No)
+    }
+}
+
+/// Represents the current state of a payload being built.
+#[derive(Debug, Clone)]
+pub enum PayloadState<P> {
+    /// No payload has been built yet.
+    Missing,
+    /// The best payload built so far, which may still be improved upon.
+    Best(P),
+    /// The payload is frozen and no further building should occur.
+    ///
+    /// Contains the final payload `P` that should be used.
+    Frozen(P),
+}
+
+impl<P> PayloadState<P> {
+    /// Checks if the payload is frozen.
+    pub const fn is_frozen(&self) -> bool {
+        matches!(self, Self::Frozen(_))
+    }
+
+    /// Returns the payload if it exists (either Best or Frozen).
+    pub const fn payload(&self) -> Option<&P> {
+        match self {
+            Self::Missing => None,
+            Self::Best(p) | Self::Frozen(p) => Some(p),
+        }
+    }
+
+    /// Returns a clone of the payload if it exists (either Best or Frozen).
+    pub fn best_payload(&self) -> Option<P>
+    where
+        P: Clone,
+    {
+        match self {
+            Self::Missing => None,
+            Self::Best(p) | Self::Frozen(p) => Some(p.clone()),
+        }
     }
 }
 
