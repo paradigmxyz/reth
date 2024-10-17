@@ -368,6 +368,8 @@ pub enum RpcInvalidTransactionError {
     /// Contains the gas limit.
     #[error("out of gas: gas exhausted during precompiled contract execution: {0}")]
     PrecompileOutOfGas(u64),
+    #[error("out of gas: not enough gas for reentrancy sentry")]
+    ReentranceSentryOutOfGas,
     /// An operand to an opcode was invalid or out of range.
     /// Contains the gas limit.
     #[error("out of gas: invalid operand to an opcode: {0}")]
@@ -465,6 +467,7 @@ impl RpcInvalidTransactionError {
             OutOfGasError::Memory | OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
+            OutOfGasError::ReentranceSentry => Self::ReentranceSentryOutOfGas,
         }
     }
 }
