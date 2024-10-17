@@ -96,7 +96,10 @@ impl PayloadJob for TestPayloadJob {
         Ok(self.attr.clone())
     }
 
-    fn resolve(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve_kind(
+        &mut self,
+        _kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let fut = futures_util::future::ready(self.best_payload());
         (fut, KeepPayloadJobAlive::No)
     }

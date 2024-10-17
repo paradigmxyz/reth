@@ -475,7 +475,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(&mut self, kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.take();
 
         if best_payload.is_none() && self.pending_block.is_none() {

@@ -203,7 +203,7 @@ where
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
 
         let Some(Ok(payload)) =
-            self.payload_builder.resolve(payload_id, PayloadKind::WaitForPending).await
+            self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await
         else {
             eyre::bail!("No payload")
         };

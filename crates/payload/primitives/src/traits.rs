@@ -32,11 +32,20 @@ pub trait PayloadBuilder: Send + Unpin {
     ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
 
     /// Resolves the payload job and returns the best payload that has been built so far.
-    async fn resolve(
+    async fn resolve_kind(
         &self,
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
+
+    /// Resolves the payload job as fast and possible and returns the best payload that has been
+    /// built so far.
+    async fn resolve(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>> {
+        self.resolve_kind(id, PayloadKind::Earliest).await
+    }
 
     /// Sends a message to the service to subscribe to payload events.
     /// Returns a receiver that will receive them.

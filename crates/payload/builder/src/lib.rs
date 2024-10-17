@@ -73,7 +73,7 @@
 //!     Ok(self.attributes.clone())
 //! }
 //!
-//! fn resolve(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+//! fn resolve_kind(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
 //!        let payload = self.best_payload();
 //!        (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
 //!     }

@@ -346,7 +346,7 @@ pub enum EngineApiMessageVersion {
 pub enum PayloadKind {
     /// Returns the best available payload, without waiting for pending job to finish.
     #[default]
-    BestAvailable,
+    Earliest,
     /// If there's a pending job in progress, waits for it to finish and then chooses best payload
     /// accounting for the one just built.
     WaitForPending,

@@ -58,7 +58,15 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     ///
     /// If `wait_for_pending` is provided and there's a payload building job in progress, returned
     /// future will first poll it until completion to get a potentially better payload.
-    fn resolve(&mut self, kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+
+    /// Resolves the payload as fast as possible.
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        self.resolve_kind(PayloadKind::Earliest)
+    }
 }
 
 /// Whether the payload job should be kept alive or terminated after the payload was requested by

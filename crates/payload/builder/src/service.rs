@@ -45,12 +45,20 @@ where
     ///
     /// Note: depending on the installed [`PayloadJobGenerator`], this may or may not terminate the
     /// job, See [`PayloadJob::resolve`].
-    pub async fn resolve(
+    pub async fn resolve_kind(
         &self,
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
-        self.inner.resolve(id, kind).await
+        self.inner.resolve_kind(id, kind).await
+    }
+
+    /// Resolves the payload job and returns the best payload that has been built so far.
+    pub async fn resolve(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
+        self.resolve_kind(id, PayloadKind::Earliest).await
     }
 
     /// Returns the best payload for the given identifier.
@@ -130,7 +138,7 @@ where
         rx.await.ok()?
     }
 
-    async fn resolve(
+    async fn resolve_kind(
         &self,
         id: PayloadId,
         kind: PayloadKind,
@@ -285,7 +293,7 @@ where
         trace!(%id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
-        let (fut, keep_alive) = self.payload_jobs[job].0.resolve(kind);
+        let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
 
         if keep_alive == KeepPayloadJobAlive::No {
             let (_, id) = self.payload_jobs.swap_remove(job);
