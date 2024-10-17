@@ -6,13 +6,13 @@ use alloy_primitives::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
-    TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, MultiProof, StateRootProgress, StorageProof, TrieInput,
 };
 
 /// Mock state for testing
@@ -72,7 +72,11 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self) -> ProviderResult<B256> {
+        unimplemented!("state root computation is not supported")
+    }
+
+    fn state_root_from_post_state(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
@@ -80,16 +84,30 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         _hashed_state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         unimplemented!("state root computation is not supported")
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         _input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+        unimplemented!("state root computation is not supported")
+    }
+
+    fn state_root_with_progress(
+        &self,
+        _state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress> {
+        unimplemented!("state root computation is not supported")
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        _range: core::ops::RangeInclusive<BlockNumber>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
@@ -138,6 +156,22 @@ impl StateProofProvider for StateProviderTest {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         unimplemented!("witness generation is not supported")
+    }
+}
+
+impl HashedPostStateProvider for StateProviderTest {
+    fn hashed_post_state_from_reverts(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        unimplemented!("reverts are not supported")
+    }
+
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        _bundle_state: &revm::db::BundleState,
+    ) -> HashedPostState {
+        unimplemented!("bundle state is not supported")
     }
 }
 

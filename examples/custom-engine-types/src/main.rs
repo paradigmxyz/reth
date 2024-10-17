@@ -39,7 +39,7 @@ use reth::{
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
         PayloadBuilderConfig,
     },
-    providers::{CanonStateSubscriptions, StateProviderFactory},
+    providers::{CanonStateSubscriptions, HashedPostStateProvider, StateProviderFactory},
     tasks::TaskManager,
     transaction_pool::TransactionPool,
 };
@@ -219,6 +219,7 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type State = ();
 }
 
 /// Configure the node types with the custom engine types
@@ -311,7 +312,8 @@ pub struct CustomPayloadBuilder;
 
 impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client:
+        StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + HashedPostStateProvider,
     Pool: TransactionPool,
 {
     type Attributes = CustomPayloadBuilderAttributes;

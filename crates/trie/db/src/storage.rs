@@ -6,7 +6,8 @@ use reth_db::{cursor::DbCursorRO, models::BlockNumberAddress, tables, DatabaseEr
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StorageRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, KeyHasher,
+    StorageRoot,
 };
 
 #[cfg(feature = "metrics")]
@@ -32,7 +33,11 @@ pub trait DatabaseStorageRoot<'a, TX> {
 pub trait DatabaseHashedStorage<TX>: Sized {
     /// Initializes [`HashedStorage`] from reverts. Iterates over storage reverts from the specified
     /// block up to the current tip and aggregates them into hashed storage in reverse.
-    fn from_reverts(tx: &TX, address: Address, from: BlockNumber) -> Result<Self, DatabaseError>;
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        address: Address,
+        from: BlockNumber,
+    ) -> Result<Self, DatabaseError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
@@ -79,13 +84,17 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
 }
 
 impl<TX: DbTx> DatabaseHashedStorage<TX> for HashedStorage {
-    fn from_reverts(tx: &TX, address: Address, from: BlockNumber) -> Result<Self, DatabaseError> {
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        address: Address,
+        from: BlockNumber,
+    ) -> Result<Self, DatabaseError> {
         let mut storage = Self::new(false);
         let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
         for entry in storage_changesets_cursor.walk_range(BlockNumberAddress((from, address))..)? {
             let (BlockNumberAddress((_, storage_address)), storage_change) = entry?;
             if storage_address == address {
-                let hashed_slot = keccak256(storage_change.key);
+                let hashed_slot = KH::hash_key(storage_change.key);
                 if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                     entry.insert(storage_change.value);
                 }

@@ -7,11 +7,12 @@ use alloy_primitives::{
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateProviderBox, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, MultiProof, StateRootProgress, TrieInput,
 };
 use std::sync::OnceLock;
 
@@ -103,7 +104,11 @@ impl AccountReader for MemoryOverlayStateProvider {
 }
 
 impl StateRootProvider for MemoryOverlayStateProvider {
-    fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
+    fn state_root_from_post_state(&self, state: HashedPostState) -> ProviderResult<B256> {
         self.state_root_from_nodes(TrieInput::from_state(state))
     }
 
@@ -113,20 +118,36 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         self.historical.state_root_from_nodes(input)
     }
 
-    fn state_root_with_updates(
+    fn state_root_from_post_state_with_updates(
         &self,
         state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         mut input: TrieInput,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.state_root_from_nodes_with_updates(input)
+    }
+
+    fn state_root_with_progress(
+        &self,
+        _state: Option<IntermediateStateRootState>,
+    ) -> ProviderResult<StateRootProgress> {
+        unimplemented!("state_root_with_progress not implemented for MemoryOverlayStateProvider")
+    }
+
+    fn incremental_root_with_updates(
+        &self,
+        _range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        unimplemented!(
+            "incremental_root_with_updates not implemented for MemoryOverlayStateProvider"
+        )
     }
 }
 
@@ -185,6 +206,22 @@ impl StateProofProvider for MemoryOverlayStateProvider {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.witness(input, target)
+    }
+}
+
+impl HashedPostStateProvider for MemoryOverlayStateProvider {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+    ) -> HashedPostState {
+        self.historical.hashed_post_state_from_bundle_state(bundle_state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        self.historical.hashed_post_state_from_reverts(block_number)
     }
 }
 

@@ -27,8 +27,10 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::StorageChangeSetReader;
+use reth_storage_api::{HashedPostStateProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::HashedPostState;
+use reth_trie_db::DatabaseState;
 use revm::{
     db::states::PlainStorageRevert,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -302,7 +304,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N::ChainSpec, N::State>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
@@ -418,7 +420,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<R>>
     where
         S: FnOnce(
-            DatabaseProviderRO<N::DB, N::ChainSpec>,
+            DatabaseProviderRO<N::DB, N::ChainSpec, N::State>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, Arc<BlockState>) -> ProviderResult<Vec<R>>,
@@ -516,7 +518,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec, N::State>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, Arc<BlockState>) -> ProviderResult<Option<R>>,
     {
         // Order of instantiation matters. More information on:
@@ -585,7 +587,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<R>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec, N::State>) -> ProviderResult<R>,
         M: Fn(Arc<BlockState>) -> ProviderResult<R>,
     {
         let block_state = match id {
@@ -734,6 +736,24 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
             },
             predicate,
         )
+    }
+}
+
+impl<N: ProviderNodeTypes> HashedPostStateProvider for BlockchainProvider2<N> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_trie::HashedPostState {
+        HashedPostState::from_bundle_state::<<N::State as DatabaseState>::KeyHasher>(
+            &bundle_state.state,
+        )
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        self.database.provider()?.hashed_post_state_from_reverts(block_number)
     }
 }
 
@@ -1668,7 +1688,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
                 .unwrap_or(true);
 
             if !account_history_exists {
-                return Err(ProviderError::StateAtBlockPruned(block_number))
+                return Err(ProviderError::StateAtBlockPruned(block_number));
             }
 
             provider.account_block_changeset(block_number)

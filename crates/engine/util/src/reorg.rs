@@ -14,7 +14,9 @@ use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
-use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
@@ -22,7 +24,6 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use reth_trie::HashedPostState;
 use revm_primitives::{
     calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
 };
@@ -105,7 +106,7 @@ impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider,
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader + StateProviderFactory + HashedPostStateProvider,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -238,7 +239,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
     next_cancun_fields: Option<CancunPayloadFields>,
 ) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
 where
-    Provider: BlockReader + StateProviderFactory,
+    Provider: BlockReader + StateProviderFactory + HashedPostStateProvider,
     Evm: ConfigureEvm<Header = Header>,
     Spec: EthereumHardforks,
 {
@@ -365,7 +366,7 @@ where
         reorg_target.number,
         Default::default(),
     );
-    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
+    let hashed_state = provider.hashed_post_state_from_bundle_state(&outcome.bundle);
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
@@ -405,7 +406,7 @@ where
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            state_root: state_provider.state_root(hashed_state)?,
+            state_root: state_provider.state_root_from_post_state(hashed_state)?,
         },
         body: BlockBody {
             transactions,

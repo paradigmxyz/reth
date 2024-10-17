@@ -21,6 +21,9 @@ use std::{
 };
 use tracing::*;
 
+#[cfg(any(test, feature = "test-utils"))]
+use reth_trie_db::DatabaseState;
+
 /// Maximum number of channels that can exist in memory.
 const MAXIMUM_CHANNELS: usize = 10_000;
 
@@ -61,8 +64,9 @@ impl AccountHashingStage {
     pub fn seed<
         Tx: DbTx + DbTxMut + 'static,
         Spec: Send + Sync + 'static + reth_chainspec::EthereumHardforks,
+        StateTypes: DatabaseState,
     >(
-        provider: &reth_provider::DatabaseProvider<Tx, Spec>,
+        provider: &reth_provider::DatabaseProvider<Tx, Spec, StateTypes>,
         opts: SeedOpts,
     ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError> {
         use alloy_primitives::U256;

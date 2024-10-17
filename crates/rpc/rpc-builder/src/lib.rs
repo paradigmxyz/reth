@@ -19,7 +19,10 @@
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::Header;
-//! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
+//! use reth_provider::{
+//!     AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider,
+//!     HashedPostStateProvider,
+//! };
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
 //!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
@@ -35,7 +38,7 @@
 //!     evm_config: EvmConfig,
 //!     block_executor: BlockExecutor,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader + HashedPostStateProvider,
 //!     Pool: TransactionPool + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -74,7 +77,10 @@
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::Header;
-//! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
+//! use reth_provider::{
+//!     AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider,
+//!     HashedPostStateProvider,
+//! };
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
@@ -103,7 +109,7 @@
 //!     evm_config: EvmConfig,
 //!     block_executor: BlockExecutor,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader + HashedPostStateProvider,
 //!     Pool: TransactionPool + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,

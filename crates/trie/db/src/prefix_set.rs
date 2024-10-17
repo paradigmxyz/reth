@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, BlockNumber, B256};
+use alloy_primitives::{BlockNumber, B256};
 use derive_more::Deref;
 use reth_db::tables;
 use reth_db_api::{
@@ -9,26 +9,39 @@ use reth_db_api::{
 };
 use reth_primitives::StorageEntry;
 use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
-use reth_trie_common::Nibbles;
+use reth_trie_common::{KeyHasher, Nibbles};
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,
 };
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
-#[derive(Deref, Debug)]
-pub struct PrefixSetLoader<'a, TX>(&'a TX);
+#[derive(Debug)]
+pub struct PrefixSetLoader<'a, TX> {
+    tx: &'a TX,
+}
 
 impl<'a, TX> PrefixSetLoader<'a, TX> {
     /// Create a new loader.
     pub const fn new(tx: &'a TX) -> Self {
-        Self(tx)
+        Self { tx }
+    }
+}
+
+impl<DbTx> Deref for PrefixSetLoader<'_, DbTx> {
+    type Target = DbTx;
+
+    fn deref(&self) -> &Self::Target {
+        self.tx
     }
 }
 
 impl<TX: DbTx> PrefixSetLoader<'_, TX> {
     /// Load all account and storage changes for the given block range.
-    pub fn load(self, range: RangeInclusive<BlockNumber>) -> Result<TriePrefixSets, DatabaseError> {
+    pub fn load<KH: KeyHasher>(
+        self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<TriePrefixSets, DatabaseError> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
         let mut storage_prefix_sets = HashMap::<B256, PrefixSetMut>::default();
@@ -39,7 +52,7 @@ impl<TX: DbTx> PrefixSetLoader<'_, TX> {
         let mut account_plain_state_cursor = self.cursor_read::<tables::PlainAccountState>()?;
         for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
-            let hashed_address = keccak256(address);
+            let hashed_address = KH::hash_key(address);
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             if account_plain_state_cursor.seek_exact(address)?.is_none() {
@@ -53,12 +66,12 @@ impl<TX: DbTx> PrefixSetLoader<'_, TX> {
         let storage_range = BlockNumberAddress::range(range);
         for storage_entry in storage_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;
-            let hashed_address = keccak256(address);
+            let hashed_address = KH::hash_key(address);
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             storage_prefix_sets
                 .entry(hashed_address)
                 .or_default()
-                .insert(Nibbles::unpack(keccak256(key)));
+                .insert(Nibbles::unpack(KH::hash_key(key)));
         }
 
         Ok(TriePrefixSets {

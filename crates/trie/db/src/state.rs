@@ -1,5 +1,5 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
-use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -11,7 +11,9 @@ use reth_primitives::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StateRootProgress, TrieInput,
+    updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorage,
+    IntermediateStateRootState, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress,
+    TrieInput,
 };
 use std::{
     collections::{hash_map, HashMap},
@@ -109,7 +111,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
-    ) -> Result<(B256, TrieUpdates), StateRootError>;
+    ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostState`] using cached intermediate nodes.
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError>;
@@ -119,14 +121,28 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
         input: TrieInput,
-    ) -> Result<(B256, TrieUpdates), StateRootError>;
+    ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError>;
+
+    /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
+    /// nodes into the hash builder. Collects the updates in the process.
+    ///
+    /// # Returns
+    ///
+    /// The intermediate progress of state root computation.
+    fn root_with_progress(
+        self,
+        state: Option<IntermediateStateRootState>,
+    ) -> Result<StateRootProgress, StateRootError>;
+
+    /// Computes the state root using the current configuration of the state root calculator.
+    fn root(self) -> Result<B256, StateRootError>;
 }
 
 /// Extends [`HashedPostState`] with operations specific for working with a database transaction.
 pub trait DatabaseHashedPostState<TX>: Sized {
     /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts from the specified
     /// block up to the current tip and aggregates them into hashed state in reverse.
-    fn from_reverts(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError>;
+    fn from_reverts<KH: KeyHasher>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
@@ -140,7 +156,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
+        let loaded_prefix_sets = PrefixSetLoader::new(tx).load::<KeccakKeyHasher>(range)?;
         Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -182,15 +198,16 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
+    ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
-        StateRoot::new(
+        let (root, updates) = StateRoot::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(prefix_sets)
-        .root_with_updates()
+        .root_with_updates()?;
+        Ok((root, updates, state_sorted))
     }
 
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError> {
@@ -207,20 +224,32 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
         input: TrieInput,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
+    ) -> Result<(B256, TrieUpdates, HashedPostStateSorted), StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
-        StateRoot::new(
+        let (root, updates) = StateRoot::new(
             InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
-        .root_with_updates()
+        .root_with_updates()?;
+        Ok((root, updates, state_sorted))
+    }
+
+    fn root_with_progress(
+        self,
+        state: Option<IntermediateStateRootState>,
+    ) -> Result<StateRootProgress, StateRootError> {
+        self.with_intermediate_state(state).root_with_progress()
+    }
+
+    fn root(self) -> Result<B256, StateRootError> {
+        Self::root(self)
     }
 }
 
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
-    fn from_reverts(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
+    fn from_reverts<KH: KeyHasher>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
         let mut accounts = HashMap::<Address, Option<Account>>::default();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
@@ -245,19 +274,19 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
         }
 
         let hashed_accounts =
-            accounts.into_iter().map(|(address, info)| (keccak256(address), info)).collect();
+            accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
 
         let hashed_storages = storages
             .into_iter()
             .map(|(address, storage)| {
                 (
-                    keccak256(address),
+                    KH::hash_key(address),
                     HashedStorage::from_iter(
                         // The `wiped` flag indicates only whether previous storage entries
                         // should be looked up in db or not. For reverts it's a noop since all
                         // wiped changes had been written as storage reverts.
                         false,
-                        storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
+                        storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
                     ),
                 )
             })
@@ -274,6 +303,7 @@ mod tests {
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
     use reth_primitives::revm_primitives::AccountInfo;
+    use reth_trie::KeccakKeyHasher;
     use revm::db::BundleState;
 
     #[test]
@@ -294,7 +324,7 @@ mod tests {
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 
-        let post_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 

@@ -23,13 +23,11 @@ use reth_primitives::{
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HashedPostStateProvider,
+    HeaderProvider, ProviderError, StateRootProvider, StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
-use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -1216,18 +1214,17 @@ where
         recorder: &mut MakeCanonicalDurationsRecorder,
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
-        let hashed_state = state.hash_state_slow();
-        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let hashed_state_sorted = hashed_state.into_sorted();
+        let hashed_state =
+            self.externals.provider_factory.hashed_post_state_from_bundle_state(&state.bundle);
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
         let block_hash_numbers =
             blocks.iter().map(|(number, b)| (number, b.hash())).collect::<Vec<_>>();
-        let trie_updates = match chain_trie_updates {
+        let (trie_updates, hashed_state_sorted) = match chain_trie_updates {
             Some(updates) => {
                 debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Using cached trie updates");
                 self.metrics.trie_updates_insert_cached.increment(1);
-                updates
+                (updates, hashed_state.into_sorted())
             }
             None => {
                 debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Recomputing state root for insert");
@@ -1238,14 +1235,8 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
-                let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
-                    .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                        &hashed_state_sorted,
-                    ))
-                    .with_prefix_sets(prefix_sets)
-                    .root_with_updates()
-                    .map_err(Into::<BlockValidationError>::into)?;
+                let (state_root, trie_updates, hashed_state_sorted) =
+                    provider.state_root_from_post_state_with_updates(hashed_state)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1256,7 +1247,7 @@ where
                     .into())
                 }
                 self.metrics.trie_updates_insert_recomputed.increment(1);
-                trie_updates
+                (trie_updates, hashed_state_sorted)
             }
         };
         recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
@@ -1399,10 +1390,10 @@ mod tests {
             blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        ProviderFactory,
+        ProviderFactory, StateRootProvider,
     };
     use reth_stages_api::StageCheckpoint;
-    use reth_trie::{root::state_root_unhashed, StateRoot};
+    use reth_trie::{root::state_root_unhashed, TrieInput};
     use std::collections::HashMap;
 
     fn setup_externals(
@@ -1875,9 +1866,10 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets().freeze();
-        let state_root =
-            StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
+        let prefix_sets =
+            provider.hashed_post_state_from_bundle_state(&exec5.bundle).construct_prefix_sets();
+        let state_root_input = TrieInput::new(Default::default(), Default::default(), prefix_sets);
+        let state_root = provider.state_root_from_nodes(state_root_input).unwrap();
         assert_eq!(state_root, block5.state_root);
     }
 

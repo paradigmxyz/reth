@@ -16,11 +16,10 @@ use reth_provider::{
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
     OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
-    StateWriter, StaticFileProviderFactory, TrieWriter,
+    StateRootProvider, StateWriter, StaticFileProviderFactory, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{IntermediateStateRootState, StateRootProgress};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::BufRead};
 use tracing::{debug, error, info, trace};
@@ -339,6 +338,7 @@ where
         + HeaderProvider
         + HashingWriter
         + StateChangeWriter
+        + StateRootProvider
         + TrieWriter
         + AsRef<Provider>,
 {
@@ -511,19 +511,15 @@ where
 /// database.
 fn compute_state_root<Provider>(provider: &Provider) -> eyre::Result<B256>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StateRootProvider,
 {
     trace!(target: "reth::cli", "Computing state root");
 
-    let tx = provider.tx_ref();
     let mut intermediate_state: Option<IntermediateStateRootState> = None;
     let mut total_flushed_updates = 0;
 
     loop {
-        match StateRootComputer::from_tx(tx)
-            .with_intermediate_state(intermediate_state)
-            .root_with_progress()?
-        {
+        match provider.state_root_with_progress(intermediate_state)? {
             StateRootProgress::Progress(state, _, updates) => {
                 let updated_len = provider.write_trie_updates(&updates)?;
                 total_flushed_updates += updated_len;
