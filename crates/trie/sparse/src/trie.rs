@@ -725,7 +725,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use alloy_primitives::U256;
+    use alloy_primitives::{Address, U256};
     use itertools::Itertools;
     use proptest::prelude::*;
     use rand::seq::IteratorRandom;
@@ -1226,5 +1226,62 @@ mod tests {
                 assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
             }
         });
+    }
+
+    /// We have three leafs that share the same prefix: A, B, C. Hash builder trie has only nodes A
+    /// and C, and we have proofs for them. Node B is new and inserted in the sparse trie first.
+    ///
+    /// Reveal the hash builder proof to leaf A in the sparse trie, insert leaf B into the sparse
+    /// trie (that will create a branch node), reveal the hash builder proof to leaf C in the sparse
+    /// trie. The hash builder proof to the leaf C didn't have the leaf B at the corresponding
+    /// nibble of the branch node.
+    ///
+    /// The desired outcome is to have a correctly adjusted branch node after revealing the leaf
+    /// C.
+    #[test]
+    fn sparse_trie_reveal_node() {
+        let mut rng = generators::rng();
+
+        // Generate three addresses with the same prefix but different last two nibbles
+        let base_address = Nibbles::unpack(rng.gen::<Address>());
+        let value = || alloy_rlp::encode_fixed_size(&U256::from(1));
+        let address1 =
+            Nibbles::from_nibbles([&base_address[..base_address.len() - 2], &[0, 1]].concat());
+        let address2 =
+            Nibbles::from_nibbles([&base_address[..base_address.len() - 2], &[0, 2]].concat());
+        let address3 =
+            Nibbles::from_nibbles([&base_address[..base_address.len() - 2], &[0, 3]].concat());
+
+        let mut trie = RevealedSparseTrie::default();
+
+        // Generate the proof for the first address and reveal it in the sparse trie
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(address1.clone(), value()), (address3.clone(), value())],
+            [address1.clone()],
+        );
+        for (path, node) in proof_nodes.nodes_sorted() {
+            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Insert the leaf for the second address
+        trie.update_leaf(address2.clone(), value().to_vec()).unwrap();
+
+        // Generate the proof for the third address and reveal it in the sparse trie
+        let (_, proof_nodes_3) = hash_builder_root_with_proofs(
+            [(address1.clone(), value()), (address3.clone(), value())],
+            [address3.clone()],
+        );
+        for (path, node) in proof_nodes_3.nodes_sorted() {
+            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Generate the nodes for the full trie with all three addresses using the hash builder, and
+        // compare them to the sparse trie
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(address1.clone(), value()), (address2.clone(), value()), (address3.clone(), value())],
+            [address1, address2, address3],
+        );
+
+        assert_eq_sparse_trie_proof_nodes(&trie, proof_nodes);
     }
 }
