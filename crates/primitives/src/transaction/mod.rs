@@ -1,18 +1,15 @@
 //! Transaction types.
 
 use crate::BlockHashOrNumber;
-use alloy_eips::eip7702::SignedAuthorization;
-use alloy_primitives::{keccak256, Address, ChainId, TxKind, B256, U256};
-
 use alloy_consensus::{
-    SignableTransaction, Transaction as AlloyTransaction, TxEip1559, TxEip2930, TxEip4844,
-    TxEip7702, TxLegacy,
+    SignableTransaction, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
+    eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Bytes, TxHash};
+use alloy_primitives::{keccak256, Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
@@ -709,7 +706,7 @@ impl Encodable for Transaction {
     }
 }
 
-impl AlloyTransaction for Transaction {
+impl alloy_consensus::Transaction for Transaction {
     fn chain_id(&self) -> Option<ChainId> {
         match self {
             Self::Legacy(tx) => tx.chain_id(),
@@ -782,18 +779,6 @@ impl AlloyTransaction for Transaction {
         }
     }
 
-    fn priority_fee_or_price(&self) -> u128 {
-        match self {
-            Self::Legacy(tx) => tx.priority_fee_or_price(),
-            Self::Eip2930(tx) => tx.priority_fee_or_price(),
-            Self::Eip1559(tx) => tx.priority_fee_or_price(),
-            Self::Eip4844(tx) => tx.priority_fee_or_price(),
-            Self::Eip7702(tx) => tx.priority_fee_or_price(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.priority_fee_or_price(),
-        }
-    }
-
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
             Self::Legacy(tx) => tx.max_fee_per_blob_gas(),
@@ -803,6 +788,18 @@ impl AlloyTransaction for Transaction {
             Self::Eip7702(tx) => tx.max_fee_per_blob_gas(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.max_fee_per_blob_gas(),
+        }
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.priority_fee_or_price(),
+            Self::Eip2930(tx) => tx.priority_fee_or_price(),
+            Self::Eip1559(tx) => tx.priority_fee_or_price(),
+            Self::Eip4844(tx) => tx.priority_fee_or_price(),
+            Self::Eip7702(tx) => tx.priority_fee_or_price(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.priority_fee_or_price(),
         }
     }
 
