@@ -145,7 +145,7 @@ impl DatabaseArguments {
     }
 
     /// Returns the geometry if set.
-    pub fn geometry(&self) -> Option<&Geometry<Range<usize>>> {
+    pub const fn geometry(&self) -> Option<&Geometry<Range<usize>>> {
         self.geometry.as_ref()
     }
 }
