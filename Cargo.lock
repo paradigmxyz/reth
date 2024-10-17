@@ -7494,7 +7494,6 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-db-common",
- "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-execution-types",
  "reth-exex",

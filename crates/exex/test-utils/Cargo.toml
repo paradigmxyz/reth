@@ -31,7 +31,6 @@ reth-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
-reth-ethereum-engine-primitives.workspace = true
 
 ## async
 futures-util.workspace = true
