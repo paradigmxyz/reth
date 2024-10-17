@@ -378,8 +378,8 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::Block;
     use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DatabaseProviderFactory,
+        providers::BlockchainProviderFactory, test_utils::create_test_provider_factory,
+        BlockWriter, Chain, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use tokio::sync::mpsc;
@@ -397,7 +397,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory.clone())?;
+        let provider = BlockchainProviderFactory::new(provider_factory.clone())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -478,7 +478,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProviderFactory::new(provider_factory)?;
 
         let node_head =
             Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
@@ -535,7 +535,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProviderFactory::new(provider_factory)?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -635,7 +635,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProviderFactory::new(provider_factory)?;
 
         let exex_head_block = random_block(
             &mut rng,

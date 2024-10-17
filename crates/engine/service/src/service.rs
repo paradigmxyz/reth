@@ -19,7 +19,7 @@ use reth_network_p2p::BlockClient;
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
+use reth_provider::{providers::BlockchainProviderFactory, ProviderFactory};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -73,7 +73,7 @@ where
         pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         tree_config: TreeConfig,
@@ -151,7 +151,10 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
-    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_provider::{
+        providers::BlockchainProviderFactory,
+        test_utils::create_test_provider_factory_with_chain_spec,
+    };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
@@ -179,9 +182,11 @@ mod tests {
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
-        let blockchain_db =
-            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
-                .unwrap();
+        let blockchain_db = BlockchainProviderFactory::with_latest(
+            provider_factory.clone(),
+            SealedHeader::default(),
+        )
+        .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);

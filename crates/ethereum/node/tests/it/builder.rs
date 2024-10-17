@@ -9,7 +9,7 @@ use reth_db::{
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_builder::{EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig};
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProviderFactory;
 use reth_tasks::TaskManager;
 
 #[test]
@@ -47,22 +47,21 @@ async fn test_eth_launcher() {
     let tasks = TaskManager::current();
     let config = NodeConfig::test();
     let db = create_test_rw_db();
-    let _builder =
-        NodeBuilder::new(config)
-            .with_database(db)
-            .with_types_and_provider::<EthereumNode, BlockchainProvider2<
-                NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-            >>()
-            .with_components(EthereumNode::components())
-            .with_add_ons(EthereumAddOns::default())
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    tasks.executor(),
-                    builder.config.datadir(),
-                    Default::default(),
-                );
-                builder.launch_with(launcher)
-            });
+    let _builder = NodeBuilder::new(config)
+        .with_database(db)
+        .with_types_and_provider::<EthereumNode, BlockchainProviderFactory<
+            NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
+        >>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_fn(|builder| {
+            let launcher = EngineNodeLauncher::new(
+                tasks.executor(),
+                builder.config.datadir(),
+                Default::default(),
+            );
+            builder.launch_with(launcher)
+        });
 }
 
 #[test]
