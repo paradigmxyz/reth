@@ -1,6 +1,6 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
 use alloy_primitives::Parity;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},

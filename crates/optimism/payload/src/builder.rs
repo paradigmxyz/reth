@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -16,7 +17,7 @@ use reth_primitives::{
     constants::BEACON_NONCE,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, TxType,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;

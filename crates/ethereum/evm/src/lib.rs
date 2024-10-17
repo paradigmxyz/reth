@@ -1,4 +1,10 @@
 //! EVM config for vanilla ethereum.
+//!
+//! # Revm features
+//!
+//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
+//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
+//! proper features are selected.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -27,6 +33,7 @@ use reth_ethereum_forks::EthereumHardfork;
 use reth_primitives::constants::EIP1559_INITIAL_BASE_FEE;
 
 pub mod execute;
+pub mod strategy;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;

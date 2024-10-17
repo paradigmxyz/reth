@@ -5,7 +5,7 @@ use crate::{
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+use alloy_consensus::{Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxLegacy};
 use alloy_primitives::{Parity, TxKind};
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;

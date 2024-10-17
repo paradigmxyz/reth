@@ -10,3 +10,40 @@ description = "Sparse MPT implementation"
 
 [lints]
 workspace = true
+
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-tracing.workspace = true
+reth-trie-common.workspace = true
+reth-trie.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# tracing
+tracing.workspace = true
+
+# misc
+rayon.workspace = true
+smallvec = { workspace = true, features = ["const_new"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-testing-utils.workspace = true
+reth-trie = { workspace = true, features = ["test-utils"] }
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+
+assert_matches.workspace = true
+criterion.workspace = true
+itertools.workspace = true
+pretty_assertions = "1.4"
+proptest.workspace = true
+rand.workspace = true
+
+[[bench]]
+name = "root"
+harness = false

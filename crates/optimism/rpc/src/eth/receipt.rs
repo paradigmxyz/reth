@@ -4,7 +4,6 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{receipt::L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
-use reth_chainspec::ChainSpec;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
@@ -55,25 +54,6 @@ where
     }
 }
 
-impl<N> OpEthApi<N>
-where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
-{
-    /// Builds a receipt w.r.t. chain spec.
-    pub fn build_op_receipt_meta(
-        &self,
-        tx: &TransactionSigned,
-        l1_block_info: revm::L1BlockInfo,
-        receipt: &Receipt,
-    ) -> Result<OpTransactionReceiptFields, OpEthApiError> {
-        Ok(OpReceiptFieldsBuilder::default()
-            .l1_block_info(&self.inner.provider().chain_spec(), tx, l1_block_info)?
-            .deposit_nonce(receipt.deposit_nonce)
-            .deposit_version(receipt.deposit_receipt_version)
-            .build())
-    }
-}
-
 /// L1 fee and data gas for a non-deposit transaction, or deposit nonce and receipt version for a
 /// deposit transaction.
 #[derive(Debug, Default, Clone)]
@@ -113,7 +93,7 @@ impl OpReceiptFieldsBuilder {
     /// Applies [`L1BlockInfo`](revm::L1BlockInfo).
     pub fn l1_block_info(
         mut self,
-        chain_spec: &ChainSpec,
+        chain_spec: &OpChainSpec,
         tx: &TransactionSigned,
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {

@@ -3,10 +3,11 @@
 use alloc::fmt;
 use core::ops;
 
-use alloy_consensus::{BlockHeader, Transaction, TxType};
+use alloy_consensus::{BlockHeader,Request, Transaction, TxType};
 use alloy_primitives::{Address, B256};
+use alloy_eips::eip1559::Withdrawal;
 
-use crate::{proofs, traits::Block, Requests, Withdrawals};
+use crate::Block;
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -27,18 +28,24 @@ pub trait BlockBody:
     /// Header type (uncle blocks).
     type Header: BlockHeader;
 
+    /// Withdrawals in block.
+    type Withdrawals: Iterator<Item = Withdrawal>;
+
+    /// Requests in block.
+    type Requests: Iterator<Item = Request>;
+
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::SignedTransaction];
 
     /// Returns [`Withdrawals`] in the block, if any.
     // todo: branch out into extension trait
-    fn withdrawals(&self) -> Option<&Withdrawals>;
+    fn withdrawals(&self) -> Option<&Self::Withdrawals>;
 
     /// Returns reference to uncle block headers.
     fn ommers(&self) -> &[Self::Header];
 
     /// Returns [`Request`] in block, if any.
-    fn requests(&self) -> Option<&Requests>;
+    fn requests(&self) -> Option<&Self::Requests>;
 
     /// Create a [`Block`] from the body and its header.
     fn into_block<T: Block<Header = Self::Header, Body = Self>>(self, header: Self::Header) -> T {
@@ -53,15 +60,15 @@ pub trait BlockBody:
 
     /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
     /// withdrawals, this will return `None`.
-    fn calculate_withdrawals_root(&self) -> Option<B256> {
-        Some(proofs::calculate_withdrawals_root(self.withdrawals()?))
-    }
+    // todo: can be default impl if `calculate_withdrawals_root` made into a method on 
+    // `Withdrawals` and `Withdrawals` moved to alloy
+    fn calculate_withdrawals_root(&self) -> Option<B256>;
 
     /// Calculate the requests root for the block body, if requests exist. If there are no
     /// requests, this will return `None`.
-    fn calculate_requests_root(&self) -> Option<B256> {
-        Some(proofs::calculate_requests_root(self.requests()?))
-    }
+    // todo: can be default impl if `calculate_requests_root` made into a method on 
+    // `Requests` and `Requests` moved to alloy
+    fn calculate_requests_root(&self) -> Option<B256>;
 
     /// Recover signer addresses for all transactions in the block body.
     fn recover_signers(&self) -> Option<Vec<Address>>;
