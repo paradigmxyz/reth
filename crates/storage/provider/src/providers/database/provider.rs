@@ -6,14 +6,15 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     writer::UnifiedStorageWriter,
-    AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter, DBProvider, EvmEnvProvider,
-    HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider,
-    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    AccountReader, AsLatestStateProviderRef, BlockExecutionWriter, BlockHashReader, BlockNumReader,
+    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
+    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
+    StateChangeWriter, StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory,
+    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -146,12 +147,6 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// State provider for latest block
-    pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
-        trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProviderRef::new(&self.tx, self.static_file_provider.clone())))
-    }
-
     /// Storage provider for state at that given block hash
     pub fn history_by_block_hash<'a>(
         &'a self,
@@ -162,7 +157,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(
+            return Ok(Box::new(LatestStateProviderRef::<'_, _, N::StateCommitment>::new(
                 &self.tx,
                 self.static_file_provider.clone(),
             )))
@@ -176,7 +171,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(
+        let mut state_provider = HistoricalStateProviderRef::<'_, _, N::StateCommitment>::new(
             &self.tx,
             block_number,
             self.static_file_provider.clone(),
@@ -246,7 +241,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
+            return Ok(Box::new(LatestStateProvider::<_, N::StateCommitment>::new(
+                self.tx,
+                self.static_file_provider,
+            )))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -257,8 +255,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider =
-            HistoricalStateProvider::new(self.tx, block_number, self.static_file_provider);
+        let mut state_provider = HistoricalStateProvider::<_, N::StateCommitment>::new(
+            self.tx,
+            block_number,
+            self.static_file_provider,
+        );
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -278,6 +279,17 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         }
 
         Ok(Box::new(state_provider))
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> AsLatestStateProviderRef for DatabaseProvider<TX, N> {
+    /// State provider for latest block
+    fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
+        trace!(target: "providers::db", "Returning latest state provider");
+        Box::new(LatestStateProviderRef::<'_, _, N::StateCommitment>::new(
+            &self.tx,
+            self.static_file_provider.clone(),
+        ))
     }
 }
 
