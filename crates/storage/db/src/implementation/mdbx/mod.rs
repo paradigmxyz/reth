@@ -23,7 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
-    ops::Deref,
+    ops::{Deref, Range, RangeBounds},
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -33,8 +33,10 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
+/// 1 GB in bytes
+pub const GIGABYTE: usize = 1024 * 1024 * 1024;
+/// 1 TB in bytes
+pub const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
@@ -61,9 +63,11 @@ impl DatabaseEnvKind {
 
 /// Arguments for database initialization.
 #[derive(Clone, Debug, Default)]
-pub struct DatabaseArguments {
+pub struct DatabaseArguments<R: RangeBounds<usize> + Clone = Range<usize>> {
     /// Client version that accesses the database.
     client_version: ClientVersion,
+    /// Database geometry settings. If [None], default values will be used.
+    geometry: Option<Geometry<R>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -96,10 +100,22 @@ impl DatabaseArguments {
     pub const fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
+            geometry: None,
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
         }
+    }
+
+    /// Set the geometry.
+    pub fn with_geometry(mut self, max_size: usize, growth_step: usize) -> Self {
+        self.geometry = Some(Geometry {
+            size: Some(0..max_size),
+            growth_step: Some(growth_step as isize),
+            shrink_threshold: Some(0),
+            page_size: Some(PageSize::Set(default_page_size())),
+        });
+        self
     }
 
     /// Set the log level.
@@ -126,6 +142,11 @@ impl DatabaseArguments {
     /// Returns the client version if any.
     pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
+    }
+
+    /// Returns the geometry if set.
+    pub fn geometry(&self) -> Option<&Geometry<Range<usize>>> {
+        self.geometry.as_ref()
     }
 }
 
@@ -278,15 +299,19 @@ impl DatabaseEnv {
         // environment creation.
         debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
         inner_env.set_max_dbs(256);
-        inner_env.set_geometry(Geometry {
-            // Maximum database size of 4 terabytes
-            size: Some(0..(4 * TERABYTE)),
-            // We grow the database in increments of 4 gigabytes
-            growth_step: Some(4 * GIGABYTE as isize),
-            // The database never shrinks
-            shrink_threshold: Some(0),
-            page_size: Some(PageSize::Set(default_page_size())),
-        });
+        if let Some(geometry) = args.geometry {
+            inner_env.set_geometry(geometry);
+        } else {
+            inner_env.set_geometry(Geometry {
+                // Maximum database size of 4 terabytes
+                size: Some(0..(4 * TERABYTE)),
+                // We grow the database in increments of 4 gigabytes
+                growth_step: Some(4 * GIGABYTE as isize),
+                // The database never shrinks
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            });
+        }
 
         fn is_current_process(id: u32) -> bool {
             #[cfg(unix)]
