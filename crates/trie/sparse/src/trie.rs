@@ -408,6 +408,11 @@ impl RevealedSparseTrie {
             self.nodes.insert(removed_path, new_node);
         }
 
+        // If the trie is empty, insert an empty node at the root.
+        if self.nodes.is_empty() {
+            self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        }
+
         Ok(())
     }
 
@@ -1144,8 +1149,11 @@ mod tests {
 
         sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])).unwrap();
 
-        // (Empty Trie)
-        assert!(sparse.nodes.is_empty());
+        // Empty
+        pretty_assertions::assert_eq!(
+            sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from_iter([(Nibbles::new(), SparseNode::Empty),])
+        );
     }
 
     #[test]
