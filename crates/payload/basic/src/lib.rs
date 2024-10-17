@@ -537,8 +537,7 @@ where
         let fut = ResolveBestPayload {
             best_payload,
             maybe_better,
-            empty_payload,
-            wait_for_pending: kind == PayloadKind::WaitForPending,
+            empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };
 
         (fut, KeepPayloadJobAlive::No)
@@ -562,8 +561,6 @@ pub struct ResolveBestPayload<Payload> {
     pub maybe_better: Option<PendingPayload<Payload>>,
     /// The empty payload building job in progress, if any.
     pub empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
-    /// Whether to wait for the pending payload to finish.
-    pub wait_for_pending: bool,
 }
 
 impl<Payload> ResolveBestPayload<Payload> {
@@ -589,8 +586,6 @@ where
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
-            } else if this.wait_for_pending {
-                return Poll::Pending
             }
         }
 
