@@ -6,17 +6,11 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::{
-    mdbx::{GIGABYTE, TERABYTE},
-    ClientVersion,
-};
+use reth_db::ClientVersion;
 use reth_storage_errors::db::LogLevel;
 
-const DEFAULT_MAX_SIZE: usize = TERABYTE * 4;
-const DEFAULT_GROWTH_STEP: usize = GIGABYTE * 4;
-
 /// Parameters for database configuration
-#[derive(Debug, Args, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "Database")]
 pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
@@ -27,22 +21,11 @@ pub struct DatabaseArgs {
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
     /// Maximum database size in bytes
-    #[arg(long = "db.max-size", default_value = "4398046511104")]
+    #[arg(long = "db.max-size")]
     pub max_size: Option<usize>,
     /// Database growth step in bytes
-    #[arg(long = "db.growth-step", default_value = "4294967296")]
+    #[arg(long = "db.growth-step")]
     pub growth_step: Option<usize>,
-}
-
-impl Default for DatabaseArgs {
-    fn default() -> Self {
-        Self {
-            log_level: None,
-            exclusive: None,
-            max_size: Some(DEFAULT_MAX_SIZE),
-            growth_step: Some(DEFAULT_GROWTH_STEP),
-        }
-    }
 }
 
 impl DatabaseArgs {
@@ -112,6 +95,7 @@ impl TypedValueParser for LogLevelValueParser {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_db::mdbx::{GIGABYTE, TERABYTE};
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
