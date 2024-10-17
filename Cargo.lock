@@ -2856,6 +2856,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-tracing",
+ "reth-trie-db",
  "serde",
  "thiserror",
  "tokio",
@@ -7563,6 +7564,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-transaction-pool",
+ "reth-trie-db",
  "tempfile",
  "thiserror",
  "tokio",
@@ -8023,6 +8025,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie-db",
  "revm",
  "serde_json",
  "tokio",
@@ -8085,6 +8088,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-primitives",
  "reth-primitives-traits",
+ "reth-trie-db",
 ]
 
 [[package]]
@@ -8245,6 +8249,7 @@ dependencies = [
  "reth-revm",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie-db",
  "revm",
  "serde",
  "serde_json",
