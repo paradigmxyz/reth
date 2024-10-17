@@ -26,6 +26,7 @@ reth-db = { workspace = true, features = ["mdbx"], optional = true }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
+reth-engine-local.workspace = true
 reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true

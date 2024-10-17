@@ -1376,7 +1376,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxEip1559;
+    use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, Sealable, B256};
     use assert_matches::assert_matches;
@@ -1388,7 +1388,7 @@ mod tests {
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::{
-        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
+        constants::EIP1559_INITIAL_BASE_FEE,
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, BlockBody, Header, Signature, Transaction, TransactionSigned,

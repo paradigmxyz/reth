@@ -58,6 +58,8 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-node-types.workspace = true
 
+alloy-consensus.workspace = true
+
 # trie
 triehash = "0.8"
 

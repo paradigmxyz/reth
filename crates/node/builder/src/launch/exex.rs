@@ -6,7 +6,8 @@ use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_exex::{
-    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal, DEFAULT_EXEX_MANAGER_CAPACITY,
+    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
+    DEFAULT_EXEX_MANAGER_CAPACITY,
 };
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::Head;
@@ -47,6 +48,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             return Ok(None)
         }
 
+        info!(target: "reth::cli", "Loading ExEx Write-Ahead Log...");
         let exex_wal = Wal::new(
             config_container
                 .config
@@ -127,7 +129,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
                     handle
-                        .send_async(notification.into())
+                        .send_async(ExExNotificationSource::BlockchainTree, notification.into())
                         .await
                         .expect("blockchain tree notification could not be sent to exex manager");
                 }
