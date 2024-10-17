@@ -8,9 +8,10 @@ use super::{
 };
 use crate::{
     BlobTransaction, BlobTransactionSidecar, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, EIP4844_TX_TYPE_ID,
+    TransactionSignedEcRecovered,
 };
 use alloy_consensus::{
+    constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, TxEip4844WithSidecar,
 };

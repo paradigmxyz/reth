@@ -1,6 +1,8 @@
 //! Transaction types.
 
 use crate::BlockHashOrNumber;
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_consensus::constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
 use alloy_consensus::{
     SignableTransaction, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
 };
@@ -37,10 +39,7 @@ pub use compat::FillTxEnv;
 pub use signature::{
     extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, Signature,
 };
-pub use tx_type::{
-    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
-};
+pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
 pub(crate) mod access_list;
