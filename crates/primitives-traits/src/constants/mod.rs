@@ -97,11 +97,6 @@ pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
 /// Multiplier for converting ether to wei.
 pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 
-/// The Ethereum mainnet genesis hash:
-/// `0x0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3`
-pub const MAINNET_GENESIS_HASH: B256 =
-    b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
-
 /// Sepolia genesis hash: `0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9`
 pub const SEPOLIA_GENESIS_HASH: B256 =
     b256!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9");
@@ -109,10 +104,6 @@ pub const SEPOLIA_GENESIS_HASH: B256 =
 /// Holesky genesis hash: `0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4`
 pub const HOLESKY_GENESIS_HASH: B256 =
     b256!("b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4");
-
-/// Testnet genesis hash: `0x2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c`
-pub const DEV_GENESIS_HASH: B256 =
-    b256!("2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c");
 
 /// Keccak256 over empty array: `0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470`
 pub const KECCAK_EMPTY: B256 =

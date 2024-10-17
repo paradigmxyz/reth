@@ -2857,6 +2857,7 @@ dependencies = [
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "eyre",
  "futures",
  "reth-chainspec",
@@ -6815,6 +6816,7 @@ dependencies = [
 name = "reth-db-common"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "boyer-moore-magiclen",
@@ -7305,6 +7307,7 @@ name = "reth-ethereum-forks"
 version = "1.1.0"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -7933,6 +7936,7 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -8029,6 +8033,7 @@ name = "reth-optimism-chainspec"
 version = "1.1.0"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "derive_more 1.0.0",

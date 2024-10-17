@@ -52,6 +52,7 @@ alloy-genesis.workspace = true
 tokio.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = []
