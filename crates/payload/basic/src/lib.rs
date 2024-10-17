@@ -359,7 +359,7 @@ where
         let _cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
-        let best_payload = self.best_payload.best_payload();
+        let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
@@ -461,18 +461,17 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        match self.best_payload.payload() {
-            Some(payload) => Ok(payload.clone()),
-            None => {
-                // No payload has been built yet, but we need to return something that the CL then
-                // can deliver, so we need to return an empty payload.
-                //
-                // Note: it is assumed that this is unlikely to happen, as the payload job is
-                // started right away and the first full block should have been
-                // built by the time CL is requesting the payload.
-                self.metrics.inc_requested_empty_payload();
-                self.builder.build_empty_payload(&self.client, self.config.clone())
-            }
+        if let Some(payload) = self.best_payload.payload() {
+            Ok(payload.clone())
+        } else {
+            // No payload has been built yet, but we need to return something that the CL then
+            // can deliver, so we need to return an empty payload.
+            //
+            // Note: it is assumed that this is unlikely to happen, as the payload job is
+            // started right away and the first full block should have been
+            // built by the time CL is requesting the payload.
+            self.metrics.inc_requested_empty_payload();
+            self.builder.build_empty_payload(&self.client, self.config.clone())
         }
     }
 
@@ -481,7 +480,7 @@ where
     }
 
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let best_payload = self.best_payload.best_payload();
+        let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
@@ -565,17 +564,6 @@ impl<P> PayloadState<P> {
         match self {
             Self::Missing => None,
             Self::Best(p) | Self::Frozen(p) => Some(p),
-        }
-    }
-
-    /// Returns a clone of the payload if it exists (either Best or Frozen).
-    pub fn best_payload(&self) -> Option<P>
-    where
-        P: Clone,
-    {
-        match self {
-            Self::Missing => None,
-            Self::Best(p) | Self::Frozen(p) => Some(p.clone()),
         }
     }
 }
