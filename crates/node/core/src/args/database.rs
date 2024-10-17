@@ -6,11 +6,14 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::ClientVersion;
+use reth_db::{ClientVersion, mdbx::{TERABYTE, GIGABYTE}};
 use reth_storage_errors::db::LogLevel;
 
+const DEFAULT_MAX_SIZE: usize = TERABYTE * 4;
+const DEFAULT_GROWTH_STEP: usize = GIGABYTE * 4;
+
 /// Parameters for database configuration
-#[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
+#[derive(Debug, Args, PartialEq, Eq, Clone, Copy)]
 #[command(next_help_heading = "Database")]
 pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
@@ -20,6 +23,23 @@ pub struct DatabaseArgs {
     /// NFS volume.
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
+    /// Maximum database size in bytes
+    #[arg(long = "db.max-size", default_value = "4398046511104")]
+    pub max_size: usize,
+    /// Database growth step in bytes
+    #[arg(long = "db.growth-step", default_value = "4294967296")]
+    pub growth_step: usize,
+}
+
+impl Default for DatabaseArgs {
+    fn default() -> Self {
+        Self {
+            log_level: None,
+            exclusive: None,
+            max_size: DEFAULT_MAX_SIZE,
+            growth_step: DEFAULT_GROWTH_STEP,
+        }
+    }
 }
 
 impl DatabaseArgs {
@@ -28,8 +48,17 @@ impl DatabaseArgs {
         self.get_database_args(default_client_version())
     }
 
-    /// Returns the database arguments with configured log level and given client version.
-    pub const fn get_database_args(
+    /// Returns the database arguments with configured log level, client version and geometry.
+    pub fn get_database_args(
+        &self,
+        client_version: ClientVersion,
+    ) -> reth_db::mdbx::DatabaseArguments {
+        self.get_const_database_args(client_version)
+        .with_geometry(self.max_size, self.growth_step)
+    }
+
+    /// Returns the const database arguments with configured log level and given client version.
+    pub const fn get_const_database_args(
         &self,
         client_version: ClientVersion,
     ) -> reth_db::mdbx::DatabaseArguments {
@@ -94,6 +123,36 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_max_size() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.max-size", "4398046511104"])
+                .unwrap();
+        assert_eq!(cmd.args.max_size, TERABYTE * 4);
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_max_size() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.max-size", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_growth_step() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.growth-step", "4294967296"])
+                .unwrap();
+        assert_eq!(cmd.args.growth_step, GIGABYTE * 4);
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_growth_step() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.growth-step", "invalid"]);
+        assert!(result.is_err());
     }
 
     #[test]
