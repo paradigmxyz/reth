@@ -1,6 +1,5 @@
 //! Ethereum protocol-related constants
 
-use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, b256, Address, B256, U256};
 use core::time::Duration;
 
