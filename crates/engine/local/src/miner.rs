@@ -131,7 +131,6 @@ where
             tokio::select! {
                 // Wait for the interval or the pool to receive a transaction
                 _ = &mut self.mode => {
-                    println!("RECEIVED");
                     if let Err(e) = self.advance().await {
                         error!(target: "engine::local", "Error advancing the chain: {:?}", e);
                     }
