@@ -25,9 +25,9 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
 };
-use std::fmt::Debug;
+use std::{fmt::Debug, marker::PhantomData};
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -41,7 +41,7 @@ use std::fmt::Debug;
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
 #[derive(Debug)]
-pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
+pub struct HistoricalStateProviderRef<'b, TX: DbTx, SC: StateCommitment> {
     /// Transaction
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
@@ -50,6 +50,8 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     lowest_available_blocks: LowestAvailableBlocks,
     /// Static File provider
     static_file_provider: StaticFileProvider,
+    /// Marker to associate the `StateCommitment` type with this provider.
+    _marker: PhantomData<SC>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -60,14 +62,20 @@ pub enum HistoryInfo {
     MaybeInPlainState,
 }
 
-impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
+impl<'b, TX: DbTx, SC: StateCommitment> HistoricalStateProviderRef<'b, TX, SC> {
     /// Create new `StateProvider` for historical block number
     pub fn new(
         tx: &'b TX,
         block_number: BlockNumber,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { tx, block_number, lowest_available_blocks: Default::default(), static_file_provider }
+        Self {
+            tx,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            static_file_provider,
+            _marker: PhantomData,
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -78,7 +86,13 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         lowest_available_blocks: LowestAvailableBlocks,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { tx, block_number, lowest_available_blocks, static_file_provider }
+        Self {
+            tx,
+            block_number,
+            lowest_available_blocks,
+            static_file_provider,
+            _marker: PhantomData,
+        }
     }
 
     /// Lookup an account in the `AccountsHistory` table
@@ -248,7 +262,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     }
 }
 
-impl<TX: DbTx> AccountReader for HistoricalStateProviderRef<'_, TX> {
+impl<TX: DbTx, SC: StateCommitment> AccountReader for HistoricalStateProviderRef<'_, TX, SC> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(address)? {
@@ -270,7 +284,7 @@ impl<TX: DbTx> AccountReader for HistoricalStateProviderRef<'_, TX> {
     }
 }
 
-impl<TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'_, TX> {
+impl<TX: DbTx, SC: StateCommitment> BlockHashReader for HistoricalStateProviderRef<'_, TX, SC> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
@@ -306,7 +320,7 @@ impl<TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'_, TX> {
     }
 }
 
-impl<TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'_, TX> {
+impl<TX: DbTx, SC: StateCommitment> StateRootProvider for HistoricalStateProviderRef<'_, TX, SC> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
@@ -340,7 +354,7 @@ impl<TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'_, TX> {
     }
 }
 
-impl<TX: DbTx> StorageRootProvider for HistoricalStateProviderRef<'_, TX> {
+impl<TX: DbTx, SC: StateCommitment> StorageRootProvider for HistoricalStateProviderRef<'_, TX, SC> {
     fn storage_root(
         &self,
         address: Address,
@@ -365,7 +379,7 @@ impl<TX: DbTx> StorageRootProvider for HistoricalStateProviderRef<'_, TX> {
     }
 }
 
-impl<TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'_, TX> {
+impl<TX: DbTx, SC: StateCommitment> StateProofProvider for HistoricalStateProviderRef<'_, TX, SC> {
     /// Get account and storage proofs.
     fn proof(
         &self,
@@ -397,7 +411,7 @@ impl<TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'_, TX> {
     }
 }
 
-impl<TX: DbTx> StateProvider for HistoricalStateProviderRef<'_, TX> {
+impl<TX: DbTx, SC: StateCommitment> StateProvider for HistoricalStateProviderRef<'_, TX, SC> {
     /// Get storage.
     fn storage(
         &self,
@@ -437,7 +451,7 @@ impl<TX: DbTx> StateProvider for HistoricalStateProviderRef<'_, TX> {
 /// State provider for a given block number.
 /// For more detailed description, see [`HistoricalStateProviderRef`].
 #[derive(Debug)]
-pub struct HistoricalStateProvider<TX: DbTx> {
+pub struct HistoricalStateProvider<TX: DbTx, SC: StateCommitment> {
     /// Database transaction
     tx: TX,
     /// State at the block number is the main indexer of the state.
@@ -446,16 +460,24 @@ pub struct HistoricalStateProvider<TX: DbTx> {
     lowest_available_blocks: LowestAvailableBlocks,
     /// Static File provider
     static_file_provider: StaticFileProvider,
+    /// Marker to associate the `StateCommitment` type with this provider.
+    _marker: PhantomData<SC>,
 }
 
-impl<TX: DbTx> HistoricalStateProvider<TX> {
+impl<TX: DbTx, SC: StateCommitment> HistoricalStateProvider<TX, SC> {
     /// Create new `StateProvider` for historical block number
     pub fn new(
         tx: TX,
         block_number: BlockNumber,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { tx, block_number, lowest_available_blocks: Default::default(), static_file_provider }
+        Self {
+            tx,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            static_file_provider,
+            _marker: PhantomData,
+        }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -478,7 +500,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    fn as_ref(&self) -> HistoricalStateProviderRef<'_, TX> {
+    fn as_ref(&self) -> HistoricalStateProviderRef<'_, TX, SC> {
         HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &self.tx,
             self.block_number,
@@ -489,7 +511,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<TX> where [TX: DbTx]);
+delegate_provider_impls!(HistoricalStateProvider<TX, SC> where [TX: DbTx, SC: StateCommitment]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -535,6 +557,18 @@ mod tests {
     };
     use reth_primitives::{Account, StorageEntry};
     use reth_storage_errors::provider::ProviderError;
+    use reth_trie_db::{MerklePatriciaTrie, StateCommitment};
+
+    type TestHistoricalStateProviderRefRO<'a> = HistoricalStateProviderRef<
+        'a,
+        reth_db::mdbx::tx::Tx<reth_db::mdbx::RO>,
+        MerklePatriciaTrie,
+    >;
+    type TestHistoricalStateProviderRefRW<'a> = HistoricalStateProviderRef<
+        'a,
+        reth_db::mdbx::tx::Tx<reth_db::mdbx::RW>,
+        MerklePatriciaTrie,
+    >;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
@@ -542,8 +576,8 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    const fn assert_historical_state_provider<T: DbTx>() {
-        assert_state_provider::<HistoricalStateProvider<T>>();
+    const fn assert_historical_state_provider<T: DbTx, SC: StateCommitment>() {
+        assert_state_provider::<HistoricalStateProvider<T, SC>>();
     }
 
     #[test]
@@ -614,58 +648,58 @@ mod tests {
 
         // run
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 1, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 2, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 2, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 3, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 4, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 4, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 7, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 7, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 9, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 9, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 10, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 10, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 11, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 11, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at15))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 16, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 16, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_plain))
         );
 
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 1, static_file_provider.clone())
                 .basic_account(HIGHER_ADDRESS),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider)
+            TestHistoricalStateProviderRefRO::new(&tx, 1000, static_file_provider)
                 .basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
@@ -726,52 +760,52 @@ mod tests {
 
         // run
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 0, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 0, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 3, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 4, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 4, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 7, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 7, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 9, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 9, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 10, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 10, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 11, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 11, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at15.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 16, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 16, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_plain.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
+            TestHistoricalStateProviderRefRO::new(&tx, 1, static_file_provider.clone())
                 .storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider)
+            TestHistoricalStateProviderRefRO::new(&tx, 1000, static_file_provider)
                 .storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
         );
@@ -785,7 +819,7 @@ mod tests {
 
         // provider block_number < lowest available block number,
         // i.e. state at provider block is pruned
-        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+        let provider = TestHistoricalStateProviderRefRW::new_with_lowest_available_blocks(
             &tx,
             2,
             LowestAvailableBlocks {
@@ -805,7 +839,7 @@ mod tests {
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
-        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+        let provider = TestHistoricalStateProviderRefRW::new_with_lowest_available_blocks(
             &tx,
             2,
             LowestAvailableBlocks {
@@ -822,7 +856,7 @@ mod tests {
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
-        let provider = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+        let provider = TestHistoricalStateProviderRefRW::new_with_lowest_available_blocks(
             &tx,
             2,
             LowestAvailableBlocks {

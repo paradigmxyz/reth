@@ -91,6 +91,13 @@ pub trait TryIntoHistoricalStateProvider {
     ) -> ProviderResult<StateProviderBox>;
 }
 
+/// Trait implemented for database providers that can be converted into a latest state provider
+/// reference.
+pub trait AsLatestStateProviderRef {
+    /// Returns a [`StateProvider`] for the latest state.
+    fn latest<'a>(&'a self) -> Box<dyn 'a + StateProvider>;
+}
+
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
 /// `BlockNumber`, the latest state, or the pending state.
 ///
