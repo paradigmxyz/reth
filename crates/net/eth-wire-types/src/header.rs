@@ -87,7 +87,7 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::EMPTY_ROOT_HASH;
+    use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
     use alloy_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::Header;
@@ -124,7 +124,7 @@ mod tests {
                 .unwrap();
         let header = Header {
             parent_hash: b256!("e0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"),
-            ommers_hash: b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: address!("ba5e000000000000000000000000000000000000"),
             state_root: b256!("ec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7"),
             transactions_root: b256!("50f738580ed699f0469702c7ccc63ed2e51bc034be9479b7bff4e68dee84accf"),
@@ -228,10 +228,7 @@ mod tests {
                 "3a9b485972e7353edd9152712492f0c58d89ef80623686b6bf947a4a6dce6cb6",
             )
             .unwrap(),
-            ommers_hash: B256::from_str(
-                "1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-            )
-            .unwrap(),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap(),
             state_root: B256::from_str(
                 "3c837fc158e3e93eafcaf2e658a02f5d8f99abc9f1c4c66cdea96c0ca26406ae",
@@ -280,7 +277,7 @@ mod tests {
                 "13a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5",
             )
             .unwrap(),
-            ommers_hash: b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: address!("f97e180c050e5ab072211ad2c213eb5aee4df134"),
             state_root: b256!("ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068a"),
             transactions_root: EMPTY_ROOT_HASH,
