@@ -4,7 +4,8 @@ use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
-use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
+use reth_evm::execute::BasicBlockExecutorProvider;
+use reth_evm_ethereum::{execute::EthExecutionStrategyFactory, EthEvmConfig};
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -124,7 +125,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     TokioTaskExecutor,
     TestCanonStateSubscriptions,
     EthEvmConfig,
-    EthExecutorProvider<EthEvmConfig>,
+    BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
 > {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
@@ -133,5 +134,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
         .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
-        .with_block_executor(EthExecutorProvider::ethereum(MAINNET.clone()))
+        .with_block_executor(
+            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::mainnet()),
+        )
 }

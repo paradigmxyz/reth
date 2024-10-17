@@ -14,7 +14,9 @@ use revm as _;
 pub use reth_ethereum_engine_primitives::EthEngineTypes;
 
 pub mod evm;
-pub use evm::{EthEvmConfig, EthExecutorProvider};
+pub use evm::{
+    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthExecutorProvider,
+};
 
 pub mod node;
 pub use node::EthereumNode;

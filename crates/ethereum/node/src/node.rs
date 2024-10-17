@@ -9,7 +9,8 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
 };
-use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_evm::execute::BasicBlockExecutorProvider;
+use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::NetworkHandle;
 use reth_node_api::{ConfigureEvm, EngineValidator, FullNodeComponents, NodeTypesWithDB};
 use reth_node_builder::{
@@ -127,7 +128,7 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
-    type Executor = EthExecutorProvider<Self::EVM>;
+    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory>;
 
     async fn build_evm(
         self,
@@ -135,7 +136,8 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
         let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let executor = EthExecutorProvider::new(chain_spec, evm_config.clone());
+        let strategy_factory = EthExecutionStrategyFactory::new(chain_spec, evm_config.clone());
+        let executor = BasicBlockExecutorProvider::new(strategy_factory);
 
         Ok((evm_config, executor))
     }
