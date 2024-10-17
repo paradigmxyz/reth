@@ -24,9 +24,9 @@ use serde::{de::DeserializeOwned, ser::Serialize};
 pub trait EngineTypes:
     PayloadTypes<
         BuiltPayload: TryInto<Self::ExecutionPayloadV1>
-                          + TryInto<Self::ExecutionPayloadV2>
-                          + TryInto<Self::ExecutionPayloadV3>
-                          + TryInto<Self::ExecutionPayloadV4>,
+                          + TryInto<Self::ExecutionPayloadEnvelopeV2>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV3>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV4>,
     > + DeserializeOwned
     + Serialize
     + 'static
@@ -34,11 +34,29 @@ pub trait EngineTypes:
     /// Execution Payload V1 type.
     type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V2 type.
-    type ExecutionPayloadV2: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    type ExecutionPayloadEnvelopeV2: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
     /// Execution Payload V3 type.
-    type ExecutionPayloadV3: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    type ExecutionPayloadEnvelopeV3: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
     /// Execution Payload V4 type.
-    type ExecutionPayloadV4: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    type ExecutionPayloadEnvelopeV4: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
 }
 
 /// Type that validates the payloads sent to the engine.
