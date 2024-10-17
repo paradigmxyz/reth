@@ -3,7 +3,10 @@ set +e  # Disable immediate exit on error
 
 # Array of crates to compile
 crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort))
+
 # Array of crates to exclude
+# Used with the `contains` function.
+# shellcheck disable=SC2034
 exclude_crates=(
   # The following are not working yet, but known to be fixable
   reth-exex-types # https://github.com/paradigmxyz/reth/issues/9946
