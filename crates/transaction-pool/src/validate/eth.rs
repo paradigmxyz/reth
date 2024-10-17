@@ -639,6 +639,7 @@ impl EthTransactionValidatorBuilder {
     pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
         self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
         self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
+        self.prague = self.chain_spec.is_prague_active_at_timestamp(timestamp);
         self
     }
 
