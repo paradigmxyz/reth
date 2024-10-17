@@ -3,6 +3,7 @@ use reth::{
     providers::StateProviderFactory, tasks::TaskSpawner, transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{PayloadBuilder, PayloadConfig};
+use reth_node_api::PayloadKind;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
 use std::{
@@ -52,10 +53,7 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(
-        &mut self,
-        _wait_for_pending: bool,
-    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let payload = self.best_payload();
         (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
     }

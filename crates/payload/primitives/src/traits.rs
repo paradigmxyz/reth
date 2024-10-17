@@ -1,4 +1,4 @@
-use crate::{PayloadEvents, PayloadTypes};
+use crate::{PayloadEvents, PayloadKind, PayloadTypes};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
@@ -35,7 +35,7 @@ pub trait PayloadBuilder: Send + Unpin {
     async fn resolve(
         &self,
         id: PayloadId,
-        wait_for_pending: bool,
+        kind: PayloadKind,
     ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
 
     /// Sends a message to the service to subscribe to payload events.

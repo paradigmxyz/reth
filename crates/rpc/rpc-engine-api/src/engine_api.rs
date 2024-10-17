@@ -17,7 +17,7 @@ use reth_engine_primitives::{EngineTypes, EngineValidator};
 use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes, PayloadKind,
     PayloadOrAttributes,
 };
 use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
@@ -260,7 +260,7 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadV1> {
         self.inner
             .payload_store
-            .resolve(payload_id, false)
+            .resolve(payload_id, PayloadKind::BestAvailable)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?
@@ -295,7 +295,7 @@ where
         // Now resolve the payload
         self.inner
             .payload_store
-            .resolve(payload_id, false)
+            .resolve(payload_id, PayloadKind::BestAvailable)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?
@@ -330,7 +330,7 @@ where
         // Now resolve the payload
         self.inner
             .payload_store
-            .resolve(payload_id, false)
+            .resolve(payload_id, PayloadKind::BestAvailable)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?
@@ -365,7 +365,7 @@ where
         // Now resolve the payload
         self.inner
             .payload_store
-            .resolve(payload_id, false)
+            .resolve(payload_id, PayloadKind::BestAvailable)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
             .map_err(|_| EngineApiError::UnknownPayload)?

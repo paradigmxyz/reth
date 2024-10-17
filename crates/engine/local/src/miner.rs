@@ -9,7 +9,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineTypes;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadKind, PayloadTypes,
 };
 use reth_provider::{BlockReader, ChainSpecProvider};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
@@ -202,7 +202,9 @@ where
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
 
-        let Some(Ok(payload)) = self.payload_builder.resolve(payload_id, true).await else {
+        let Some(Ok(payload)) =
+            self.payload_builder.resolve(payload_id, PayloadKind::WaitForPending).await
+        else {
             eyre::bail!("No payload")
         };
 

@@ -11,7 +11,7 @@ use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_payload_primitives::{
     BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
-    PayloadEvents, PayloadTypes,
+    PayloadEvents, PayloadKind, PayloadTypes,
 };
 use reth_provider::CanonStateNotification;
 use std::{
@@ -48,9 +48,9 @@ where
     pub async fn resolve(
         &self,
         id: PayloadId,
-        wait_for_pending: bool,
+        kind: PayloadKind,
     ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
-        self.inner.resolve(id, wait_for_pending).await
+        self.inner.resolve(id, kind).await
     }
 
     /// Returns the best payload for the given identifier.
@@ -133,10 +133,10 @@ where
     async fn resolve(
         &self,
         id: PayloadId,
-        wait_for_pending: bool,
+        kind: PayloadKind,
     ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::Resolve(id, wait_for_pending, tx)).ok()?;
+        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx)).ok()?;
         match rx.await.transpose()? {
             Ok(fut) => Some(fut.await),
             Err(e) => Some(Err(e.into())),
@@ -280,12 +280,12 @@ where
     fn resolve(
         &mut self,
         id: PayloadId,
-        wait_for_pending: bool,
+        kind: PayloadKind,
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
         trace!(%id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
-        let (fut, keep_alive) = self.payload_jobs[job].0.resolve(wait_for_pending);
+        let (fut, keep_alive) = self.payload_jobs[job].0.resolve(kind);
 
         if keep_alive == KeepPayloadJobAlive::No {
             let (_, id) = self.payload_jobs.swap_remove(job);
@@ -422,8 +422,8 @@ where
                         let attributes = this.payload_attributes(id);
                         let _ = tx.send(attributes);
                     }
-                    PayloadServiceCommand::Resolve(id, wait_for_pending, tx) => {
-                        let _ = tx.send(this.resolve(id, wait_for_pending));
+                    PayloadServiceCommand::Resolve(id, strategy, tx) => {
+                        let _ = tx.send(this.resolve(id, strategy));
                     }
                     PayloadServiceCommand::Subscribe(tx) => {
                         let new_rx = this.payload_events.subscribe();
@@ -456,7 +456,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Resolve the payload and return the payload
     Resolve(
         PayloadId,
-        /* wait_for_pending: */ bool,
+        /* kind: */ PayloadKind,
         oneshot::Sender<Option<PayloadFuture<T::BuiltPayload>>>,
     ),
     /// Payload service events
