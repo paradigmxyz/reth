@@ -278,6 +278,14 @@ impl RevealedSparseTrie {
             assert_eq!(child_path, path);
         }
 
+        // If we don't have any other removed nodes, insert an empty node at the root.
+        if removed_nodes.is_empty() {
+            debug_assert!(self.nodes.is_empty());
+            self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+
+            return Ok(())
+        }
+
         // Walk the stack of removed nodes from the back and re-insert them back into the trie,
         // adjusting the node type as needed.
         while let Some(removed_node) = removed_nodes.pop() {
@@ -406,11 +414,6 @@ impl RevealedSparseTrie {
             };
             debug!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
             self.nodes.insert(removed_path, new_node);
-        }
-
-        // If the trie is empty, insert an empty node at the root.
-        if self.nodes.is_empty() {
-            self.nodes.insert(Nibbles::default(), SparseNode::Empty);
         }
 
         Ok(())
