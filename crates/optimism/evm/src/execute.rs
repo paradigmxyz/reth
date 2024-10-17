@@ -5,6 +5,7 @@ use crate::{
 };
 use alloy_consensus::Transaction as _;
 use alloy_primitives::{BlockNumber, U256};
+use op_alloy_consensus::DepositTransaction;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{

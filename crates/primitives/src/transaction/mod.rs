@@ -364,42 +364,6 @@ impl Transaction {
         }
     }
 
-    /// Returns the source hash of the transaction, which uniquely identifies its source.
-    /// If not a deposit transaction, this will always return `None`.
-    #[cfg(feature = "optimism")]
-    pub const fn source_hash(&self) -> Option<B256> {
-        match self {
-            Self::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
-            _ => None,
-        }
-    }
-
-    /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
-    /// is not a deposit transaction, this will always return `None`.
-    #[cfg(feature = "optimism")]
-    pub const fn mint(&self) -> Option<u128> {
-        match self {
-            Self::Deposit(TxDeposit { mint, .. }) => *mint,
-            _ => None,
-        }
-    }
-
-    /// Returns whether or not the transaction is a system transaction. If the transaction
-    /// is not a deposit transaction, this will always return `false`.
-    #[cfg(feature = "optimism")]
-    pub const fn is_system_transaction(&self) -> bool {
-        match self {
-            Self::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
-            _ => false,
-        }
-    }
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    pub const fn is_deposit(&self) -> bool {
-        matches!(self, Self::Deposit(_))
-    }
-
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
     /// hash intended for signing.
     pub fn encode_without_signature(&self, out: &mut dyn bytes::BufMut) {

@@ -188,6 +188,8 @@ dependencies = [
  "arbitrary",
  "c-kzg",
  "derive_more 1.0.0",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "once_cell",
  "serde",
  "sha2 0.10.8",
@@ -488,6 +490,8 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "derive_more 1.0.0",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "jsonrpsee-types",
  "jsonwebtoken",
  "rand 0.8.5",
@@ -2663,6 +2667,47 @@ checksum = "534c5cf6194dfab3db3242765c03bbe257cf92f22b38f6bc0c58d59108a820ba"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ethereum_serde_utils"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70cbccfccf81d67bff0ab36e591fa536c8a935b078a7b0e58c1d00d418332fc9"
+dependencies = [
+ "alloy-primitives",
+ "hex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
+name = "ethereum_ssz"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfbba28f4f3f32d92c06a64f5bf6c4537b5d4e21f28c689bd2bbaecfea4e0d3e"
+dependencies = [
+ "alloy-primitives",
+ "derivative",
+ "ethereum_serde_utils",
+ "itertools 0.13.0",
+ "serde",
+ "serde_derive",
+ "smallvec",
+ "typenum",
+]
+
+[[package]]
+name = "ethereum_ssz_derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d37845ba7c16bf4be8be4b5786f03a2ba5f2fda0d7f9e7cb2282f69cff420d7"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.79",
 ]
 
 [[package]]
@@ -5157,8 +5202,7 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ea7162170c6f3cad8f67f4dd7108e3f78349fd553da5b8bebff1e7ef8f38896"
+source = "git+https://github.com/alloy-rs/op-alloy.git?branch=main#20eb16233c00087827f70d6b4a42afb79dc39da9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5175,8 +5219,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-genesis"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f3d31dfbbd8dd898c7512f8ce7d30103980485416f668566100b0ed0994b958"
+source = "git+https://github.com/alloy-rs/op-alloy.git?branch=main#20eb16233c00087827f70d6b4a42afb79dc39da9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5189,8 +5232,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-network"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d113b325527ba7da271a8793f1c14bdf7f035ce9e0611e668c36fc6812568c7f"
+source = "git+https://github.com/alloy-rs/op-alloy.git?branch=main#20eb16233c00087827f70d6b4a42afb79dc39da9"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -5203,8 +5245,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-protocol"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "310873e4fbfc41986716c4fb6000a8b49d025d932d2c261af58271c434b05288"
+source = "git+https://github.com/alloy-rs/op-alloy.git?branch=main#20eb16233c00087827f70d6b4a42afb79dc39da9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5220,8 +5261,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323c65880e2561aa87f74f8af260fd15b9cc930c448c88a60ae95af86c88c634"
+source = "git+https://github.com/alloy-rs/op-alloy.git?branch=main#20eb16233c00087827f70d6b4a42afb79dc39da9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5237,15 +5277,16 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349e7b420f45d1a00216ec4c65fcf3f0057a841bc39732c405c85ae782b94121"
+source = "git+https://github.com/alloy-rs/op-alloy.git?branch=main#20eb16233c00087827f70d6b4a42afb79dc39da9"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-serde",
  "derive_more 1.0.0",
+ "ethereum_ssz",
  "op-alloy-protocol",
  "serde",
+ "snap",
 ]
 
 [[package]]
@@ -8202,6 +8243,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth-basic-payload-builder",
  "reth-chain-state",
