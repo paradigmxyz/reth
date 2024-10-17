@@ -69,6 +69,13 @@ impl SparseTrie {
 }
 
 /// The representation of revealed sparse trie.
+///
+/// ## Invariants
+///
+/// - The root node is always present in `nodes` collection.
+/// - Each leaf entry in `nodes` collection must have a corresponding entry in `values` collection.
+///   The opposite is also true.
+/// - All keys in `values` collection are full leaf paths.
 #[derive(PartialEq, Eq)]
 pub struct RevealedSparseTrie {
     /// All trie nodes.
