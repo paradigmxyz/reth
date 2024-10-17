@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use alloy_genesis::Genesis;
-use alloy_primitives::b256;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
@@ -75,13 +75,11 @@ async fn can_handle_blobs() -> eyre::Result<()> {
         .submit_payload(blob_payload, blob_attr, PayloadStatusEnum::Valid, versioned_hashes.clone())
         .await?;
 
-    let genesis_hash = b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
-
     let (_, _) = tokio::join!(
         // send fcu with blob hash
-        node.engine_api.update_forkchoice(genesis_hash, blob_block_hash),
+        node.engine_api.update_forkchoice(MAINNET_GENESIS_HASH, blob_block_hash),
         // send fcu with normal hash
-        node.engine_api.update_forkchoice(genesis_hash, payload.block().hash())
+        node.engine_api.update_forkchoice(MAINNET_GENESIS_HASH, payload.block().hash())
     );
 
     // submit normal payload

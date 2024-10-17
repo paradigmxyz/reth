@@ -98,11 +98,6 @@ pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
 /// Multiplier for converting ether to wei.
 pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 
-/// The Ethereum mainnet genesis hash:
-/// `0x0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3`
-pub const MAINNET_GENESIS_HASH: B256 =
-    b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
-
 /// Sepolia genesis hash: `0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9`
 pub const SEPOLIA_GENESIS_HASH: B256 =
     b256!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9");
