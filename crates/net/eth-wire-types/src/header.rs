@@ -87,6 +87,7 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::Header;
@@ -201,10 +202,7 @@ mod tests {
             gas_used: 0x0125b8,
             timestamp: 0x079e,
             extra_data: Bytes::from_str("42").unwrap(),
-            mix_hash: B256::from_str(
-                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            )
-            .unwrap(),
+            mix_hash: EMPTY_ROOT_HASH,
             base_fee_per_gas: Some(0x09),
             withdrawals_root: Some(
                 B256::from_str("27f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973")
@@ -254,16 +252,10 @@ mod tests {
             gas_used: 0x02a865,
             timestamp: 0x079e,
             extra_data: Bytes::from(vec![0x42]),
-            mix_hash: B256::from_str(
-                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            )
-            .unwrap(),
+            mix_hash: EMPTY_ROOT_HASH,
             nonce: 0u64.into(),
             base_fee_per_gas: Some(9),
-            withdrawals_root: Some(
-                B256::from_str("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-                    .unwrap(),
-            ),
+            withdrawals_root: Some(EMPTY_ROOT_HASH),
             blob_gas_used: Some(0x020000),
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
@@ -291,12 +283,8 @@ mod tests {
             ommers_hash: b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
             beneficiary: address!("f97e180c050e5ab072211ad2c213eb5aee4df134"),
             state_root: b256!("ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068a"),
-            transactions_root: b256!(
-                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
-            ),
-            receipts_root: b256!(
-                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
-            ),
+            transactions_root: EMPTY_ROOT_HASH,
+            receipts_root: EMPTY_ROOT_HASH,
             logs_bloom: Default::default(),
             difficulty: U256::from(0),
             number: 0x30598,
@@ -307,9 +295,7 @@ mod tests {
             mix_hash: b256!("70ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f2325"),
             nonce: 0u64.into(),
             base_fee_per_gas: Some(7),
-            withdrawals_root: Some(b256!(
-                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
-            )),
+            withdrawals_root: Some(EMPTY_ROOT_HASH),
             parent_beacon_block_root: None,
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0x1600000),
