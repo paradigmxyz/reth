@@ -1,6 +1,6 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
-use alloy_consensus::TxLegacy;
+use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
     b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Parity, Sealable,
     TxKind, B256, U256,
@@ -66,8 +66,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlo
         Header {
             parent_hash: hex!("c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f")
                 .into(),
-            ommers_hash: hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
-                .into(),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").into(),
             state_root: hex!("50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d")
                 .into(),

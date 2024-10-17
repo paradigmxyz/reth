@@ -126,12 +126,13 @@ impl Compact for AlloyHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
     use alloy_primitives::{address, b256, bloom, bytes, hex};
 
     /// Holesky block #1947953
     const HOLESKY_BLOCK: Header = Header {
         parent_hash: b256!("8605e0c46689f66b3deed82598e43d5002b71a929023b665228728f0c6e62a95"),
-        ommers_hash: b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: address!("c6e2459991bfe27cca6d86722f35da23a1e4cb97"),
         state_root: b256!("edad188ca5647d62f4cca417c11a1afbadebce30d23260767f6f587e9b3b9993"),
         transactions_root: b256!("4daf25dc08a841aa22aa0d3cb3e1f159d4dcaf6a6063d4d36bfac11d3fdb63ee"),
