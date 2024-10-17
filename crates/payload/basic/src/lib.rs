@@ -175,7 +175,7 @@ where
             deadline,
             // ticks immediately
             interval: tokio::time::interval(self.config.interval),
-            best_payload: None,
+            best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
@@ -321,8 +321,8 @@ where
     deadline: Pin<Box<Sleep>>,
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
-    /// The best payload so far.
-    best_payload: Option<Builder::BuiltPayload>,
+    /// The best payload so far and its state.
+    best_payload: PayloadState<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -359,7 +359,7 @@ where
         let _cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
-        let best_payload = self.best_payload.clone();
+        let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
@@ -404,8 +404,9 @@ where
 
         // check if the interval is reached
         while this.interval.poll_tick(cx).is_ready() {
-            // start a new job if there is no pending block and we haven't reached the deadline
-            if this.pending_block.is_none() {
+            // start a new job if there is no pending block, we haven't reached the deadline,
+            // and the payload isn't frozen
+            if this.pending_block.is_none() && !this.best_payload.is_frozen() {
                 this.spawn_build_job();
             }
         }
@@ -417,7 +418,11 @@ where
                     BuildOutcome::Better { payload, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
                         debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                        this.best_payload = Some(payload);
+                        this.best_payload = PayloadState::Best(payload);
+                    }
+                    BuildOutcome::Freeze(payload) => {
+                        debug!(target: "payload_builder", "payload frozen, no further building will occur");
+                        this.best_payload = PayloadState::Frozen(payload);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
@@ -456,17 +461,18 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+        if let Some(payload) = self.best_payload.payload() {
+            Ok(payload.clone())
+        } else {
+            // No payload has been built yet, but we need to return something that the CL then
+            // can deliver, so we need to return an empty payload.
+            //
+            // Note: it is assumed that this is unlikely to happen, as the payload job is
+            // started right away and the first full block should have been
+            // built by the time CL is requesting the payload.
+            self.metrics.inc_requested_empty_payload();
+            self.builder.build_empty_payload(&self.client, self.config.clone())
         }
-        // No payload has been built yet, but we need to return something that the CL then can
-        // deliver, so we need to return an empty payload.
-        //
-        // Note: it is assumed that this is unlikely to happen, as the payload job is started right
-        // away and the first full block should have been built by the time CL is requesting the
-        // payload.
-        self.metrics.inc_requested_empty_payload();
-        self.builder.build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
@@ -474,8 +480,7 @@ where
     }
 
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let best_payload = self.best_payload.take();
-
+        let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
@@ -532,6 +537,34 @@ where
         let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
 
         (fut, KeepPayloadJobAlive::No)
+    }
+}
+
+/// Represents the current state of a payload being built.
+#[derive(Debug, Clone)]
+pub enum PayloadState<P> {
+    /// No payload has been built yet.
+    Missing,
+    /// The best payload built so far, which may still be improved upon.
+    Best(P),
+    /// The payload is frozen and no further building should occur.
+    ///
+    /// Contains the final payload `P` that should be used.
+    Frozen(P),
+}
+
+impl<P> PayloadState<P> {
+    /// Checks if the payload is frozen.
+    pub const fn is_frozen(&self) -> bool {
+        matches!(self, Self::Frozen(_))
+    }
+
+    /// Returns the payload if it exists (either Best or Frozen).
+    pub const fn payload(&self) -> Option<&P> {
+        match self {
+            Self::Missing => None,
+            Self::Best(p) | Self::Frozen(p) => Some(p),
+        }
     }
 }
 
@@ -715,6 +748,9 @@ pub enum BuildOutcome<Payload> {
     },
     /// Build job was cancelled
     Cancelled,
+
+    /// The payload is final and no further building should occur
+    Freeze(Payload),
 }
 
 impl<Payload> BuildOutcome<Payload> {
