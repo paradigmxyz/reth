@@ -78,7 +78,7 @@ pub trait Compact: Sized {
     }
 }
 
-impl Compact for String {
+impl Compact for alloc::string::String {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
