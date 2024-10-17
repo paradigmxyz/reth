@@ -1,8 +1,9 @@
 //! Transaction types.
 
 use crate::BlockHashOrNumber;
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_consensus::constants::constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
 use alloy_consensus::{
-    constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
     SignableTransaction, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
