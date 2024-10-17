@@ -902,6 +902,7 @@ where
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
         for chain in self.state.chains.values() {
+            all_chain_blocks.reserve_exact(chain.blocks().len());
             for (&number, block) in chain.blocks() {
                 all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
