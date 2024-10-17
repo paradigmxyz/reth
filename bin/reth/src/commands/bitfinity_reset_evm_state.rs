@@ -589,7 +589,7 @@ mod test {
         }
     }
 
-    /// Merge accouts into a single account
+    /// Merge accounts into a single account
     fn merge_accounts(accounts: Vec<RawAccountInfo>) -> RawAccountInfo {
         let mut result = accounts[0].clone();
         for account in accounts {
