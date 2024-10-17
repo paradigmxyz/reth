@@ -6,9 +6,14 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+#[macro_use]
+extern crate alloc;
+
+use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
@@ -18,7 +23,6 @@ use reth_primitives::{
     Head, Header, TransactionSigned,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use std::sync::Arc;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
