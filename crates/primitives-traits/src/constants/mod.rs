@@ -106,10 +106,6 @@ pub const SEPOLIA_GENESIS_HASH: B256 =
 pub const HOLESKY_GENESIS_HASH: B256 =
     b256!("b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4");
 
-/// Testnet genesis hash: `0x2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c`
-pub const DEV_GENESIS_HASH: B256 =
-    b256!("2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c");
-
 /// From address from Optimism system txs: `0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001`
 pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
