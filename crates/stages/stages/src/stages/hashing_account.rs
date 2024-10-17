@@ -61,8 +61,9 @@ impl AccountHashingStage {
     pub fn seed<
         Tx: DbTx + DbTxMut + 'static,
         Spec: Send + Sync + 'static + reth_chainspec::EthereumHardforks,
+        SC: Send + Sync + 'static,
     >(
-        provider: &reth_provider::DatabaseProvider<Tx, Spec>,
+        provider: &reth_provider::DatabaseProvider<Tx, Spec, SC>,
         opts: SeedOpts,
     ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError> {
         use alloy_primitives::U256;

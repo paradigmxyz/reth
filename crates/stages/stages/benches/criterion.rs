@@ -14,6 +14,7 @@ use reth_stages::{
     StageCheckpoint,
 };
 use reth_stages_api::{ExecInput, Stage, StageExt, UnwindInput};
+use reth_trie_db::MerklePatriciaTrie;
 use std::ops::RangeInclusive;
 use tokio::runtime::Runtime;
 
@@ -148,7 +149,14 @@ fn measure_stage<F, S>(
     block_interval: RangeInclusive<BlockNumber>,
     label: String,
 ) where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<
+            DatabaseProvider<
+                <TempDatabase<DatabaseEnv> as Database>::TXMut,
+                ChainSpec,
+                MerklePatriciaTrie,
+            >,
+        >,
     F: Fn(S, &TestStageDB, StageRange),
 {
     let stage_range = (

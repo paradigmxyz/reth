@@ -13,12 +13,13 @@ use reth_primitives::{
     Signature, Transaction, TransactionSigned, TxType, Withdrawal, Withdrawals,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
+use reth_trie_db::StateCommitment;
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
-    provider: &DatabaseProviderRW<DB, Spec>,
+pub fn assert_genesis_block<DB: Database, Spec: Send + Sync, SC: StateCommitment>(
+    provider: &DatabaseProviderRW<DB, Spec, SC>,
     g: SealedBlock,
 ) {
     let n = g.number;

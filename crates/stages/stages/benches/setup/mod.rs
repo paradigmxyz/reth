@@ -26,12 +26,19 @@ mod constants;
 mod account_hashing;
 pub use account_hashing::*;
 use reth_stages_api::{ExecInput, Stage, UnwindInput};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, MerklePatriciaTrie};
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<
+            DatabaseProvider<
+                <TempDatabase<DatabaseEnv> as Database>::TXMut,
+                ChainSpec,
+                MerklePatriciaTrie,
+            >,
+        >,
 >(
     stage: S,
     db: &TestStageDB,
@@ -63,7 +70,14 @@ pub(crate) fn stage_unwind<
 
 pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
 where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<
+            DatabaseProvider<
+                <TempDatabase<DatabaseEnv> as Database>::TXMut,
+                ChainSpec,
+                MerklePatriciaTrie,
+            >,
+        >,
 {
     let (input, unwind) = range;
 

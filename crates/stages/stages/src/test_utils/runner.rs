@@ -6,6 +6,7 @@ use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_db::MerklePatriciaTrie;
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
@@ -20,8 +21,13 @@ pub(crate) enum TestRunnerError {
 
 /// A generic test runner for stages.
 pub(crate) trait StageTestRunner {
-    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>
-        + 'static;
+    type S: Stage<
+            DatabaseProvider<
+                <TempDatabase<DatabaseEnv> as Database>::TXMut,
+                ChainSpec,
+                MerklePatriciaTrie,
+            >,
+        > + 'static;
 
     /// Return a reference to the database.
     fn db(&self) -> &TestStageDB;
