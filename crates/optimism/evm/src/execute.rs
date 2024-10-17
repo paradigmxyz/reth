@@ -3,8 +3,10 @@
 use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_primitives::{BlockNumber, U256};
+use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
@@ -27,7 +29,6 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Provides executors to execute regular optimism blocks

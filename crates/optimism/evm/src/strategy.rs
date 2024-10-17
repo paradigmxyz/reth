@@ -1,7 +1,9 @@
 //! Optimism block execution strategy,
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
+use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -24,7 +26,6 @@ use reth_revm::{
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
