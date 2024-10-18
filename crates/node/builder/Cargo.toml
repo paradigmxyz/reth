@@ -96,4 +96,21 @@ tempfile.workspace = true
 
 [features]
 default = []
-test-utils = ["reth-db/test-utils"]
+test-utils = [
+	"reth-db/test-utils",
+	"reth-blockchain-tree/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-engine-tree/test-utils",
+	"reth-evm/test-utils",
+	"reth-downloaders/test-utils",
+	"reth-network/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-stages/test-utils",
+	"reth-db-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-transaction-pool/test-utils"
+]

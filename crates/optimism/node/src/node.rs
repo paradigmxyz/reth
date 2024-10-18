@@ -6,14 +6,16 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager};
-use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives};
+use reth_node_api::{
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
+};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
-        NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -68,7 +70,6 @@ impl OptimismNode {
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
-        OptimismEngineValidatorBuilder,
     >
     where
         Node: FullNodeTypes<
@@ -86,7 +87,6 @@ impl OptimismNode {
             })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
-            .engine_validator(OptimismEngineValidatorBuilder::default())
     }
 }
 
@@ -103,7 +103,6 @@ where
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
-        OptimismEngineValidatorBuilder,
     >;
 
     type AddOns = OptimismAddOns<
@@ -131,7 +130,9 @@ impl NodeTypesWithEngine for OptimismNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OptimismAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>>);
+pub struct OptimismAddOns<N: FullNodeComponents>(
+    pub RpcAddOns<N, OpEthApi<N>, OptimismEngineValidatorBuilder>,
+);
 
 impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
     fn default() -> Self {
@@ -142,12 +143,14 @@ impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
 impl<N: FullNodeComponents> OptimismAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
     pub fn new(sequencer_http: Option<String>) -> Self {
-        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http)))
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
     }
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOns<N>
-    for OptimismAddOns<N>
+impl<N> NodeAddOns<N> for OptimismAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -159,8 +162,10 @@ impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOn
     }
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> RethRpcAddOns<N>
-    for OptimismAddOns<N>
+impl<N> RethRpcAddOns<N> for OptimismAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
 
@@ -458,12 +463,12 @@ pub struct OptimismEngineValidatorBuilder;
 impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
-    Node: FullNodeTypes<Types = Types>,
+    Node: FullNodeComponents<Types = Types>,
     OptimismEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = OptimismEngineValidator;
 
-    async fn build_validator(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Validator> {
-        Ok(OptimismEngineValidator::new(ctx.chain_spec()))
+    async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
+        Ok(OptimismEngineValidator::new(ctx.config.chain.clone()))
     }
 }

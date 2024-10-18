@@ -222,6 +222,8 @@ where
         self.to_engine.send(BeaconEngineMessage::NewPayload {
             payload: block_to_payload(payload.block().clone()),
             cancun_fields,
+            // todo: prague
+            execution_requests: None,
             tx,
         })?;
 

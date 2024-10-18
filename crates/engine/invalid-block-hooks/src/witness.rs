@@ -162,7 +162,7 @@ where
         let response = ExecutionWitness {
             state: HashMap::from_iter(state),
             codes: Default::default(),
-            keys: Some(state_preimages),
+            keys: state_preimages,
         };
         let re_executed_witness_path = self.save_file(
             format!("{}_{}.witness.re_executed.json", block.number, block.hash()),
