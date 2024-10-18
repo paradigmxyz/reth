@@ -1,30 +1,31 @@
 use core::fmt::Debug;
+use std::hash::Hash;
 
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use alloy_serde::WithOtherFields;
 
-use alloy_consensus::{
-    Transaction as AlloyConsensusTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
-};
+use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 use alloy_rlp::Encodable;
+use reth_codecs::Compact;
+use serde::{Deserialize, Serialize};
 
 /// Inner trait for a raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 pub trait TransactionInner<T>:
     Debug
-    + Clone
-    + PartialEq
-    + Eq
-    + std::hash::Hash
-    + serde::Serialize
-    + for<'a> serde::Deserialize<'a>
-    + derive_more::From<T>
-    + AlloyConsensusTransaction
-    + TryFrom<WithOtherFields<alloy_rpc_types::Transaction>>
-    + reth_codecs::Compact
     + Default
+    + Clone
+    + Eq
+    + PartialEq
     + Encodable
+    + Hash
+    + Compact
+    + Serialize
+    + for<'a> Deserialize<'a>
+    + derive_more::From<T>
+    + alloy_consensus::Transaction
+    + TryFrom<WithOtherFields<alloy_rpc_types::Transaction>>
 {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
