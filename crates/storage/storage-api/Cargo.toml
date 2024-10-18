@@ -26,5 +26,6 @@ reth-trie.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 
 auto_impl.workspace = true

@@ -9002,6 +9002,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
