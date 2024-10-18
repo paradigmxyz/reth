@@ -15,7 +15,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{Account, Bytecode, StaticFileSegment};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -41,7 +41,7 @@ use std::{fmt::Debug, marker::PhantomData};
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
 #[derive(Debug)]
-pub struct HistoricalStateProviderRef<'b, TX: DbTx, SC: StateCommitment> {
+pub struct HistoricalStateProviderRef<'b, TX: DbTx, SC> {
     /// Transaction
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
@@ -160,7 +160,7 @@ impl<'b, TX: DbTx, SC: StateCommitment> HistoricalStateProviderRef<'b, TX, SC> {
             );
         }
 
-        Ok(HashedPostState::from_reverts(self.tx, self.block_number)?)
+        Ok(HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, self.block_number)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -284,7 +284,7 @@ impl<TX: DbTx, SC: StateCommitment> AccountReader for HistoricalStateProviderRef
     }
 }
 
-impl<TX: DbTx, SC: StateCommitment> BlockHashReader for HistoricalStateProviderRef<'_, TX, SC> {
+impl<TX: DbTx, SC: Send + Sync> BlockHashReader for HistoricalStateProviderRef<'_, TX, SC> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
@@ -411,6 +411,24 @@ impl<TX: DbTx, SC: StateCommitment> StateProofProvider for HistoricalStateProvid
     }
 }
 
+impl<TX: DbTx, SC: StateCommitment> HashedPostStateProvider
+    for HistoricalStateProviderRef<'_, TX, SC>
+{
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::from_bundle_state::<SC::KeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, block_number).map_err(Into::into)
+    }
+}
+
 impl<TX: DbTx, SC: StateCommitment> StateProvider for HistoricalStateProviderRef<'_, TX, SC> {
     /// Get storage.
     fn storage(
@@ -451,7 +469,7 @@ impl<TX: DbTx, SC: StateCommitment> StateProvider for HistoricalStateProviderRef
 /// State provider for a given block number.
 /// For more detailed description, see [`HistoricalStateProviderRef`].
 #[derive(Debug)]
-pub struct HistoricalStateProvider<TX: DbTx, SC: StateCommitment> {
+pub struct HistoricalStateProvider<TX: DbTx, SC> {
     /// Database transaction
     tx: TX,
     /// State at the block number is the main indexer of the state.

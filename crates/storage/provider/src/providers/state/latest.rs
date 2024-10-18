@@ -12,7 +12,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{Account, Bytecode, StaticFileSegment};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -21,14 +21,14 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
+    DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
 };
 use std::marker::PhantomData;
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
-pub struct LatestStateProviderRef<'b, TX: DbTx, SC: StateCommitment> {
+pub struct LatestStateProviderRef<'b, TX: DbTx, SC> {
     /// database transaction
     tx: &'b TX,
     /// Static File provider
@@ -37,21 +37,21 @@ pub struct LatestStateProviderRef<'b, TX: DbTx, SC: StateCommitment> {
     _marker: PhantomData<SC>,
 }
 
-impl<'b, TX: DbTx, SC: StateCommitment> LatestStateProviderRef<'b, TX, SC> {
+impl<'b, TX: DbTx, SC> LatestStateProviderRef<'b, TX, SC> {
     /// Create new state provider
     pub const fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
         Self { tx, static_file_provider, _marker: PhantomData }
     }
 }
 
-impl<TX: DbTx, SC: StateCommitment> AccountReader for LatestStateProviderRef<'_, TX, SC> {
+impl<TX: DbTx, SC: Send + Sync> AccountReader for LatestStateProviderRef<'_, TX, SC> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.tx.get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 }
 
-impl<TX: DbTx, SC: StateCommitment> BlockHashReader for LatestStateProviderRef<'_, TX, SC> {
+impl<TX: DbTx, SC: Send + Sync> BlockHashReader for LatestStateProviderRef<'_, TX, SC> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.get_with_static_file_or_database(
@@ -87,7 +87,7 @@ impl<TX: DbTx, SC: StateCommitment> BlockHashReader for LatestStateProviderRef<'
     }
 }
 
-impl<TX: DbTx, SC: StateCommitment> StateRootProvider for LatestStateProviderRef<'_, TX, SC> {
+impl<TX: DbTx, SC: Send + Sync> StateRootProvider for LatestStateProviderRef<'_, TX, SC> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.tx, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -115,7 +115,7 @@ impl<TX: DbTx, SC: StateCommitment> StateRootProvider for LatestStateProviderRef
     }
 }
 
-impl<TX: DbTx, SC: StateCommitment> StorageRootProvider for LatestStateProviderRef<'_, TX, SC> {
+impl<TX: DbTx, SC: Send + Sync> StorageRootProvider for LatestStateProviderRef<'_, TX, SC> {
     fn storage_root(
         &self,
         address: Address,
@@ -136,7 +136,7 @@ impl<TX: DbTx, SC: StateCommitment> StorageRootProvider for LatestStateProviderR
     }
 }
 
-impl<TX: DbTx, SC: StateCommitment> StateProofProvider for LatestStateProviderRef<'_, TX, SC> {
+impl<TX: DbTx, SC: Send + Sync> StateProofProvider for LatestStateProviderRef<'_, TX, SC> {
     fn proof(
         &self,
         input: TrieInput,
@@ -161,6 +161,22 @@ impl<TX: DbTx, SC: StateCommitment> StateProofProvider for LatestStateProviderRe
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         TrieWitness::overlay_witness(self.tx, input, target).map_err(Into::<ProviderError>::into)
+    }
+}
+
+impl<TX: DbTx, SC: StateCommitment> HashedPostStateProvider for LatestStateProviderRef<'_, TX, SC> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::from_bundle_state::<SC::KeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, block_number).map_err(Into::into)
     }
 }
 

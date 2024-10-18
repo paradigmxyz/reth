@@ -2,7 +2,7 @@ use crate::BlockExecutionOutput;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, StorageEntry};
-use reth_trie::HashedPostState;
+use reth_trie::{HashedPostState, KeyHasher};
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
@@ -163,8 +163,8 @@ impl ExecutionOutcome {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state(&self.bundle.state)
+    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.

@@ -5,7 +5,6 @@ use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_db::MerklePatriciaTrie;
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]

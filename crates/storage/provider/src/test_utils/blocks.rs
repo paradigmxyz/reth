@@ -14,7 +14,6 @@ use reth_primitives::{
     Signature, Transaction, TransactionSigned, TxType, Withdrawal, Withdrawals,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use reth_trie_db::StateCommitment;
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 

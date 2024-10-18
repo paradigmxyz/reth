@@ -48,14 +48,18 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
+    HashedPostState, HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment};
+use reth_trie_db::{
+    DatabaseHashedPostState, DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment,
+};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -64,7 +68,6 @@ use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
-    marker::PhantomData,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
     time::{Duration, Instant},
@@ -138,8 +141,6 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     static_file_provider: StaticFileProvider,
     /// Pruning configuration
     prune_modes: PruneModes,
-    /// Marker to associate the `StateCommitment` type with this provider.
-    _marker: std::marker::PhantomData<SC>,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -226,7 +227,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, _marker: PhantomData }
+        Self { tx, chain_spec, static_file_provider, prune_modes }
     }
 }
 
@@ -387,7 +388,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, _marker: PhantomData }
+        Self { tx, chain_spec, static_file_provider, prune_modes }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -3509,6 +3510,28 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> HashedPostStateProvider for DatabaseProvider<TX, N> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> reth_trie::HashedPostState {
+        HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
+            &bundle_state.state,
+        )
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<<N::StateCommitment as StateCommitment>::KeyHasher>(
+            self.tx_ref(),
+            block_number,
+        )
+        .map_err(Into::into)
     }
 }
 
