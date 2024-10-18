@@ -25,7 +25,7 @@ pub mod receipt;
 pub use receipt::Receipt;
 
 pub mod transaction;
-pub use transaction::Transaction;
+pub use transaction::{Transaction, TransactionInner};
 
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
@@ -65,9 +65,3 @@ pub use header::{BlockHeader, Header, HeaderError, SealedHeader};
 pub mod serde_bincode_compat {
     pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
 }
-
-
-mod transaction;
-
-#[cfg(feature = "arbitrary")]
-pub use transaction::Transaction;
