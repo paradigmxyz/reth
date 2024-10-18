@@ -302,7 +302,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProviderRO<N::DB, N::ChainSpec>,
+            &DatabaseProviderRO<N::DB, N::ChainSpec, N::StateCommitment>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
@@ -418,7 +418,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<Vec<R>>
     where
         S: FnOnce(
-            DatabaseProviderRO<N::DB, N::ChainSpec>,
+            DatabaseProviderRO<N::DB, N::ChainSpec, N::StateCommitment>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, Arc<BlockState>) -> ProviderResult<Vec<R>>,
@@ -516,7 +516,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
+        S: FnOnce(
+            DatabaseProviderRO<N::DB, N::ChainSpec, N::StateCommitment>,
+        ) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, Arc<BlockState>) -> ProviderResult<Option<R>>,
     {
         // Order of instantiation matters. More information on:
@@ -585,7 +587,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<R>
     where
-        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<R>,
+        S: FnOnce(DatabaseProviderRO<N::DB, N::ChainSpec, N::StateCommitment>) -> ProviderResult<R>,
         M: Fn(Arc<BlockState>) -> ProviderResult<R>,
     {
         let block_state = match id {
