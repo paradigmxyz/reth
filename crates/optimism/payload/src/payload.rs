@@ -18,8 +18,7 @@ use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
-    convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use std::sync::Arc;
 
@@ -249,7 +248,7 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
                 B256::ZERO
             };
         Self {
-            execution_payload: block_to_payload_v4(block),
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -262,6 +261,7 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
             parent_beacon_block_root,
+            execution_requests: vec![],
         }
     }
 }

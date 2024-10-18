@@ -8,6 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::{ExecutionPayload, MaybeCancunPayloadFields, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_primitives::SealedBlock;
@@ -112,12 +114,17 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         &self,
         payload: ExecutionPayload,
         cancun_fields: MaybeCancunPayloadFields,
+        execution_requests: Option<Vec<Bytes>>,
     ) -> Result<SealedBlock, PayloadError> {
         let expected_hash = payload.block_hash();
 
         // First parse the block
-        let sealed_block =
-            try_into_block(payload, cancun_fields.parent_beacon_block_root())?.seal_slow();
+        let sealed_block = try_into_block(
+            payload,
+            cancun_fields.parent_beacon_block_root(),
+            execution_requests.map(Requests::new),
+        )?
+        .seal_slow();
 
         // Ensure the hash included in the payload matches the block hash
         if expected_hash != sealed_block.hash() {
@@ -162,7 +169,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
         if !shanghai_active && sealed_block.body.withdrawals.is_some() {
             // shanghai not active but withdrawals present
-            return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
+            return Err(PayloadError::PreShanghaiBlockWithWithdrawals)
         }
 
         if !self.is_prague_active_at_timestamp(sealed_block.timestamp) &&

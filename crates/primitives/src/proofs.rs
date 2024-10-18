@@ -1,11 +1,11 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal,
+    Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
 };
 use alloc::vec::Vec;
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::{eip2718::Encodable2718, eip7685::Encodable7685};
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
@@ -27,13 +27,6 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
-}
-
-/// Calculate [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) requests root.
-///
-/// NOTE: The requests are encoded as `id + request`
-pub fn calculate_requests_root(requests: &[Request]) -> B256 {
-    ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
 }
 
 /// Calculates the receipt root for a header.

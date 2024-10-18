@@ -5,6 +5,7 @@ use crate::{
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -380,7 +381,7 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
-            requests: vec![],
+            requests: Requests::default(),
             gas_used,
         })
     }
@@ -403,7 +404,7 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
-            requests: vec![],
+            requests: Requests::default(),
             gas_used,
         })
     }
@@ -429,7 +430,7 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
-            requests: vec![],
+            requests: Requests::default(),
             gas_used,
         })
     }

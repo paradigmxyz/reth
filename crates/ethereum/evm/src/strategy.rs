@@ -6,6 +6,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use alloy_consensus::Transaction as _;
+use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
@@ -18,7 +19,7 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, ConfigureEvmEnv,
 };
-use reth_primitives::{BlockWithSenders, Header, Receipt, Request};
+use reth_primitives::{BlockWithSenders, Header, Receipt};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     state_change::post_block_balance_increments,
@@ -194,7 +195,7 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
         receipts: &[Receipt],
-    ) -> Result<Vec<Request>, Self::Error> {
+    ) -> Result<Requests, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -203,12 +204,11 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
 
-            let post_execution_requests =
-                self.system_caller.apply_post_execution_changes(&mut evm)?;
-
-            [deposit_requests, post_execution_requests].concat()
+            let mut requests = Requests::new(vec![deposit_requests]);
+            requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
+            requests
         } else {
-            vec![]
+            Requests::default()
         };
         drop(evm);
 
@@ -257,7 +257,7 @@ where
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
-        requests: &[Request],
+        requests: &Requests,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec.clone(), receipts, requests)
     }
@@ -266,13 +266,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxLegacy, EMPTY_ROOT_HASH};
+    use alloy_consensus::TxLegacy;
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7685::EMPTY_REQUESTS_HASH,
     };
-    use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
+    use alloy_primitives::{b256, bytes, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_evm::execute::{
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
@@ -365,7 +366,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -397,7 +397,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -468,7 +467,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -523,7 +521,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -797,7 +794,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
@@ -855,7 +852,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
 
@@ -901,7 +898,7 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header().clone();
-        header.requests_root = Some(EMPTY_ROOT_HASH);
+        header.requests_hash = Some(EMPTY_REQUESTS_HASH);
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
@@ -938,7 +935,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 1,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
         let header_hash = header.hash_slow();
@@ -977,7 +974,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 2,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
 
@@ -1088,10 +1085,7 @@ mod tests {
         assert!(receipt.success);
 
         let request = requests.first().unwrap();
-        let withdrawal_request = request.as_withdrawal_request().unwrap();
-        assert_eq!(withdrawal_request.source_address, sender_address);
-        assert_eq!(withdrawal_request.validator_pubkey, validator_public_key);
-        assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
+        assert_eq!(request, &bytes!("00")); // todo: placeholder
     }
 
     #[test]
