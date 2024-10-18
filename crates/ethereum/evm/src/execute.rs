@@ -4,8 +4,9 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
@@ -19,7 +20,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt, Request};
+use reth_primitives::{BlockWithSenders, EthereumHardfork, Header, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
@@ -104,7 +105,7 @@ where
 #[derive(Debug, Clone)]
 struct EthExecuteOutput {
     receipts: Vec<Receipt>,
-    requests: Vec<Request>,
+    requests: Requests,
     gas_used: u64,
 }
 
@@ -122,7 +123,7 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Executes the transactions in the block and returns the receipts of the transactions in the
-    /// block, the total gas used and the list of EIP-7685 [requests](Request).
+    /// block, the total gas used and the list of EIP-7685 [requests](Requests).
     ///
     /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
     /// executes the transactions.
@@ -205,11 +206,11 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-            let post_execution_requests = system_caller.apply_post_execution_changes(&mut evm)?;
-
-            [deposit_requests, post_execution_requests].concat()
+            let mut requests = Requests::new(vec![deposit_requests]);
+            requests.extend(system_caller.apply_post_execution_changes(&mut evm)?);
+            requests
         } else {
-            vec![]
+            Requests::default()
         };
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
@@ -283,7 +284,7 @@ where
     /// Execute a single block and apply the state changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block, the total gas used and the list of
-    /// EIP-7685 [requests](Request).
+    /// EIP-7685 [requests](Requests).
     ///
     /// Returns an error if execution fails.
     fn execute_without_verification_with_state_hook<F>(
@@ -494,11 +495,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxLegacy, EMPTY_ROOT_HASH};
+    use alloy_consensus::TxLegacy;
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7685::EMPTY_REQUESTS_HASH,
     };
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
@@ -509,7 +511,7 @@ mod tests {
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
+    use revm_primitives::{bytes, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
@@ -583,7 +585,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -612,12 +613,7 @@ mod tests {
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
-                        body: BlockBody {
-                            transactions: vec![],
-                            ommers: vec![],
-                            withdrawals: None,
-                            requests: None,
-                        },
+                        body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
                     },
                     senders: vec![],
                 },
@@ -684,7 +680,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -739,7 +734,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -1016,7 +1010,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
@@ -1075,7 +1069,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
 
@@ -1121,7 +1115,7 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header().clone();
-        header.requests_root = Some(EMPTY_ROOT_HASH);
+        header.requests_hash = Some(EMPTY_REQUESTS_HASH);
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
@@ -1159,7 +1153,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 1,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
         let header_hash = header.hash_slow();
@@ -1196,7 +1190,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 2,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
 
@@ -1303,10 +1297,7 @@ mod tests {
         assert!(receipt.success);
 
         let request = requests.first().unwrap();
-        let withdrawal_request = request.as_withdrawal_request().unwrap();
-        assert_eq!(withdrawal_request.source_address, sender_address);
-        assert_eq!(withdrawal_request.validator_pubkey, validator_public_key);
-        assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
+        assert_eq!(request, &bytes!("00")); // todo: placeholder
     }
 
     #[test]

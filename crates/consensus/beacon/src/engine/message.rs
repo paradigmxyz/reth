@@ -1,4 +1,5 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
@@ -146,6 +147,10 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
         payload: ExecutionPayload,
         /// The cancun-related newPayload fields, if any.
         cancun_fields: Option<CancunPayloadFields>,
+        // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
+        // workaround.
+        /// The pectra EIP-7685 execution requests.
+        execution_requests: Option<Vec<Bytes>>,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },

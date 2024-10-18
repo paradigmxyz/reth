@@ -21,6 +21,9 @@ reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
+
+# alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # revm
