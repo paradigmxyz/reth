@@ -20,6 +20,12 @@ pub use constants::gas_units::{format_gas, format_gas_throughput};
 pub mod account;
 pub use account::{Account, Bytecode};
 
+pub mod receipt;
+pub use receipt::Receipt;
+
+pub mod transaction;
+pub use transaction::{signed::SignedTransaction, Transaction};
+
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
@@ -28,6 +34,9 @@ pub use request::{Request, Requests};
 
 pub mod signature;
 pub use signature::Signature;
+
+pub mod block;
+pub use block::{body::BlockBody, Block};
 
 mod withdrawal;
 pub use withdrawal::{Withdrawal, Withdrawals};

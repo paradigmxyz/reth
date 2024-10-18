@@ -806,6 +806,15 @@ where
         Ok(initial_target)
     }
 
+    /// Returns true if the node should terminate after the initial backfill run.
+    ///
+    /// This is the case if any of these configs are set:
+    ///  `--debug.max-block`
+    ///  `--debug.terminate`
+    pub const fn terminate_after_initial_backfill(&self) -> bool {
+        self.node_config().debug.terminate || self.node_config().debug.max_block.is_some()
+    }
+
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
     /// than the checkpoint of the first stage).
     ///
@@ -1063,7 +1072,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
-                    block_interval: 0,
+                    block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,
                     sender_recovery_before: None,

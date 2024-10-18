@@ -6,6 +6,7 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
+use reth_db::ClientVersion;
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -24,7 +25,15 @@ pub struct DatabaseArgs {
 impl DatabaseArgs {
     /// Returns default database arguments with configured log level and client version.
     pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
-        reth_db::mdbx::DatabaseArguments::new(default_client_version())
+        self.get_database_args(default_client_version())
+    }
+
+    /// Returns the database arguments with configured log level and given client version.
+    pub const fn get_database_args(
+        &self,
+        client_version: ClientVersion,
+    ) -> reth_db::mdbx::DatabaseArguments {
+        reth_db::mdbx::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
     }

@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_rpc_types_engine::{
-    OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
-    OptimismPayloadAttributes,
+    OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
 };
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
@@ -35,13 +34,13 @@ impl<T: PayloadTypes> EngineTypes for OptimismEngineTypes<T>
 where
     T::BuiltPayload: TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
-        + TryInto<OptimismExecutionPayloadEnvelopeV3>
-        + TryInto<OptimismExecutionPayloadEnvelopeV4>,
+        + TryInto<OpExecutionPayloadEnvelopeV3>
+        + TryInto<OpExecutionPayloadEnvelopeV4>,
 {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadV3 = OpExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = OpExecutionPayloadEnvelopeV4;
 }
 
 /// A default payload type for [`OptimismEngineTypes`]
@@ -51,7 +50,7 @@ pub struct OptimismPayloadTypes;
 
 impl PayloadTypes for OptimismPayloadTypes {
     type BuiltPayload = OptimismBuiltPayload;
-    type PayloadAttributes = OptimismPayloadAttributes;
+    type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
 }
 
@@ -112,12 +111,12 @@ pub fn validate_withdrawals_presence(
 
 impl<Types> EngineValidator<Types> for OptimismEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OptimismPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, OptimismPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, OpPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
             &self.chain_spec,
@@ -138,7 +137,7 @@ where
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,
-        attributes: &OptimismPayloadAttributes,
+        attributes: &OpPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(&self.chain_spec, version, attributes.into())?;
 

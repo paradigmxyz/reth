@@ -10,8 +10,6 @@ use alloy_primitives::{Address, Bytes, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
-use proptest::prelude::prop_compose;
-#[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use reth_primitives_traits::Requests;
 use serde::{Deserialize, Serialize};
@@ -20,7 +18,7 @@ use serde::{Deserialize, Serialize};
 // a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
 // requests as withdrawals
 #[cfg(any(feature = "arbitrary", test))]
-prop_compose! {
+proptest::prelude::prop_compose! {
     pub fn empty_requests_strategy()(_ in 0..1) -> Option<Requests> {
         None
     }

@@ -58,8 +58,6 @@ pub trait Signature: Sized + Send + Sync {
     fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)>;
 }
 
-// todo: add optimism type that wraps Signature, to impl separately for OP to account for system
-// null signature
 impl Signature for alloy_primitives::Signature {
     fn r(&self) -> U256 {
         Self::r(self)

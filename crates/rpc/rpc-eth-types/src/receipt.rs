@@ -1,5 +1,6 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
+use alloy_consensus::Transaction;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{
     AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,

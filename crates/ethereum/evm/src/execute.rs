@@ -5,6 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{BlockNumber, U256};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
@@ -141,10 +142,12 @@ where
     where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
-        let mut system_caller =
-            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
+        let mut system_caller = SystemCaller::new(self.evm_config.clone(), &self.chain_spec);
+        if let Some(hook) = state_hook {
+            system_caller.with_state_hook(Some(Box::new(hook) as Box<dyn OnStateHook>));
+        }
 
         system_caller.apply_pre_execution_changes(block, &mut evm)?;
 
@@ -290,7 +293,7 @@ where
         state_hook: Option<F>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
@@ -372,7 +375,7 @@ where
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         mut self,
         input: Self::Input<'_>,
         mut witness: F,
@@ -396,7 +399,7 @@ where
         state_hook: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } = self
@@ -491,7 +494,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxLegacy;
+    use alloy_consensus::{TxLegacy, EMPTY_ROOT_HASH};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -500,8 +503,7 @@ mod tests {
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
-        constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        public_key_to_address, Account, Block, BlockBody, Transaction,
+        constants::ETH_TO_WEI, public_key_to_address, Account, Block, BlockBody, Transaction,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,

@@ -6,21 +6,22 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager};
-use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
+use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
         NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    BuilderContext, Node, PayloadBuilderConfig,
+    rpc::{RethRpcAddOns, RpcAddOns, RpcHandle},
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -34,6 +35,14 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OptimismEngineTypes,
 };
+
+/// Optimism primitive types.
+#[derive(Debug)]
+pub struct OpPrimitives;
+
+impl NodePrimitives for OpPrimitives {
+    type Block = Block;
+}
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -97,7 +106,9 @@ where
         OptimismEngineValidatorBuilder,
     >;
 
-    type AddOns = OptimismAddOns;
+    type AddOns = OptimismAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
@@ -110,7 +121,7 @@ where
 }
 
 impl NodeTypes for OptimismNode {
-    type Primitives = ();
+    type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
 }
 
@@ -119,25 +130,43 @@ impl NodeTypesWithEngine for OptimismNode {
 }
 
 /// Add-ons w.r.t. optimism.
-#[derive(Debug, Clone)]
-pub struct OptimismAddOns {
-    sequencer_http: Option<String>,
+#[derive(Debug)]
+pub struct OptimismAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>>);
+
+impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
-impl OptimismAddOns {
+impl<N: FullNodeComponents> OptimismAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
-    pub const fn new(sequencer_http: Option<String>) -> Self {
-        Self { sequencer_http }
-    }
-
-    /// Returns the sequencer HTTP URL.
-    pub fn sequencer_http(&self) -> Option<&str> {
-        self.sequencer_http.as_deref()
+    pub fn new(sequencer_http: Option<String>) -> Self {
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http)))
     }
 }
 
-impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> NodeAddOns<N>
+    for OptimismAddOns<N>
+{
+    type Handle = RpcHandle<N, OpEthApi<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        self.0.launch_add_ons(ctx).await
+    }
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>> RethRpcAddOns<N>
+    for OptimismAddOns<N>
+{
     type EthApi = OpEthApi<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.0.hooks_mut()
+    }
 }
 
 /// A regular optimism evm and executor builder.
@@ -189,7 +218,11 @@ where
         ))
         .with_head_timestamp(ctx.head().timestamp)
         .kzg_settings(ctx.kzg_settings()?)
-        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+        .with_additional_tasks(
+            pool_config_overrides
+                .additional_validation_tasks
+                .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
+        )
         .build_with_tasks(ctx.provider().clone(), ctx.task_executor().clone(), blob_store.clone())
         .map(|validator| {
             OpTransactionValidator::new(validator)
