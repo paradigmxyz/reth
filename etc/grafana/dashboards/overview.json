@@ -1214,7 +1214,7 @@
           "hide": false,
           "includeNullMetadata": false,
           "instant": false,
-          "legendFormat": "Start",
+          "legendFormat": "Tasks started",
           "range": true,
           "refId": "A",
           "useBackend": false
