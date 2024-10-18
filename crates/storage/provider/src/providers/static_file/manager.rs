@@ -143,9 +143,10 @@ impl StaticFileProvider {
                         // appending/truncating rows
                         for segment in event.paths {
                             // Ensure it's a file with the .conf extension
-                            if segment
+                            #[allow(clippy::nonminimal_bool)]
+                            if !segment
                                 .extension()
-                                .is_none_or(|s| s.to_str() != Some(CONFIG_FILE_EXTENSION))
+                                .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
                             {
                                 continue
                             }
