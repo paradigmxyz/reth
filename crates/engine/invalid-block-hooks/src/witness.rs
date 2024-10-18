@@ -6,14 +6,15 @@ use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
+use reth_evm::{
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
+};
 use reth_primitives::{Header, Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
-    state_change::post_block_balance_increments,
     DatabaseCommit, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;

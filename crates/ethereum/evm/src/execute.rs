@@ -15,6 +15,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    state_change::post_block_balance_increments,
     system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
@@ -24,7 +25,6 @@ use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord,
     db::{states::bundle_state::BundleRetention, State},
-    state_change::post_block_balance_increments,
     Evm,
 };
 use revm_primitives::{
@@ -163,7 +163,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
