@@ -61,7 +61,6 @@ There are many tables within the node, all used to store different types of data
 - StageCheckpointProgresses
 - PruneCheckpoints
 - VersionHistory
-- BlockRequests
 - ChainState
 
 <br>
@@ -283,7 +282,6 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
     let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
     let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
     let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-    let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
     // Cursors to unwind transitions
     let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -322,7 +320,7 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
 }
 ```
 
-This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `BlockRequests`, `TransactionBlocks` tables.
+This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `TransactionBlocks` tables.
 
 Then it gets a walker of the block body cursor, and then walk backwards through the cursor to delete the block body entries from the last block number to the block number specified in the `UnwindInput` struct.
 

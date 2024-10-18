@@ -15,6 +15,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -25,7 +26,7 @@ use reth_execution_errors::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockHashOrNumber, BlockWithSenders, Header, Requests, SealedBlock,
+    proofs, Block, BlockBody, BlockHashOrNumber, BlockWithSenders, Header, SealedBlock,
     SealedHeader, TransactionSigned, Withdrawals,
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
@@ -301,7 +302,7 @@ impl StorageInner {
             timestamp,
             base_fee_per_gas,
             blob_gas_used,
-            requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
+            requests_hash: requests.map(|r| r.requests_hash()),
             ..Default::default()
         };
 
@@ -366,7 +367,6 @@ impl StorageInner {
                 transactions,
                 ommers: ommers.clone(),
                 withdrawals: withdrawals.clone(),
-                requests: requests.clone(),
             },
         }
         .with_recovered_senders()
@@ -390,7 +390,7 @@ impl StorageInner {
         // root here
 
         let Block { mut header, body, .. } = block.block;
-        let body = BlockBody { transactions: body.transactions, ommers, withdrawals, requests };
+        let body = BlockBody { transactions: body.transactions, ommers, withdrawals };
 
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
@@ -682,7 +682,7 @@ mod tests {
                 timestamp,
                 base_fee_per_gas: None,
                 blob_gas_used: Some(0),
-                requests_root: None,
+                requests_hash: None,
                 excess_blob_gas: Some(0),
                 ..Default::default()
             }

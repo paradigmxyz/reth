@@ -45,7 +45,7 @@ pub use receipt::{
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, Request, Requests, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
+    LogData, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 

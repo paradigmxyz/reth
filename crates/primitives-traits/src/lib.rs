@@ -29,9 +29,6 @@ pub use transaction::{signed::SignedTransaction, Transaction};
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
-pub mod request;
-pub use request::{Request, Requests};
-
 pub mod block;
 pub use block::{body::BlockBody, Block};
 

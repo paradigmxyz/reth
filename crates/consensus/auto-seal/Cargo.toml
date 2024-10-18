@@ -31,6 +31,7 @@ reth-tokio-util.workspace = true
 reth-trie.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 revm-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true

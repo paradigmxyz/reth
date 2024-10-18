@@ -37,7 +37,7 @@ pub const fn generate_valid_header(
     }
 
     // Placeholder for future EIP adjustments
-    header.requests_root = None;
+    header.requests_hash = None;
 
     header
 }

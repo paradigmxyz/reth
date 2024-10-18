@@ -10,6 +10,7 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -25,7 +26,7 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs::{self, calculate_requests_root},
+    proofs::{self},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, EthereumHardforks, Header, Receipt,
 };
@@ -308,9 +309,7 @@ where
     }
 
     // calculate the requests and the requests root
-    let (requests, requests_root) = if chain_spec
-        .is_prague_active_at_timestamp(attributes.timestamp)
-    {
+    let requests = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
         let withdrawal_requests = system_caller
@@ -328,11 +327,9 @@ where
             )
             .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
-        let requests_root = calculate_requests_root(&requests);
-        (Some(requests.into()), Some(requests_root))
+        Some(Requests::new(vec![deposit_requests, withdrawal_requests, consolidation_requests]))
     } else {
-        (None, None)
+        None
     };
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
@@ -414,13 +411,13 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
-        requests_root,
+        requests_hash: requests.map(|r| r.requests_hash()),
     };
 
     // seal the block
     let block = Block {
         header,
-        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests },
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
     let sealed_block = block.seal_slow();
