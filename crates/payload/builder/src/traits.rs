@@ -55,6 +55,12 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// If this returns [`KeepPayloadJobAlive::Yes`], then the [`PayloadJob`] will be polled
     /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
     /// dropped after this call.
+    ///
+    /// The [`PayloadKind`] determines how the payload should be resolved in the
+    /// `ResolvePayloadFuture`. [`PayloadKind::Earliest`] should return the earliest available
+    /// payload (as fast as possible), e.g. racing an empty payload job against a pending job if
+    /// there's no payload available yet. [`PayloadKind::WaitForPending`] is allowed to wait
+    /// until a built payload is available.
     fn resolve_kind(
         &mut self,
         kind: PayloadKind,
