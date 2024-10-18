@@ -1,5 +1,7 @@
 //! Transaction abstraction
 
+pub mod signed;
+
 use alloc::fmt;
 
 use reth_codecs::Compact;
