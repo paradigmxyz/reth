@@ -276,6 +276,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
+        // Legacy Engine: This prevents a race condition in which the `StaticFileProducer` could
+        // attempt to proceed with a finalized block which has been unwinded
+        let _locked_sf_producer = self.static_file_producer.lock();
+
         let mut provider_rw = self.provider_factory.database_provider_rw()?;
 
         for stage in unwind_pipeline {

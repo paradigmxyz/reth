@@ -14,8 +14,13 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     // todo: make chain spec type generic over hardfork
     //type Hardfork: Clone + Copy + 'static;
 
-    /// Chain id.
+    /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
+
+    /// Returns the chain id number
+    fn chain_id(&self) -> u64 {
+        self.chain().id()
+    }
 
     /// Get the [`BaseFeeParams`] for the chain at the given block.
     fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams;

@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
+use alloy_consensus::Transaction;
 use alloy_primitives::Address;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
@@ -100,7 +101,7 @@ where
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {
-                    to: tx.to(),
+                    to: tx.to().into(),
                     value: tx.value(),
                     gas: tx.gas_limit() as u128,
                     gas_price: tx.transaction.max_fee_per_gas(),

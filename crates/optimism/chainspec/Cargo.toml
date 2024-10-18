@@ -25,6 +25,7 @@ reth-optimism-forks.workspace = true
 alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true

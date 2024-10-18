@@ -1,5 +1,6 @@
 //! Loads and formats OP transaction RPC response.
 
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
 use op_alloy_rpc_types::Transaction;
@@ -40,7 +41,7 @@ where
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
-            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
             let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
                 });

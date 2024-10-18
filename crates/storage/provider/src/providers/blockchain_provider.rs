@@ -402,7 +402,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<MemoryOverlayStateProvider> {
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
+        Ok(state.state_provider(latest_historical))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
@@ -1933,7 +1933,7 @@ mod tests {
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
     fn persist_block_after_db_tx_creation(
-        provider: Arc<BlockchainProvider2<MockNodeTypesWithDB>>,
+        provider: BlockchainProvider2<MockNodeTypesWithDB>,
         block_number: BlockNumber,
     ) {
         let hook_provider = provider.clone();
@@ -3142,7 +3142,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3257,7 +3256,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3383,7 +3381,6 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let provider = Arc::new(provider);
 
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
@@ -3685,8 +3682,6 @@ mod tests {
             },
         )?;
 
-        let provider = Arc::new(provider);
-
         // Old implementation was querying the database first. This is problematic, if there are
         // changes AFTER the database transaction is created.
         let old_transaction_hash_fn =
@@ -3739,7 +3734,7 @@ mod tests {
                 correct_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
-                    provider.database.clone()
+                    provider.database
                 ),
                 Ok(Some(to_be_persisted_tx))
             );

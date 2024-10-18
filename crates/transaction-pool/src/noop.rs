@@ -227,6 +227,14 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        _sender: Address,
+        _on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
+    }
+
     fn get_transaction_by_sender_and_nonce(
         &self,
         _sender: Address,

@@ -138,10 +138,10 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 /// use alloy_primitives::{B256, U256};
 /// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
-/// use reth_primitives::MAINNET_GENESIS_HASH;
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
@@ -216,6 +216,7 @@ impl StatusBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{EthVersion, Status};
+    use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
@@ -235,10 +236,7 @@ mod tests {
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
             .unwrap(),
-            genesis: B256::from_str(
-                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-            )
-            .unwrap(),
+            genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
 
@@ -258,10 +256,7 @@ mod tests {
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
             .unwrap(),
-            genesis: B256::from_str(
-                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-            )
-            .unwrap(),
+            genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();

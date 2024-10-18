@@ -320,7 +320,7 @@ mod tests {
                     hashed_state
                         .storages
                         .entry(hashed_address)
-                        .or_insert_with(|| HashedStorage::new(false))
+                        .or_insert_with(HashedStorage::default)
                         .storage
                         .insert(hashed_slot, *value);
                 }

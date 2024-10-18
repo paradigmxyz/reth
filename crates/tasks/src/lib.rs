@@ -288,7 +288,7 @@ pub struct TaskExecutor {
     on_shutdown: Shutdown,
     /// Sender half for sending panic signals to this type
     panicked_tasks_tx: UnboundedSender<PanickedTaskError>,
-    // Task Executor Metrics
+    /// Task Executor Metrics
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active
     graceful_tasks: Arc<AtomicUsize>,
