@@ -67,6 +67,7 @@ use reth_payload_builder::{
 };
 use reth_primitives::Withdrawals;
 use reth_tracing::{RethTracer, Tracer};
+use reth_trie_db::MerklePatriciaTrie;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +220,7 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
 }
 
 /// Configure the node types with the custom engine types
