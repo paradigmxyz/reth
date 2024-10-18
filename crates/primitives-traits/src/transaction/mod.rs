@@ -1,5 +1,4 @@
-use core::fmt::Debug;
-use core::hash::Hash;
+use core::{fmt::Debug, hash::Hash};
 
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use alloy_serde::WithOtherFields;
