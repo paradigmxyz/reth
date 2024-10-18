@@ -555,7 +555,7 @@ mod tests {
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, StateRoot, StorageRoot,
+        HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot, StorageRoot,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm::{
@@ -1447,7 +1447,7 @@ mod tests {
                         0,
                         Vec::new()
                     )
-                    .hash_state_slow(),
+                    .hash_state_slow::<KeccakKeyHasher>(),
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (

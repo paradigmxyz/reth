@@ -130,6 +130,31 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
     }
 }
 
+impl reth_storage_api::HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> reth_trie::HashedPostState {
+        self.0.hashed_post_state_from_bundle_state(bundle_state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: alloy_primitives::BlockNumber,
+    ) -> ProviderResult<reth_trie::HashedPostState> {
+        self.0.hashed_post_state_from_reverts(block_number)
+    }
+}
+
+impl reth_storage_api::HashedStorageProvider for StateProviderTraitObjWrapper<'_> {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> reth_trie::HashedStorage {
+        self.0.hashed_storage_from_bundle_account(account)
+    }
+}
+
 impl StateProvider for StateProviderTraitObjWrapper<'_> {
     fn account_balance(
         &self,

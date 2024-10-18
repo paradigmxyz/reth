@@ -27,13 +27,15 @@ use reth_primitives::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, HashedStorageProvider, StageCheckpointReader,
+    StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
-    TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
+    MultiProof, StorageProof, TrieInput,
 };
+use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
@@ -152,8 +154,8 @@ impl MockEthProvider {
 
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
-    type Provider = DatabaseProvider<TxMock, ChainSpec>;
-    type ProviderRW = DatabaseProvider<TxMock, ChainSpec>;
+    type Provider = DatabaseProvider<TxMock, ChainSpec, MerklePatriciaTrie>;
+    type ProviderRW = DatabaseProvider<TxMock, ChainSpec, MerklePatriciaTrie>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
@@ -666,6 +668,31 @@ impl StateProofProvider for MockEthProvider {
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for MockEthProvider {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        unimplemented!("hashed_post_state_from_reverts not supported for MockEthProvider")
+    }
+}
+
+impl HashedStorageProvider for MockEthProvider {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> HashedStorage {
+        HashedStorage::from_bundle_account::<KeccakKeyHasher>(account)
     }
 }
 

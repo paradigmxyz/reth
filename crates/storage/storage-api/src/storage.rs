@@ -1,7 +1,9 @@
 use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::models::BlockNumberAddress;
+use reth_execution_types::BundleAccount;
 use reth_primitives::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::HashedStorage;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::RangeInclusive,
@@ -30,6 +32,13 @@ pub trait StorageReader: Send + Sync {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>>;
+}
+
+/// [`HashedStorage`] provider
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait HashedStorageProvider: Send + Sync {
+    /// Returns the [`HashedStorage`] for the provided `BundleAccount`.
+    fn hashed_storage_from_bundle_account(&self, account: &BundleAccount) -> HashedStorage;
 }
 
 /// Storage ChangeSet reader

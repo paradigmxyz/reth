@@ -6,7 +6,9 @@ use alloy_primitives::{
     Address, BlockNumber, Bytes, B256,
 };
 use reth_primitives::{Account, Bytecode};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, HashedStorageProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
@@ -37,12 +39,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BundleStateProvider<SP, EDP>
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         bundle_state
             .account(&address)
-            .map(|account| {
-                HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                )
-            })
+            .map(|account| self.state_provider.hashed_storage_from_bundle_account(account))
             .unwrap_or_default()
     }
 }
@@ -86,7 +83,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let mut state = self.state_provider.hashed_post_state_from_bundle_state(bundle_state);
         state.extend(hashed_state);
         self.state_provider.state_root(state)
     }
@@ -100,7 +97,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let mut state = self.state_provider.hashed_post_state_from_bundle_state(bundle_state);
         state.extend(hashed_state);
         self.state_provider.state_root_with_updates(state)
     }
@@ -110,7 +107,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        input.prepend(self.state_provider.hashed_post_state_from_bundle_state(bundle_state));
         self.state_provider.state_root_from_nodes_with_updates(input)
     }
 }
@@ -150,7 +147,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        input.prepend(self.state_provider.hashed_post_state_from_bundle_state(bundle_state));
         self.state_provider.proof(input, address, slots)
     }
 
@@ -160,7 +157,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        input.prepend(self.state_provider.hashed_post_state_from_bundle_state(bundle_state));
         self.state_provider.multiproof(input, targets)
     }
 
@@ -170,8 +167,37 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        input.prepend(self.state_provider.hashed_post_state_from_bundle_state(bundle_state));
         self.state_provider.witness(input, target)
+    }
+}
+
+impl<SP: StateProvider, EDP: ExecutionDataProvider> HashedPostStateProvider
+    for BundleStateProvider<SP, EDP>
+{
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
+        self.state_provider.hashed_post_state_from_bundle_state(bundle_state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        self.state_provider.hashed_post_state_from_reverts(block_number)
+    }
+}
+
+impl<SP: StateProvider, EDP: ExecutionDataProvider> HashedStorageProvider
+    for BundleStateProvider<SP, EDP>
+{
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> HashedStorage {
+        self.state_provider.hashed_storage_from_bundle_account(account)
     }
 }
 
