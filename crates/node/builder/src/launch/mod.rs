@@ -24,7 +24,8 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, FullNodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+    AddOnsContext, FullNodeComponents, FullNodeTypes, NodeCore, NodeTypesWithDB,
+    NodeTypesWithEngine,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -47,14 +48,14 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`NodeCore`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    <N as FullNodeComponents>::Network,
+    <N as NodeCore>::Provider,
+    <N as NodeCore>::Pool,
+    <N as NodeCore>::Evm,
+    <N as NodeCore>::Network,
     TaskExecutor,
-    <N as FullNodeTypes>::Provider,
+    <N as NodeCore>::Provider,
 >;
 
 /// A general purpose trait that launches a new node of any kind.

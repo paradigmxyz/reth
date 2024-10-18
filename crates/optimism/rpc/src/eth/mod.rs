@@ -17,12 +17,12 @@ use op_alloy_network::Optimism;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeCore, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
-    StageCheckpointReader, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    HeaderProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -43,10 +43,10 @@ use crate::{OpEthApiError, OpTxBuilder, SequencerClient};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Network,
-    <N as FullNodeComponents>::Evm,
+    <N as NodeCore>::Provider,
+    <N as NodeCore>::Pool,
+    <N as NodeCore>::Network,
+    <N as NodeCore>::Evm,
 >;
 
 /// OP-Reth `Eth` API implementation.
@@ -60,7 +60,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
-pub struct OpEthApi<N: FullNodeComponents> {
+pub struct OpEthApi<N: NodeCore> {
     /// Gateway to node's core components.
     #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
@@ -69,7 +69,12 @@ pub struct OpEthApi<N: FullNodeComponents> {
     sequencer_client: Option<SequencerClient>,
 }
 
-impl<N: FullNodeComponents> OpEthApi<N> {
+impl<N> OpEthApi<N>
+where
+    N: NodeCore<
+        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
+    >,
+{
     /// Creates a new instance for given context.
     pub fn new(ctx: &EthApiBuilderCtx<N>, sequencer_http: Option<String>) -> Self {
         let blocking_task_pool =
@@ -98,7 +103,7 @@ impl<N: FullNodeComponents> OpEthApi<N> {
 impl<N> EthApiTypes for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+    N: NodeCore,
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
@@ -244,7 +249,19 @@ where
     }
 }
 
-impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
+impl<N> BuilderProvider<N> for OpEthApi<N>
+where
+    Self: Send,
+    N: FullNodeComponents,
+{
+    type Ctx<'a> = &'a EthApiBuilderCtx<N>;
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        Box::new(Self::with_spawner)
+    }
+}
+
+impl<N: NodeCore> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
