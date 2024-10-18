@@ -8047,6 +8047,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
