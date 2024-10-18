@@ -32,6 +32,9 @@ pub use integer_list::{IntegerList, IntegerListError};
 pub mod request;
 pub use request::{Request, Requests};
 
+pub mod signature;
+pub use signature::Signature;
+
 pub mod block;
 pub use block::{body::BlockBody, Block};
 
