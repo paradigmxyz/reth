@@ -1,10 +1,10 @@
 //! [EIP-7251](https://eips.ethereum.org/EIPS/eip-7251) system call implementation.
 use crate::ConfigureEvm;
-use alloc::{boxed::Box, format, string::ToString, vec::Vec};
-use alloy_eips::eip7251::{ConsolidationRequest, CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS};
-use alloy_primitives::{bytes::Buf, Address, Bytes, FixedBytes};
+use alloc::{boxed::Box, format};
+use alloy_eips::eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS;
+use alloy_primitives::Bytes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Header, Request};
+use reth_primitives::Header;
 use revm::{interpreter::Host, Database, Evm};
 use revm_primitives::{ExecutionResult, ResultAndState};
 
@@ -64,56 +64,23 @@ where
     Ok(res)
 }
 
-/// Parses the consolidation requests from the execution output.
+/// Calls the consolidation requests system contract, and returns the requests from the execution
+/// output.
 #[inline]
-pub(crate) fn post_commit(result: ExecutionResult) -> Result<Vec<Request>, BlockExecutionError> {
-    let mut data = match result {
+pub(crate) fn post_commit(result: ExecutionResult) -> Result<Bytes, BlockExecutionError> {
+    match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
             Err(BlockValidationError::ConsolidationRequestsContractCall {
                 message: format!("execution reverted: {output}"),
-            })
+            }
+            .into())
         }
         ExecutionResult::Halt { reason, .. } => {
             Err(BlockValidationError::ConsolidationRequestsContractCall {
                 message: format!("execution halted: {reason:?}"),
-            })
-        }
-    }?;
-
-    // Consolidations are encoded as a series of consolidation requests, each with the following
-    // format:
-    //
-    // +------+--------+---------------+
-    // | addr | pubkey | target pubkey |
-    // +------+--------+---------------+
-    //    20      48        48
-
-    const CONSOLIDATION_REQUEST_SIZE: usize = 20 + 48 + 48;
-    let mut consolidation_requests = Vec::with_capacity(data.len() / CONSOLIDATION_REQUEST_SIZE);
-    while data.has_remaining() {
-        if data.remaining() < CONSOLIDATION_REQUEST_SIZE {
-            return Err(BlockValidationError::ConsolidationRequestsContractCall {
-                message: "invalid consolidation request length".to_string(),
             }
             .into())
         }
-
-        let mut source_address = Address::ZERO;
-        data.copy_to_slice(source_address.as_mut_slice());
-
-        let mut source_pubkey = FixedBytes::<48>::ZERO;
-        data.copy_to_slice(source_pubkey.as_mut_slice());
-
-        let mut target_pubkey = FixedBytes::<48>::ZERO;
-        data.copy_to_slice(target_pubkey.as_mut_slice());
-
-        consolidation_requests.push(Request::ConsolidationRequest(ConsolidationRequest {
-            source_address,
-            source_pubkey,
-            target_pubkey,
-        }));
     }
-
-    Ok(consolidation_requests)
 }

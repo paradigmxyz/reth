@@ -70,7 +70,7 @@ impl<DB> TestEnv<DB> {
         payload: T,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload.into(), cancun_fields).await
+        self.engine_handle.new_payload(payload.into(), cancun_fields, None).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine

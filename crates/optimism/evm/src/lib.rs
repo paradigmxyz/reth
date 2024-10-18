@@ -10,7 +10,6 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-#[macro_use]
 extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};

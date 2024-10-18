@@ -81,7 +81,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
-                tx.clear::<tables::BlockRequests>()?;
                 reset_stage_checkpoint(tx, StageId::Bodies)?;
 
                 insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;

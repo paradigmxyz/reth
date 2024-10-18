@@ -23,6 +23,7 @@ reth-prune-types.workspace = true
 reth-consensus.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
 alloy-consensus.workspace = true
@@ -41,8 +42,6 @@ derive_more.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alloy-eips.workspace = true
-
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }

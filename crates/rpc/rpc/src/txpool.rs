@@ -101,7 +101,7 @@ where
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {
-                    to: tx.to().into(),
+                    to: tx.to(),
                     value: tx.value(),
                     gas: tx.gas_limit() as u128,
                     gas_price: tx.transaction.max_fee_per_gas(),

@@ -865,10 +865,11 @@ impl NewCanonicalChain {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
+    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{map::HashSet, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{Account, Bytecode, Receipt, Requests};
+    use reth_primitives::{Account, Bytecode, Receipt};
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,

@@ -3,6 +3,7 @@
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
+use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -17,7 +18,7 @@ use reth_evm::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
-use reth_primitives::{BlockWithSenders, Header, Receipt, Request, TxType};
+use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     state_change::post_block_balance_increments,
@@ -235,7 +236,7 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
         _receipts: &[Receipt],
-    ) -> Result<Vec<Request>, Self::Error> {
+    ) -> Result<Requests, Self::Error> {
         let balance_increments =
             post_block_balance_increments(&self.chain_spec.clone(), block, total_difficulty);
         // increment balances
@@ -243,7 +244,7 @@ where
             .increment_balances(balance_increments)
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
-        Ok(vec![])
+        Ok(Requests::default())
     }
 
     fn state_ref(&self) -> &State<DB> {
@@ -267,7 +268,7 @@ where
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
-        _requests: &[Request],
+        _requests: &Requests,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec.clone(), receipts)
     }

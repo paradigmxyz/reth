@@ -48,9 +48,6 @@ impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction
                 transactions,
                 ommers: Default::default(),
                 withdrawals: block.withdrawals.map(Into::into),
-                // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it
-                // as empty.
-                requests: None,
             },
         })
     }

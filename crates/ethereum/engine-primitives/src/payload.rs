@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_eips::{eip4844::BlobTransactionSidecar, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
@@ -11,8 +11,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{SealedBlock, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
-    convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use std::convert::Infallible;
 
@@ -142,10 +141,17 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
 
 impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
     fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+        let EthBuiltPayload { block, fees, sidecars, executed_block, .. } = value;
 
+        // if we have an executed block, we pop off the first set of requests from the execution
+        // outcome. the assumption here is that there will always only be one block in the execution
+        // outcome.
+        let execution_requests = executed_block
+            .and_then(|block| block.execution_outcome().requests.first().cloned())
+            .map(Requests::take)
+            .unwrap_or_default();
         Self {
-            execution_payload: block_to_payload_v4(block),
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -157,6 +163,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            execution_requests,
         }
     }
 }

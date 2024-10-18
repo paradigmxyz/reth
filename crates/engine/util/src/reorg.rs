@@ -1,7 +1,7 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::Transaction;
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
 };
@@ -147,7 +147,12 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }),
+                    Some(BeaconEngineMessage::NewPayload {
+                        payload,
+                        cancun_fields,
+                        execution_requests,
+                        tx,
+                    }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -162,26 +167,29 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let (reorg_payload, reorg_cancun_fields) = match create_reorg_head(
-                        this.provider,
-                        this.evm_config,
-                        this.payload_validator,
-                        *this.depth,
-                        payload.clone(),
-                        cancun_fields.clone(),
-                    ) {
-                        Ok(result) => result,
-                        Err(error) => {
-                            error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
-                            // Forward the payload and attempt to create reorg on top of
-                            // the next one
-                            return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
-                                payload,
-                                cancun_fields,
-                                tx,
-                            }))
-                        }
-                    };
+                    let (reorg_payload, reorg_cancun_fields, reorg_execution_requests) =
+                        match create_reorg_head(
+                            this.provider,
+                            this.evm_config,
+                            this.payload_validator,
+                            *this.depth,
+                            payload.clone(),
+                            cancun_fields.clone(),
+                            execution_requests.clone(),
+                        ) {
+                            Ok(result) => result,
+                            Err(error) => {
+                                error!(target: "engine::stream::reorg", %error, "Error attempting to create reorg head");
+                                // Forward the payload and attempt to create reorg on top of
+                                // the next one
+                                return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
+                                    payload,
+                                    cancun_fields,
+                                    execution_requests,
+                                    tx,
+                                }))
+                            }
+                        };
                     let reorg_forkchoice_state = ForkchoiceState {
                         finalized_block_hash: last_forkchoice_state.finalized_block_hash,
                         safe_block_hash: last_forkchoice_state.safe_block_hash,
@@ -197,11 +205,17 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx },
+                        BeaconEngineMessage::NewPayload {
+                            payload,
+                            cancun_fields,
+                            execution_requests,
+                            tx,
+                        },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             payload: reorg_payload,
                             cancun_fields: reorg_cancun_fields,
+                            execution_requests: reorg_execution_requests,
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
@@ -236,7 +250,8 @@ fn create_reorg_head<Provider, Evm, Spec>(
     mut depth: usize,
     next_payload: ExecutionPayload,
     next_cancun_fields: Option<CancunPayloadFields>,
-) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
+    next_execution_requests: Option<Vec<Bytes>>,
+) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>, Option<Vec<Bytes>>)>
 where
     Provider: BlockReader + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
@@ -246,7 +261,11 @@ where
 
     // Ensure next payload is valid.
     let next_block = payload_validator
-        .ensure_well_formed_payload(next_payload, next_cancun_fields.into())
+        .ensure_well_formed_payload(
+            next_payload,
+            next_cancun_fields.into(),
+            next_execution_requests,
+        )
         .map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
@@ -401,7 +420,7 @@ where
             transactions_root: proofs::calculate_transaction_root(&transactions),
             receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
-            requests_root: None, // TODO(prague)
+            requests_hash: None, // TODO(prague)
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
@@ -411,7 +430,6 @@ where
             transactions,
             ommers: reorg_target.body.ommers,
             withdrawals: reorg_target.body.withdrawals,
-            requests: None, // TODO(prague)
         },
     }
     .seal_slow();
@@ -422,5 +440,7 @@ where
             .header
             .parent_beacon_block_root
             .map(|root| CancunPayloadFields { parent_beacon_block_root: root, versioned_hashes }),
+        // todo(prague)
+        None,
     ))
 }

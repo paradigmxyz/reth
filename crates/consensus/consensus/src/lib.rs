@@ -12,10 +12,11 @@
 extern crate alloc;
 
 use alloc::{fmt::Debug, vec::Vec};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, GotExpected, GotExpectedBoxed, Header,
-    InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
+    InvalidTransactionError, Receipt, SealedBlock, SealedHeader,
 };
 
 /// A consensus implementation that does nothing.
@@ -31,12 +32,12 @@ pub struct PostExecutionInput<'a> {
     /// Receipts of the block.
     pub receipts: &'a [Receipt],
     /// EIP-7685 requests of the block.
-    pub requests: &'a [Request],
+    pub requests: &'a Requests,
 }
 
 impl<'a> PostExecutionInput<'a> {
     /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [Receipt], requests: &'a [Request]) -> Self {
+    pub const fn new(receipts: &'a [Receipt], requests: &'a Requests) -> Self {
         Self { receipts, requests }
     }
 }
@@ -170,10 +171,10 @@ pub enum ConsensusError {
     #[display("mismatched block withdrawals root: {_0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
-    /// Error when the requests root in the block is different from the expected requests
-    /// root.
-    #[display("mismatched block requests root: {_0}")]
-    BodyRequestsRootDiff(GotExpectedBoxed<B256>),
+    /// Error when the requests hash in the block is different from the expected requests
+    /// hash.
+    #[display("mismatched block requests hash: {_0}")]
+    BodyRequestsHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
     #[display("block with [hash={hash}, number={number}] is already known")]
@@ -248,17 +249,17 @@ pub enum ConsensusError {
     #[display("missing withdrawals root")]
     WithdrawalsRootMissing,
 
-    /// Error when the requests root is missing.
-    #[display("missing requests root")]
-    RequestsRootMissing,
+    /// Error when the requests hash is missing.
+    #[display("missing requests hash")]
+    RequestsHashMissing,
 
     /// Error when an unexpected withdrawals root is encountered.
     #[display("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
-    /// Error when an unexpected requests root is encountered.
-    #[display("unexpected requests root")]
-    RequestsRootUnexpected,
+    /// Error when an unexpected requests hash is encountered.
+    #[display("unexpected requests hash")]
+    RequestsHashUnexpected,
 
     /// Error when withdrawals are missing.
     #[display("missing withdrawals")]

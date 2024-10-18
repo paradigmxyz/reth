@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -1637,17 +1637,6 @@ impl WithdrawalsProvider for StaticFileProvider {
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-impl RequestsProvider for StaticFileProvider {
-    fn requests_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }

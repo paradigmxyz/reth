@@ -75,7 +75,7 @@ fn payload_validation() {
         b
     });
 
-    assert_matches!(try_into_sealed_block(block_with_valid_extra_data, None), Ok(_));
+    assert_matches!(try_into_sealed_block(block_with_valid_extra_data, None, None), Ok(_));
 
     // Invalid extra data
     let block_with_invalid_extra_data = Bytes::from_static(&[0; 33]);
@@ -84,7 +84,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(invalid_extra_data_block,None),
+        try_into_sealed_block(invalid_extra_data_block, None, None),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -95,7 +95,7 @@ fn payload_validation() {
     });
     assert_matches!(
 
-        try_into_sealed_block(block_with_zero_base_fee,None),
+        try_into_sealed_block(block_with_zero_base_fee, None, None),
         Err(PayloadError::BaseFee(val)) if val.is_zero()
     );
 
@@ -114,7 +114,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_ommers.clone(),None),
+        try_into_sealed_block(block_with_ommers.clone(), None, None),
 
         Err(PayloadError::BlockHash { consensus, .. })
             if consensus == block_with_ommers.block_hash()
@@ -126,7 +126,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_difficulty.clone(),None),
+        try_into_sealed_block(block_with_difficulty.clone(), None, None),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
 
     );
@@ -137,7 +137,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_nonce.clone(),None),
+        try_into_sealed_block(block_with_nonce.clone(), None, None),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
 
     );
