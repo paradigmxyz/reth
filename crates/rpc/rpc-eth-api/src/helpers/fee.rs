@@ -45,46 +45,14 @@ pub trait EthFees: LoadFee {
         LoadFee::suggested_priority_fee(self)
     }
 
+    /// Converts a pending block to a `fee_history_entry`
     fn pending_block_to_fee_entry(
         &self,
         pending_block: &SealedBlockWithSenders,
         pending_receipts: &[Receipt],
     ) -> Result<FeeHistoryEntry, Self::Error> {
-        let header = &pending_block.header;
-        let base_fee_per_gas = header.base_fee_per_gas.unwrap_or_default();
-        let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
-        let base_fee_per_blob_gas = header.blob_fee();
-        let blob_gas_used_ratio = header.blob_gas_used.unwrap_or_default() as f64
-            / reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64;
-    
-        //calculate rewards
-        let rewards = if !pending_block.body.transactions.is_empty() {
-            let percentiles = self.gas_oracle().config().percentile;
-            calculate_reward_percentiles_for_block(
-                &[percentiles as f64],
-                header.gas_used,
-                base_fee_per_gas,
-                &pending_block.body.transactions,
-                pending_receipts,
-            )
-            .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-    
-        Ok(FeeHistoryEntry {
-            base_fee_per_gas,
-            gas_used_ratio,
-            base_fee_per_blob_gas,
-            blob_gas_used_ratio,
-            rewards,
-            excess_blob_gas: header.blob_gas_used,
-            blob_gas_used: header.blob_gas_used,
-            gas_used: header.gas_used,
-            gas_limit: header.gas_limit,
-            header_hash: header.hash(),
-            timestamp: header.timestamp,
-        })
+        let percentiles = &[self.gas_oracle().config().percentile as f64];
+        Ok(FeeHistoryEntry::from_block_and_receipts(pending_block, pending_receipts, percentiles))
     }
 
     /// Reports the fee history, for the given amount of blocks, up until the given newest block.
@@ -189,25 +157,33 @@ pub trait EthFees: LoadFee {
                     }
                 }
 
+                let mut entries = fee_entries;
+
+                // Add pending block if available and there's room
                 if let Some((pending_block, pending_receipts)) = pending_block {
-                    if fee_entries.len() < block_count as usize {
-                        let pending_entry = self.pending_block_to_fee_entry(&pending_block, &pending_receipts)?;
-                    
-                        base_fee_per_gas.push(pending_entry.base_fee_per_gas as u128);
-                        gas_used_ratio.push(pending_entry.gas_used_ratio);
-                        base_fee_per_blob_gas.push(pending_entry.base_fee_per_blob_gas.unwrap_or_default());
-                        blob_gas_used_ratio.push(pending_entry.blob_gas_used_ratio);
-    
-                        if let Some(percentiles) = &reward_percentiles {
-                            let mut block_rewards = Vec::with_capacity(percentiles.len());
-                            for &percentile in percentiles {
-                                block_rewards.push(self.approximate_percentile(&pending_entry, percentile));
-                            }
-                            rewards.push(block_rewards);
-                        }
+                    if entries.len() < block_count as usize {
+                        let pending_entry =
+                            self.pending_block_to_fee_entry(&pending_block, &pending_receipts)?;
+                        entries.push(pending_entry);
                     }
                 }
-                let last_entry = fee_entries.last().expect("is not empty");
+
+                for entry in &entries {
+                    base_fee_per_gas.push(entry.base_fee_per_gas as u128);
+                    gas_used_ratio.push(entry.gas_used_ratio);
+                    base_fee_per_blob_gas.push(entry.base_fee_per_blob_gas.unwrap_or_default());
+                    blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
+
+                    if let Some(percentiles) = &reward_percentiles {
+                        let mut block_rewards = Vec::with_capacity(percentiles.len());
+                        for &percentile in percentiles {
+                            block_rewards.push(self.approximate_percentile(entry, percentile));
+                        }
+                        rewards.push(block_rewards);
+                    }
+                }
+
+                let last_entry = entries.last().expect("is not empty");
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
@@ -225,6 +201,16 @@ pub trait EthFees: LoadFee {
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
 
+                let mut headers = LoadFee::provider(self)
+                .sealed_headers_range(start_block..=end_block)
+                .map_err(Self::Error::from_eth_err)?;
+
+                // Add pending block if available and there's room
+                if let Some((pending_block, _)) = pending_block {
+                   if headers.len() < block_count as usize {
+                      headers.push(pending_block.header.clone());
+                   }
+                }
 
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
@@ -252,34 +238,6 @@ pub trait EthFees: LoadFee {
                             )
                             .unwrap_or_default(),
                         );
-                    }
-                }
-
-                if let Some((pending_block, pending_receipts)) = pending_block {
-
-                    if headers.len() < block_count as usize {
-                        let pending_header = &pending_block.header;
-                    
-                        base_fee_per_gas.push(pending_header.base_fee_per_gas.unwrap_or_default() as u128);
-                        gas_used_ratio.push(pending_header.gas_used as f64 / pending_header.gas_limit as f64);
-                        base_fee_per_blob_gas.push(pending_header.blob_fee().unwrap_or_default());
-                        blob_gas_used_ratio.push(
-                            pending_header.blob_gas_used.unwrap_or_default() as f64
-                                / reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
-                        );
-    
-                        if let Some(percentiles) = &reward_percentiles {
-                            rewards.push(
-                                calculate_reward_percentiles_for_block(
-                                    percentiles,
-                                    pending_header.gas_used,
-                                    pending_header.base_fee_per_gas.unwrap_or_default(),
-                                    &pending_block.body.transactions,
-                                    &pending_receipts,
-                                )
-                                .unwrap_or_default(),
-                            );
-                        }
                     }
                 }
 
