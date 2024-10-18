@@ -20,6 +20,12 @@ pub struct DatabaseArgs {
     /// NFS volume.
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
+    /// Maximum database size in bytes
+    #[arg(long = "db.max-size")]
+    pub max_size: Option<usize>,
+    /// Database growth step in bytes
+    #[arg(long = "db.growth-step")]
+    pub growth_step: Option<usize>,
 }
 
 impl DatabaseArgs {
@@ -28,8 +34,16 @@ impl DatabaseArgs {
         self.get_database_args(default_client_version())
     }
 
-    /// Returns the database arguments with configured log level and given client version.
-    pub const fn get_database_args(
+    /// Returns the database arguments with configured log level, client version and geometry.
+    pub fn get_database_args(
+        &self,
+        client_version: ClientVersion,
+    ) -> reth_db::mdbx::DatabaseArguments {
+        self.get_const_database_args(client_version).with_geometry(self.max_size, self.growth_step)
+    }
+
+    /// Returns the const database arguments with configured log level and given client version.
+    pub const fn get_const_database_args(
         &self,
         client_version: ClientVersion,
     ) -> reth_db::mdbx::DatabaseArguments {
@@ -81,6 +95,7 @@ impl TypedValueParser for LogLevelValueParser {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_db::mdbx::{GIGABYTE, TERABYTE};
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -94,6 +109,42 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_max_size() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.max-size",
+            "4398046511104",
+        ])
+        .unwrap();
+        assert_eq!(cmd.args.max_size, Some(TERABYTE * 4));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_max_size() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.max-size", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_growth_step() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.growth-step",
+            "4294967296",
+        ])
+        .unwrap();
+        assert_eq!(cmd.args.growth_step, Some(GIGABYTE * 4));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_growth_step() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.growth-step", "invalid"]);
+        assert!(result.is_err());
     }
 
     #[test]
