@@ -7425,6 +7425,8 @@ dependencies = [
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-consensus",
+ "reth-consensus-common",
+ "reth-ethereum-forks",
  "reth-execution-errors",
  "reth-execution-types",
  "reth-metrics",
