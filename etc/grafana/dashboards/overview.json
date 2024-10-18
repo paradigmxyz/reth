@@ -1103,7 +1103,7 @@
           "refId": "C"
         }
       ],
-      "title": "Task Executor critical",
+      "title": "Task Executor critical tasks",
       "type": "timeseries"
     },
     {
@@ -1111,7 +1111,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks the number of regular tasks currently being spawned or finished by the executor.",
+      "description": "Tracks the number of regular tasks currently ran by the executor.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1160,25 +1160,13 @@
               },
               {
                 "color": "semi-dark-red",
-                "value": 0
+                "value": 80
               }
             ]
           },
           "unit": "tasks/s"
         },
         "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "custom.transform",
-                "value": "negative-Y"
-              }
-            ]
-          },
           {
             "matcher": {
               "id": "byFrameRefID",
@@ -1236,23 +1224,6 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_executor_spawn_finished_regular_tasks_total{instance=\"$instance\"}[$__rate_interval])",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": false,
-          "instant": false,
-          "legendFormat": "Stop",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "editorMode": "code",
           "expr": "reth_executor_spawn_regular_tasks_total{instance=\"$instance\"}- reth_executor_spawn_finished_regular_tasks_total{instance=\"$instance\"}",
           "hide": false,
@@ -1262,7 +1233,7 @@
           "refId": "C"
         }
       ],
-      "title": "Task Executor regular",
+      "title": "Task Executor regular tasks",
       "type": "timeseries"
     },
     {
