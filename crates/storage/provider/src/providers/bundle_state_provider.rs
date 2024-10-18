@@ -6,7 +6,9 @@ use alloy_primitives::{
     Address, BlockNumber, Bytes, B256,
 };
 use reth_primitives::{Account, Bytecode};
-use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, HashedStorageProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
@@ -37,12 +39,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BundleStateProvider<SP, EDP>
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         bundle_state
             .account(&address)
-            .map(|account| {
-                HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                )
-            })
+            .map(|account| self.state_provider.hashed_storage_from_bundle_account(account))
             .unwrap_or_default()
     }
 }
@@ -190,6 +187,17 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> HashedPostStateProvider
         block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         self.state_provider.hashed_post_state_from_reverts(block_number)
+    }
+}
+
+impl<SP: StateProvider, EDP: ExecutionDataProvider> HashedStorageProvider
+    for BundleStateProvider<SP, EDP>
+{
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> HashedStorage {
+        self.state_provider.hashed_storage_from_bundle_account(account)
     }
 }
 

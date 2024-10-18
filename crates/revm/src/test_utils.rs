@@ -6,8 +6,8 @@ use alloy_primitives::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
+    StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -152,6 +152,15 @@ impl HashedPostStateProvider for StateProviderTest {
         _block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         unimplemented!("reverts are not supported")
+    }
+}
+
+impl HashedStorageProvider for StateProviderTest {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &revm::db::BundleAccount,
+    ) -> HashedStorage {
+        HashedStorage::from_bundle_account::<KeccakKeyHasher>(account)
     }
 }
 

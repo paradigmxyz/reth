@@ -1,3 +1,5 @@
+use crate::HashedStorageProvider;
+
 use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
@@ -23,6 +25,7 @@ pub trait StateProvider:
     + StorageRootProvider
     + StateProofProvider
     + HashedPostStateProvider
+    + HashedStorageProvider
     + Send
     + Sync
 {

@@ -870,8 +870,8 @@ mod tests {
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, Receipt, Requests};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-        StateRootProvider, StorageRootProvider,
+        AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
+        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{AccountProof, HashedStorage, MultiProof, StorageProof, TrieInput};
 
@@ -1025,6 +1025,15 @@ mod tests {
             _block_number: BlockNumber,
         ) -> ProviderResult<HashedPostState> {
             Ok(HashedPostState::default())
+        }
+    }
+
+    impl HashedStorageProvider for MockStateProvider {
+        fn hashed_storage_from_bundle_account(
+            &self,
+            _account: &reth_execution_types::BundleAccount,
+        ) -> HashedStorage {
+            HashedStorage::default()
         }
     }
 

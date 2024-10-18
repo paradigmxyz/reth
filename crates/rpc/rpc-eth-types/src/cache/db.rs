@@ -146,6 +146,15 @@ impl reth_storage_api::HashedPostStateProvider for StateProviderTraitObjWrapper<
     }
 }
 
+impl reth_storage_api::HashedStorageProvider for StateProviderTraitObjWrapper<'_> {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> reth_trie::HashedStorage {
+        self.0.hashed_storage_from_bundle_account(account)
+    }
+}
+
 impl StateProvider for StateProviderTraitObjWrapper<'_> {
     fn account_balance(
         &self,

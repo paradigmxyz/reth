@@ -2,7 +2,7 @@ use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     Nibbles,
 };
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::Account;
@@ -34,7 +34,7 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.clone().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
+                let hashed_storage = HashedStorage::from_plain_storage::<KH>(
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
@@ -61,7 +61,7 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
-                let hashed_storage = HashedStorage::from_plain_storage(
+                let hashed_storage = HashedStorage::from_plain_storage::<KH>(
                     account.status,
                     account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),
                 );
@@ -220,13 +220,24 @@ impl HashedStorage {
     }
 
     /// Create new hashed storage from account status and plain storage.
-    pub fn from_plain_storage<'a>(
+    pub fn from_plain_storage<'a, KH: KeyHasher>(
         status: AccountStatus,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
         Self::from_iter(
             status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+            storage.into_iter().map(|(key, value)| (KH::hash_key(B256::from(*key)), *value)),
+        )
+    }
+
+    /// Create a new hashed storage from the provided [`BundleAccount`]
+    ///
+    /// This function will use the present value of the storage slots in the account to create the
+    /// hashed storage.
+    pub fn from_bundle_account<KH: KeyHasher>(account: &BundleAccount) -> Self {
+        Self::from_plain_storage::<KH>(
+            account.status,
+            account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
         )
     }
 

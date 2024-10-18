@@ -12,7 +12,9 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{Account, Bytecode, StaticFileSegment};
-use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, HashedStorageProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -177,6 +179,15 @@ impl<TX: DbTx, SC: StateCommitment> HashedPostStateProvider for LatestStateProvi
         block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, block_number).map_err(Into::into)
+    }
+}
+
+impl<TX: DbTx, SC: StateCommitment> HashedStorageProvider for LatestStateProviderRef<'_, TX, SC> {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> HashedStorage {
+        HashedStorage::from_bundle_account::<SC::KeyHasher>(account)
     }
 }
 

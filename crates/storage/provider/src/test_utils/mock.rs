@@ -27,8 +27,8 @@ use reth_primitives::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, HashedStorageProvider, StageCheckpointReader,
+    StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -684,6 +684,15 @@ impl HashedPostStateProvider for MockEthProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         unimplemented!("hashed_post_state_from_reverts not supported for MockEthProvider")
+    }
+}
+
+impl HashedStorageProvider for MockEthProvider {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> HashedStorage {
+        HashedStorage::from_bundle_account::<KeccakKeyHasher>(account)
     }
 }
 

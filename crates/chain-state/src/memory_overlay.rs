@@ -7,8 +7,8 @@ use alloy_primitives::{
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateProviderBox, StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
+    StateProofProvider, StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
@@ -201,6 +201,15 @@ impl HashedPostStateProvider for MemoryOverlayStateProvider {
         block_number: BlockNumber,
     ) -> ProviderResult<HashedPostState> {
         self.historical.hashed_post_state_from_reverts(block_number)
+    }
+}
+
+impl HashedStorageProvider for MemoryOverlayStateProvider {
+    fn hashed_storage_from_bundle_account(
+        &self,
+        account: &reth_execution_types::BundleAccount,
+    ) -> HashedStorage {
+        self.historical.hashed_storage_from_bundle_account(account)
     }
 }
 

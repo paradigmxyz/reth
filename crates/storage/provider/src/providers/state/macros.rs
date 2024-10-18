@@ -60,6 +60,9 @@ macro_rules! delegate_provider_impls {
                 fn hashed_post_state_from_reverts(&self, block_number: alloy_primitives::BlockNumber) -> reth_storage_errors::provider::ProviderResult<reth_trie::HashedPostState>;
                 fn hashed_post_state_from_bundle_state(&self, bundle_state: &revm::db::BundleState) -> reth_trie::HashedPostState;
             }
+            HashedStorageProvider $(where [$($generics)*])? {
+                fn hashed_storage_from_bundle_account(&self, account: &revm::db::BundleAccount) -> reth_trie::HashedStorage;
+            }
         );
     }
 }
