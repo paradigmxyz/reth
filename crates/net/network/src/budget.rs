@@ -5,8 +5,8 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 10;
 
 /// Default budget to try and drain headers and bodies download streams.
 ///
-/// Default is 4 iterations.
-pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 4;
+/// Default is 2 iterations.
+pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 2;
 
 /// Default budget to try and drain [`Swarm`](crate::swarm::Swarm).
 ///
@@ -55,7 +55,7 @@ macro_rules! poll_nested_stream_with_budget {
                         let mut f = $on_ready_some;
                         f(item);
 
-                        budget = budget.saturating_sub(1);
+                        budget -= 1;
                         if budget == 0 {
                             break true
                         }

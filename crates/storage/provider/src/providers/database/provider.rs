@@ -7,10 +7,11 @@ use crate::{
     },
     writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, DBProvider, EvmEnvProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
+    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
+    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
     StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
@@ -46,7 +47,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StorageChangeSetReader, TryIntoHistoricalStateProvider};
+use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -67,7 +68,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, Spec> = DatabaseProvider<<DB as Database>::TX, Spec>;
@@ -141,6 +142,64 @@ impl<TX, Spec> DatabaseProvider<TX, Spec> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+}
+
+impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
+    /// State provider for latest block
+    pub fn latest<'a>(&'a self) -> ProviderResult<Box<dyn StateProvider + 'a>> {
+        trace!(target: "providers::db", "Returning latest state provider");
+        Ok(Box::new(LatestStateProviderRef::new(&self.tx, self.static_file_provider.clone())))
+    }
+
+    /// Storage provider for state at that given block hash
+    pub fn history_by_block_hash<'a>(
+        &'a self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
+        let mut block_number =
+            self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        if block_number == self.best_block_number().unwrap_or_default() &&
+            block_number == self.last_block_number().unwrap_or_default()
+        {
+            return Ok(Box::new(LatestStateProviderRef::new(
+                &self.tx,
+                self.static_file_provider.clone(),
+            )))
+        }
+
+        // +1 as the changeset that we want is the one that was applied after this block.
+        block_number += 1;
+
+        let account_history_prune_checkpoint =
+            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
+        let storage_history_prune_checkpoint =
+            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+
+        let mut state_provider = HistoricalStateProviderRef::new(
+            &self.tx,
+            block_number,
+            self.static_file_provider.clone(),
+        );
+
+        // If we pruned account or storage history, we can't return state on every historical block.
+        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
+        if let Some(prune_checkpoint_block_number) =
+            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
+            state_provider = state_provider.with_lowest_available_account_history_block_number(
+                prune_checkpoint_block_number + 1,
+            );
+        }
+        if let Some(prune_checkpoint_block_number) =
+            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
+            state_provider = state_provider.with_lowest_available_storage_history_block_number(
+                prune_checkpoint_block_number + 1,
+            );
+        }
+
+        Ok(Box::new(state_provider))
     }
 }
 
@@ -541,18 +600,18 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
                 // even if empty
                 let withdrawals =
                     if self.chain_spec.is_shanghai_active_at_timestamp(header_ref.timestamp) {
-                        Some(
-                            withdrawals_cursor
-                                .seek_exact(header_ref.number)?
-                                .map(|(_, w)| w.withdrawals)
-                                .unwrap_or_default(),
-                        )
+                        withdrawals_cursor
+                            .seek_exact(header_ref.number)?
+                            .map(|(_, w)| w.withdrawals)
+                            .unwrap_or_default()
+                            .into()
                     } else {
                         None
                     };
                 let requests =
                     if self.chain_spec.is_prague_active_at_timestamp(header_ref.timestamp) {
-                        Some(requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                        (requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                            .into()
                     } else {
                         None
                     };
@@ -2151,10 +2210,8 @@ impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> RequestsProvider
     ) -> ProviderResult<Option<Requests>> {
         if self.chain_spec.is_prague_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
-                // If we are past Prague, then all blocks should have a requests list, even if
-                // empty
-                let requests = self.tx.get::<tables::BlockRequests>(number)?.unwrap_or_default();
-                return Ok(Some(requests))
+                let requests = self.tx.get::<tables::BlockRequests>(number)?;
+                return Ok(requests)
             }
         }
         Ok(None)
@@ -2915,10 +2972,10 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HashingWriter for DatabaseProvider<T
                 map
             });
 
-        let hashed_storage_keys =
-            HashMap::from_iter(hashed_storages.iter().map(|(hashed_address, entries)| {
-                (*hashed_address, BTreeSet::from_iter(entries.keys().copied()))
-            }));
+        let hashed_storage_keys = hashed_storages
+            .iter()
+            .map(|(hashed_address, entries)| (*hashed_address, entries.keys().copied().collect()))
+            .collect();
 
         let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
         // Hash the address and key and apply them to HashedStorage (if Storage is None
@@ -3483,10 +3540,8 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'stat
         }
 
         if let Some(requests) = block.block.body.requests {
-            if !requests.0.is_empty() {
-                self.tx.put::<tables::BlockRequests>(block_number, requests)?;
-                durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
-            }
+            self.tx.put::<tables::BlockRequests>(block_number, requests)?;
+            durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
@@ -3600,7 +3655,7 @@ impl<TX: DbTx, Spec: Send + Sync> StatsReader for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> FinalizedBlockReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync> ChainStateBlockReader for DatabaseProvider<TX, Spec> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         let mut finalized_blocks = self
             .tx
@@ -3612,13 +3667,31 @@ impl<TX: DbTx, Spec: Send + Sync> FinalizedBlockReader for DatabaseProvider<TX, 
         let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
         Ok(last_finalized_block_number)
     }
+
+    fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
+        let mut finalized_blocks = self
+            .tx
+            .cursor_read::<tables::ChainState>()?
+            .walk(Some(tables::ChainStateKey::LastSafeBlockBlock))?
+            .take(1)
+            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
+
+        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
+        Ok(last_finalized_block_number)
+    }
 }
 
-impl<TX: DbTxMut, Spec: Send + Sync> FinalizedBlockWriter for DatabaseProvider<TX, Spec> {
+impl<TX: DbTxMut, Spec: Send + Sync> ChainStateBlockWriter for DatabaseProvider<TX, Spec> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+
+    fn save_safe_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        Ok(self
+            .tx
+            .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
     }
 }
 

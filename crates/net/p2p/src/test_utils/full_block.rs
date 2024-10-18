@@ -185,15 +185,15 @@ impl HeadersClient for TestFullBlockClient {
             .filter_map(|_| {
                 headers.iter().find_map(|(hash, header)| {
                     // Checks if the header matches the specified block or number.
-                    if BlockNumHash::new(header.number, *hash).matches_block_or_num(&block) {
-                        match request.direction {
-                            HeadersDirection::Falling => block = header.parent_hash.into(),
-                            HeadersDirection::Rising => block = (header.number + 1).into(),
-                        }
-                        Some(header.clone())
-                    } else {
-                        None
-                    }
+                    BlockNumHash::new(header.number, *hash).matches_block_or_num(&block).then(
+                        || {
+                            match request.direction {
+                                HeadersDirection::Falling => block = header.parent_hash.into(),
+                                HeadersDirection::Rising => block = (header.number + 1).into(),
+                            }
+                            header.clone()
+                        },
+                    )
                 })
             })
             .collect::<Vec<_>>();

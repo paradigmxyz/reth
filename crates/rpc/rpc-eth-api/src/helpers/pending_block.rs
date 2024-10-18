@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 
+use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
@@ -12,14 +13,14 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs::calculate_transaction_root,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
     Block, BlockBody, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
-    TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -260,8 +261,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let chain_spec = self.provider().chain_spec();
 
-        let evm_config = self.evm_config().clone();
-        let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+        let mut system_caller = SystemCaller::new(self.evm_config().clone(), chain_spec.clone());
 
         let parent_beacon_block_root = if origin.is_actual_pending() {
             // apply eip-4788 pre block contract call if we got the block from the CL with the real
@@ -323,7 +323,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             let env = Env::boxed(
                 cfg.cfg_env.clone(),
                 block_env.clone(),
-                Self::evm_config(self).tx_env(&tx),
+                Self::evm_config(self).tx_env(tx.as_signed(), tx.signer()),
             );
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
@@ -415,7 +415,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
-            if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+            (cfg.handler_cfg.spec_id >= SpecId::CANCUN).then_some(sum_blob_gas_used);
 
         // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
         // set these to empty

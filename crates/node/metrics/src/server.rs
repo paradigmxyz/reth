@@ -11,7 +11,6 @@ use metrics_process::Collector;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
-use tracing::info;
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -52,8 +51,6 @@ impl MetricServer {
     pub async fn serve(&self) -> eyre::Result<()> {
         let MetricServerConfig { listen_addr, hooks, task_executor, version_info, chain_spec_info } =
             &self.config;
-
-        info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
 
         let hooks = hooks.clone();
         self.start_endpoint(

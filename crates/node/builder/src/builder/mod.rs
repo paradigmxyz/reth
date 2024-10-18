@@ -13,7 +13,7 @@ use crate::{
     common::WithConfigs,
     components::NodeComponentsBuilder,
     node::FullNode,
-    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
+    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 use futures::Future;
@@ -37,7 +37,6 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
@@ -162,12 +161,37 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
         Self { config, database: () }
     }
+
+    /// Apply a function to the builder
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
+    /// Apply a function to the builder, if the condition is `true`.
+    pub fn apply_if<F>(self, cond: bool, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        if cond {
+            f(self)
+        } else {
+            self
+        }
+    }
 }
 
 impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         &self.config
+    }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+        &mut self.config
     }
 }
 
@@ -333,19 +357,11 @@ where
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
-        N::AddOns: NodeAddOns<
+        N::AddOns: RethRpcAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
-            EthApi: EthApiBuilderProvider<
-                        NodeAdapter<
-                            RethFullAdapter<DB, N>,
-                            <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-                        >
-                    >
-                        + FullEthApiServer
-                        + AddDevSigners
         >,
     {
         self.node(node).launch().await
@@ -393,11 +409,31 @@ impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>, EthApi: FullEthApiServer + AddDevSigners>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.config
+    }
+
+    /// Apply a function to the builder
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
+    /// Apply a function to the builder, if the condition is `true`.
+    pub fn apply_if<F>(self, cond: bool, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        if cond {
+            f(self)
+        } else {
+            self
+        }
     }
 
     /// Sets the hook that is run once the node's components are initialized.
@@ -419,6 +455,14 @@ where
             + 'static,
     {
         Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
+    }
+
+    /// Modifies the addons with the given closure.
+    pub fn map_add_ons<F>(self, f: F) -> Self
+    where
+        F: FnOnce(AO) -> AO,
+    {
+        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -461,6 +505,24 @@ where
         }
     }
 
+    /// Installs an `ExEx` (Execution Extension) in the node if the condition is true.
+    ///
+    /// # Note
+    ///
+    /// The `ExEx` ID must be unique.
+    pub fn install_exex_if<F, R, E>(self, cond: bool, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        if cond {
+            self.install_exex(exex_id, exex)
+        } else {
+            self
+        }
+    }
+
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
@@ -490,12 +552,7 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypesWithEngine<ChainSpec: EthereumHardforks + EthChainSpec>,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: NodeAddOns<
-        NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
-        EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
-    >,
+    AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(

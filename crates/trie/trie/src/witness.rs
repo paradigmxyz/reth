@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
@@ -7,6 +5,7 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     HashedPostState,
 };
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
     keccak256,
     map::{HashMap, HashSet},
@@ -15,10 +14,10 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::{Either, Itertools};
 use reth_execution_errors::{StateProofError, TrieWitnessError};
-use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, StorageMultiProof, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
+use std::collections::BTreeMap;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -111,14 +110,13 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
-            let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
-                account_rlp.clear();
-                TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
-                    .encode(&mut account_rlp as &mut dyn BufMut);
-                Some(account_rlp.clone())
-            } else {
-                None
-            };
+            let value =
+                (account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH).then(|| {
+                    account_rlp.clear();
+                    TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
+                        .encode(&mut account_rlp as &mut dyn BufMut);
+                    account_rlp.clone()
+                });
             let key = Nibbles::unpack(hashed_address);
             account_trie_nodes.extend(
                 self.target_nodes(
@@ -218,9 +216,14 @@ where
                 TrieNode::Branch(branch) => {
                     next_path.push(key[path.len()]);
                     let children = branch_node_children(path.clone(), &branch);
-                    for (child_path, node_hash) in children {
+                    for (child_path, value) in children {
                         if !key.starts_with(&child_path) {
-                            trie_nodes.insert(child_path, Either::Left(node_hash));
+                            let value = if value.len() < B256::len_bytes() {
+                                Either::Right(value.to_vec())
+                            } else {
+                                Either::Left(B256::from_slice(&value[1..]))
+                            };
+                            trie_nodes.insert(child_path, value);
                         }
                     }
                 }
@@ -230,7 +233,10 @@ where
                 TrieNode::Leaf(leaf) => {
                     next_path.extend_from_slice(&leaf.key);
                     if next_path != key {
-                        trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                        trie_nodes.insert(
+                            next_path.clone(),
+                            Either::Right(leaf.value.as_slice().to_vec()),
+                        );
                     }
                 }
                 TrieNode::EmptyRoot => {
@@ -311,8 +317,13 @@ where
                             match TrieNode::decode(&mut &node[..])? {
                                 TrieNode::Branch(branch) => {
                                     let children = branch_node_children(path, &branch);
-                                    for (child_path, branch_hash) in children {
-                                        hash_builder.add_branch(child_path, branch_hash, false);
+                                    for (child_path, value) in children {
+                                        if value.len() < B256::len_bytes() {
+                                            hash_builder.add_leaf(child_path, value);
+                                        } else {
+                                            let hash = B256::from_slice(&value[1..]);
+                                            hash_builder.add_branch(child_path, hash, false);
+                                        }
                                     }
                                     break
                                 }
@@ -342,14 +353,14 @@ where
 }
 
 /// Returned branch node children with keys in order.
-fn branch_node_children(prefix: Nibbles, node: &BranchNode) -> Vec<(Nibbles, B256)> {
+fn branch_node_children(prefix: Nibbles, node: &BranchNode) -> Vec<(Nibbles, &[u8])> {
     let mut children = Vec::with_capacity(node.state_mask.count_ones() as usize);
     let mut stack_ptr = node.as_ref().first_child_index();
     for index in CHILD_INDEX_RANGE {
         if node.state_mask.is_bit_set(index) {
             let mut child_path = prefix.clone();
             child_path.push(index);
-            children.push((child_path, B256::from_slice(&node.stack[stack_ptr][1..])));
+            children.push((child_path, &node.stack[stack_ptr][..]));
             stack_ptr += 1;
         }
     }

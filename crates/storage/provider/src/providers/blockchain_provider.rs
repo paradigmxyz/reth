@@ -1,8 +1,8 @@
 use crate::{
     providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderRO, EvmEnvProvider, FinalizedBlockReader, HeaderProvider, ProviderError,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
@@ -93,9 +93,23 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
         Ok(Self {
             database,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),
+            canonical_in_memory_state: CanonicalInMemoryState::with_head(
+                latest,
+                finalized_header,
+                safe_header,
+            ),
         })
     }
 
@@ -183,8 +197,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for tx_num in block_body.tx_num_range() {
-                let receipt =
-                    receipt_iter.next().ok_or(ProviderError::ReceiptNotFound(tx_num.into()))?;
+                let receipt = receipt_iter
+                    .next()
+                    .ok_or_else(|| ProviderError::ReceiptNotFound(tx_num.into()))?;
                 block_receipts.push(Some(receipt));
             }
             receipts.push(block_receipts);
@@ -387,7 +402,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     ) -> ProviderResult<MemoryOverlayStateProvider> {
         let anchor_hash = state.anchor().hash;
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(self.canonical_in_memory_state.state_provider_from_state(state, latest_historical))
+        Ok(state.state_provider(latest_historical))
     }
 
     /// Fetches data from either in-memory state or persistent storage for a range of transactions.
@@ -667,7 +682,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
             {
                 last_finalized_num_hash.number
             } else {
-                self.database.last_block_number()?
+                self.last_block_number()?
             }
         } else {
             // Otherwise, return what we have on disk for the input block
@@ -827,12 +842,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
             id,
             |db_provider| db_provider.ommers(id),
             |block_state| {
-                if self
-                    .database
-                    .chain_spec()
-                    .final_paris_total_difficulty(block_state.number())
-                    .is_some()
-                {
+                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
                     return Ok(Some(Vec::new()))
                 }
 
@@ -1160,7 +1170,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
+        if !self.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
             return Ok(None)
         }
 
@@ -1196,7 +1206,7 @@ impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
+        if !self.chain_spec().is_prague_active_at_timestamp(timestamp) {
             return Ok(None)
         }
 
@@ -1923,7 +1933,7 @@ mod tests {
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
     fn persist_block_after_db_tx_creation(
-        provider: Arc<BlockchainProvider2<MockNodeTypesWithDB>>,
+        provider: BlockchainProvider2<MockNodeTypesWithDB>,
         block_number: BlockNumber,
     ) {
         let hook_provider = provider.clone();
@@ -3132,7 +3142,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3247,7 +3256,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3373,7 +3381,6 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let provider = Arc::new(provider);
 
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
@@ -3675,8 +3682,6 @@ mod tests {
             },
         )?;
 
-        let provider = Arc::new(provider);
-
         // Old implementation was querying the database first. This is problematic, if there are
         // changes AFTER the database transaction is created.
         let old_transaction_hash_fn =
@@ -3729,7 +3734,7 @@ mod tests {
                 correct_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
-                    provider.database.clone()
+                    provider.database
                 ),
                 Ok(Some(to_be_persisted_tx))
             );

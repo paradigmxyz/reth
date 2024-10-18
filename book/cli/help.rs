@@ -320,7 +320,7 @@ fn preprocess_help(s: &str) -> Cow<'_, str> {
             (r"default: reth/.*/\w+", "default: reth/<VERSION>/<OS>"),
             // Remove rpc.max-tracing-requests default value
             (
-                r"(rpc.max-tracing-requests <COUNT>\n.*\n.*\n.*)\[default: \d+\]",
+                r"(rpc.max-tracing-requests <COUNT>\n.*\n.*\n.*\n.*\n.*)\[default: \d+\]",
                 r"$1[default: <NUM CPU CORES-2>]",
             ),
         ];

@@ -1,10 +1,10 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
-    Request, TransactionSigned, Withdrawal,
+    Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal,
 };
 use alloc::vec::Vec;
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::{eip2718::Encodable2718, eip7685::Encodable7685};
 use alloy_primitives::{keccak256, B256};
 use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
@@ -65,7 +65,8 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{constants::EMPTY_ROOT_HASH, Block};
+    use crate::Block;
+    use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_genesis::GenesisAccount;
     use alloy_primitives::{b256, hex_literal::hex, Address, U256};
     use alloy_rlp::Decodable;
