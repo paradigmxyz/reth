@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::hash::Hash;
+use core::hash::Hash;
 
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use alloy_serde::WithOtherFields;
@@ -47,7 +47,7 @@ pub trait TransactionInner<T>:
     /// transaction.
     ///
     /// This is the number of blobs times the
-    /// [`DATA_GAS_PER_BLOB`](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     fn blob_gas_used(&self) -> Option<u64>;
 
     /// Returns the effective gas price for the given base fee.
