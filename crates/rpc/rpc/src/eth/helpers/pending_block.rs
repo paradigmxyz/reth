@@ -3,7 +3,10 @@
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_primitives::Header;
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HashedPostStateProvider,
+    StateProviderFactory,
+};
 use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::TransactionPool;
@@ -17,7 +20,8 @@ where
     Provider: BlockReaderIdExt
         + EvmEnvProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory,
+        + StateProviderFactory
+        + HashedPostStateProvider,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -27,7 +31,8 @@ where
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
            + ChainSpecProvider<ChainSpec: EthereumHardforks>
-           + StateProviderFactory {
+           + StateProviderFactory
+           + HashedPostStateProvider {
         self.inner.provider()
     }
 

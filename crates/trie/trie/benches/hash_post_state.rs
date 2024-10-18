@@ -1,11 +1,11 @@
 #![allow(missing_docs, unreachable_pub)]
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+use alloy_primitives::{map::HashMap, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher};
 use revm::db::{states::BundleBuilder, BundleAccount};
 
-pub fn hash_post_state(c: &mut Criterion) {
+pub fn hash_post_state<KH: KeyHasher>(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash Post State");
     group.sample_size(20);
 
@@ -14,29 +14,30 @@ pub fn hash_post_state(c: &mut Criterion) {
 
         // sequence
         group.bench_function(BenchmarkId::new("sequence hashing", size), |b| {
-            b.iter(|| from_bundle_state_seq(&state))
+            b.iter(|| from_bundle_state_seq::<KH>(&state))
         });
 
         // parallel
         group.bench_function(BenchmarkId::new("parallel hashing", size), |b| {
-            b.iter(|| HashedPostState::from_bundle_state(&state))
+            b.iter(|| HashedPostState::from_bundle_state::<KH>(&state))
         });
     }
 }
 
-fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostState {
+fn from_bundle_state_seq<KH: KeyHasher>(
+    state: &HashMap<Address, BundleAccount>,
+) -> HashedPostState {
     let mut this = HashedPostState::default();
 
     for (address, account) in state {
-        let hashed_address = keccak256(address);
+        let hashed_address = KH::hash_key(address);
         this.accounts.insert(hashed_address, account.info.clone().map(Into::into));
 
         let hashed_storage = HashedStorage::from_iter(
             account.status.was_destroyed(),
-            account
-                .storage
-                .iter()
-                .map(|(key, value)| (keccak256(B256::new(key.to_be_bytes())), value.present_value)),
+            account.storage.iter().map(|(key, value)| {
+                (KH::hash_key(B256::new(key.to_be_bytes())), value.present_value)
+            }),
         );
         this.storages.insert(hashed_address, hashed_storage);
     }
@@ -75,5 +76,5 @@ fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
     bundle_state.state
 }
 
-criterion_group!(post_state, hash_post_state);
+criterion_group!(post_state, hash_post_state::<KeccakKeyHasher>);
 criterion_main!(post_state);

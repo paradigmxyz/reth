@@ -40,9 +40,9 @@ use reth_node_metrics::{
 use reth_primitives::Head;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
-    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
-    TreeViewer,
+    BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, HashedPostStateProvider,
+    ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
+    StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::clients::EthApiClient;
@@ -888,7 +888,7 @@ impl<T, CB>
     >
 where
     T: FullNodeTypes<
-        Provider: WithTree + StateProviderFactory + ChainSpecProvider,
+        Provider: WithTree + StateProviderFactory + ChainSpecProvider + HashedPostStateProvider,
         Types: NodeTypes<ChainSpec: EthereumHardforks>,
     >,
     CB: NodeComponentsBuilder<T>,

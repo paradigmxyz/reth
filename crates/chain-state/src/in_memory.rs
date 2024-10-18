@@ -870,10 +870,13 @@ mod tests {
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, Receipt, Requests};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
-        StorageRootProvider,
+        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+        StateRootProvider, StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, MultiProof, StorageProof, TrieInput};
+    use reth_trie::{
+        AccountProof, HashedPostStateSorted, HashedStorage, IntermediateStateRootState,
+        KeccakKeyHasher, MultiProof, StateRootProgress, StorageProof, TrieInput,
+    };
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -943,7 +946,14 @@ mod tests {
     }
 
     impl StateRootProvider for MockStateProvider {
-        fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+        fn state_root(&self) -> ProviderResult<B256> {
+            unimplemented!()
+        }
+
+        fn state_root_from_post_state(
+            &self,
+            _hashed_state: HashedPostState,
+        ) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
@@ -951,16 +961,30 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn state_root_with_updates(
+        fn state_root_from_post_state_with_updates(
             &self,
             _hashed_state: HashedPostState,
-        ) -> ProviderResult<(B256, TrieUpdates)> {
-            Ok((B256::random(), TrieUpdates::default()))
+        ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+            Ok((B256::random(), TrieUpdates::default(), HashedPostStateSorted::default()))
         }
 
         fn state_root_from_nodes_with_updates(
             &self,
             _input: TrieInput,
+        ) -> ProviderResult<(B256, TrieUpdates, HashedPostStateSorted)> {
+            Ok((B256::random(), TrieUpdates::default(), HashedPostStateSorted::default()))
+        }
+
+        fn state_root_with_progress(
+            &self,
+            _state: Option<IntermediateStateRootState>,
+        ) -> ProviderResult<StateRootProgress> {
+            Ok(reth_trie::StateRootProgress::Complete(B256::random(), 0, Default::default()))
+        }
+
+        fn incremental_root_with_updates(
+            &self,
+            _range: std::ops::RangeInclusive<BlockNumber>,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
@@ -1009,6 +1033,22 @@ mod tests {
             _target: HashedPostState,
         ) -> ProviderResult<HashMap<B256, Bytes>> {
             Ok(HashMap::default())
+        }
+    }
+
+    impl HashedPostStateProvider for MockStateProvider {
+        fn hashed_post_state_from_bundle_state(
+            &self,
+            bundle_state: &revm::db::BundleState,
+        ) -> HashedPostState {
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state)
+        }
+
+        fn hashed_post_state_from_reverts(
+            &self,
+            _block_number: BlockNumber,
+        ) -> ProviderResult<HashedPostState> {
+            Ok(HashedPostState::default())
         }
     }
 

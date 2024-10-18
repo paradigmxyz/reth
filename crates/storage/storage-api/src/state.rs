@@ -8,6 +8,8 @@ use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{Bytecode, KECCAK_EMPTY};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::HashedPostState;
+use revm::db::BundleState;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -20,6 +22,7 @@ pub trait StateProvider:
     + StateRootProvider
     + StorageRootProvider
     + StateProofProvider
+    + HashedPostStateProvider
     + Send
     + Sync
 {
@@ -88,6 +91,25 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
+}
+
+/// Trait implemented for database providers that can be converted into a latest state provider.
+pub trait ToLatestStateProviderRef {
+    /// Returns a [`StateProvider`] for the latest state.
+    fn latest_ref<'a>(&'a self) -> Box<dyn 'a + StateProvider>;
+}
+
+/// Trait that provides the `HashedPostState` from various sources.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait HashedPostStateProvider {
+    /// Returns the `HashedPostState` of the `BundleState`.
+    fn hashed_post_state_from_bundle_state(&self, bundle_state: &BundleState) -> HashedPostState;
+
+    /// Returns the `HashedPostState` for the given block number.
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given

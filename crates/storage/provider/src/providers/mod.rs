@@ -26,6 +26,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::HashedPostStateProvider;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -166,7 +167,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 impl<N> BlockchainProvider<N>
 where
     Self: StateProviderFactory,
-    N: NodeTypesWithDB,
+    N: ProviderNodeTypes,
 {
     /// Return a [`StateProviderBox`] that contains bundle state data provider.
     /// Used to inspect or execute transaction on the pending state.
@@ -178,7 +179,8 @@ where
         trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
 
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
+        let bundle_state_provider =
+            ProviderFactory::<N>::bundle_state_provider(state_provider, bundle_state_data);
         Ok(Box::new(bundle_state_provider))
     }
 }
@@ -200,6 +202,22 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.database.static_file_provider()
+    }
+}
+
+impl<N: ProviderNodeTypes> HashedPostStateProvider for BlockchainProvider<N> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_trie::HashedPostState {
+        self.database.hashed_post_state_from_bundle_state(bundle_state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<reth_trie::HashedPostState> {
+        self.database.hashed_post_state_from_reverts(block_number)
     }
 }
 

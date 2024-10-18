@@ -123,6 +123,7 @@ pub struct TestNode;
 impl NodeTypes for TestNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type State = ();
 }
 
 impl NodeTypesWithEngine for TestNode {

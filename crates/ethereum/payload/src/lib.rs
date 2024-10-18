@@ -29,12 +29,11 @@ use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, EthereumHardforks, Header, Receipt,
 };
-use reth_provider::{ChainSpecProvider, StateProviderFactory};
+use reth_provider::{ChainSpecProvider, HashedPostStateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
-use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
@@ -82,7 +81,8 @@ where
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client:
+        StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + HashedPostStateProvider,
     Pool: TransactionPool,
 {
     type Attributes = EthPayloadBuilderAttributes;
@@ -131,7 +131,8 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client:
+        StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + HashedPostStateProvider,
     Pool: TransactionPool,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
@@ -200,12 +201,12 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue
+            continue;
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // convert tx to a signed transaction
@@ -222,7 +223,7 @@ where
                 // for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
         }
 
@@ -250,11 +251,11 @@ where
                             best_txs.mark_invalid(&pool_tx);
                         }
 
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -304,7 +305,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     // calculate the requests and the requests root
@@ -353,16 +354,19 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
-    let (state_root, trie_output) = {
+    let hashed_state = client.hashed_post_state_from_bundle_state(&execution_outcome.bundle);
+    let (state_root, trie_output, _) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for payload"
-            );
-        })?
+        state_provider
+            .db
+            .state_root_from_post_state_with_updates(hashed_state.clone())
+            .inspect_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for payload"
+                );
+            })?
     };
 
     // create the block header

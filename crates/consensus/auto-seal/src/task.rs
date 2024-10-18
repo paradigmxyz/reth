@@ -5,7 +5,7 @@ use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_provider::{CanonChainTracker, StateProviderFactory};
+use reth_provider::{CanonChainTracker, HashedPostStateProvider, StateProviderFactory};
 use reth_stages_api::PipelineEvent;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
@@ -82,7 +82,12 @@ impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes, ChainSpec>
 impl<Executor, Client, Pool, Engine, ChainSpec> Future
     for MiningTask<Client, Pool, Executor, Engine, ChainSpec>
 where
-    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
+    Client: StateProviderFactory
+        + HashedPostStateProvider
+        + CanonChainTracker
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Engine: EngineTypes,
     Executor: BlockExecutorProvider,

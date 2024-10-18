@@ -99,7 +99,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     #[allow(unused)]
     const fn ensure_static_file(&self) -> Result<(), UnifiedStorageWriterError> {
         if self.static_file.is_none() {
-            return Err(UnifiedStorageWriterError::MissingStaticFileWriter)
+            return Err(UnifiedStorageWriterError::MissingStaticFileWriter);
         }
         Ok(())
     }
@@ -542,7 +542,8 @@ where
 mod tests {
     use super::*;
     use crate::{
-        test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
+        test_utils::create_test_provider_factory, AccountReader, StateRootProvider,
+        StorageTrieWriter, TrieWriter,
     };
     use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
     use reth_db::tables;
@@ -552,7 +553,9 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
-    use reth_storage_api::DatabaseProviderFactory;
+    use reth_storage_api::{
+        DatabaseProviderFactory, HashedPostStateProvider, ToLatestStateProviderRef,
+    };
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -1439,17 +1442,12 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                StateRoot::overlay_root(
-                    tx,
-                    ExecutionOutcome::new(
-                        state.bundle_state.clone(),
-                        Receipts::default(),
-                        0,
-                        Vec::new()
+                provider_rw
+                    .latest_ref()
+                    .state_root_from_post_state(
+                        provider_rw.hashed_post_state_from_bundle_state(&state.bundle_state)
                     )
-                    .hash_state_slow(),
-                )
-                .unwrap(),
+                    .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())
