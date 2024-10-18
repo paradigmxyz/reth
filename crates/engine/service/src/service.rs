@@ -3,6 +3,7 @@ use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
+use reth_engine_primitives::{EngineForkchoiceValidator, PayloadTypes};
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
@@ -46,21 +47,23 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EngineService<N, Client, E>
+pub struct EngineService<N, Client, E, V>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    V: EngineForkchoiceValidator<<N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     orchestrator: EngineServiceType<N, Client>,
-    _marker: PhantomData<E>,
+    _marker: PhantomData<(E, V)>,
 }
 
-impl<N, Client, E> EngineService<N, Client, E>
+impl<N, Client, E, V> EngineService<N, Client, E, V>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    V: EngineForkchoiceValidator<<N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
@@ -79,6 +82,7 @@ where
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
         sync_metrics_tx: MetricEventsSender,
+        engine_forkchoice_validator: V,
     ) -> Self {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
@@ -102,6 +106,7 @@ where
             tree_config,
             invalid_block_hook,
             engine_kind,
+            engine_forkchoice_validator,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -121,11 +126,12 @@ where
     }
 }
 
-impl<N, Client, E> Stream for EngineService<N, Client, E>
+impl<N, Client, E, V> Stream for EngineService<N, Client, E, V>
 where
     N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
+    V: EngineForkchoiceValidator<<N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
@@ -203,6 +209,7 @@ mod tests {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             sync_metrics_tx,
+            engine_forkchoice_validator,
         );
     }
 }

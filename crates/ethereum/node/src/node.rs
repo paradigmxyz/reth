@@ -16,8 +16,9 @@ use reth_node_api::{
 };
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
-        NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, EngineForkchoiceValidatorBuilder,
+        EngineValidatorBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder,
+        PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::RpcAddOns,
@@ -58,6 +59,7 @@ impl EthereumNode {
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
         EthereumEngineValidatorBuilder,
+        EthereumEngineForkchoiceValidatorBuilder,
     >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
@@ -75,6 +77,7 @@ impl EthereumNode {
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
             .engine_validator(EthereumEngineValidatorBuilder::default())
+            .engine_forkchoice_validator(EthereumEngineForkchoiceValidatorBuilder::default())
     }
 }
 
@@ -111,6 +114,7 @@ where
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
         EthereumEngineValidatorBuilder,
+        EthereumEngineForkchoiceValidatorBuilder,
     >;
 
     type AddOns = EthereumAddOns<
@@ -354,5 +358,22 @@ where
 
     async fn build_validator(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.chain_spec()))
+    }
+}
+
+/// Builder for [`EthereumForkchoiceEngineValidator`].
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct EthereumEngineForkchoiceValidatorBuilder;
+
+impl<Node, Types> EnginForkchoiceValidatorBuilder<Node> for EthereumEngineForkchoiceValidatorBuilder
+where
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
+{
+    type Validator = EthereumEngineForkchoiceValidator;
+
+    async fn build_validator(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Validator> {
+        Ok(EthereumEngineForkchoiceValidator {})
     }
 }

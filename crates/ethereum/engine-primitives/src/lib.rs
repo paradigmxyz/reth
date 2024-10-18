@@ -11,17 +11,19 @@
 mod payload;
 use std::sync::Arc;
 
+use alloy_rpc_types_engine::ForkchoiceUpdateError;
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{EngineTypes, EngineValidator};
+use reth_engine_primitives::{EngineForkchoiceValidator, EngineTypes, EngineValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    PayloadOrAttributes, PayloadTypes,
+    PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
+use reth_primitives::Header;
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -91,5 +93,29 @@ where
         attributes: &EthPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(&self.chain_spec, version, attributes.into())
+    }
+}
+
+/// Validator for the forkchoice updated ethereum engine API.
+#[derive(Debug, Clone)]
+pub struct EthereumEngineForkchoiceValidator;
+
+impl EngineForkchoiceValidator<EthPayloadAttributes> for EthereumEngineForkchoiceValidator {
+    /// Validates the payload attributes with respect to the header.
+    fn validate_fork_choice_header(
+        &self,
+        attributes: &EthPayloadAttributes,
+        head: &Header,
+    ) -> Result<(), ForkchoiceUpdateError> {
+        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
+        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
+        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
+        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
+        //    be rolled back.
+        if attributes.timestamp() <= head.timestamp {
+            Err(ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes)
+        } else {
+            Ok(())
+        }
     }
 }

@@ -4,7 +4,9 @@ use std::{future::Future, marker::PhantomData};
 
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_api::{EngineValidator, NodeTypesWithEngine};
+use reth_node_api::{
+    EngineForkchoiceValidator, EngineValidator, NodeTypesWithEngine, PayloadTypes,
+};
 use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
@@ -16,7 +18,7 @@ use crate::{
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 
-use super::EngineValidatorBuilder;
+use super::{EngineForkchoiceValidatorBuilder, EngineValidatorBuilder};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///
@@ -38,23 +40,24 @@ use super::EngineValidatorBuilder;
 /// All component builders are captured in the builder state and will be consumed once the node is
 /// launched.
 #[derive(Debug)]
-pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB> {
+pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF> {
     pool_builder: PoolB,
     payload_builder: PayloadB,
     network_builder: NetworkB,
     executor_builder: ExecB,
     consensus_builder: ConsB,
     engine_validator_builder: EVB,
+    engine_forkchoice_validator_builder: EVF,
     _marker: PhantomData<Node>,
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
 {
     /// Configures the node types.
     pub fn node_types<Types>(
         self,
-    ) -> ComponentsBuilder<Types, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
+    ) -> ComponentsBuilder<Types, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
     where
         Types: FullNodeTypes,
     {
@@ -65,6 +68,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -74,6 +78,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             network_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker: Default::default(),
         }
     }
@@ -87,6 +92,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             executor_builder: self.executor_builder,
             consensus_builder: self.consensus_builder,
             engine_validator_builder: self.engine_validator_builder,
+            engine_forkchoice_validator_builder: self.engine_forkchoice_validator_builder,
             _marker: self._marker,
         }
     }
@@ -100,6 +106,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             executor_builder: self.executor_builder,
             consensus_builder: self.consensus_builder,
             engine_validator_builder: self.engine_validator_builder,
+            engine_forkchoice_validator_builder: self.engine_forkchoice_validator_builder,
             _marker: self._marker,
         }
     }
@@ -113,6 +120,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             executor_builder: self.executor_builder,
             consensus_builder: self.consensus_builder,
             engine_validator_builder: self.engine_validator_builder,
+            engine_forkchoice_validator_builder: self.engine_forkchoice_validator_builder,
             _marker: self._marker,
         }
     }
@@ -126,6 +134,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             executor_builder: f(self.executor_builder),
             consensus_builder: self.consensus_builder,
             engine_validator_builder: self.engine_validator_builder,
+            engine_forkchoice_validator_builder: self.engine_forkchoice_validator_builder,
             _marker: self._marker,
         }
     }
@@ -139,13 +148,14 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
             executor_builder: self.executor_builder,
             consensus_builder: f(self.consensus_builder),
             engine_validator_builder: self.engine_validator_builder,
+            engine_forkchoice_validator_builder: self.engine_forkchoice_validator_builder,
             _marker: self._marker,
         }
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
 where
     Node: FullNodeTypes,
 {
@@ -156,7 +166,7 @@ where
     pub fn pool<PB>(
         self,
         pool_builder: PB,
-    ) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB, ExecB, ConsB, EVB>
+    ) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
     where
         PB: PoolBuilder<Node>,
     {
@@ -167,6 +177,7 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -176,13 +187,14 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         }
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<Node>,
@@ -194,7 +206,7 @@ where
     pub fn network<NB>(
         self,
         network_builder: NB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NB, ExecB, ConsB, EVB>
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NB, ExecB, ConsB, EVB, EVF>
     where
         NB: NetworkBuilder<Node, PoolB::Pool>,
     {
@@ -205,6 +217,7 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -214,6 +227,7 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         }
     }
@@ -225,7 +239,7 @@ where
     pub fn payload<PB>(
         self,
         payload_builder: PB,
-    ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB, EVB>
+    ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB, EVB, EVF>
     where
         PB: PayloadServiceBuilder<Node, PoolB::Pool>,
     {
@@ -236,6 +250,7 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -245,6 +260,7 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         }
     }
@@ -256,7 +272,7 @@ where
     pub fn executor<EB>(
         self,
         executor_builder: EB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, EB, ConsB, EVB>
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, EB, ConsB, EVB, EVF>
     where
         EB: ExecutorBuilder<Node>,
     {
@@ -267,6 +283,7 @@ where
             executor_builder: _,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -276,6 +293,7 @@ where
             executor_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         }
     }
@@ -287,7 +305,7 @@ where
     pub fn consensus<CB>(
         self,
         consensus_builder: CB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, CB, EVB>
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, CB, EVB, EVF>
     where
         CB: ConsensusBuilder<Node>,
     {
@@ -298,6 +316,7 @@ where
             executor_builder,
             consensus_builder: _,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -307,6 +326,7 @@ where
             executor_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         }
     }
@@ -318,7 +338,7 @@ where
     pub fn engine_validator<EngineVB>(
         self,
         engine_validator_builder: EngineVB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EngineVB>
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EngineVB, EVF>
     where
         EngineVB: EngineValidatorBuilder<Node>,
     {
@@ -329,6 +349,7 @@ where
             executor_builder,
             consensus_builder,
             engine_validator_builder: _,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -338,13 +359,14 @@ where
             executor_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         }
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB> NodeComponentsBuilder<Node>
-    for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF> NodeComponentsBuilder<Node>
+    for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB, EVB, EVF>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<Node>,
@@ -353,6 +375,7 @@ where
     ExecB: ExecutorBuilder<Node>,
     ConsB: ConsensusBuilder<Node>,
     EVB: EngineValidatorBuilder<Node>,
+    EVF: EngineForkchoiceValidatorBuilder<Node>,
 {
     type Components = Components<
         Node,
@@ -361,6 +384,7 @@ where
         ExecB::Executor,
         ConsB::Consensus,
         EVB::Validator,
+        EVF::Validator,
     >;
 
     async fn build_components(
@@ -374,6 +398,7 @@ where
             executor_builder: evm_builder,
             consensus_builder,
             engine_validator_builder,
+            engine_forkchoice_validator_builder,
             _marker,
         } = self;
 
@@ -383,6 +408,8 @@ where
         let payload_builder = payload_builder.spawn_payload_service(context, pool.clone()).await?;
         let consensus = consensus_builder.build_consensus(context).await?;
         let engine_validator = engine_validator_builder.build_validator(context).await?;
+        let engine_forkchoice_validator =
+            engine_forkchoice_validator_builder.build_forkchoice_validator(context).await?;
 
         Ok(Components {
             transaction_pool: pool,
@@ -392,11 +419,12 @@ where
             executor,
             consensus,
             engine_validator,
+            engine_forkchoice_validator,
         })
     }
 }
 
-impl Default for ComponentsBuilder<(), (), (), (), (), (), ()> {
+impl Default for ComponentsBuilder<(), (), (), (), (), (), (), ()> {
     fn default() -> Self {
         Self {
             pool_builder: (),
@@ -405,6 +433,7 @@ impl Default for ComponentsBuilder<(), (), (), (), (), (), ()> {
             executor_builder: (),
             consensus_builder: (),
             engine_validator_builder: (),
+            engine_forkchoice_validator_builder: (),
             _marker: Default::default(),
         }
     }
@@ -430,18 +459,23 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-impl<Node, F, Fut, Pool, EVM, Executor, Cons, Val> NodeComponentsBuilder<Node> for F
+impl<Node, F, Fut, Pool, EVM, Executor, Cons, Val, V> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons, Val>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons, Val, V>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
     Val: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine> + Clone + Unpin + 'static,
+    V: EngineForkchoiceValidator<
+            <<Node::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        > + Clone
+        + Unpin
+        + 'static,
 {
-    type Components = Components<Node, Pool, EVM, Executor, Cons, Val>;
+    type Components = Components<Node, Pool, EVM, Executor, Cons, Val, V>;
 
     fn build_components(
         self,

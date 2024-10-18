@@ -27,8 +27,9 @@ use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_network_api::FullNetwork;
-use reth_node_api::{EngineValidator, NodeTypesWithEngine};
+use reth_node_api::{EngineForkchoiceValidator, EngineValidator, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
@@ -58,6 +59,11 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     /// Validator for the engine API.
     type EngineValidator: EngineValidator<<T::Types as NodeTypesWithEngine>::Engine>;
 
+    /// Validator for forkchoice update API.
+    type EngineForkchoiceValidator: EngineForkchoiceValidator<
+        <<T::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+    >;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -78,13 +84,15 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
 
     /// Returns the engine validator.
     fn engine_validator(&self) -> &Self::EngineValidator;
+
+    fn engine_forkchoice_validator(&self) -> &Self::EngineForkchoiceValidator;
 }
 
 /// All the components of the node.
 ///
 /// This provides access to all the components of the node.
 #[derive(Debug)]
-pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus, Validator> {
+pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus, Validator, V> {
     /// The transaction pool of the node.
     pub transaction_pool: Pool,
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
@@ -99,10 +107,12 @@ pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus, Valid
     pub payload_builder: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
     /// The validator for the engine API.
     pub engine_validator: Validator,
+    /// Validator for forkchoice update API.
+    pub engine_forkchoice_validator: V,
 }
 
-impl<Node, Pool, EVM, Executor, Cons, Val> NodeComponents<Node>
-    for Components<Node, Pool, EVM, Executor, Cons, Val>
+impl<Node, Pool, EVM, Executor, Cons, Val, V> NodeComponents<Node>
+    for Components<Node, Pool, EVM, Executor, Cons, Val, V>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
@@ -110,6 +120,11 @@ where
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
     Val: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine> + Clone + Unpin + 'static,
+    V: EngineForkchoiceValidator<
+            <<Node::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        > + Clone
+        + Unpin
+        + 'static,
 {
     type Pool = Pool;
     type Evm = EVM;
@@ -117,6 +132,7 @@ where
     type Consensus = Cons;
     type Network = NetworkHandle;
     type EngineValidator = Val;
+    type EngineForkchoiceValidator = V;
 
     fn pool(&self) -> &Self::Pool {
         &self.transaction_pool
@@ -147,10 +163,14 @@ where
     fn engine_validator(&self) -> &Self::EngineValidator {
         &self.engine_validator
     }
+
+    fn engine_forkchoice_validator(&self) -> &Self::EngineForkchoiceValidator {
+        &self.engine_forkchoice_validator
+    }
 }
 
-impl<Node, Pool, EVM, Executor, Cons, Val> Clone
-    for Components<Node, Pool, EVM, Executor, Cons, Val>
+impl<Node, Pool, EVM, Executor, Cons, Val, V> Clone
+    for Components<Node, Pool, EVM, Executor, Cons, Val, V>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
@@ -158,6 +178,9 @@ where
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone,
     Val: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>,
+    V: EngineForkchoiceValidator<
+        <<Node::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+    >,
 {
     fn clone(&self) -> Self {
         Self {
@@ -168,6 +191,7 @@ where
             network: self.network.clone(),
             payload_builder: self.payload_builder.clone(),
             engine_validator: self.engine_validator.clone(),
+            engine_forkchoice_validator: self.engine_forkchoice_validator.clone(),
         }
     }
 }

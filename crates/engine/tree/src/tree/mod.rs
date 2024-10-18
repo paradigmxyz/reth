@@ -26,11 +26,11 @@ use reth_chain_state::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineForkchoiceValidator, EngineTypes};
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadBuilder, PayloadBuilderAttributes, PayloadTypes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
@@ -463,7 +463,7 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
+pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec, V> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
@@ -503,10 +503,12 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     invalid_block_hook: Box<dyn InvalidBlockHook>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// Engine forkchoice updated validator
+    engine_forkchoice_validator: V,
 }
 
-impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<P, E, T, Spec>
+impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug, V> std::fmt::Debug
+    for EngineApiTreeHandler<P, E, T, Spec, V>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -529,13 +531,14 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
     }
 }
 
-impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
+impl<P, E, T, Spec, V> EngineApiTreeHandler<P, E, T, Spec, V>
 where
     P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
     Spec: Send + Sync + EthereumHardforks + 'static,
+    V: EngineForkchoiceValidator<<T as PayloadTypes>::PayloadAttributes>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[allow(clippy::too_many_arguments)]
@@ -552,6 +555,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
         engine_kind: EngineApiKind,
+        engine_forkchoice_validator: V,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
@@ -573,6 +577,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            engine_forkchoice_validator,
         }
     }
 
@@ -598,6 +603,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
         kind: EngineApiKind,
+        engine_forkchoice_validator: V,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -628,6 +634,7 @@ where
             payload_builder,
             config,
             kind,
+            engine_forkchoice_validator,
         );
         task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
@@ -2488,8 +2495,9 @@ where
         //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
         //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
         //    be rolled back.
-        if attrs.timestamp() <= head.timestamp {
-            return OnForkChoiceUpdated::invalid_payload_attributes()
+        match self.engine_forkchoice_validator.validate_fork_choice_header(&attrs, head) {
+            Ok(_) => {}
+            Err(_) => return OnForkChoiceUpdated::invalid_payload_attributes(),
         }
 
         // 8. Client software MUST begin a payload build process building on top of

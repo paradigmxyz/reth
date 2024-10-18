@@ -15,10 +15,12 @@ use std::{
 };
 
 use crate::miner::{LocalMiner, MiningMode};
+use alloy_rpc_types_engine::PayloadAttributes;
 use futures_util::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::Consensus;
+use reth_engine_primitives::{EngineForkchoiceValidator, EngineTypes};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -29,6 +31,7 @@ use reth_engine_tree::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
+use reth_ethereum_engine_primitives::{EthPayloadAttributes, EthereumEngineForkchoiceValidator};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
@@ -62,7 +65,7 @@ where
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
-    pub fn new<B>(
+    pub fn new<B, V>(
         consensus: Arc<dyn Consensus>,
         executor_factory: impl BlockExecutorProvider,
         provider: ProviderFactory<N>,
@@ -76,9 +79,11 @@ where
         from_engine: EngineMessageStream<N::Engine>,
         mode: MiningMode,
         payload_attributes_builder: B,
+        engine_forkchoice_validator: V,
     ) -> Self
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        V: EngineForkchoiceValidator<<N::Engine as PayloadTypes>::PayloadAttributes>,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =
@@ -101,6 +106,7 @@ where
             tree_config,
             invalid_block_hook,
             engine_kind,
+            engine_forkchoice_validator,
         );
 
         let handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);

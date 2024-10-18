@@ -11,10 +11,13 @@
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
+pub use alloy_rpc_types_engine::ForkchoiceUpdateError;
+use reth_payload_primitives::PayloadAttributes;
 pub use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
     PayloadTypes,
 };
+use reth_primitives::Header;
 use serde::{de::DeserializeOwned, ser::Serialize};
 
 /// This type defines the versioned types of the engine API.
@@ -57,4 +60,16 @@ pub trait EngineValidator<Types: EngineTypes>: Clone + Send + Sync + Unpin + 'st
         version: EngineApiMessageVersion,
         attributes: &<Types as PayloadTypes>::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError>;
+}
+
+/// Type that can validate payload attributes against the header for forkchoice updated requests.
+pub trait EngineForkchoiceValidator<Attr: PayloadAttributes>:
+    Clone + Send + Sync + Unpin + 'static
+{
+    /// Validates the payload attributes with respect to the header.
+    fn validate_fork_choice_header(
+        &self,
+        attributes: &Attr,
+        head: &Header,
+    ) -> Result<(), ForkchoiceUpdateError>;
 }

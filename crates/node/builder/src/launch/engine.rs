@@ -19,7 +19,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
 use reth_node_api::{
-    BuiltPayload, FullNodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    BuiltPayload, EngineForkchoiceValidator, EngineTypes, FullNodeTypes, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -77,11 +78,19 @@ where
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
+    // <CB::Components as NodeComponents<T>>::EngineForkchoiceValidator: EngineForkchoiceValidator<
+    // alloy_rpc_types_engine::PayloadAttributes>
+    <CB::Components as NodeComponents<T>>::EngineForkchoiceValidator: EngineForkchoiceValidator<
+        <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+    >,
+    // <Types as NodeTypesWithEngine>::Engine: EngineTypes<PayloadAttributes =
+    // reth_ethereum_engine_primitives::EthPayloadAttributes>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
     async fn launch_node(
         self,
+
         target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx, engine_tree_config } = self;
@@ -91,6 +100,7 @@ where
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
         } = target;
+
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // TODO: move tree_config and canon_state_notification_sender
@@ -227,6 +237,7 @@ where
                 Box::pin(consensus_engine_stream),
                 mining_mode,
                 LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
+                ctx.components().engine_forkchoice_validator(),
             );
 
             Either::Left(eth_service)
@@ -246,6 +257,7 @@ where
                 engine_tree_config,
                 ctx.invalid_block_hook()?,
                 ctx.sync_metrics_tx(),
+                ctx.components().engine_forkchoice_validator(),
             );
 
             Either::Right(eth_service)
