@@ -33,6 +33,7 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
 ///
 /// NOTE: The requests are encoded as `id + request`
 pub fn calculate_requests_root(requests: &[Request]) -> B256 {
+    // todo: rm
     ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
 }
 

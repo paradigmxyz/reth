@@ -301,7 +301,7 @@ impl StorageInner {
             timestamp,
             base_fee_per_gas,
             blob_gas_used,
-            requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
+            requests_hash: requests.map(|r| proofs::calculate_requests_root(&r.0)),
             ..Default::default()
         };
 
@@ -682,7 +682,7 @@ mod tests {
                 timestamp,
                 base_fee_per_gas: None,
                 blob_gas_used: Some(0),
-                requests_root: None,
+                requests_hash: None,
                 excess_blob_gas: Some(0),
                 ..Default::default()
             }

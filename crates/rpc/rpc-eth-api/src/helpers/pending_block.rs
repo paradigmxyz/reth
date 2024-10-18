@@ -419,7 +419,8 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
         // set these to empty
-        let (requests, requests_root) =
+        let (requests, requests_hash) =
+        // TODO update
             if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
                 (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
             } else {
@@ -447,7 +448,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
             extra_data: Default::default(),
             parent_beacon_block_root,
-            requests_root,
+            requests_hash: None, // TODO requests_hash,
         };
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>

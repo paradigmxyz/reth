@@ -67,6 +67,7 @@ pub trait BlockBody:
     /// requests, this will return `None`.
     // todo: can be default impl if `calculate_requests_root` made into a method on
     // `Requests` and `Requests` moved to alloy
+    // TODO
     fn calculate_requests_root(&self) -> Option<B256>;
 
     /// Recover signer addresses for all transactions in the block body.

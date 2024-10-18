@@ -84,6 +84,7 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
 /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
 #[inline]
 pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
+    // todo: invalid
     let requests_root =
         block.body.calculate_requests_root().ok_or(ConsensusError::BodyRequestsMissing)?;
     let header_requests_root = block.requests_root.ok_or(ConsensusError::RequestsRootMissing)?;
@@ -460,7 +461,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
-            requests_root: None
+            requests_hash: None
         };
         // size: 0x9b5
 

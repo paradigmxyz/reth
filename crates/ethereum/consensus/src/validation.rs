@@ -38,7 +38,8 @@ pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
 
     // Validate that the header requests root matches the calculated requests root
     if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        let Some(header_requests_root) = block.header.requests_root else {
+        // todo: update
+        let Some(header_requests_root) = block.header.requests_hash else {
             return Err(ConsensusError::RequestsRootMissing)
         };
         let requests_root = reth_primitives::proofs::calculate_requests_root(requests);

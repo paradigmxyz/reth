@@ -124,7 +124,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         blob_gas_used,
         excess_blob_gas,
         parent_beacon_block_root,
-        requests_root,
+        requests_hash,
     } = header;
 
     Header {
@@ -150,7 +150,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         excess_blob_gas,
         parent_beacon_block_root,
         total_difficulty: None,
-        requests_root,
+        requests_hash,
     }
 }
 

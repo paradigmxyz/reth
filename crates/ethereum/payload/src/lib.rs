@@ -308,6 +308,7 @@ where
     }
 
     // calculate the requests and the requests root
+    // todo
     let (requests, requests_root) = if chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
     {
@@ -414,7 +415,7 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
-        requests_root,
+        requests_hash: None, // TODO,
     };
 
     // seal the block

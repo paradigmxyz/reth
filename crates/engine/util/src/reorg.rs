@@ -401,7 +401,7 @@ where
             transactions_root: proofs::calculate_transaction_root(&transactions),
             receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
-            requests_root: None, // TODO(prague)
+            requests_hash: None, // TODO(prague)
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),

@@ -266,7 +266,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxLegacy, EMPTY_ROOT_HASH};
+    use alloy_consensus::{constants::KECCAK_EMPTY, TxLegacy, EMPTY_ROOT_HASH};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -797,7 +797,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(KECCAK_EMPTY),
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
@@ -855,7 +855,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(KECCAK_EMPTY),
             ..Header::default()
         };
 
@@ -901,7 +901,7 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header().clone();
-        header.requests_root = Some(EMPTY_ROOT_HASH);
+        header.requests_hash = Some(KECCAK_EMPTY);
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
@@ -938,7 +938,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 1,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(KECCAK_EMPTY),
             ..Header::default()
         };
         let header_hash = header.hash_slow();
@@ -977,7 +977,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 2,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(KECCAK_EMPTY),
             ..Header::default()
         };
 
