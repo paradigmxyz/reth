@@ -27,7 +27,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::StorageChangeSetReader;
+use reth_storage_api::{HashedPostStateProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use revm::{
     db::states::PlainStorageRevert,
@@ -1704,6 +1704,22 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
         } else {
             self.get_state(block..=block)
         }
+    }
+}
+
+impl<N: ProviderNodeTypes> HashedPostStateProvider for BlockchainProvider2<N> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> reth_trie::HashedPostState {
+        self.database.hashed_post_state_from_bundle_state(bundle_state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<reth_trie::HashedPostState> {
+        self.database.hashed_post_state_from_reverts(block_number)
     }
 }
 

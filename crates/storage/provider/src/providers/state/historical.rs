@@ -14,7 +14,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{constants::EPOCH_SLOTS, Account, Bytecode, StaticFileSegment};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -159,7 +159,7 @@ impl<'b, TX: DbTx, SC: StateCommitment> HistoricalStateProviderRef<'b, TX, SC> {
             );
         }
 
-        Ok(HashedPostState::from_reverts(self.tx, self.block_number)?)
+        Ok(HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, self.block_number)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -407,6 +407,24 @@ impl<TX: DbTx, SC: StateCommitment> StateProofProvider for HistoricalStateProvid
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         input.prepend(self.revert_state()?);
         TrieWitness::overlay_witness(self.tx, input, target).map_err(Into::<ProviderError>::into)
+    }
+}
+
+impl<TX: DbTx, SC: StateCommitment> HashedPostStateProvider
+    for HistoricalStateProviderRef<'_, TX, SC>
+{
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::from_bundle_state::<SC::KeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, block_number).map_err(Into::into)
     }
 }
 

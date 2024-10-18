@@ -48,14 +48,18 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
+    HashedPostState, HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment};
+use reth_trie_db::{
+    DatabaseHashedPostState, DatabaseStateRoot, DatabaseStorageTrieCursor, StateCommitment,
+};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -3755,6 +3759,25 @@ impl<TX: DbTxMut, Spec: Send + Sync, SC: Send + Sync> ChainStateBlockWriter
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx, Spec: Send + Sync, SC: StateCommitment> HashedPostStateProvider
+    for DatabaseProvider<TX, Spec, SC>
+{
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> reth_trie::HashedPostState {
+        HashedPostState::from_bundle_state::<SC::KeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<SC::KeyHasher>(self.tx_ref(), block_number)
+            .map_err(Into::into)
     }
 }
 

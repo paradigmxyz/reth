@@ -21,9 +21,9 @@ use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
-    HeaderProvider, OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
-    StorageReader, ToLatestStateProviderRef,
+    writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashedPostStateProvider,
+    HashingWriter, HeaderProvider, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StorageReader, ToLatestStateProviderRef,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -153,7 +153,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
-            execution_outcome.hash_state_slow(),
+            provider.hashed_post_state_from_bundle_state(execution_outcome.state()),
         )?;
 
         if in_memory_state_root == block.state_root {

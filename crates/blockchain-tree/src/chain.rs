@@ -18,10 +18,11 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
-    FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
+    FullExecutionDataProvider, HashedPostStateProvider, ProviderError, StateRootProvider,
+    TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -227,14 +228,19 @@ impl AppendableChain {
                 execution_outcome.extend(initial_execution_outcome.clone());
                 ParallelStateRoot::new(
                     consistent_view,
-                    TrieInput::from_state(execution_outcome.hash_state_slow()),
+                    TrieInput::from_state(
+                        externals
+                            .provider_factory
+                            .hashed_post_state_from_bundle_state(execution_outcome.state()),
+                    ),
                 )
                 .incremental_root_with_updates()
                 .map(|(root, updates)| (root, Some(updates)))
                 .map_err(ProviderError::from)?
             } else {
-                let hashed_state =
-                    HashedPostState::from_bundle_state(&initial_execution_outcome.state().state);
+                let hashed_state = externals
+                    .provider_factory
+                    .hashed_post_state_from_bundle_state(initial_execution_outcome.state());
                 let state_root = provider.state_root(hashed_state)?;
                 (state_root, None)
             };

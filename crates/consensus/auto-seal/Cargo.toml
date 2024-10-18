@@ -28,7 +28,6 @@ reth-engine-primitives.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
-reth-trie.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true

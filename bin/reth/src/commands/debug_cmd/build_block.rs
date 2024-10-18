@@ -31,7 +31,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    HashedPostStateProvider, ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_stages::StageId;
@@ -266,7 +266,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
-                let hashed_post_state = execution_outcome.hash_state_slow();
+                let hashed_post_state =
+                    provider_factory.hashed_post_state_from_bundle_state(execution_outcome.state());
                 let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
                     provider_factory.provider()?.tx_ref(),
                     hashed_post_state.clone(),

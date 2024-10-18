@@ -12,7 +12,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{Account, Bytecode, StaticFileSegment};
-use reth_storage_api::{StateProofProvider, StorageRootProvider};
+use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -21,8 +21,8 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
+    DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
 };
 use std::marker::PhantomData;
 
@@ -161,6 +161,22 @@ impl<TX: DbTx, SC: StateCommitment> StateProofProvider for LatestStateProviderRe
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         TrieWitness::overlay_witness(self.tx, input, target).map_err(Into::<ProviderError>::into)
+    }
+}
+
+impl<TX: DbTx, SC: StateCommitment> HashedPostStateProvider for LatestStateProviderRef<'_, TX, SC> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
+        HashedPostState::from_bundle_state::<SC::KeyHasher>(&bundle_state.state)
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<SC::KeyHasher>(self.tx, block_number).map_err(Into::into)
     }
 }
 

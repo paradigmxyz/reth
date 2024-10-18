@@ -19,6 +19,9 @@ pub use execute::*;
 mod execution_outcome;
 pub use execution_outcome::*;
 
+// Re-export commonly used execution types from `revm`.
+pub use revm::db::{BundleAccount, BundleState};
+
 /// Bincode-compatible serde implementations for commonly used types for (EVM) block execution.
 ///
 /// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
