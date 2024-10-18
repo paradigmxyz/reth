@@ -6340,6 +6340,7 @@ dependencies = [
 name = "reth-basic-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "futures-core",

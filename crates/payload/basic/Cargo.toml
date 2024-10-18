@@ -26,6 +26,7 @@ reth-tasks.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 revm.workspace = true
+alloy-consensus.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "time"] }

@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -18,7 +19,7 @@ use reth_payload_builder::{
 };
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
+    constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
 };
 use reth_provider::{
