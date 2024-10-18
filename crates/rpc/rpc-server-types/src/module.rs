@@ -194,9 +194,8 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // If the string is empty, then no modules are selected
         if s.is_empty() {
-            return Ok(Self::Selection(Default::default()));
+            return Ok(Self::Selection(Default::default()))
         }
 
         let mut modules = s.split(',').map(str::trim).peekable();
