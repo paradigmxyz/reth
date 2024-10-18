@@ -151,7 +151,9 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
-    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_provider::{
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
+    };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
