@@ -58,11 +58,11 @@ mod consistent_view;
 use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
-mod blockchain_provider3;
-pub use blockchain_provider3::BlockchainProvider3;
+mod blockchain_provider;
+pub use blockchain_provider::BlockchainProvider2;
 
-mod factories;
-pub use factories::BlockchainProviderFactory;
+mod atomic;
+pub use atomic::AtomicBlockchainProvider;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
 pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
