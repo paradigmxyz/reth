@@ -2,6 +2,7 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
+use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
@@ -18,8 +19,8 @@ use reth_network_peers::{
 };
 use reth_primitives_traits::{
     constants::{
-        EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT,
-        HOLESKY_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        EIP1559_INITIAL_BASE_FEE, ETHEREUM_BLOCK_GAS_LIMIT, HOLESKY_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header, SealedHeader,
 };

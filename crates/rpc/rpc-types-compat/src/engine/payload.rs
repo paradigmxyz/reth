@@ -6,8 +6,8 @@ use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadBodyV2, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
+    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadV4, PayloadError,
 };
 use reth_primitives::{
     constants::MAXIMUM_EXTRA_DATA_SIZE,
@@ -379,52 +379,6 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
         transactions: transactions.collect(),
         withdrawals: value.body.withdrawals.map(Withdrawals::into_inner),
     }
-}
-
-/// Converts [`Block`] to [`ExecutionPayloadBodyV2`]
-pub fn convert_to_payload_body_v2(value: Block) -> ExecutionPayloadBodyV2 {
-    let transactions = value.body.transactions.into_iter().map(|tx| {
-        let mut out = Vec::new();
-        tx.encode_2718(&mut out);
-        out.into()
-    });
-
-    let mut payload = ExecutionPayloadBodyV2 {
-        transactions: transactions.collect(),
-        withdrawals: value.body.withdrawals.map(Withdrawals::into_inner),
-        deposit_requests: None,
-        withdrawal_requests: None,
-        consolidation_requests: None,
-    };
-
-    if let Some(requests) = value.body.requests {
-        let (deposit_requests, withdrawal_requests, consolidation_requests) =
-            requests.into_iter().fold(
-                (Vec::new(), Vec::new(), Vec::new()),
-                |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
-                    match request {
-                        Request::DepositRequest(r) => {
-                            deposits.push(r);
-                        }
-                        Request::WithdrawalRequest(r) => {
-                            withdrawals.push(r);
-                        }
-                        Request::ConsolidationRequest(r) => {
-                            consolidation_requests.push(r);
-                        }
-                        _ => {}
-                    };
-
-                    (deposits, withdrawals, consolidation_requests)
-                },
-            );
-
-        payload.deposit_requests = Some(deposit_requests);
-        payload.withdrawal_requests = Some(withdrawal_requests);
-        payload.consolidation_requests = Some(consolidation_requests);
-    }
-
-    payload
 }
 
 /// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]

@@ -9,6 +9,8 @@ use alloy_rlp::Encodable;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
+pub mod signed;
+
 /// Inner trait for a raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).

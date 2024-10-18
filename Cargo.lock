@@ -6340,6 +6340,7 @@ dependencies = [
 name = "reth-basic-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "futures-core",
@@ -8025,6 +8026,8 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
 ]
 
 [[package]]
@@ -9004,6 +9007,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",

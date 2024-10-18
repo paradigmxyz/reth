@@ -10,9 +10,9 @@ use alloy_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    PayloadId, PayloadStatus, TransitionConfiguration,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, TransitionConfiguration,
 };
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use alloy_serde::JsonStorageKey;
@@ -146,13 +146,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadbodiesbyhashv2>
-    #[method(name = "getPayloadBodiesByHashV2")]
-    async fn get_payload_bodies_by_hash_v2(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<ExecutionPayloadBodiesV2>;
-
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     ///
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -171,16 +164,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
-
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadbodiesbyrangev2>
-    ///
-    /// Similar to `getPayloadBodiesByRangeV1`, but returns [`ExecutionPayloadBodiesV2`]
-    #[method(name = "getPayloadBodiesByRangeV2")]
-    async fn get_payload_bodies_by_range_v2(
-        &self,
-        start: U64,
-        count: U64,
-    ) -> RpcResult<ExecutionPayloadBodiesV2>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
     ///
