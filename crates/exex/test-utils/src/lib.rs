@@ -142,7 +142,9 @@ where
         TestConsensusBuilder,
         EthereumEngineValidatorBuilder,
     >;
-    type AddOns = EthereumAddOns;
+    type AddOns = EthereumAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
@@ -271,6 +273,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+            .with_unused_discovery_port()
             .build(provider_factory.clone()),
     )
     .await?;

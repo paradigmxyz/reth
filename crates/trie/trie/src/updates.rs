@@ -236,7 +236,7 @@ mod serde_nibbles_set {
         S: Serializer,
     {
         let mut storage_nodes =
-            Vec::from_iter(map.iter().map(|elem| alloy_primitives::hex::encode(elem.pack())));
+            map.iter().map(|elem| alloy_primitives::hex::encode(elem.pack())).collect::<Vec<_>>();
         storage_nodes.sort_unstable();
         storage_nodes.serialize(serializer)
     }
@@ -455,7 +455,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::TrieUpdates> for TrieUpdates<'a> {
+    impl SerializeAs<super::TrieUpdates> for TrieUpdates<'_> {
         fn serialize_as<S>(source: &super::TrieUpdates, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -515,7 +515,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    impl<'a> SerializeAs<super::StorageTrieUpdates> for StorageTrieUpdates<'a> {
+    impl SerializeAs<super::StorageTrieUpdates> for StorageTrieUpdates<'_> {
         fn serialize_as<S>(
             source: &super::StorageTrieUpdates,
             serializer: S,

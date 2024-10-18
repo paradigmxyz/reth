@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -26,7 +27,7 @@ use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs::{self, calculate_requests_root},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, BlockBody, EthereumHardforks, Header, Receipt, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, EthereumHardforks, Header, Receipt,
 };
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -160,7 +161,7 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let mut system_caller = SystemCaller::new(&evm_config, chain_spec.clone());
+    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 
     // apply eip-4788 pre block contract call
     system_caller
@@ -228,7 +229,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            evm_config.tx_env(&tx),
+            evm_config.tx_env(tx.as_signed(), tx.signer()),
         );
 
         // Configure the environment for the block.

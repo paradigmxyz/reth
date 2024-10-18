@@ -3,7 +3,10 @@
 use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{BlockNumber, U256};
+use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
@@ -26,7 +29,6 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Provides executors to execute regular optimism blocks
@@ -121,10 +123,12 @@ where
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
-        let mut system_caller =
-            SystemCaller::new(&self.evm_config, &self.chain_spec).with_state_hook(state_hook);
+        let mut system_caller = SystemCaller::new(self.evm_config.clone(), &self.chain_spec);
+        if let Some(hook) = state_hook {
+            system_caller.with_state_hook(Some(Box::new(hook) as Box<dyn OnStateHook>));
+        }
 
         // apply pre execution changes
         system_caller.apply_beacon_root_contract_call(
@@ -306,7 +310,7 @@ where
         state_hook: Option<F>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
@@ -381,7 +385,7 @@ where
         })
     }
 
-    fn execute_with_state_witness<F>(
+    fn execute_with_state_closure<F>(
         mut self,
         input: Self::Input<'_>,
         mut witness: F,
@@ -410,7 +414,7 @@ where
         state_hook: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_without_verification_with_state_hook(
@@ -513,8 +517,8 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
-    use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
-    use reth_optimism_chainspec::{optimism_deposit_tx_signature, BASE_MAINNET};
+    use reth_chainspec::MIN_TRANSACTION_GAS;
+    use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -548,8 +552,7 @@ mod tests {
         db
     }
 
-    fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        let chain_spec = Arc::new(OpChainSpec::new(Arc::unwrap_or_clone(chain_spec)));
+    fn executor_provider(chain_spec: Arc<OpChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
         OpExecutorProvider { evm_config: OptimismEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
@@ -572,11 +575,7 @@ mod tests {
         let account = Account { balance: U256::MAX, ..Account::default() };
         db.insert_account(addr, account, None, HashMap::default());
 
-        let chain_spec = Arc::new(
-            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
-                .regolith_activated()
-                .build(),
-        );
+        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
@@ -656,11 +655,7 @@ mod tests {
 
         db.insert_account(addr, account, None, HashMap::default());
 
-        let chain_spec = Arc::new(
-            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
-                .canyon_activated()
-                .build(),
-        );
+        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {

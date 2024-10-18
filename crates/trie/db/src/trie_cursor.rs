@@ -19,7 +19,7 @@ use reth_trie_common::StorageTrieEntry;
 #[derive(Debug)]
 pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
 
-impl<'a, TX> Clone for DatabaseTrieCursorFactory<'a, TX> {
+impl<TX> Clone for DatabaseTrieCursorFactory<'_, TX> {
     fn clone(&self) -> Self {
         Self(self.0)
     }
@@ -33,7 +33,7 @@ impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
 }
 
 /// Implementation of the trie cursor factory for a database transaction.
-impl<'a, TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'a, TX> {
+impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;

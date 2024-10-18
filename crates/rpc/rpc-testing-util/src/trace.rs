@@ -114,7 +114,7 @@ pub struct TraceCallStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceCallResult> + 'a>>,
 }
 
-impl<'a> Stream for TraceCallStream<'a> {
+impl Stream for TraceCallStream<'_> {
     type Item = TraceCallResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -122,7 +122,7 @@ impl<'a> Stream for TraceCallStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceCallStream<'a> {
+impl std::fmt::Debug for TraceCallStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceCallStream").finish()
     }
@@ -134,7 +134,7 @@ pub struct TraceFilterStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceFilterResult> + 'a>>,
 }
 
-impl<'a> Stream for TraceFilterStream<'a> {
+impl Stream for TraceFilterStream<'_> {
     type Item = TraceFilterResult;
 
     /// Attempts to pull out the next value of the stream.
@@ -143,7 +143,7 @@ impl<'a> Stream for TraceFilterStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceFilterStream<'a> {
+impl std::fmt::Debug for TraceFilterStream<'_> {
     /// Provides a debug representation of the `TraceFilterStream`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceFilterStream").finish_non_exhaustive()
@@ -157,7 +157,7 @@ pub struct TraceGetStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceGetResult> + 'a>>,
 }
 
-impl<'a> Stream for TraceGetStream<'a> {
+impl Stream for TraceGetStream<'_> {
     type Item = TraceGetResult;
 
     /// Attempts to pull out the next item of the stream
@@ -166,7 +166,7 @@ impl<'a> Stream for TraceGetStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceGetStream<'a> {
+impl std::fmt::Debug for TraceGetStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceGetStream").finish_non_exhaustive()
     }
@@ -180,7 +180,7 @@ pub struct CallManyTraceStream<'a> {
     stream: Pin<Box<dyn Stream<Item = CallManyTraceResult> + 'a>>,
 }
 
-impl<'a> Stream for CallManyTraceStream<'a> {
+impl Stream for CallManyTraceStream<'_> {
     type Item = CallManyTraceResult;
 
     /// Polls for the next item from the stream.
@@ -189,7 +189,7 @@ impl<'a> Stream for CallManyTraceStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for CallManyTraceStream<'a> {
+impl std::fmt::Debug for CallManyTraceStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallManyTraceStream").finish()
     }
@@ -201,7 +201,7 @@ pub struct RawTransactionTraceStream<'a> {
     stream: RawTransactionTraceResult<'a>,
 }
 
-impl<'a> Stream for RawTransactionTraceStream<'a> {
+impl Stream for RawTransactionTraceStream<'_> {
     type Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -209,7 +209,7 @@ impl<'a> Stream for RawTransactionTraceStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for RawTransactionTraceStream<'a> {
+impl std::fmt::Debug for RawTransactionTraceStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawTransactionTraceStream").finish()
     }
@@ -221,7 +221,7 @@ pub struct ReplayTransactionStream<'a> {
     stream: Pin<Box<dyn Stream<Item = ReplayTransactionResult> + 'a>>,
 }
 
-impl<'a> Stream for ReplayTransactionStream<'a> {
+impl Stream for ReplayTransactionStream<'_> {
     type Item = ReplayTransactionResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -229,7 +229,7 @@ impl<'a> Stream for ReplayTransactionStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for ReplayTransactionStream<'a> {
+impl std::fmt::Debug for ReplayTransactionStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplayTransactionStream").finish()
     }
@@ -393,7 +393,7 @@ impl<'a> TraceBlockStream<'a> {
     }
 }
 
-impl<'a> Stream for TraceBlockStream<'a> {
+impl Stream for TraceBlockStream<'_> {
     type Item = TraceBlockResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -401,7 +401,7 @@ impl<'a> Stream for TraceBlockStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceBlockStream<'a> {
+impl std::fmt::Debug for TraceBlockStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceBlockStream").finish_non_exhaustive()
     }
