@@ -855,7 +855,7 @@ pub trait Call: LoadState + SpawnBlocking {
             // Update the gas used based on the new result.
             gas_used = res.result.gas_used();
             // Update the gas limit estimates (highest and lowest) based on the execution result.
-            self.update_estimated_gas_range(
+            update_estimated_gas_range(
                 res.result,
                 optimistic_gas_limit,
                 &mut highest_gas_limit,
@@ -900,7 +900,7 @@ pub trait Call: LoadState + SpawnBlocking {
                     // Unpack the result and environment if the transaction was successful.
                     (res, env) = ethres?;
                     // Update the estimated gas range based on the transaction result.
-                    self.update_estimated_gas_range(
+                    update_estimated_gas_range(
                         res.result,
                         mid_gas_limit,
                         &mut highest_gas_limit,
@@ -914,55 +914,6 @@ pub trait Call: LoadState + SpawnBlocking {
         }
 
         Ok(U256::from(highest_gas_limit))
-    }
-
-    /// Updates the highest and lowest gas limits for binary search based on the execution result.
-    ///
-    /// This function refines the gas limit estimates used in a binary search to find the optimal
-    /// gas limit for a transaction. It adjusts the highest or lowest gas limits depending on
-    /// whether the execution succeeded, reverted, or halted due to specific reasons.
-    #[inline]
-    fn update_estimated_gas_range(
-        &self,
-        result: ExecutionResult,
-        tx_gas_limit: u64,
-        highest_gas_limit: &mut u64,
-        lowest_gas_limit: &mut u64,
-    ) -> Result<(), Self::Error> {
-        match result {
-            ExecutionResult::Success { .. } => {
-                // Cap the highest gas limit with the succeeding gas limit.
-                *highest_gas_limit = tx_gas_limit;
-            }
-            ExecutionResult::Revert { .. } => {
-                // Increase the lowest gas limit.
-                *lowest_gas_limit = tx_gas_limit;
-            }
-            ExecutionResult::Halt { reason, .. } => {
-                match reason {
-                    HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
-                        // Both `OutOfGas` and `InvalidEFOpcode` can occur dynamically if the gas
-                        // left is too low. Treat this as an out of gas
-                        // condition, knowing that the call succeeds with a
-                        // higher gas limit.
-                        //
-                        // Common usage of invalid opcode in OpenZeppelin:
-                        // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
-
-                        // Increase the lowest gas limit.
-                        *lowest_gas_limit = tx_gas_limit;
-                    }
-                    err => {
-                        // These cases should be unreachable because we know the transaction
-                        // succeeds, but if they occur, treat them as an
-                        // error.
-                        return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
-                    }
-                }
-            }
-        };
-
-        Ok(())
     }
 
     /// Executes the requests again after an out of gas error to check if the error is gas related
@@ -1162,4 +1113,52 @@ pub trait Call: LoadState + SpawnBlocking {
 
         Ok(env)
     }
+}
+
+/// Updates the highest and lowest gas limits for binary search based on the execution result.
+///
+/// This function refines the gas limit estimates used in a binary search to find the optimal
+/// gas limit for a transaction. It adjusts the highest or lowest gas limits depending on
+/// whether the execution succeeded, reverted, or halted due to specific reasons.
+#[inline]
+fn update_estimated_gas_range(
+    result: ExecutionResult,
+    tx_gas_limit: u64,
+    highest_gas_limit: &mut u64,
+    lowest_gas_limit: &mut u64,
+) -> Result<(), EthApiError> {
+    match result {
+        ExecutionResult::Success { .. } => {
+            // Cap the highest gas limit with the succeeding gas limit.
+            *highest_gas_limit = tx_gas_limit;
+        }
+        ExecutionResult::Revert { .. } => {
+            // Increase the lowest gas limit.
+            *lowest_gas_limit = tx_gas_limit;
+        }
+        ExecutionResult::Halt { reason, .. } => {
+            match reason {
+                HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
+                    // Both `OutOfGas` and `InvalidEFOpcode` can occur dynamically if the gas
+                    // left is too low. Treat this as an out of gas
+                    // condition, knowing that the call succeeds with a
+                    // higher gas limit.
+                    //
+                    // Common usage of invalid opcode in OpenZeppelin:
+                    // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
+
+                    // Increase the lowest gas limit.
+                    *lowest_gas_limit = tx_gas_limit;
+                }
+                err => {
+                    // These cases should be unreachable because we know the transaction
+                    // succeeds, but if they occur, treat them as an
+                    // error.
+                    return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
+                }
+            }
+        }
+    };
+
+    Ok(())
 }

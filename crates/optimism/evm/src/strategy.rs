@@ -1,6 +1,9 @@
 //! Optimism block execution strategy,
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloy_consensus::Transaction as _;
+use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -23,7 +26,6 @@ use reth_revm::{
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
@@ -278,7 +280,7 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::execute::{BatchExecutor, BlockExecutorProvider, GenericBlockExecutorProvider};
+    use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
@@ -315,11 +317,11 @@ mod tests {
 
     fn executor_provider(
         chain_spec: Arc<OpChainSpec>,
-    ) -> GenericBlockExecutorProvider<OpExecutionStrategyFactory> {
+    ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory> {
         let strategy_factory =
             OpExecutionStrategyFactory::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec));
 
-        GenericBlockExecutorProvider::new(strategy_factory)
+        BasicBlockExecutorProvider::new(strategy_factory)
     }
 
     #[test]

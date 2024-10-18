@@ -1,5 +1,6 @@
 //! Loads and formats OP transaction RPC response.
 
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
 use op_alloy_rpc_types::Transaction;

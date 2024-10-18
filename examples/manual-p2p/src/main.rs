@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use futures::StreamExt;
 use reth_chainspec::{Chain, MAINNET};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
@@ -17,7 +18,7 @@ use reth_eth_wire::{
 };
 use reth_network::config::rng_secret_key;
 use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
-use reth_primitives::{EthereumHardfork, Head, MAINNET_GENESIS_HASH};
+use reth_primitives::{EthereumHardfork, Head};
 use secp256k1::{SecretKey, SECP256K1};
 use std::sync::LazyLock;
 use tokio::net::TcpStream;

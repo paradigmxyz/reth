@@ -1,11 +1,13 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, BlockBody, Signature,
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    transaction::extract_chain_id, Block, BlockBody, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
 };
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+use alloy_consensus::{
+    constants::EMPTY_TRANSACTIONS, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+};
 use alloy_primitives::{Parity, TxKind};
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;
