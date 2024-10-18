@@ -5,7 +5,6 @@ use alloc::{vec, vec::Vec};
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
-use alloy_primitives::{Bloom, Bytes, Log, B256};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -225,7 +224,11 @@ impl Encodable2718 for ReceiptWithBloom {
     }
 
     fn encode_2718_len(&self) -> usize {
-        self.as_encoder().length()
+        let encoder = self.as_encoder();
+        match self.receipt.tx_type {
+            TxType::Legacy => encoder.receipt_length(),
+            _ => 1 + encoder.receipt_length(), // 1 byte for the type prefix
+        }
     }
 
     fn encode_2718(&self, out: &mut dyn BufMut) {
@@ -662,5 +665,51 @@ mod tests {
         receipt.to_compact(&mut data);
         let (decoded, _) = Receipt::from_compact(&data[..], data.len());
         assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn test_encode_2718_length() {
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
+            },
+            bloom: Bloom::default(),
+        };
+
+        let encoded = receipt.encoded_2718();
+        assert_eq!(
+            encoded.len(),
+            receipt.encode_2718_len(),
+            "Encoded length should match the actual encoded data length"
+        );
+
+        // Test for legacy receipt as well
+        let legacy_receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
+            },
+            bloom: Bloom::default(),
+        };
+
+        let legacy_encoded = legacy_receipt.encoded_2718();
+        assert_eq!(
+            legacy_encoded.len(),
+            legacy_receipt.encode_2718_len(),
+            "Encoded length for legacy receipt should match the actual encoded data length"
+        );
     }
 }
