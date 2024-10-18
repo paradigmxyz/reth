@@ -197,7 +197,6 @@ impl FromStr for RpcModuleSelection {
         if s.is_empty() {
             return Ok(Self::Selection(Default::default()))
         }
-
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         // We convert to lowercase to make the comparison case-insensitive
