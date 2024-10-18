@@ -22,7 +22,6 @@ alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
-alloy-trie.workspace = true
 alloy-consensus.workspace = true
 
 # misc

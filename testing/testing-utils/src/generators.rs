@@ -204,7 +204,8 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let requests = block_params
         .requests_count
         .map(|count| (0..count).map(|_| random_request(rng)).collect::<Vec<_>>());
-    let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
+    // TODO
+    let requests_hash = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
 
     let withdrawals = block_params.withdrawals_count.map(|count| {
         (0..count)
@@ -226,7 +227,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         transactions_root,
         ommers_hash,
         base_fee_per_gas: Some(rng.gen()),
-        requests_root,
+        requests_hash,
         withdrawals_root,
         ..Default::default()
     }

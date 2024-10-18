@@ -4,10 +4,9 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
-use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 
-use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH};
+use alloy_consensus::constants::{DEV_GENESIS_HASH, KECCAK_EMPTY, MAINNET_GENESIS_HASH};
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
@@ -283,8 +282,8 @@ impl ChainSpec {
             };
 
         // If Prague is activated at genesis we set requests root to an empty trie root.
-        let requests_root =
-            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(EMPTY_ROOT_HASH);
+        let requests_hash =
+            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(KECCAK_EMPTY);
 
         Header {
             gas_limit: self.genesis.gas_limit,
@@ -300,7 +299,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            requests_root,
+            requests_hash,
             ..Default::default()
         }
     }
@@ -939,6 +938,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
+    use alloy_trie::EMPTY_ROOT_HASH;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 

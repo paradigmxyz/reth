@@ -85,7 +85,7 @@ pub const BEDROCK_HEADER: Header = Header {
     blob_gas_used: None,
     excess_blob_gas: None,
     parent_beacon_block_root: None,
-    requests_root: None,
+    requests_hash: None,
 };
 
 /// Bedrock total difficulty on Optimism Mainnet.

@@ -599,6 +599,7 @@ impl BlockBody {
     /// Calculate the requests root for the block body, if requests exist. If there are no
     /// requests, this will return `None`.
     pub fn calculate_requests_root(&self) -> Option<B256> {
+        // TODO
         self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
     }
 

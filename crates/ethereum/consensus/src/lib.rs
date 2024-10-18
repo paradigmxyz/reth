@@ -121,10 +121,10 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         }
 
         if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
-            if header.requests_root.is_none() {
+            if header.requests_hash.is_none() {
                 return Err(ConsensusError::RequestsRootMissing)
             }
-        } else if header.requests_root.is_some() {
+        } else if header.requests_hash.is_some() {
             return Err(ConsensusError::RequestsRootUnexpected)
         }
 
