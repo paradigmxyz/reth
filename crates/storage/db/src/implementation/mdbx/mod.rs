@@ -149,7 +149,7 @@ impl DatabaseArguments {
         &self.client_version
     }
 
-    /// Returns the geometry if set.
+    /// Returns the geometry.
     pub const fn geometry(&self) -> &Geometry<Range<usize>> {
         &self.geometry
     }
