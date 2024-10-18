@@ -2,6 +2,13 @@
 
 use super::*;
 use convert_case::{Case, Casing};
+use syn::parse_quote;
+
+/// Returns the path of the reth_codecs crate
+pub fn codecs_path() -> syn::Path {
+    // TODO: support reth_codecs(crate = "") attribute so we can set a custom path, if this is unset use `reth_codecs`
+    parse_quote!(reth_codecs)
+}
 
 /// Generates code to implement the `Compact` trait for a data type.
 pub fn generate_from_to(
@@ -14,6 +21,7 @@ pub fn generate_from_to(
 
     let to_compact = generate_to_compact(fields, ident, is_zstd);
     let from_compact = generate_from_compact(fields, ident, is_zstd);
+    let reth_codecs = codecs_path();
 
     let snake_case_ident = ident.to_string().to_case(Case::Snake);
 
@@ -28,11 +36,11 @@ pub fn generate_from_to(
 
     let impl_compact = if has_lifetime {
         quote! {
-           impl<#lifetime> Compact for #ident<#lifetime>
+           impl<#lifetime> #reth_codecs::Compact for #ident<#lifetime>
         }
     } else {
         quote! {
-           impl Compact for #ident
+           impl #reth_codecs::Compact for #ident
         }
     };
 
@@ -53,6 +61,8 @@ pub fn generate_from_to(
             #[allow(dead_code)]
             #[test_fuzz::test_fuzz]
             fn #fuzz(obj: #ident)  {
+                use #reth_codecs::Compact;
+
                 let mut buf = vec![];
                 let len = obj.clone().to_compact(&mut buf);
                 let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
