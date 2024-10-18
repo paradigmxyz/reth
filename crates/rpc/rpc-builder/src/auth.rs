@@ -111,19 +111,19 @@ impl AuthServerConfigBuilder {
     }
 
     /// Set the socket address for the server.
-    pub const fn socket_addr(mut self, socket_addr: SocketAddr) -> Self {
+    pub const fn with_socket_addr(mut self, socket_addr: SocketAddr) -> Self {
         self.socket_addr = Some(socket_addr);
         self
     }
 
     /// Set the socket address for the server.
-    pub const fn maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
+    pub const fn with_maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
         self.socket_addr = socket_addr;
         self
     }
 
     /// Set the secret for the server.
-    pub const fn secret(mut self, secret: JwtSecret) -> Self {
+    pub const fn with_secret(mut self, secret: JwtSecret) -> Self {
         self.secret = secret;
         self
     }
@@ -138,7 +138,7 @@ impl AuthServerConfigBuilder {
     }
 
     /// Set the ipc endpoint for the server.
-    pub fn ipc_endpoint(mut self, ipc_endpoint: String) -> Self {
+    pub fn with_ipc_endpoint(mut self, ipc_endpoint: String) -> Self {
         self.ipc_endpoint = Some(ipc_endpoint);
         self
     }
