@@ -6400,6 +6400,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-chainspec",
+ "reth-evm",
  "reth-metrics",
  "reth-payload-builder",
  "reth-payload-primitives",

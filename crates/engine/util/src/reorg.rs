@@ -11,14 +11,16 @@ use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnFork
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
+use reth_evm::{
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm,
+};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
-    state_change::post_block_withdrawals_balance_increments,
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
@@ -131,7 +133,7 @@ where
                     }
                     Err(_) => {}
                 };
-                continue
+                continue;
             }
 
             if let EngineReorgState::Reorg { queue } = &mut this.state {
@@ -187,7 +189,7 @@ where
                                     cancun_fields,
                                     execution_requests,
                                     tx,
-                                }))
+                                }));
                             }
                         };
                     let reorg_forkchoice_state = ForkchoiceState {
@@ -226,7 +228,7 @@ where
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
-                    continue
+                    continue;
                 }
                 (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
@@ -238,7 +240,7 @@ where
                 }
                 (item, _) => item,
             };
-            return Poll::Ready(item)
+            return Poll::Ready(item);
         }
     }
 }
@@ -277,7 +279,7 @@ where
                 .block_by_hash(previous_hash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
             if depth == 0 {
-                break 'target reorg_target
+                break 'target reorg_target;
             }
 
             depth -= 1;
@@ -323,7 +325,7 @@ where
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
-            continue
+            continue;
         }
 
         // Configure the environment for the block.
@@ -335,7 +337,7 @@ where
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
                 trace!(target: "engine::stream::reorg", hash = %tx.hash(), ?error, "Error executing transaction from next block");
-                continue
+                continue;
             }
             // Treat error as fatal
             Err(error) => {

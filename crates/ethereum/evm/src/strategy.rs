@@ -16,13 +16,13 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         BlockValidationError, ProviderError,
     },
+    state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_primitives::{BlockWithSenders, Header, Receipt};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
-    state_change::post_block_balance_increments,
     Database, DatabaseCommit, State,
 };
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256};
@@ -151,7 +151,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
