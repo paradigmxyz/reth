@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -481,7 +482,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve_kind(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
