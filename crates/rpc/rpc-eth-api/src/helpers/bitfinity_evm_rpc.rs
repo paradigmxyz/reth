@@ -7,7 +7,7 @@ use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm_primitives::{Bytes, B256, U256};
+use revm_primitives::{Address, Bytes, B256, U256};
 
 /// Proxy to the Bitfinity EVM RPC.
 pub trait BitfinityEvmRpc {
@@ -62,6 +62,26 @@ pub trait BitfinityEvmRpc {
             })?;
 
             Ok(tx_hash.0.into())
+        }
+    }
+
+    /// Forwards `ic_getGenesisBalances` calls to the Bitfinity EVM
+    fn get_genesis_balances(&self) -> impl Future<Output = RpcResult<Vec<(Address, U256)>>> + Send {
+        let chain_spec = self.chain_spec();
+        async move {
+            let (rpc_url, client) = get_client(&chain_spec)?;
+
+            let balances = client.get_genesis_balances().await.map_err(|e| {
+                internal_rpc_err(format!(
+                    "failed to forward ic_getGenesisBalances request to {}: {}",
+                    rpc_url, e
+                ))
+            })?;
+
+            Ok(balances
+                .into_iter()
+                .map(|(address, balance)| (address.0.into(), U256::from(balance.as_u128())))
+                .collect())
         }
     }
 }
