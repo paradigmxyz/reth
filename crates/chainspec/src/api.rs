@@ -5,8 +5,14 @@ use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use core::fmt::{Debug, Display};
+use reth_ethereum_forks::Hardforks;
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
+
+/// Helper trait that unifies chain spec behaviour to support all node operations.
+pub trait FullChainSpec: EthChainSpec + Hardforks {}
+
+impl<T> FullChainSpec for T where T: EthChainSpec + Hardforks {}
 
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]

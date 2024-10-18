@@ -35,6 +35,13 @@ pub enum TransactionSource {
 // === impl TransactionSource ===
 
 impl TransactionSource {
+    /// Returns reference to wrapped transaction.
+    pub const fn as_recovered(&self) -> &TransactionSignedEcRecovered {
+        match self {
+            Self::Pool(transaction) | Self::Block { transaction, .. } => transaction,
+        }
+    }
+
     /// Consumes the type and returns the wrapped transaction.
     pub fn into_recovered(self) -> TransactionSignedEcRecovered {
         self.into()

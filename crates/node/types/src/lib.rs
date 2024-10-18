@@ -10,7 +10,7 @@
 
 use std::marker::PhantomData;
 
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::FullChainSpec;
 use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
@@ -33,7 +33,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: FullChainSpec;
 }
 
 /// The type that configures an Ethereum-like node with an engine for consensus.
@@ -121,7 +121,7 @@ impl<P, C> AnyNodeTypes<P, C> {
 impl<P, C> NodeTypes for AnyNodeTypes<P, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec + 'static,
+    C: FullChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -157,7 +157,7 @@ impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec + 'static,
+    C: FullChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -167,7 +167,7 @@ impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec + 'static,
+    C: FullChainSpec + 'static,
 {
     type Engine = E;
 }
