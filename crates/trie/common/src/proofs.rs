@@ -1,6 +1,7 @@
 //! Merkle trie proofs.
 
 use crate::{Nibbles, TrieAccount};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
@@ -9,13 +10,13 @@ use alloy_trie::{
     EMPTY_ROOT_HASH,
 };
 use itertools::Itertools;
-use reth_primitives_traits::{constants::KECCAK_EMPTY, Account};
+use reth_primitives_traits::Account;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
-/// in the paths of target accounts.  
+/// in the paths of target accounts.
 #[derive(Clone, Default, Debug)]
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
