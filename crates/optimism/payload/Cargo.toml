@@ -41,6 +41,7 @@ alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 revm-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 
 # misc
 tracing.workspace = true
@@ -52,5 +53,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-optimism-evm/optimism",
-    "reth-revm/optimism",
+    "revm/optimism",
 ]

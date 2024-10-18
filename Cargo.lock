@@ -741,9 +741,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fa8acead43cb238a7b7f47238c71137f4677a0b8d90e7e3be6e6ca59a28194e"
+checksum = "cdd7f8b3a7c65ca09b3c7bdd7c7d72d7423d026f5247eda96af53d24e58315c1"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -2857,6 +2857,7 @@ dependencies = [
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "eyre",
  "futures",
  "reth-chainspec",
@@ -6339,6 +6340,7 @@ dependencies = [
 name = "reth-basic-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "futures-core",
@@ -6528,6 +6530,7 @@ name = "reth-chainspec"
 version = "1.1.0"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -6551,6 +6554,7 @@ dependencies = [
  "clap",
  "eyre",
  "reth-cli-runner",
+ "reth-db",
  "serde_json",
  "shellexpand",
 ]
@@ -6812,6 +6816,7 @@ dependencies = [
 name = "reth-db-common"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "boyer-moore-magiclen",
@@ -7157,6 +7162,7 @@ dependencies = [
 name = "reth-engine-util"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
@@ -7268,6 +7274,7 @@ dependencies = [
 name = "reth-ethereum-consensus"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-chainspec",
  "reth-consensus",
@@ -7300,6 +7307,7 @@ name = "reth-ethereum-forks"
 version = "1.1.0"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -7318,6 +7326,7 @@ dependencies = [
 name = "reth-ethereum-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -7359,12 +7368,14 @@ dependencies = [
  "metrics",
  "parking_lot 0.12.3",
  "reth-chainspec",
+ "reth-consensus",
  "reth-execution-errors",
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
+ "reth-revm",
  "reth-storage-errors",
  "revm",
  "revm-primitives",
@@ -7380,6 +7391,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "reth-chainspec",
+ "reth-consensus",
  "reth-ethereum-consensus",
  "reth-ethereum-forks",
  "reth-evm",
@@ -7924,6 +7936,7 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -8013,6 +8026,8 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
 ]
 
 [[package]]
@@ -8020,6 +8035,7 @@ name = "reth-optimism-chainspec"
 version = "1.1.0"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
  "derive_more 1.0.0",
@@ -8081,6 +8097,7 @@ dependencies = [
 name = "reth-optimism-consensus"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-chainspec",
  "reth-consensus",
@@ -8100,8 +8117,10 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "derive_more 1.0.0",
  "op-alloy-consensus",
  "reth-chainspec",
+ "reth-consensus",
  "reth-ethereum-forks",
  "reth-evm",
  "reth-execution-errors",
@@ -8114,7 +8133,6 @@ dependencies = [
  "reth-revm",
  "revm",
  "revm-primitives",
- "thiserror",
  "tracing",
 ]
 
@@ -8188,6 +8206,7 @@ dependencies = [
 name = "reth-optimism-payload-builder"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -8221,6 +8240,7 @@ dependencies = [
 name = "reth-optimism-primitives"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-primitives",
  "reth-primitives-traits",
@@ -8230,6 +8250,7 @@ dependencies = [
 name = "reth-optimism-rpc"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -8721,6 +8742,7 @@ dependencies = [
 name = "reth-rpc-eth-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-eips",
  "alloy-json-rpc",
@@ -8983,6 +9005,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
@@ -9111,6 +9134,7 @@ dependencies = [
 name = "reth-trie"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "auto_impl",
@@ -9166,6 +9190,7 @@ dependencies = [
 name = "reth-trie-db"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "auto_impl",
@@ -9233,9 +9258,13 @@ dependencies = [
  "assert_matches",
  "criterion",
  "itertools 0.13.0",
+ "pretty_assertions",
  "proptest",
+ "rand 0.8.5",
  "rayon",
  "reth-primitives",
+ "reth-testing-utils",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "smallvec",

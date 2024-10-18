@@ -676,8 +676,8 @@ impl RpcModuleConfigBuilder {
     }
 
     /// Get a reference to the eth namespace config, if any
-    pub const fn get_eth(&self) -> &Option<EthConfig> {
-        &self.eth
+    pub const fn get_eth(&self) -> Option<&EthConfig> {
+        self.eth.as_ref()
     }
 
     /// Get a mutable reference to the eth namespace config, if any

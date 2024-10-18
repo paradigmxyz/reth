@@ -5,9 +5,8 @@ use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
+    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
@@ -23,7 +22,7 @@ use reth_payload_primitives::{
 use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::{
-    convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
+    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -451,18 +450,6 @@ where
         self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v1).await
     }
 
-    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
-    /// blocks.
-    ///
-    /// Same as [`Self::get_payload_bodies_by_range_v1`] but as [`ExecutionPayloadBodiesV2`].
-    pub async fn get_payload_bodies_by_range_v2(
-        &self,
-        start: BlockNumber,
-        count: u64,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v2).await
-    }
-
     /// Called to retrieve execution payload bodies by hashes.
     async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
@@ -507,16 +494,6 @@ where
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v1).await
-    }
-
-    /// Called to retrieve execution payload bodies by hashes.
-    ///
-    /// Same as [`Self::get_payload_bodies_by_hash_v1`] but as [`ExecutionPayloadBodiesV2`].
-    pub async fn get_payload_bodies_by_hash_v2(
-        &self,
-        hashes: Vec<BlockHash>,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v2).await
     }
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
@@ -846,17 +823,6 @@ where
         Ok(res.await?)
     }
 
-    async fn get_payload_bodies_by_hash_v2(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<ExecutionPayloadBodiesV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV2");
-        let start = Instant::now();
-        let res = Self::get_payload_bodies_by_hash_v2(self, block_hashes);
-        self.inner.metrics.latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
-        Ok(res.await?)
-    }
-
     /// Handler for `engine_getPayloadBodiesByRangeV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
@@ -882,18 +848,6 @@ where
         let start_time = Instant::now();
         let res = Self::get_payload_bodies_by_range_v1(self, start.to(), count.to()).await;
         self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
-        Ok(res?)
-    }
-
-    async fn get_payload_bodies_by_range_v2(
-        &self,
-        start: U64,
-        count: U64,
-    ) -> RpcResult<ExecutionPayloadBodiesV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV2");
-        let start_time = Instant::now();
-        let res = Self::get_payload_bodies_by_range_v2(self, start.to(), count.to()).await;
-        self.inner.metrics.latency.get_payload_bodies_by_range_v2.record(start_time.elapsed());
         Ok(res?)
     }
 

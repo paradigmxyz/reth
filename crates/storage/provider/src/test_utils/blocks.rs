@@ -1,6 +1,6 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
-use alloy_consensus::TxLegacy;
+use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
     b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, Parity, Sealable,
     TxKind, B256, U256,
@@ -66,8 +66,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| SealedBlo
         Header {
             parent_hash: hex!("c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f")
                 .into(),
-            ommers_hash: hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
-                .into(),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").into(),
             state_root: hex!("50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d")
                 .into(),
@@ -201,20 +200,20 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
             .revert_account_info(number, account2, Some(None))
             .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
-        vec![vec![Some(Receipt {
-            tx_type: TxType::Eip2930,
-            success: true,
-            cumulative_gas_used: 300,
-            logs: vec![Log::new_unchecked(
-                Address::new([0x60; 20]),
-                vec![B256::with_last_byte(1), B256::with_last_byte(2)],
-                Bytes::default(),
-            )],
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: None,
-        })]]
+        vec![vec![Some(
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            Receipt {
+                tx_type: TxType::Eip2930,
+                success: true,
+                cumulative_gas_used: 300,
+                logs: vec![Log::new_unchecked(
+                    Address::new([0x60; 20]),
+                    vec![B256::with_last_byte(1), B256::with_last_byte(2)],
+                    Bytes::default(),
+                )],
+                ..Default::default()
+            },
+        )]]
         .into(),
         number,
         Vec::new(),
@@ -263,20 +262,20 @@ fn block2(
             )
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
-        vec![vec![Some(Receipt {
-            tx_type: TxType::Eip1559,
-            success: false,
-            cumulative_gas_used: 400,
-            logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
-                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                Bytes::default(),
-            )],
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: None,
-        })]]
+        vec![vec![Some(
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            Receipt {
+                tx_type: TxType::Eip1559,
+                success: false,
+                cumulative_gas_used: 400,
+                logs: vec![Log::new_unchecked(
+                    Address::new([0x61; 20]),
+                    vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                    Bytes::default(),
+                )],
+                ..Default::default()
+            },
+        )]]
         .into(),
         number,
         Vec::new(),
@@ -334,20 +333,20 @@ fn block3(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Some(Receipt {
-            tx_type: TxType::Eip1559,
-            success: true,
-            cumulative_gas_used: 400,
-            logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
-                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                Bytes::default(),
-            )],
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: None,
-        })]]
+        vec![vec![Some(
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 400,
+                logs: vec![Log::new_unchecked(
+                    Address::new([0x61; 20]),
+                    vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                    Bytes::default(),
+                )],
+                ..Default::default()
+            },
+        )]]
         .into(),
         number,
         Vec::new(),
@@ -425,20 +424,20 @@ fn block4(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Some(Receipt {
-            tx_type: TxType::Eip1559,
-            success: true,
-            cumulative_gas_used: 400,
-            logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
-                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                Bytes::default(),
-            )],
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: None,
-        })]]
+        vec![vec![Some(
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 400,
+                logs: vec![Log::new_unchecked(
+                    Address::new([0x61; 20]),
+                    vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                    Bytes::default(),
+                )],
+                ..Default::default()
+            },
+        )]]
         .into(),
         number,
         Vec::new(),
@@ -513,20 +512,20 @@ fn block5(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Some(Receipt {
-            tx_type: TxType::Eip1559,
-            success: true,
-            cumulative_gas_used: 400,
-            logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
-                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                Bytes::default(),
-            )],
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: None,
-        })]]
+        vec![vec![Some(
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 400,
+                logs: vec![Log::new_unchecked(
+                    Address::new([0x61; 20]),
+                    vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                    Bytes::default(),
+                )],
+                ..Default::default()
+            },
+        )]]
         .into(),
         number,
         Vec::new(),

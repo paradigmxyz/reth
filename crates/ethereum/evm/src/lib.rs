@@ -33,6 +33,7 @@ use reth_ethereum_forks::EthereumHardfork;
 use reth_primitives::constants::EIP1559_INITIAL_BASE_FEE;
 
 pub mod execute;
+pub mod strategy;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
@@ -193,13 +194,14 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, KECCAK_EMPTY,
+        Header,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

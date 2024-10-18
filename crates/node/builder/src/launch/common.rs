@@ -1072,7 +1072,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
-                    block_interval: 0,
+                    block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,
                     sender_recovery_before: None,
