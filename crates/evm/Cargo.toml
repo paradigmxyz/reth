@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
+reth-consensus-common.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
@@ -37,6 +38,7 @@ parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 parking_lot.workspace = true
+reth-ethereum-forks.workspace = true
 
 [features]
 default = ["std"]
