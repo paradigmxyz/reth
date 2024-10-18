@@ -142,8 +142,22 @@ impl RevealedSparseTrie {
                         stack_ptr += 1;
                     }
                 }
-                self.nodes
-                    .insert(path, SparseNode::Branch { state_mask: branch.state_mask, hash: None });
+
+                match self.nodes.get(&path) {
+                    // Empty, non-existing and blinded nodes can be replaced safely replaced.
+                    Some(SparseNode::Empty | SparseNode::Hash(_)) | None => {
+                        self.nodes.insert(
+                            path,
+                            SparseNode::Branch { state_mask: branch.state_mask, hash: None },
+                        );
+                    }
+                    // Branch nodes should not be modified.
+                    Some(SparseNode::Branch { .. }) => {}
+                    // All other node types can't be handled
+                    Some(node) => {
+                        panic!("node at path {path:?}: {node:?}")
+                    }
+                }
             }
             TrieNode::Extension(ext) => {
                 let mut child_path = path.clone();
@@ -267,11 +281,11 @@ impl RevealedSparseTrie {
     /// Remove leaf node from the trie.
     pub fn remove_leaf(&mut self, path: Nibbles) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
-        let existing = self.values.remove(&path);
-        if existing.is_none() {
-            // trie structure unchanged, return immediately
-            return Ok(())
-        }
+        self.values.remove(&path);
+
+        // If the path wasn't present in `values`, we still need to walk the trie and ensure that
+        // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
+        // in `nodes`, but not in the `values`.
 
         let mut removed_nodes = self.take_nodes_for_path(&path)?;
         debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
@@ -726,6 +740,7 @@ mod tests {
 
     use super::*;
     use alloy_primitives::U256;
+    use assert_matches::assert_matches;
     use itertools::Itertools;
     use proptest::prelude::*;
     use rand::seq::IteratorRandom;
@@ -959,7 +974,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1101.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
@@ -971,11 +986,11 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::new())
+                    SparseNode::new_leaf(Nibbles::default())
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    SparseNode::new_leaf(Nibbles::new())
+                    SparseNode::new_leaf(Nibbles::default())
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x2]),
@@ -1014,7 +1029,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
@@ -1026,11 +1041,11 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::new())
+                    SparseNode::new_leaf(Nibbles::default())
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    SparseNode::new_leaf(Nibbles::new())
+                    SparseNode::new_leaf(Nibbles::default())
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (
@@ -1062,7 +1077,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
@@ -1096,7 +1111,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
@@ -1127,7 +1142,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
-                (Nibbles::new(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
@@ -1146,7 +1161,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([(
-                Nibbles::new(),
+                Nibbles::default(),
                 SparseNode::new_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]))
             ),])
         );
@@ -1156,7 +1171,42 @@ mod tests {
         // Empty
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
-            BTreeMap::from_iter([(Nibbles::new(), SparseNode::Empty),])
+            BTreeMap::from_iter([(Nibbles::default(), SparseNode::Empty),])
+        );
+    }
+
+    #[test]
+    fn sparse_trie_remove_leaf_blinded() {
+        let mut sparse = RevealedSparseTrie::default();
+
+        let leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
+        );
+
+        // Reveal a branch node and one of its children
+        //
+        // Branch (Mask = 11)
+        // ├── 0 -> Hash (Path = 0)
+        // └── 1 -> Leaf (Path = 1)
+        sparse
+            .reveal_node(
+                Nibbles::default(),
+                TrieNode::Branch(BranchNode::new(
+                    vec![
+                        RlpNode::word_rlp(&B256::repeat_byte(1)),
+                        RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
+                    ],
+                    TrieMask::new(0b11),
+                )),
+            )
+            .unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf)).unwrap();
+
+        // Removing a blinded leaf should result in an error
+        assert_matches!(
+            sparse.remove_leaf(Nibbles::from_nibbles([0x0])),
+            Err(SparseTrieError::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
 
@@ -1226,5 +1276,131 @@ mod tests {
                 assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
             }
         });
+    }
+
+    /// We have three leafs that share the same prefix: A, B, C. Hash builder trie has only nodes A
+    /// and C, and we have proofs for them. Node B is new and inserted in the sparse trie first.
+    ///
+    /// Reveal the hash builder proof to leaf A in the sparse trie, insert leaf B into the sparse
+    /// trie, reveal the hash builder proof to leaf C in the sparse trie.
+    ///
+    /// The hash builder proof to the leaf C didn't have the leaf B at the corresponding nibble of
+    /// the branch node, so we need to adjust the branch node instead of fully replacing it.
+    #[test]
+    fn sparse_trie_reveal_node_1() {
+        // Generate three keys with the same prefix but different last nibble
+        let key1 = Nibbles::from_nibbles_unchecked([0x0]);
+        let key2 = Nibbles::from_nibbles_unchecked([0x1]);
+        let key3 = Nibbles::from_nibbles_unchecked([0x2]);
+        let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
+
+        let mut trie = RevealedSparseTrie::default();
+
+        // Generate the proof for the first key and reveal it in the sparse trie
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(key1.clone(), value()), (key3.clone(), value())],
+            [key1.clone()],
+        );
+        for (path, node) in proof_nodes.nodes_sorted() {
+            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Check that the branch node exists with only two nibbles set
+        assert_eq!(
+            trie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b101.into()))
+        );
+
+        // Insert the leaf for the second key
+        trie.update_leaf(key2.clone(), value().to_vec()).unwrap();
+
+        // Check that the branch node was updated and another nibble was set
+        assert_eq!(
+            trie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b111.into()))
+        );
+
+        // Generate the proof for the third key and reveal it in the sparse trie
+        let (_, proof_nodes_3) = hash_builder_root_with_proofs(
+            [(key1.clone(), value()), (key3.clone(), value())],
+            [key3.clone()],
+        );
+        for (path, node) in proof_nodes_3.nodes_sorted() {
+            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Check that nothing changed in the branch node
+        assert_eq!(
+            trie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b111.into()))
+        );
+
+        // Generate the nodes for the full trie with all three key using the hash builder, and
+        // compare them to the sparse trie
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(key1.clone(), value()), (key2.clone(), value()), (key3.clone(), value())],
+            [key1, key2, key3],
+        );
+
+        assert_eq_sparse_trie_proof_nodes(&trie, proof_nodes);
+    }
+
+    /// We have three leafs that share the same prefix: A, B, C. Hash builder trie has all three
+    /// nodes, and we have proofs for them.
+    ///
+    /// Reveal the hash builder proofs to leafs A and B in the sparse trie, remove leaf B from
+    /// the sparse trie (that will not destroy the branch node, because there's also leaf C left),
+    /// reveal the hash builder proof to leaf C in the sparse trie.
+    ///
+    /// The hash builder proof to the leaf C had a branch node with all three nibless set, but we
+    /// already deleted the leaf B, so it should not set the nibble for the leaf B again.
+    #[test]
+    fn sparse_trie_reveal_node_2() {
+        // Generate three keys with the same prefix but different last nibble
+        let key1 = || Nibbles::from_nibbles_unchecked([0x0]);
+        let key2 = || Nibbles::from_nibbles_unchecked([0x1]);
+        let key3 = || Nibbles::from_nibbles_unchecked([0x2]);
+        let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
+
+        let mut trie = RevealedSparseTrie::default();
+
+        // Generate the proofs for the first and second keys and reveal them in the sparse trie
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(key1(), value()), (key2(), value()), (key3(), value())],
+            [key1(), key2()],
+        );
+        for (path, node) in proof_nodes.nodes_sorted() {
+            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Check that the branch node exists with all three nibbles set
+        assert_eq!(
+            trie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b111.into()))
+        );
+
+        // Remove the leaf for the second key
+        trie.remove_leaf(key2()).unwrap();
+
+        // Check that the branch node was updated and a nibble was unset
+        assert_eq!(
+            trie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b101.into()))
+        );
+
+        // Generate the proof for the third key and reveal it in the sparse trie
+        let (_, proof_nodes_3) = hash_builder_root_with_proofs(
+            [(key1(), value()), (key2(), value()), (key3(), value())],
+            [key3()],
+        );
+        for (path, node) in proof_nodes_3.nodes_sorted() {
+            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Check that nothing changed in the branch node
+        assert_eq!(
+            trie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b101.into()))
+        );
     }
 }
