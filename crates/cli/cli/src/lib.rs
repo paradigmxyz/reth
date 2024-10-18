@@ -15,6 +15,7 @@ use std::{borrow::Cow, ffi::OsString};
 
 /// The chainspec module defines the different chainspecs that can be used by the node.
 pub mod chainspec;
+use crate::chainspec::ChainSpecParser;
 
 /// Reth based node cli.
 ///
@@ -23,6 +24,9 @@ pub mod chainspec;
 /// It provides commonly used functionality for running commands and information about the CL, such
 /// as the name and version.
 pub trait RethCli: Sized {
+    /// The associated `ChainSpecParser` type
+    type ChainSpecParser: ChainSpecParser;
+
     /// The name of the implementation, eg. `reth`, `op-reth`, etc.
     fn name(&self) -> Cow<'static, str>;
 

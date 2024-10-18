@@ -16,6 +16,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
+    system_calls::SystemCaller,
     ConfigureEvmEnv,
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
@@ -26,7 +27,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
+    helpers::{Call, EthApiSpec, EthTransactions, LoadState, TraceExt},
     EthApiTypes, FromEthApiError,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -245,6 +246,7 @@ where
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
         let block_hash = block.hash();
+        let parent_beacon_block_root = block.parent_beacon_block_root;
 
         let this = self.clone();
         self.eth_api()
@@ -255,6 +257,26 @@ where
                 let tx = transaction.into_recovered();
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply relevant system calls
+                let mut system_caller = SystemCaller::new(
+                    Call::evm_config(this.eth_api()).clone(),
+                    LoadState::provider(this.eth_api()).chain_spec(),
+                );
+
+                system_caller
+                    .pre_block_beacon_root_contract_call(
+                        &mut db,
+                        &cfg,
+                        &block_env,
+                        parent_beacon_block_root,
+                    )
+                    .map_err(|_| {
+                        EthApiError::EvmCustom(
+                            "failed to apply 4788 beacon root system call".to_string(),
+                        )
+                    })?;
+
                 // replay all transactions prior to the targeted transaction
                 let index = this.eth_api().replay_transactions_until(
                     &mut db,

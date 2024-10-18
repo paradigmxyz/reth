@@ -263,6 +263,7 @@ mod tests {
 
         let (deposit_contract_addr, _) = random_eoa_account(&mut rng);
         for block in &blocks {
+            receipts.reserve_exact(block.body.size());
             for (txi, transaction) in block.body.transactions.iter().enumerate() {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
