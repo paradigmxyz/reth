@@ -28,6 +28,7 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{
     args::RollupArgs,
@@ -123,6 +124,7 @@ where
 impl NodeTypes for OptimismNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
 }
 
 impl NodeTypesWithEngine for OptimismNode {
