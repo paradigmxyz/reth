@@ -19,7 +19,7 @@ the [docker docs](/book/installation/docker.md#using-docker-compose).
 
 #### Adding a new metric to Grafana
 
-To set up a new metric Reth and its Grafana dashboard:
+To set up a new metric in Reth and its Grafana dashboard:
 
 1. Add the metric to the codebase following the [metrics section](../docs/design/metrics.md#creating-metrics)
    documentation.
