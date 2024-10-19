@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -68,9 +68,9 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload.into(), cancun_fields, None).await
+        self.engine_handle.new_payload(payload.into(), sidecar).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
@@ -78,11 +78,11 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload_retry_on_syncing<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let payload: ExecutionPayload = payload.into();
         loop {
-            let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
+            let result = self.send_new_payload(payload.clone(), sidecar.clone()).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
