@@ -34,6 +34,21 @@ alloy-primitives.workspace = true
 
 [features]
 default = ["std"]
-std = []
-test-utils = ["dep:reth-trie"]
-serde = ["revm/serde"]
+std = [
+	"reth-primitives/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"alloy-eips/std"
+]
+test-utils = [
+	"dep:reth-trie",
+	"reth-primitives/test-utils",
+	"reth-trie?/test-utils",
+	"revm/test-utils"
+]
+serde = [
+	"revm/serde",
+	"reth-trie?/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde"
+]

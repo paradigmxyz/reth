@@ -43,5 +43,15 @@ tokio = { workspace = true, features = ["full"] }
 
 [features]
 default = ["std"]
-test-utils = ["reth-consensus/test-utils", "parking_lot"]
-std = ["reth-consensus/std"]
+test-utils = [
+	"reth-consensus/test-utils",
+	"parking_lot",
+	"reth-network-types/test-utils",
+	"reth-primitives/test-utils"
+]
+std = [
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"alloy-eips/std",
+	"alloy-primitives/std"
+]

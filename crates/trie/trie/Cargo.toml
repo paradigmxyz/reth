@@ -64,9 +64,23 @@ bincode.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
-serde = ["dep:serde"]
-serde-bincode-compat = ["serde_with"]
-test-utils = ["triehash", "reth-trie-common/test-utils"]
+serde = [
+	"dep:serde",
+	"alloy-consensus/serde",
+	"alloy-primitives/serde",
+	"revm/serde"
+]
+serde-bincode-compat = [
+	"serde_with",
+	"reth-primitives/serde-bincode-compat",
+	"alloy-consensus/serde-bincode-compat"
+]
+test-utils = [
+	"triehash",
+	"reth-trie-common/test-utils",
+	"reth-primitives/test-utils",
+	"revm/test-utils"
+]
 
 [[bench]]
 name = "prefix_set"

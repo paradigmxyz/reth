@@ -69,15 +69,35 @@ op-alloy-consensus.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-optimism-evm/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "reth-beacon-consensus/optimism",
-    "revm/optimism",
-    "reth-auto-seal-consensus/optimism",
-    "reth-optimism-rpc/optimism",
-    "reth-engine-local/optimism",
+	"reth-primitives/optimism",
+	"reth-provider/optimism",
+	"reth-optimism-evm/optimism",
+	"reth-optimism-payload-builder/optimism",
+	"reth-beacon-consensus/optimism",
+	"revm/optimism",
+	"reth-auto-seal-consensus/optimism",
+	"reth-optimism-rpc/optimism",
+	"reth-engine-local/optimism",
+	"reth-optimism-consensus/optimism",
+	"reth-db/optimism"
 ]
-asm-keccak = ["reth-primitives/asm-keccak"]
-test-utils = ["reth-node-builder/test-utils"]
+asm-keccak = [
+	"reth-primitives/asm-keccak",
+	"reth/asm-keccak",
+	"alloy-primitives/asm-keccak",
+	"revm/asm-keccak"
+]
+test-utils = [
+	"reth-node-builder/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-network/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-revm/test-utils",
+	"reth-db/test-utils",
+	"reth-provider/test-utils",
+	"reth-transaction-pool/test-utils",
+	"revm/test-utils"
+]

@@ -585,7 +585,7 @@ pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.5"
 serial_test = { default-features = false, version = "3" }
-similar-asserts = { default-features = false, version = "1.5.0" }
+similar-asserts = { version = "1.5.0", features = ["serde"] }
 tempfile = "3.8"
 test-fuzz = "6"
 

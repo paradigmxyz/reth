@@ -39,5 +39,14 @@ proptest-arbitrary-interop.workspace = true
 test-fuzz.workspace = true
 
 [features]
-test-utils = ["arbitrary"]
-arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest"]
+test-utils = [
+	"arbitrary",
+	"reth-primitives/test-utils",
+	"reth-codecs/test-utils"
+]
+arbitrary = [
+	"reth-primitives/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"alloy-primitives/arbitrary"
+]

@@ -73,11 +73,14 @@ reth-cli-commands.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
-    "reth-optimism-evm/optimism",
-    "reth-provider/optimism",
-    "reth-node-core/optimism",
-    "reth-optimism-node/optimism",
+	"reth-primitives/optimism",
+	"reth-optimism-evm/optimism",
+	"reth-provider/optimism",
+	"reth-node-core/optimism",
+	"reth-optimism-node/optimism",
+	"reth-execution-types/optimism",
+	"reth-db/optimism",
+	"reth-db-api/optimism"
 ]
 asm-keccak = [
     "alloy-primitives/asm-keccak",

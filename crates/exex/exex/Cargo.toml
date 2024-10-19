@@ -70,4 +70,14 @@ tempfile.workspace = true
 
 [features]
 default = []
-serde = ["reth-provider/serde", "reth-exex-types/serde"]
+serde = [
+	"reth-provider/serde",
+	"reth-exex-types/serde",
+	"reth-revm/serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"parking_lot/serde",
+	"rand/serde",
+	"secp256k1/serde"
+]

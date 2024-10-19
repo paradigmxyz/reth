@@ -33,10 +33,24 @@ reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 [features]
 default = ["std"]
 optimism = ["reth-primitives/optimism", "revm/optimism"]
-serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
-serde-bincode-compat = [
-    "reth-primitives/serde-bincode-compat",
-    "reth-trie/serde-bincode-compat",
-    "serde_with",
+serde = [
+	"dep:serde",
+	"reth-trie/serde",
+	"revm/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"rand/serde"
 ]
-std = []
+serde-bincode-compat = [
+	"reth-primitives/serde-bincode-compat",
+	"reth-trie/serde-bincode-compat",
+	"serde_with",
+	"alloy-eips/serde-bincode-compat"
+]
+std = [
+	"reth-primitives/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"serde?/std"
+]
