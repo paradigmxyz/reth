@@ -1,7 +1,8 @@
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt, Request};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
 
 /// Validate a block with regard to execution results:
 ///
@@ -11,7 +12,7 @@ pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
-    requests: &[Request],
+    requests: &Requests,
 ) -> Result<(), ConsensusError> {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
@@ -36,15 +37,15 @@ pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
         }
     }
 
-    // Validate that the header requests root matches the calculated requests root
+    // Validate that the header requests hash matches the calculated requests hash
     if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        let Some(header_requests_root) = block.header.requests_root else {
-            return Err(ConsensusError::RequestsRootMissing)
+        let Some(header_requests_hash) = block.header.requests_hash else {
+            return Err(ConsensusError::RequestsHashMissing)
         };
-        let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
-        if requests_root != header_requests_root {
-            return Err(ConsensusError::BodyRequestsRootDiff(
-                GotExpected::new(requests_root, header_requests_root).into(),
+        let requests_hash = requests.requests_hash();
+        if requests_hash != header_requests_hash {
+            return Err(ConsensusError::BodyRequestsHashDiff(
+                GotExpected::new(requests_hash, header_requests_hash).into(),
             ))
         }
     }

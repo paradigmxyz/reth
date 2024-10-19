@@ -97,7 +97,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Executor = C::Executor;
     type Network = C::Network;
     type Consensus = C::Consensus;
-    type EngineValidator = C::EngineValidator;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -129,10 +128,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn consensus(&self) -> &Self::Consensus {
         self.components.consensus()
-    }
-
-    fn engine_validator(&self) -> &Self::EngineValidator {
-        self.components.engine_validator()
     }
 }
 

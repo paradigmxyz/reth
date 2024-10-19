@@ -60,7 +60,6 @@ zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
@@ -97,7 +96,6 @@ reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "dep:arbitrary",
-    "dep:proptest",
     "alloy-eips/arbitrary",
     "rand",
     "reth-codec",

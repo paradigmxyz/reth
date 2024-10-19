@@ -799,6 +799,21 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
             best_payload: self.best_payload,
         }
     }
+
+    /// Maps the transaction pool to a new type using a closure with the current pool type as input.
+    pub fn map_pool<F, P>(self, f: F) -> BuildArguments<P, Client, Attributes, Payload>
+    where
+        F: FnOnce(Pool) -> P,
+    {
+        BuildArguments {
+            client: self.client,
+            pool: f(self.pool),
+            cached_reads: self.cached_reads,
+            config: self.config,
+            cancel: self.cancel,
+            best_payload: self.best_payload,
+        }
+    }
 }
 
 /// A trait for building payloads that encapsulate Ethereum transactions.
