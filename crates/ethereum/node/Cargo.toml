@@ -43,14 +43,12 @@ reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
-reth-node-core.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 futures.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 tokio.workspace = true
-futures-util.workspace = true
 serde_json.workspace = true
 alloy-consensus.workspace = true
 

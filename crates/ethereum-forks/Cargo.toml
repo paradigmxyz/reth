@@ -35,7 +35,6 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
 alloy-consensus.workspace = true
 
 [features]

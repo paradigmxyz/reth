@@ -31,7 +31,6 @@ tracing.workspace = true
 
 # misc
 rayon.workspace = true
-derive_more.workspace = true
 auto_impl.workspace = true
 itertools.workspace = true
 
@@ -50,7 +49,6 @@ serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
@@ -60,11 +58,6 @@ triehash = "0.8"
 # misc
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-tokio = { workspace = true, default-features = false, features = [
-    "sync",
-    "rt",
-    "macros",
-] }
 serde_json.workspace = true
 criterion.workspace = true
 bincode.workspace = true
