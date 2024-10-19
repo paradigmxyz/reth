@@ -325,7 +325,7 @@ where
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
-            continue;
+            continue
         }
 
         // Configure the environment for the block.
