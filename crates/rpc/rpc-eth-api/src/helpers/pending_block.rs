@@ -301,7 +301,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             // convert tx to a signed transaction
