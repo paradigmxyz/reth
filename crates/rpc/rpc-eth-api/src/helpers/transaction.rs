@@ -365,9 +365,8 @@ pub trait EthTransactions: LoadTransaction {
 
             // set nonce if not already set before
             if request.nonce.is_none() {
-                let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
-                // note: `.to()` can't panic because the nonce is constructed from a `u64`
-                request.nonce = Some(nonce.to());
+                let nonce = self.next_available_nonce(from).await?;
+                request.nonce = Some(nonce);
             }
 
             let chain_id = self.chain_id();

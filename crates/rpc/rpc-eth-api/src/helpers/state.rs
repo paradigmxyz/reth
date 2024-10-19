@@ -272,6 +272,42 @@ pub trait LoadState: EthApiTypes {
         }
     }
 
+    /// Returns the next available nonce without gaps for the given address
+    /// Next available nonce is either the on chain nonce of the account or the highest consecutive
+    /// nonce in the pool + 1
+    fn next_available_nonce(
+        &self,
+        address: Address,
+    ) -> impl Future<Output = Result<u64, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            // first fetch the on chain nonce of the account
+            let on_chain_account_nonce = this
+                .latest_state()?
+                .account_nonce(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
+            let mut next_nonce = on_chain_account_nonce;
+            // Retrieve the highest consecutive transaction for the sender from the transaction pool
+            if let Some(highest_tx) = this
+                .pool()
+                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            {
+                // Return the nonce of the highest consecutive transaction + 1
+                next_nonce = highest_tx.nonce().checked_add(1).ok_or_else(|| {
+                    Self::Error::from(EthApiError::InvalidTransaction(
+                        RpcInvalidTransactionError::NonceMaxValue,
+                    ))
+                })?;
+            }
+
+            Ok(next_nonce)
+        })
+    }
+
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
     /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
