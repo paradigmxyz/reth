@@ -273,7 +273,7 @@ mod tests {
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
         eip7685::EMPTY_REQUESTS_HASH,
     };
-    use alloy_primitives::{b256, bytes, fixed_bytes, keccak256, Bytes, TxKind, B256};
+    use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_evm::execute::{
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
@@ -1085,9 +1085,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        let request = requests.first().unwrap();
-        // TODO: must be empty? @onbjerg
-        assert_eq!(request, &bytes!("00")); // todo: placeholder
+        assert!(requests[0].is_empty(), "there should be no deposits");
+        assert!(!requests[1].is_empty(), "there should be a withdrawal");
+        assert!(requests[2].is_empty(), "there should be no consolidations");
     }
 
     #[test]

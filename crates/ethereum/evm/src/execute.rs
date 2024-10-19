@@ -511,7 +511,7 @@ mod tests {
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{bytes, BLOCKHASH_SERVE_WINDOW};
+    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
@@ -1297,9 +1297,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        let request = requests.first().unwrap();
-        // TODO: must be empty? @onbjerg
-        assert_eq!(request, &bytes!("00")); // todo: placeholder
+        assert!(requests[0].is_empty(), "there should be no deposits");
+        assert!(!requests[1].is_empty(), "there should be a withdrawal");
+        assert!(requests[2].is_empty(), "there should be no consolidations");
     }
 
     #[test]
