@@ -219,7 +219,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
-  # Check crates correclty propagate features
+  # Check crates correctly propagate features
   feature-propagation:
     runs-on: ubuntu-latest
     timeout-minutes: 20
