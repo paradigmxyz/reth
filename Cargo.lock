@@ -6406,7 +6406,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
