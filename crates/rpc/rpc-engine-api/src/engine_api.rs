@@ -2,12 +2,11 @@ use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
 use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
+    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
@@ -23,7 +22,7 @@ use reth_payload_primitives::{
 use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::{
-    convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
+    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -141,7 +140,7 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, None, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -157,7 +156,7 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, None, None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -179,15 +178,18 @@ where
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
-        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields), None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV4,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
+        // TODO(onbjerg): Figure out why we even get these here, since we'll check the requests
+        // from execution against the requests root in the header.
+        execution_requests: Vec<Bytes>,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
@@ -201,7 +203,13 @@ where
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
-        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
+        // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
+        // workaround.
+        Ok(self
+            .inner
+            .beacon_consensus
+            .new_payload(payload, Some(cancun_fields), Some(execution_requests))
+            .await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -371,7 +379,7 @@ where
             .map_err(|_| EngineApiError::UnknownPayload)?
             .try_into()
             .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV4");
+                warn!("could not transform built payload into ExecutionPayloadV3");
                 EngineApiError::UnknownPayload
             })
     }
@@ -451,18 +459,6 @@ where
         self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v1).await
     }
 
-    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
-    /// blocks.
-    ///
-    /// Same as [`Self::get_payload_bodies_by_range_v1`] but as [`ExecutionPayloadBodiesV2`].
-    pub async fn get_payload_bodies_by_range_v2(
-        &self,
-        start: BlockNumber,
-        count: u64,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v2).await
-    }
-
     /// Called to retrieve execution payload bodies by hashes.
     async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
@@ -507,16 +503,6 @@ where
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v1).await
-    }
-
-    /// Called to retrieve execution payload bodies by hashes.
-    ///
-    /// Same as [`Self::get_payload_bodies_by_hash_v1`] but as [`ExecutionPayloadBodiesV2`].
-    pub async fn get_payload_bodies_by_hash_v2(
-        &self,
-        hashes: Vec<BlockHash>,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
-        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v2).await
     }
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
@@ -688,15 +674,22 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV4,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
+        execution_requests: Vec<Bytes>,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
-        let gas_used = payload.payload_inner.payload_inner.payload_inner.gas_used;
-        let res =
-            Self::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root).await;
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
+        let res = Self::new_payload_v4(
+            self,
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+        )
+        .await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -846,17 +839,6 @@ where
         Ok(res.await?)
     }
 
-    async fn get_payload_bodies_by_hash_v2(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<ExecutionPayloadBodiesV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV2");
-        let start = Instant::now();
-        let res = Self::get_payload_bodies_by_hash_v2(self, block_hashes);
-        self.inner.metrics.latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
-        Ok(res.await?)
-    }
-
     /// Handler for `engine_getPayloadBodiesByRangeV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
@@ -882,18 +864,6 @@ where
         let start_time = Instant::now();
         let res = Self::get_payload_bodies_by_range_v1(self, start.to(), count.to()).await;
         self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
-        Ok(res?)
-    }
-
-    async fn get_payload_bodies_by_range_v2(
-        &self,
-        start: U64,
-        count: U64,
-    ) -> RpcResult<ExecutionPayloadBodiesV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV2");
-        let start_time = Instant::now();
-        let res = Self::get_payload_bodies_by_range_v2(self, start.to(), count.to()).await;
-        self.inner.metrics.latency.get_payload_bodies_by_range_v2.record(start_time.elapsed());
         Ok(res?)
     }
 

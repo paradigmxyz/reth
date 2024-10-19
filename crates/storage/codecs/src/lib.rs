@@ -78,6 +78,21 @@ pub trait Compact: Sized {
     }
 }
 
+impl Compact for alloc::string::String {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.as_bytes().to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (vec, buf) = Vec::<u8>::from_compact(buf, len);
+        let string = Self::from_utf8(vec).unwrap(); // Safe conversion
+        (string, buf)
+    }
+}
+
 impl<T: Compact> Compact for &T {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

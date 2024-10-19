@@ -21,6 +21,9 @@ reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
+
+# alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # revm
@@ -32,8 +35,7 @@ reth-ethereum-forks.workspace = true
 alloy-primitives.workspace = true
 
 [features]
-default = ["std", "c-kzg"]
+default = ["std"]
 std = []
-c-kzg = ["revm/c-kzg"]
 test-utils = ["dep:reth-trie"]
 serde = ["revm/serde"]

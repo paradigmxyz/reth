@@ -6,9 +6,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+extern crate alloc;
+
+use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
@@ -18,7 +22,6 @@ use reth_primitives::{
     Head, Header, TransactionSigned,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use std::sync::Arc;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -204,6 +207,7 @@ impl ConfigureEvm for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::ChainSpec;
@@ -212,7 +216,7 @@ mod tests {
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, Receipt, Receipts, SealedBlockWithSenders, TxType, KECCAK_EMPTY,
+        Header, Receipt, Receipts, SealedBlockWithSenders, TxType,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

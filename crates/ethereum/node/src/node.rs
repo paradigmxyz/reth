@@ -11,18 +11,21 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
-use reth_node_api::{ConfigureEvm, EngineValidator, FullNodeComponents, NodeTypesWithDB};
+use reth_node_api::{
+    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodePrimitives,
+    NodeTypesWithDB,
+};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
-        NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::RpcAddOns,
+    rpc::{EngineValidatorBuilder, RpcAddOns},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
@@ -32,6 +35,14 @@ use reth_transaction_pool::{
 };
 
 use crate::{EthEngineTypes, EthEvmConfig};
+
+/// Ethereum primitive types.
+#[derive(Debug)]
+pub struct EthPrimitives;
+
+impl NodePrimitives for EthPrimitives {
+    type Block = Block;
+}
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -47,7 +58,6 @@ impl EthereumNode {
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
-        EthereumEngineValidatorBuilder,
     >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
@@ -64,12 +74,11 @@ impl EthereumNode {
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
-            .engine_validator(EthereumEngineValidatorBuilder::default())
     }
 }
 
 impl NodeTypes for EthereumNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
 }
 
@@ -86,6 +95,7 @@ pub type EthereumAddOns<N> = RpcAddOns<
         NetworkHandle,
         <N as FullNodeComponents>::Evm,
     >,
+    EthereumEngineValidatorBuilder,
 >;
 
 impl<Types, N> Node<N> for EthereumNode
@@ -100,7 +110,6 @@ where
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
-        EthereumEngineValidatorBuilder,
     >;
 
     type AddOns = EthereumAddOns<
@@ -337,12 +346,12 @@ pub struct EthereumEngineValidatorBuilder;
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-    Node: FullNodeTypes<Types = Types>,
+    Node: FullNodeComponents<Types = Types>,
     EthereumEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = EthereumEngineValidator;
 
-    async fn build_validator(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Validator> {
-        Ok(EthereumEngineValidator::new(ctx.chain_spec()))
+    async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
+        Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
     }
 }

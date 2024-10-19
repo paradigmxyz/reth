@@ -4,7 +4,7 @@ use crate::{
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
@@ -1200,24 +1200,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        if !self.chain_spec().is_prague_active_at_timestamp(timestamp) {
-            return Ok(None)
-        }
-
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.requests_by_block(id, timestamp),
-            |block_state| Ok(block_state.block_ref().block().body.requests.clone()),
-        )
-    }
-}
-
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
@@ -1747,8 +1729,8 @@ mod tests {
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
-        ReceiptProviderIdExt, RequestsProvider, StateProviderFactory, TransactionVariant,
-        TransactionsProvider, WithdrawalsProvider,
+        ReceiptProviderIdExt, StateProviderFactory, TransactionVariant, TransactionsProvider,
+        WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1933,7 +1915,7 @@ mod tests {
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
     fn persist_block_after_db_tx_creation(
-        provider: Arc<BlockchainProvider2<MockNodeTypesWithDB>>,
+        provider: BlockchainProvider2<MockNodeTypesWithDB>,
         block_number: BlockNumber,
     ) {
         let hook_provider = provider.clone();
@@ -2850,37 +2832,6 @@ mod tests {
     }
 
     #[test]
-    fn test_requests_provider() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_chain_spec_and_random_blocks(
-                &mut rng,
-                chain_spec.clone(),
-                TEST_BLOCKS_COUNT,
-                TEST_BLOCKS_COUNT,
-                BlockRangeParams { requests_count: Some(1..2), ..Default::default() },
-            )?;
-
-        let database_block = database_blocks.first().unwrap().clone();
-        let in_memory_block = in_memory_blocks.last().unwrap().clone();
-
-        let prague_timestamp =
-            chain_spec.hardforks.fork(EthereumHardfork::Prague).as_timestamp().unwrap();
-
-        assert_eq!(
-            provider.requests_by_block(database_block.number.into(), prague_timestamp,)?,
-            database_block.body.requests.clone()
-        );
-        assert_eq!(
-            provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
-            in_memory_block.body.requests.clone()
-        );
-
-        Ok(())
-    }
-
-    #[test]
     fn test_state_provider_factory() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
@@ -3142,7 +3093,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3257,7 +3207,6 @@ mod tests {
                     ..Default::default()
                 },
             )?;
-            let provider = Arc::new(provider);
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -3383,7 +3332,6 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        let provider = Arc::new(provider);
 
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
@@ -3685,8 +3633,6 @@ mod tests {
             },
         )?;
 
-        let provider = Arc::new(provider);
-
         // Old implementation was querying the database first. This is problematic, if there are
         // changes AFTER the database transaction is created.
         let old_transaction_hash_fn =
@@ -3739,7 +3685,7 @@ mod tests {
                 correct_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
-                    provider.database.clone()
+                    provider.database
                 ),
                 Ok(Some(to_be_persisted_tx))
             );

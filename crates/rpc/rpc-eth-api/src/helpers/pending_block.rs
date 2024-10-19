@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
@@ -12,14 +14,14 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs::calculate_transaction_root,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, BlockBody, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
-    TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, SealedBlockWithSenders, SealedHeader,
+    TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -416,14 +418,9 @@ pub trait LoadPendingBlock: EthApiTypes {
         let blob_gas_used =
             (cfg.handler_cfg.spec_id >= SpecId::CANCUN).then_some(sum_blob_gas_used);
 
-        // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
-        // set these to empty
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-            } else {
-                (None, None)
-            };
+        let requests_hash = chain_spec
+            .is_prague_active_at_timestamp(block_env.timestamp.to::<u64>())
+            .then_some(EMPTY_REQUESTS_HASH);
 
         let header = Header {
             parent_hash,
@@ -446,7 +443,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
             extra_data: Default::default(),
             parent_beacon_block_root,
-            requests_root,
+            requests_hash,
         };
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>
@@ -455,7 +452,7 @@ pub trait LoadPendingBlock: EthApiTypes {
         // seal the block
         let block = Block {
             header,
-            body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests },
+            body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
         };
         Ok((SealedBlockWithSenders { block: block.seal_slow(), senders }, receipts))
     }
