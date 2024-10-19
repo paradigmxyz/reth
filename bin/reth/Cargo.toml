@@ -96,7 +96,6 @@ backon.workspace = true
 similar-asserts.workspace = true
 
 [dev-dependencies]
-reth-discv4.workspace = true
 tempfile.workspace = true
 
 [features]

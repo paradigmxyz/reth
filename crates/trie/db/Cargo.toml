@@ -17,7 +17,6 @@ reth-primitives.workspace = true
 reth-execution-errors.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
-reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 reth-trie.workspace = true
@@ -32,10 +31,7 @@ alloy-primitives.workspace = true
 tracing.workspace = true
 
 # misc
-rayon.workspace = true
 derive_more.workspace = true
-auto_impl.workspace = true
-itertools.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -56,7 +52,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
-reth-node-types.workspace = true
 
 alloy-consensus.workspace = true
 
@@ -66,12 +61,6 @@ triehash = "0.8"
 # misc
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-tokio = { workspace = true, default-features = false, features = [
-    "sync",
-    "rt",
-    "macros",
-] }
-tokio-stream.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 

@@ -74,7 +74,6 @@ futures.workspace = true
 # test vectors generation
 proptest.workspace = true
 tokio.workspace = true
-tempfile.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism"]
