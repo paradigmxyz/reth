@@ -161,12 +161,12 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into());
+                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into())
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.

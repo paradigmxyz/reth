@@ -133,7 +133,7 @@ where
                     }
                     Err(_) => {}
                 };
-                continue;
+                continue
             }
 
             if let EngineReorgState::Reorg { queue } = &mut this.state {
@@ -189,7 +189,7 @@ where
                                     cancun_fields,
                                     execution_requests,
                                     tx,
-                                }));
+                                }))
                             }
                         };
                     let reorg_forkchoice_state = ForkchoiceState {
@@ -228,7 +228,7 @@ where
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
-                    continue;
+                    continue
                 }
                 (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
@@ -240,7 +240,7 @@ where
                 }
                 (item, _) => item,
             };
-            return Poll::Ready(item);
+            return Poll::Ready(item)
         }
     }
 }
@@ -279,7 +279,7 @@ where
                 .block_by_hash(previous_hash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
             if depth == 0 {
-                break 'target reorg_target;
+                break 'target reorg_target
             }
 
             depth -= 1;
@@ -337,7 +337,7 @@ where
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
                 trace!(target: "engine::stream::reorg", hash = %tx.hash(), ?error, "Error executing transaction from next block");
-                continue;
+                continue
             }
             // Treat error as fatal
             Err(error) => {
