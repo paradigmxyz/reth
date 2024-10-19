@@ -90,18 +90,41 @@ pprof = { workspace = true, features = [
 
 [features]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
-std = ["reth-primitives-traits/std"]
+std = [
+	"reth-primitives-traits/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"alloy-serde?/std",
+	"k256/std",
+	"once_cell/std",
+	"revm-primitives/std",
+	"secp256k1?/std",
+	"serde/std"
+]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
-asm-keccak = ["alloy-primitives/asm-keccak"]
+asm-keccak = [
+	"alloy-primitives/asm-keccak",
+	"revm-primitives/asm-keccak"
+]
 arbitrary = [
-    "dep:arbitrary",
-    "alloy-eips/arbitrary",
-    "rand",
-    "reth-codec",
-    "reth-ethereum-forks/arbitrary",
-    "reth-primitives-traits/arbitrary",
-    "revm-primitives/arbitrary",
-    "secp256k1",
+	"dep:arbitrary",
+	"alloy-eips/arbitrary",
+	"rand",
+	"reth-codec",
+	"reth-ethereum-forks/arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"revm-primitives/arbitrary",
+	"secp256k1",
+	"reth-chainspec/arbitrary",
+	"reth-trie-common/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-rpc-types?/arbitrary",
+	"alloy-serde?/arbitrary",
+	"op-alloy-consensus?/arbitrary",
+	"op-alloy-rpc-types?/arbitrary"
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [
@@ -121,12 +144,18 @@ alloy-compat = [
     "dep:alloy-serde",
     "dep:op-alloy-rpc-types",
 ]
-test-utils = ["reth-primitives-traits/test-utils"]
+test-utils = [
+	"reth-primitives-traits/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-codecs?/test-utils",
+	"reth-trie-common/test-utils"
+]
 serde-bincode-compat = [
-    "alloy-consensus/serde-bincode-compat",
-    "op-alloy-consensus?/serde-bincode-compat",
-    "reth-primitives-traits/serde-bincode-compat",
-    "serde_with",
+	"alloy-consensus/serde-bincode-compat",
+	"op-alloy-consensus?/serde-bincode-compat",
+	"reth-primitives-traits/serde-bincode-compat",
+	"serde_with",
+	"alloy-eips/serde-bincode-compat"
 ]
 
 [[bench]]

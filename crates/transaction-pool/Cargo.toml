@@ -72,12 +72,42 @@ serde_json.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
-test-utils = ["rand", "paste", "serde"]
+serde = [
+	"dep:serde",
+	"reth-execution-types/serde",
+	"reth-eth-wire-types/serde",
+	"reth-provider/serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bitflags/serde",
+	"parking_lot/serde",
+	"rand?/serde",
+	"revm/serde",
+	"smallvec/serde"
+]
+test-utils = [
+	"rand",
+	"paste",
+	"serde",
+	"reth-chain-state/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-provider/test-utils",
+	"revm/test-utils"
+]
 arbitrary = [
-    "proptest",
-    "reth-primitives/arbitrary",
-    "proptest-arbitrary-interop",
+	"proptest",
+	"reth-primitives/arbitrary",
+	"proptest-arbitrary-interop",
+	"reth-chainspec/arbitrary",
+	"reth-eth-wire-types/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary",
+	"bitflags/arbitrary",
+	"revm/arbitrary",
+	"smallvec/arbitrary"
 ]
 
 [[bench]]

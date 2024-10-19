@@ -55,4 +55,17 @@ alloy-consensus.workspace = true
 
 [features]
 default = []
-test-utils = ["reth-node-builder/test-utils"]
+test-utils = [
+	"reth-node-builder/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-network/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-revm/test-utils",
+	"reth-db/test-utils",
+	"reth-provider/test-utils",
+	"reth-transaction-pool/test-utils",
+	"revm/test-utils",
+	"reth-evm/test-utils"
+]

@@ -42,5 +42,24 @@ reth-ethereum-forks.workspace = true
 
 [features]
 default = ["std"]
-std = ["dep:metrics", "dep:reth-metrics"]
-test-utils = ["dep:parking_lot"]
+std = [
+	"dep:metrics",
+	"dep:reth-metrics",
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"revm-primitives/std",
+	"revm/std"
+]
+test-utils = [
+	"dep:parking_lot",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-revm/test-utils",
+	"revm/test-utils"
+]

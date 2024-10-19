@@ -49,7 +49,15 @@ serde.workspace = true
 
 [features]
 default = ["std", "alloy"]
-std = ["alloy-primitives/std", "bytes/std"]
+std = [
+	"alloy-primitives/std",
+	"bytes/std",
+	"alloy-consensus?/std",
+	"alloy-eips?/std",
+	"alloy-genesis?/std",
+	"alloy-trie?/std",
+	"serde/std"
+]
 alloy = [
     "dep:alloy-consensus",
     "dep:alloy-eips",

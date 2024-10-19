@@ -66,5 +66,23 @@ similar-asserts.workspace = true
 
 [features]
 metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]
-serde = ["dep:serde"]
-test-utils = ["triehash", "reth-trie-common/test-utils"]
+serde = [
+	"dep:serde",
+	"reth-provider/serde",
+	"reth-trie/serde",
+	"alloy-consensus/serde",
+	"alloy-primitives/serde",
+	"revm/serde",
+	"similar-asserts/serde"
+]
+test-utils = [
+	"triehash",
+	"reth-trie-common/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-db/test-utils",
+	"reth-db-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-trie/test-utils",
+	"revm/test-utils"
+]

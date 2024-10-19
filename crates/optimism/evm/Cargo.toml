@@ -51,10 +51,21 @@ alloy-consensus.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = [
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-revm/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"revm-primitives/std",
+	"revm/std"
+]
 optimism = [
-    "reth-primitives/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "revm/optimism",
+	"reth-primitives/optimism",
+	"reth-execution-types/optimism",
+	"reth-optimism-consensus/optimism",
+	"revm/optimism",
+	"revm-primitives/optimism"
 ]

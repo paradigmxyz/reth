@@ -93,13 +93,24 @@ pprof = { workspace = true, features = [
 
 [features]
 test-utils = [
-    "dep:reth-chainspec",
-    "reth-network-p2p/test-utils",
-    "reth-db/test-utils",
-    "reth-provider/test-utils",
-    "reth-stages-api/test-utils",
-    "dep:reth-testing-utils",
-    "dep:tempfile",
+	"dep:reth-chainspec",
+	"reth-network-p2p/test-utils",
+	"reth-db/test-utils",
+	"reth-provider/test-utils",
+	"reth-stages-api/test-utils",
+	"dep:reth-testing-utils",
+	"dep:tempfile",
+	"reth-chainspec?/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-downloaders/test-utils",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-revm/test-utils",
+	"reth-codecs/test-utils",
+	"reth-db-api/test-utils",
+	"reth-trie-db/test-utils",
+	"reth-trie/test-utils"
 ]
 
 [[bench]]

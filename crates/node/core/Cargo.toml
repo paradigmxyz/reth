@@ -76,10 +76,18 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism"]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-db/optimism"
+]
 # Features for vergen to generate correct env vars
-jemalloc = []
-asm-keccak = []
+jemalloc = [
+	"reth-cli-util/jemalloc"
+]
+asm-keccak = [
+	"reth-primitives/asm-keccak",
+	"alloy-primitives/asm-keccak"
+]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

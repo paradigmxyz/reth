@@ -89,10 +89,28 @@ mdbx = [
     "dep:strum",
     "dep:rustc-hash",
 ]
-test-utils = ["dep:tempfile", "arbitrary", "parking_lot"]
+test-utils = [
+	"dep:tempfile",
+	"arbitrary",
+	"parking_lot",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-db-api/test-utils",
+	"reth-nippy-jar/test-utils",
+	"reth-trie-common/test-utils"
+]
 bench = []
-arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
-optimism = []
+arbitrary = [
+	"reth-primitives/arbitrary",
+	"reth-db-api/arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"reth-trie-common/arbitrary",
+	"alloy-primitives/arbitrary"
+]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-db-api/optimism"
+]
 disable-lock = []
 
 [[bench]]
