@@ -154,9 +154,9 @@ pub trait LoadPendingBlock: EthApiTypes {
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number
-                    && pending.origin.header().hash() == pending_block.block.parent_hash
-                    && now <= pending_block.expires_at
+                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                    pending.origin.header().hash() == pending_block.block.parent_hash &&
+                    now <= pending_block.expires_at
                 {
                     return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
                 }
