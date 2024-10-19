@@ -205,7 +205,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-// Implement the trait for ReceiptWithBloom
 impl Encodable2718 for ReceiptWithBloom {
     /// Encodes the receipt into its "raw" format.
     /// This format is also referred to as "binary" encoding.
