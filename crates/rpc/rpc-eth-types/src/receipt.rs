@@ -102,8 +102,6 @@ impl ReceiptBuilder {
             gas_used: gas_used as u128,
             contract_address,
             effective_gas_price: transaction.effective_gas_price(meta.base_fee),
-            // TODO pre-byzantium receipts have a post-transaction state root
-            state_root: None,
             // EIP-4844 fields
             blob_gas_price,
             blob_gas_used: blob_gas_used.map(u128::from),

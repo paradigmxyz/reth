@@ -2,8 +2,8 @@
 
 use alloc::{fmt, vec::Vec};
 
-use alloy_consensus::{BlockHeader, Request, Transaction, TxType};
-use alloy_eips::eip4895::Withdrawal;
+use alloy_consensus::{BlockHeader, Transaction, TxType};
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
 
 use crate::Block;
@@ -30,9 +30,6 @@ pub trait BlockBody:
     /// Withdrawals in block.
     type Withdrawals: Iterator<Item = Withdrawal>;
 
-    /// Requests in block.
-    type Requests: Iterator<Item = Request>;
-
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::SignedTransaction];
 
@@ -43,8 +40,8 @@ pub trait BlockBody:
     /// Returns reference to uncle block headers.
     fn ommers(&self) -> &[Self::Header];
 
-    /// Returns [`Request`] in block, if any.
-    fn requests(&self) -> Option<&Self::Requests>;
+    /// Returns [`Requests`] in block, if any.
+    fn requests(&self) -> Option<&Requests>;
 
     /// Create a [`Block`] from the body and its header.
     fn into_block<T: Block<Header = Self::Header, Body = Self>>(self, header: Self::Header) -> T {
@@ -62,12 +59,6 @@ pub trait BlockBody:
     // todo: can be default impl if `calculate_withdrawals_root` made into a method on
     // `Withdrawals` and `Withdrawals` moved to alloy
     fn calculate_withdrawals_root(&self) -> Option<B256>;
-
-    /// Calculate the requests root for the block body, if requests exist. If there are no
-    /// requests, this will return `None`.
-    // todo: can be default impl if `calculate_requests_root` made into a method on
-    // `Requests` and `Requests` moved to alloy
-    fn calculate_requests_root(&self) -> Option<B256>;
 
     /// Recover signer addresses for all transactions in the block body.
     fn recover_signers(&self) -> Option<Vec<Address>>;

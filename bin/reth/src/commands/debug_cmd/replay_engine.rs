@@ -171,7 +171,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     debug!(target: "reth::cli", ?response, "Received for forkchoice updated");
                 }
                 StoredEngineApiMessage::NewPayload { payload, cancun_fields } => {
-                    let response = beacon_engine_handle.new_payload(payload, cancun_fields).await?;
+                    // todo: prague (last arg)
+                    let response =
+                        beacon_engine_handle.new_payload(payload, cancun_fields, None).await?;
                     debug!(target: "reth::cli", ?response, "Received for new payload");
                 }
             };
