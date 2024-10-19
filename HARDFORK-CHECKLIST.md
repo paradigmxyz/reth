@@ -9,8 +9,8 @@
 
 ## Engine API
 
-If there are changes to the engine API (e.g. a new `engine_newPayloadVx` and `engine_getPayloadVx` pair) add the new types to the `alloy-rpc-types-engine` crate.
-If there are new parameters to the `engine_newPayloadVx` endpoint, add them to the `ExecutionPayloadSidecar` container type. This types contains all additional parameters that are required to convert an `ExecutionPayload` to an EL block.
+- If there are changes to the engine API (e.g. a new `engine_newPayloadVx` and `engine_getPayloadVx` pair) add the new types to the `alloy-rpc-types-engine` crate.
+- If there are new parameters to the `engine_newPayloadVx` endpoint, add them to the `ExecutionPayloadSidecar` container type. This types contains all additional parameters that are required to convert an `ExecutionPayload` to an EL block.
 
 ## Reth changes
 
