@@ -15,14 +15,11 @@ up to date.
 To run Reth, Grafana or Prometheus with Docker Compose, refer to
 the [docker docs](/book/installation/docker.md#using-docker-compose).
 
-Thank you for providing that context. I understand now that this text is already part of a subsection. I'll revise it to
-fit better within that structure while still improving clarity and readability.
-
 ### Grafana
 
 #### Adding a new metric to Grafana
 
-To set up a new metric in the Reth Grafana dashboard:
+To set up a new metric Reth and its Grafana dashboard:
 
 1. Add the metric to the codebase following the [metrics section](../docs/design/metrics.md#creating-metrics)
    documentation.
@@ -50,7 +47,7 @@ To set up a new metric in the Reth Grafana dashboard:
 6. Configure your metric panel:
     - Set a panel title and description
     - Select metric(s) from the `Metrics browser` or use the `PromQL` terminal
-    - Document your metric(s) by setting units, legends,...
+    - Document your metric(s) by setting units, legends, etc.
     - When adding multiple metrics, use field overwrites if needed
 
 7. Save and arrange:
@@ -63,13 +60,22 @@ To set up a new metric in the Reth Grafana dashboard:
     - Click `Save to file`
 
 9. Update dashboard file:
-    - Replace the content of the corresponding file in the [dashboards folder](grafana/dashboards) with the exported
+    - Replace the content of the corresponding file in the [dashboards folder](./grafana/dashboards) with the exported
       JSON
 
 Your new metric is now integrated into the Reth Grafana dashboard.
 
 #### Import Grafana dashboards
 
-Running Grafana in Docker makes it possible to import existing dashboards, refer
-to [docs on how to run only Grafana in Docker](/book/installation/docker.md#using-docker-compose#run-only-grafana-in-docker).
+In order to import new Grafana dashboards or update a dashboard:
 
+1. Go to `Home` > `Dashboards`
+
+2. Click `New` > `Import`
+
+3. Drag the JSON dashboard file to import it
+
+4. If updating an existing dashboard, you will need to change the name and UID of the imported dashboard in order to
+   avoid conflict
+
+5. Delete the old dashboard
