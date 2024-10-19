@@ -1248,15 +1248,16 @@ mod tests {
             HashMap::default(),
         );
 
-        // https://github.com/lightclient/7002asm/blob/e0d68e04d15f25057af7b6d180423d94b6b3bdb3/test/Contract.t.sol.in#L49-L64
+        // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
         let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
-        let withdrawal_amount = fixed_bytes!("2222222222222222");
+        let withdrawal_amount = fixed_bytes!("0203040506070809");
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
 
         let mut header = chain_spec.genesis_header().clone();
         header.gas_limit = 1_500_000;
-        header.gas_used = 134_807;
+        // measured
+        header.gas_used = 135_856;
         header.receipts_root =
             b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
 
@@ -1266,10 +1267,10 @@ mod tests {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
                 gas_price: header.base_fee_per_gas.unwrap().into(),
-                gas_limit: 134_807,
+                gas_limit: header.gas_used,
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 // `MIN_WITHDRAWAL_REQUEST_FEE`
-                value: U256::from(1),
+                value: U256::from(2),
                 input,
             }),
         );
@@ -1297,6 +1298,7 @@ mod tests {
         assert!(receipt.success);
 
         let request = requests.first().unwrap();
+        // TODO: must be empty? @onbjerg
         assert_eq!(request, &bytes!("00")); // todo: placeholder
     }
 
