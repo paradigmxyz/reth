@@ -1,3 +1,5 @@
+//! State changes that are not related to transactions.
+
 use alloy_primitives::{map::HashMap, Address, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;

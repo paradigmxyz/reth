@@ -11,7 +11,10 @@ use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm, ConfigureEvmEnv,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
@@ -27,9 +30,7 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
     ReceiptProvider, StateProviderFactory,
 };
-use reth_revm::{
-    database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
@@ -157,7 +158,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())))
+                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
                 }
             }
 

@@ -46,4 +46,12 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-optimism = ["reth-provider/optimism", "reth-optimism-consensus"]
+optimism = [
+	"reth-provider/optimism",
+	"reth-optimism-consensus",
+	"reth-beacon-consensus/optimism",
+	"reth-execution-types/optimism",
+	"reth-optimism-consensus?/optimism",
+	"reth-primitives/optimism",
+	"revm-primitives/optimism"
+]

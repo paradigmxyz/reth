@@ -20,6 +20,5 @@ reth-primitives.workspace = true
 serde_json.workspace = true
 reth-tracing.workspace = true
 tokio-stream.workspace = true
-reth-provider = { workspace = true, features = ["test-utils"] }
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 alloy-primitives.workspace = true

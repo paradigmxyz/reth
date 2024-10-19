@@ -12,6 +12,7 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         BlockValidationError, ProviderError,
     },
+    state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, ConfigureEvmEnv,
 };
@@ -21,7 +22,6 @@ use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
-    state_change::post_block_balance_increments,
     Database, State,
 };
 use revm_primitives::{

@@ -56,9 +56,13 @@ revm.workspace = true
 
 [features]
 test-utils = [
-  "alloy-signer",
-  "alloy-signer-local",
-  "alloy-consensus",
-  "rand",
-  "revm"
+	"alloy-signer",
+	"alloy-signer-local",
+	"alloy-consensus",
+	"rand",
+	"revm",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-trie/test-utils",
+	"revm?/test-utils"
 ]
