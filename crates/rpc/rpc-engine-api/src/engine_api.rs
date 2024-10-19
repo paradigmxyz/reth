@@ -289,7 +289,7 @@ where
     pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV2> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -324,7 +324,7 @@ where
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV3> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -359,7 +359,7 @@ where
     pub async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV4> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -778,7 +778,7 @@ where
     async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV2> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         let start = Instant::now();
         let res = Self::get_payload_v2(self, payload_id).await;
@@ -798,7 +798,7 @@ where
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV3> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         let start = Instant::now();
         let res = Self::get_payload_v3(self, payload_id).await;
@@ -818,7 +818,7 @@ where
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV4> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         let start = Instant::now();
         let res = Self::get_payload_v4(self, payload_id).await;
