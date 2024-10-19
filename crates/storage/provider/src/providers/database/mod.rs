@@ -23,8 +23,10 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::TryIntoHistoricalStateProvider;
+use reth_storage_api::{HashedPostStateProvider, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::HashedPostState;
+use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -130,7 +132,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
     /// data.
     #[track_caller]
-    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N::ChainSpec>> {
+    pub fn provider(
+        &self,
+    ) -> ProviderResult<DatabaseProviderRO<N::DB, N::ChainSpec, N::StateCommitment>> {
         Ok(DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
@@ -144,7 +148,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     #[track_caller]
-    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N::ChainSpec>> {
+    pub fn provider_rw(
+        &self,
+    ) -> ProviderResult<DatabaseProviderRW<N::DB, N::ChainSpec, N::StateCommitment>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
@@ -157,7 +163,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?, self.static_file_provider())))
+        Ok(Box::new(LatestStateProvider::<_, N::StateCommitment>::new(
+            self.db.tx()?,
+            self.static_file_provider(),
+        )))
     }
 
     /// Storage provider for state at that given block
@@ -186,8 +195,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX, N::ChainSpec>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N::ChainSpec>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX, N::ChainSpec, N::StateCommitment>;
+    type ProviderRW =
+        DatabaseProvider<<N::DB as Database>::TXMut, N::ChainSpec, N::StateCommitment>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()
@@ -612,6 +622,28 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.provider()?.get_prune_checkpoints()
+    }
+}
+
+impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
+    fn hashed_post_state_from_bundle_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> reth_trie::HashedPostState {
+        HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
+            &bundle_state.state,
+        )
+    }
+
+    fn hashed_post_state_from_reverts(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<HashedPostState> {
+        HashedPostState::from_reverts::<<N::StateCommitment as StateCommitment>::KeyHasher>(
+            &self.db.tx().map_err(Into::<ProviderError>::into)?,
+            block_number,
+        )
+        .map_err(Into::into)
     }
 }
 
