@@ -58,7 +58,6 @@ strum = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-rand.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 test-fuzz.workspace = true

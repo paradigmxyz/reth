@@ -76,7 +76,6 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-rand.workspace = true
 
 [features]
 test-utils = [
@@ -86,5 +85,5 @@ test-utils = [
   "reth-prune-types",
   "reth-stages/test-utils",
   "reth-static-file",
-  "reth-tracing"
+  "reth-tracing",
 ]

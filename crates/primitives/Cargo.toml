@@ -75,7 +75,6 @@ alloy-genesis.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 bincode.workspace = true
-modular-bitfield.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
