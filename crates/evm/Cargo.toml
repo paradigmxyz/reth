@@ -52,6 +52,7 @@ std = [
     "reth-revm/std",
     "alloy-eips/std",
     "alloy-primitives/std",
+    "alloy-consensus/std",
     "revm-primitives/std",
     "revm/std",
 ]
