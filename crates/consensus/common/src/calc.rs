@@ -57,7 +57,7 @@ pub fn base_block_reward_pre_merge(chain_spec: impl Hardforks, block_number: Blo
 /// ```
 /// # use reth_chainspec::MAINNET;
 /// # use reth_consensus_common::calc::{base_block_reward, block_reward};
-/// # use reth_primitives::constants::ETH_TO_WEI;
+/// # use alloy_consensus::constants::ETH_TO_WEI;
 /// # use alloy_primitives::U256;
 /// #
 /// // This is block 126 on mainnet.
