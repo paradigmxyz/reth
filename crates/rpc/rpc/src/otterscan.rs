@@ -261,7 +261,6 @@ where
                     from: receipt.from(),
                     to: receipt.to(),
                     contract_address: receipt.contract_address(),
-                    state_root: receipt.state_root(),
                     authorization_list: receipt
                         .authorization_list()
                         .map(<[SignedAuthorization]>::to_vec),

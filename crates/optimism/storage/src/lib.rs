@@ -16,7 +16,7 @@ mod tests {
         CompactClientVersion, CompactU256, CompactU64, StoredBlockBodyIndices, StoredBlockOmmers,
         StoredBlockWithdrawals,
     };
-    use reth_primitives::{Account, Receipt, ReceiptWithBloom, Requests, Withdrawals};
+    use reth_primitives::{Account, Receipt, ReceiptWithBloom, Withdrawals};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
@@ -74,6 +74,5 @@ mod tests {
         validate_bitflag_backwards_compat!(StoredBlockWithdrawals, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(Withdrawals, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(Requests, UnusedBits::Zero);
     }
 }

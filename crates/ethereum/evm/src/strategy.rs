@@ -6,6 +6,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use alloy_consensus::Transaction as _;
+use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
@@ -18,7 +19,7 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, ConfigureEvmEnv,
 };
-use reth_primitives::{BlockWithSenders, Header, Receipt, Request};
+use reth_primitives::{BlockWithSenders, Header, Receipt};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     state_change::post_block_balance_increments,
@@ -194,7 +195,7 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
         receipts: &[Receipt],
-    ) -> Result<Vec<Request>, Self::Error> {
+    ) -> Result<Requests, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -203,12 +204,11 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
 
-            let post_execution_requests =
-                self.system_caller.apply_post_execution_changes(&mut evm)?;
-
-            [deposit_requests, post_execution_requests].concat()
+            let mut requests = Requests::new(vec![deposit_requests]);
+            requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
+            requests
         } else {
-            vec![]
+            Requests::default()
         };
         drop(evm);
 
@@ -257,7 +257,7 @@ where
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
-        requests: &[Request],
+        requests: &Requests,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec.clone(), receipts, requests)
     }
@@ -266,11 +266,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxLegacy, EMPTY_ROOT_HASH};
+    use alloy_consensus::TxLegacy;
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7685::EMPTY_REQUESTS_HASH,
     };
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
@@ -365,7 +366,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -397,7 +397,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -468,7 +467,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -523,7 +521,6 @@ mod tests {
                                 transactions: vec![],
                                 ommers: vec![],
                                 withdrawals: None,
-                                requests: None,
                             },
                         },
                         senders: vec![],
@@ -797,7 +794,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
@@ -855,7 +852,7 @@ mod tests {
             parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
 
@@ -901,7 +898,7 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header().clone();
-        header.requests_root = Some(EMPTY_ROOT_HASH);
+        header.requests_hash = Some(EMPTY_REQUESTS_HASH);
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
@@ -938,7 +935,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 1,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
         let header_hash = header.hash_slow();
@@ -977,7 +974,7 @@ mod tests {
             parent_hash: header_hash,
             timestamp: 1,
             number: 2,
-            requests_root: Some(EMPTY_ROOT_HASH),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
             ..Header::default()
         };
 
@@ -1039,15 +1036,16 @@ mod tests {
             HashMap::default(),
         );
 
-        // https://github.com/lightclient/7002asm/blob/e0d68e04d15f25057af7b6d180423d94b6b3bdb3/test/Contract.t.sol.in#L49-L64
+        // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
         let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
-        let withdrawal_amount = fixed_bytes!("2222222222222222");
+        let withdrawal_amount = fixed_bytes!("0203040506070809");
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
 
         let mut header = chain_spec.genesis_header().clone();
         header.gas_limit = 1_500_000;
-        header.gas_used = 134_807;
+        // measured
+        header.gas_used = 135_856;
         header.receipts_root =
             b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
 
@@ -1057,10 +1055,10 @@ mod tests {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
                 gas_price: header.base_fee_per_gas.unwrap().into(),
-                gas_limit: 134_807,
+                gas_limit: header.gas_used,
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 // `MIN_WITHDRAWAL_REQUEST_FEE`
-                value: U256::from(1),
+                value: U256::from(2),
                 input,
             }),
         );
@@ -1087,11 +1085,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        let request = requests.first().unwrap();
-        let withdrawal_request = request.as_withdrawal_request().unwrap();
-        assert_eq!(withdrawal_request.source_address, sender_address);
-        assert_eq!(withdrawal_request.validator_pubkey, validator_public_key);
-        assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
+        assert!(requests[0].is_empty(), "there should be no deposits");
+        assert!(!requests[1].is_empty(), "there should be a withdrawal");
+        assert!(requests[2].is_empty(), "there should be no consolidations");
     }
 
     #[test]
