@@ -339,11 +339,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::Reverts);
 
+    let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts.clone()].into(),
+        vec![receipts].into(),
         block_number,
-        vec![requests.clone().unwrap_or_default()],
+        vec![requests.unwrap_or_default()],
     );
     let receipts_root =
         execution_outcome.receipts_root_slow(block_number).expect("Number is in range");
@@ -411,7 +412,7 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
-        requests_hash: requests.map(|r| r.requests_hash()),
+        requests_hash,
     };
 
     // seal the block
