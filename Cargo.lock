@@ -6417,6 +6417,7 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "1.1.0"
 dependencies = [
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -7217,6 +7218,7 @@ name = "reth-engine-util"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
@@ -8400,7 +8402,6 @@ name = "reth-payload-validator"
 version = "1.1.0"
 dependencies = [
  "alloy-eips",
- "alloy-primitives",
  "alloy-rpc-types",
  "reth-chainspec",
  "reth-primitives",

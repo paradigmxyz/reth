@@ -3,7 +3,7 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
-use alloy_eips::{eip4844::BlobAndProofV1, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types::{
@@ -57,7 +57,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>

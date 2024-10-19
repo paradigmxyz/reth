@@ -1,8 +1,8 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
+use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
@@ -189,7 +189,7 @@ where
         parent_beacon_block_root: B256,
         // TODO(onbjerg): Figure out why we even get these here, since we'll check the requests
         // from execution against the requests root in the header.
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
@@ -677,7 +677,7 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
