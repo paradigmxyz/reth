@@ -2,10 +2,10 @@
 
 ## Introducing new EIP types or changes to primitive types 
 
-Make required changes to primitive data structures on [alloy](https://github.com/alloy-rs/alloy)
-All new EIP data structures/constants etc. go into the `alloy-eips` crate at first.
-New Transaction types go into `alloy-consensus`
-If there are changes to existing data structures, such as `Header` or `Block`, apply them to the types in `alloy-consensus` (e.g. new `request_hashes` field in prague)
+- Make required changes to primitive data structures on [alloy](https://github.com/alloy-rs/alloy)
+- All new EIP data structures/constants/helpers etc. go into the `alloy-eips` crate at first.
+- New transaction types go into `alloy-consensus`
+- If there are changes to existing data structures, such as `Header` or `Block`, apply them to the types in `alloy-consensus` (e.g. new `request_hashes` field in Prague)
 
 ## Engine API
 
