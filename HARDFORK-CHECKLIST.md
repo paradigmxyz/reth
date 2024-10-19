@@ -16,6 +16,6 @@ If there are new parameters to the `engine_newPayloadVx` endpoint, add them to t
 
 ### Updates to the engine API
 
-Add new endpoints to the `EngineApi` trait and implement endpoints.
-Update the `ExceuctionPayload` + `ExecutionPayloadSidecar` to `Block` conversion if there are any additional parameters.
-Update version specific validation checks in the `EngineValidator` trait.
+- Add new endpoints to the `EngineApi` trait and implement endpoints.
+- Update the `ExceuctionPayload` + `ExecutionPayloadSidecar` to `Block` conversion if there are any additional parameters.
+- Update version specific validation checks in the `EngineValidator` trait.
