@@ -14,6 +14,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    state_change::post_block_balance_increments,
     system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
@@ -22,10 +23,7 @@ use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
-use reth_revm::{
-    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
-    state_change::post_block_balance_increments, Evm, State,
-};
+use reth_revm::{batch::BlockBatchRecord, db::states::bundle_state::BundleRetention, Evm, State};
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,

@@ -12,14 +12,16 @@ use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnFork
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm};
+use reth_evm::{
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm,
+};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{proofs, Block, BlockBody, Header, Receipt, Receipts};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
-    state_change::post_block_withdrawals_balance_increments,
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;

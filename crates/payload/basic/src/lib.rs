@@ -14,6 +14,7 @@ use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{
     database::CachedReads, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
 };
@@ -27,7 +28,6 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
-use reth_revm::state_change::post_block_withdrawals_balance_increments;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{Database, State};
