@@ -1,8 +1,8 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
+use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
@@ -189,7 +189,7 @@ where
         parent_beacon_block_root: B256,
         // TODO(onbjerg): Figure out why we even get these here, since we'll check the requests
         // from execution against the requests root in the header.
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
@@ -289,7 +289,7 @@ where
     pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV2> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -324,7 +324,7 @@ where
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV3> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -359,7 +359,7 @@ where
     pub async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV4> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -677,7 +677,7 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
@@ -778,7 +778,7 @@ where
     async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV2> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         let start = Instant::now();
         let res = Self::get_payload_v2(self, payload_id).await;
@@ -798,7 +798,7 @@ where
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV3> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         let start = Instant::now();
         let res = Self::get_payload_v3(self, payload_id).await;
@@ -818,7 +818,7 @@ where
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV4> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         let start = Instant::now();
         let res = Self::get_payload_v4(self, payload_id).await;

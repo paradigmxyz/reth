@@ -4,7 +4,7 @@ use crate::{
     engine::message::OnForkChoiceUpdated, BeaconConsensusEngineEvent, BeaconEngineMessage,
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
-use alloy_primitives::Bytes;
+use alloy_eips::eip7685::Requests;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -48,7 +48,7 @@ where
         &self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-        execution_requests: Option<Vec<Bytes>>,
+        execution_requests: Option<Requests>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
