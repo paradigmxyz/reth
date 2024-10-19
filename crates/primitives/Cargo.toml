@@ -110,14 +110,22 @@ asm-keccak = [
 	"revm-primitives/asm-keccak"
 ]
 arbitrary = [
-    "dep:arbitrary",
-    "alloy-eips/arbitrary",
-    "rand",
-    "reth-codec",
-    "reth-ethereum-forks/arbitrary",
-    "reth-primitives-traits/arbitrary",
-    "revm-primitives/arbitrary",
-    "secp256k1",
+	"dep:arbitrary",
+	"alloy-eips/arbitrary",
+	"rand",
+	"reth-codec",
+	"reth-ethereum-forks/arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"revm-primitives/arbitrary",
+	"secp256k1",
+	"reth-chainspec/arbitrary",
+	"reth-trie-common/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-rpc-types?/arbitrary",
+	"alloy-serde?/arbitrary",
+	"op-alloy-consensus?/arbitrary",
+	"op-alloy-rpc-types?/arbitrary"
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [

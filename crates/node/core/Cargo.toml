@@ -77,7 +77,10 @@ tokio.workspace = true
 tempfile.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism"]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-db/optimism"
+]
 # Features for vergen to generate correct env vars
 jemalloc = [
 	"reth-cli-util/jemalloc"
