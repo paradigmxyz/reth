@@ -21,6 +21,7 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
+reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
@@ -43,14 +44,12 @@ reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
-reth-node-core.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 futures.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 tokio.workspace = true
-futures-util.workspace = true
 serde_json.workspace = true
 alloy-consensus.workspace = true
 
@@ -67,5 +66,6 @@ test-utils = [
 	"reth-db/test-utils",
 	"reth-provider/test-utils",
 	"reth-transaction-pool/test-utils",
-	"revm/test-utils"
+	"revm/test-utils",
+	"reth-evm/test-utils"
 ]

@@ -76,7 +76,6 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-rand.workspace = true
 
 [features]
 test-utils = [

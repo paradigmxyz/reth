@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-db.workspace = true
-reth-db-api.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 reth-execution-errors.workspace = true
@@ -46,7 +45,11 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
+tokio = { workspace = true, default-features = false, features = [
+    "sync",
+    "rt",
+    "macros",
+] }
 rayon.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 proptest.workspace = true

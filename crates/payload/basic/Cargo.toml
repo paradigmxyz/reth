@@ -15,12 +15,12 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
+reth-evm.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
