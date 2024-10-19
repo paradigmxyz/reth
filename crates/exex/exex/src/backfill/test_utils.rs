@@ -10,8 +10,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{
-    Block, BlockBody, BlockWithSenders, Header, Receipt,
-    SealedBlockWithSenders, Transaction,
+    Block, BlockBody, BlockWithSenders, Header, Receipt, SealedBlockWithSenders, Transaction,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
