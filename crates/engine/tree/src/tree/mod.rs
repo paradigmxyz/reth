@@ -1143,7 +1143,7 @@ where
                 if blocks_to_persist.is_empty() {
                     debug!(target: "engine::tree", "Returned empty set of blocks to persist");
                 } else {
-                    debug!(target: "engine::tree", blocks= ?blocks_to_persist.iter().map(|block| block.block.num_hash()).collect::<Vec<_>>(),"Persisting blocks");
+                    debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.block.num_hash()).collect::<Vec<_>>(), "Persisting blocks");
                     let (tx, rx) = oneshot::channel();
                     let _ = self.persistence.save_blocks(blocks_to_persist, tx);
                     self.persistence_state.start(rx);
