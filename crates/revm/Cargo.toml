@@ -30,6 +30,7 @@ revm.workspace = true
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = ["std"]

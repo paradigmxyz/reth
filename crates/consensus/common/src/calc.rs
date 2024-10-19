@@ -1,6 +1,6 @@
+use alloy_consensus::constants::ETH_TO_WEI;
 use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{EthereumHardfork, Hardforks};
-use reth_primitives::constants::ETH_TO_WEI;
 
 /// Calculates the base block reward.
 ///

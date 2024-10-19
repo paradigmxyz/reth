@@ -7976,6 +7976,7 @@ dependencies = [
 name = "reth-node-events"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "futures",
@@ -8525,6 +8526,7 @@ dependencies = [
 name = "reth-revm"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "reth-chainspec",
  "reth-consensus-common",
