@@ -118,7 +118,10 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV2")]
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV2>;
+    async fn get_payload_v2(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV2>;
 
     /// Post Cancun payload handler which also returns a blobs bundle.
     ///
@@ -128,7 +131,10 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV3")]
-    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV3>;
+    async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV3>;
 
     /// Post Prague payload handler.
     ///
@@ -138,7 +144,10 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV4")]
-    async fn get_payload_v4(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV4>;
+    async fn get_payload_v4(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV4>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
