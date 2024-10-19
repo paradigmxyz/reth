@@ -103,7 +103,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.81" # MSRV
+          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -163,7 +163,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.81" # MSRV
+          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

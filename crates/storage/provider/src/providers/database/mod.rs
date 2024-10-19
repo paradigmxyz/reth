@@ -4,8 +4,8 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
-    PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -516,16 +516,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.provider()?.latest_withdrawal()
-    }
-}
-
-impl<N: ProviderNodeTypes> RequestsProvider for ProviderFactory<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.provider()?.requests_by_block(id, timestamp)
     }
 }
 

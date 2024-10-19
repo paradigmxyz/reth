@@ -802,18 +802,6 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
-    fn to(&self) -> TxKind {
-        match self {
-            Self::Legacy(tx) => tx.to(),
-            Self::Eip2930(tx) => tx.to(),
-            Self::Eip1559(tx) => tx.to(),
-            Self::Eip4844(tx) => tx.to(),
-            Self::Eip7702(tx) => tx.to(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.to(),
-        }
-    }
-
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.value(),
@@ -826,7 +814,7 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
-    fn input(&self) -> &[u8] {
+    fn input(&self) -> &Bytes {
         match self {
             Self::Legacy(tx) => tx.input(),
             Self::Eip2930(tx) => tx.input(),
@@ -883,6 +871,18 @@ impl alloy_consensus::Transaction for Transaction {
             Self::Eip7702(tx) => tx.authorization_list(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.authorization_list(),
+        }
+    }
+
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.kind(),
+            Self::Eip2930(tx) => tx.kind(),
+            Self::Eip1559(tx) => tx.kind(),
+            Self::Eip4844(tx) => tx.kind(),
+            Self::Eip7702(tx) => tx.kind(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.kind(),
         }
     }
 }
@@ -1383,15 +1383,11 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
-    fn to(&self) -> TxKind {
-        alloy_consensus::Transaction::to(self.deref())
-    }
-
     fn value(&self) -> U256 {
         self.deref().value()
     }
 
-    fn input(&self) -> &[u8] {
+    fn input(&self) -> &Bytes {
         self.deref().input()
     }
 
@@ -1409,6 +1405,10 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
     }
 }
 
@@ -2242,8 +2242,8 @@ mod tests {
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
-        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")).into());
-        assert_eq!(tx.input(), hex!("1b55ba3a"));
+        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
     }

@@ -9,10 +9,11 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use crate::system_calls::OnStateHook;
 use alloc::{boxed::Box, vec::Vec};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use core::{fmt::Display, marker::PhantomData};
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, Receipt, Request};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{db::BundleState, State};
@@ -190,7 +191,7 @@ pub trait BlockExecutionStrategy<DB> {
         block: &BlockWithSenders,
         total_difficulty: U256,
         receipts: &[Receipt],
-    ) -> Result<Vec<Request>, Self::Error>;
+    ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
     fn state_ref(&self) -> &State<DB>;
@@ -209,7 +210,7 @@ pub trait BlockExecutionStrategy<DB> {
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
-        requests: &[Request],
+        requests: &Requests,
     ) -> Result<(), ConsensusError>;
 }
 
@@ -450,10 +451,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip6110::DepositRequest;
     use alloy_primitives::U256;
     use reth_chainspec::{ChainSpec, MAINNET};
     use revm::db::{CacheDB, EmptyDBTyped};
+    use revm_primitives::bytes;
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -545,14 +546,14 @@ mod tests {
         _evm_config: EvmConfig,
         state: State<DB>,
         execute_transactions_result: (Vec<Receipt>, u64),
-        apply_post_execution_changes_result: Vec<Request>,
+        apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
         execute_transactions_result: (Vec<Receipt>, u64),
-        apply_post_execution_changes_result: Vec<Request>,
+        apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
@@ -607,7 +608,7 @@ mod tests {
             _block: &BlockWithSenders,
             _total_difficulty: U256,
             _receipts: &[Receipt],
-        ) -> Result<Vec<Request>, Self::Error> {
+        ) -> Result<Requests, Self::Error> {
             Ok(self.apply_post_execution_changes_result.clone())
         }
 
@@ -629,7 +630,7 @@ mod tests {
             &self,
             _block: &BlockWithSenders,
             _receipts: &[Receipt],
-            _requests: &[Request],
+            _requests: &Requests,
         ) -> Result<(), ConsensusError> {
             Ok(())
         }
@@ -651,8 +652,7 @@ mod tests {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
         let expected_execute_transactions_result = (expected_receipts.clone(), expected_gas_used);
-        let expected_apply_post_execution_changes_result =
-            vec![Request::DepositRequest(DepositRequest::default())];
+        let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
