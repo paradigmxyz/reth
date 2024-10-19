@@ -14,8 +14,6 @@ pub use alloy_eips::eip4844::BlobTransactionSidecar;
 #[cfg(feature = "c-kzg")]
 pub use alloy_eips::eip4844::BlobTransactionValidationError;
 
-use alloc::vec::Vec;
-
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
