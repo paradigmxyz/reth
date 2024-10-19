@@ -31,6 +31,7 @@ reth-node-types.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 

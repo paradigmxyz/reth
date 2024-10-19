@@ -27,6 +27,7 @@ revm-primitives.workspace = true
 reth-trie.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
@@ -49,6 +50,4 @@ itertools.workspace = true
 tracing.workspace = true
 
 [features]
-optimism = [
-    "reth-beacon-consensus/optimism",
-]
+optimism = ["reth-beacon-consensus/optimism"]

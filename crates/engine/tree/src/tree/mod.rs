@@ -7,7 +7,7 @@ use crate::{
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    BlockNumber, Bytes, B256, U256,
+    BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -70,6 +70,7 @@ use crate::{
     engine::{EngineApiKind, EngineApiRequest},
     tree::metrics::EngineApiMetrics,
 };
+use alloy_eips::eip7685::Requests;
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -721,7 +722,7 @@ where
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-        execution_requests: Option<Vec<Bytes>>,
+        execution_requests: Option<Requests>,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);

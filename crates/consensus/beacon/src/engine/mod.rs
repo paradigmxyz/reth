@@ -1,4 +1,5 @@
-use alloy_primitives::{BlockNumber, Bytes, B256};
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
@@ -1087,7 +1088,7 @@ where
         cancun_fields: Option<CancunPayloadFields>,
         // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
         // workaround.
-        execution_requests: Option<Vec<Bytes>>,
+        execution_requests: Option<Requests>,
     ) -> Result<Either<PayloadStatus, SealedBlock>, BeaconOnNewPayloadError> {
         self.metrics.new_payload_messages.increment(1);
 

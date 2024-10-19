@@ -1,7 +1,8 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::Transaction;
-use alloy_primitives::{Bytes, U256};
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus,
 };
@@ -250,8 +251,8 @@ fn create_reorg_head<Provider, Evm, Spec>(
     mut depth: usize,
     next_payload: ExecutionPayload,
     next_cancun_fields: Option<CancunPayloadFields>,
-    next_execution_requests: Option<Vec<Bytes>>,
-) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>, Option<Vec<Bytes>>)>
+    next_execution_requests: Option<Requests>,
+) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>, Option<Requests>)>
 where
     Provider: BlockReader + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
