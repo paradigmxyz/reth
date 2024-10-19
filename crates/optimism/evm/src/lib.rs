@@ -11,7 +11,7 @@
 
 use alloy_primitives::{Address, U256};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{Fee, OpChainSpec};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
@@ -155,13 +155,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(
-                        self.chain_spec.base_fee_params_at_timestamp(attributes.timestamp),
-                    )
-                    .unwrap_or_default(),
-            ),
+            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };

@@ -1,11 +1,10 @@
 //! Optimism payload builder implementation.
-
 use std::sync::Arc;
 
-use alloy_primitives::U256;
+use alloy_primitives::{b64, B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{BaseFeeParams, ChainSpecProvider, EthereumHardforks};
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -29,7 +28,7 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
+use revm_primitives::{calc_excess_blob_gas, Bytes};
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -173,7 +172,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let PayloadConfig { parent_block, attributes, extra_data } = config;
+    let PayloadConfig { parent_block, attributes, mut extra_data } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
@@ -485,6 +484,18 @@ where
         blob_gas_used = Some(0);
     }
 
+    let is_holocene = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Holocene,
+        attributes.payload_attributes.timestamp,
+    );
+
+    if is_holocene {
+        extra_data = get_holocene_extra_data(
+            &attributes,
+            chain_spec.base_fee_params_at_timestamp(attributes.payload_attributes.timestamp),
+        );
+    }
+
     let header = Header {
         parent_hash: parent_block.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -540,4 +551,70 @@ where
     payload.extend_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
+}
+
+/// Extracts the Holcene 1599 parameters from the encoded form:
+/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
+pub fn decode_eip_1559_params(eip_1559_params: B64) -> (u32, u32) {
+    let elasticity: [u8; 4] = eip_1559_params.0[..4].try_into().unwrap();
+    let denominator: [u8; 4] = eip_1559_params.0[4..].try_into().unwrap();
+    println!("denominator: {:?}", denominator);
+    println!("elasticity: {:?}", elasticity);
+    (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
+}
+
+fn get_holocene_extra_data(
+    attributes: &OptimismPayloadBuilderAttributes,
+    default_base_fee_params: BaseFeeParams,
+) -> Bytes {
+    let mut extra_data = [0u8; 9];
+    // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
+    // The eip 1559 params should exist here since there was a check previously
+    if attributes.eip_1559_params.unwrap() == B64::ZERO {
+        let mut default_params = [0u8; 8];
+        default_params[..4].copy_from_slice(
+            &(default_base_fee_params.max_change_denominator as u32).to_be_bytes(),
+        );
+        default_params[4..]
+            .copy_from_slice(&(default_base_fee_params.elasticity_multiplier as u32).to_be_bytes());
+        extra_data[1..].copy_from_slice(&default_params);
+        Bytes::copy_from_slice(&extra_data)
+    } else {
+        let (elasticity, denominator) =
+            decode_eip_1559_params(attributes.eip_1559_params.expect("eip_1559_params is none"));
+        let mut eip_1559_params = [0u8; 8];
+        println!("denominator: {}", denominator);
+        println!("elasticity: {}", elasticity);
+        eip_1559_params[..4].copy_from_slice(&(denominator as u32).to_be_bytes());
+        eip_1559_params[4..].copy_from_slice(&(elasticity as u32).to_be_bytes());
+        extra_data[1..].copy_from_slice(&eip_1559_params);
+        Bytes::copy_from_slice(&extra_data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_get_extra_data_post_holocene() {
+        let attributes = OptimismPayloadBuilderAttributes {
+            eip_1559_params: Some(B64::from_str("0x0000000800000008").unwrap()),
+            ..Default::default()
+        };
+        let extra_data = get_holocene_extra_data(&attributes, BaseFeeParams::new(80, 60));
+        assert_eq!(extra_data, Bytes::copy_from_slice(&[0, 0, 0, 0, 8, 0, 0, 0, 8]));
+    }
+
+    #[test]
+    fn test_get_extra_data_post_holocene_default() {
+        let attributes = OptimismPayloadBuilderAttributes {
+            eip_1559_params: Some(B64::ZERO),
+            ..Default::default()
+        };
+        let extra_data = get_holocene_extra_data(&attributes, BaseFeeParams::new(80, 60));
+        assert_eq!(extra_data, Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
+    }
 }
