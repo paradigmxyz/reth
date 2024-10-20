@@ -23,6 +23,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-tracing.workspace = true
 reth-trie-common.workspace = true
+reth-node-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
