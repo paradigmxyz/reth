@@ -20,6 +20,7 @@ use reth_libmdbx::{
     ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
+use reth_node_types::ByteSize;
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
@@ -33,8 +34,12 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
+/// 1 KB in bytes
+pub const KILOBYTE: usize = 1024;
+/// 1 MB in bytes
+pub const MEGABYTE: usize = KILOBYTE * 1024;
 /// 1 GB in bytes
-pub const GIGABYTE: usize = 1024 * 1024 * 1024;
+pub const GIGABYTE: usize = MEGABYTE * 1024;
 /// 1 TB in bytes
 pub const TERABYTE: usize = GIGABYTE * 1024;
 
@@ -113,10 +118,14 @@ impl DatabaseArguments {
     }
 
     /// Set the geometry.
-    pub fn with_geometry(mut self, max_size: Option<usize>, growth_step: Option<usize>) -> Self {
+    pub fn with_geometry(
+        mut self,
+        max_size: Option<ByteSize>,
+        growth_step: Option<ByteSize>,
+    ) -> Self {
         self.geometry = Geometry {
-            size: max_size.map(|size| 0..size),
-            growth_step: growth_step.map(|growth_step| growth_step as isize),
+            size: max_size.map(|size| 0..size.0),
+            growth_step: growth_step.map(|growth_step| growth_step.0 as isize),
             shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         };
