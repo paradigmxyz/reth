@@ -81,6 +81,12 @@ Database:
 
           [possible values: true, false]
 
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
