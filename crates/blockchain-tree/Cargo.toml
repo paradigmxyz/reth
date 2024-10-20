@@ -87,3 +87,7 @@ optimism = [
 	"reth-db/optimism",
 	"reth-db-api/optimism"
 ]
+
+[[bench]]
+name = "bench"
+harness = false

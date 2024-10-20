@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-
+#![allow(clippy::field_reassign_with_default)]
 use alloy_consensus::Header;
 use alloy_primitives::BlockHash;
 use criterion::{self, black_box, criterion_group, criterion_main, Criterion};
@@ -7,13 +7,15 @@ use reth_blockchain_tree::BlockBuffer;
 use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader};
 
 pub fn create_block(_number: u64, _parent: BlockHash) -> SealedBlockWithSenders {
-    let _rng = rand::thread_rng();
+    let mut header = Header::default();
+    header.number = _number;
+    header.parent_hash = _parent;
 
-    let header = Header::default();
-    let s_header = SealedHeader::new(header, BlockHash::random());
+    let block_hash = BlockHash::random();
+    let s_header = SealedHeader::new(header, block_hash);
 
-    let a = BlockBody::default();
-    let sealed_block = SealedBlock::new(s_header, a);
+    let body = BlockBody::default();
+    let sealed_block = SealedBlock::new(s_header, body);
     SealedBlockWithSenders::new(sealed_block, vec![]).unwrap()
 }
 
