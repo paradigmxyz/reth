@@ -205,10 +205,15 @@ mod tests {
     fn test_command_parser_max_size_and_growth_step_from_str_invalid_unit() {
         let result = CommandParser::<DatabaseArgs>::try_parse_from([
             "reth",
-            "--db.max-size",
-            "2PB",
             "--db.growth-step",
             "1 PB",
+        ]);
+        assert!(result.is_err());
+
+        let result = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.max-size",
+            "2PB",
         ]);
         assert!(result.is_err());
     }
