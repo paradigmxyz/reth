@@ -19,13 +19,13 @@ pub fn create_block(_number: u64, _parent: BlockHash) -> SealedBlockWithSenders 
     SealedBlockWithSenders::new(sealed_block, vec![]).unwrap()
 }
 
-pub fn setup_buffer(size: usize, max_number: u64) -> BlockBuffer {
+pub fn setup_buffer(size: usize) -> BlockBuffer {
     let mut buffer = BlockBuffer::new(size as u32);
     let _rng = rand::thread_rng();
     let mut parent = BlockHash::random();
 
     for i in 0..size {
-        let number = i as u64 % max_number;
+        let number = i as u64;
         let block = create_block(number, parent);
         parent = block.hash();
         buffer.insert_block(block);
@@ -38,14 +38,16 @@ fn bench_remove_old_blocks(c: &mut Criterion) {
     let mut group = c.benchmark_group("remove_old_blocks");
 
     for size in &[100, 1000, 10000] {
+        let mut i = 25;
         group.bench_function(format!("size_{}", size), |b| {
             b.iter_with_setup(
-                || setup_buffer(*size, 100),
+                || setup_buffer(*size),
                 |mut buffer| {
-                    buffer.remove_old_blocks(black_box(50));
+                    buffer.remove_old_blocks(black_box((size - i) as u64));
                 },
             )
         });
+        i *= 10;
     }
 
     group.finish();
