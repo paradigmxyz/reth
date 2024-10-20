@@ -3,7 +3,10 @@ set +e  # Disable immediate exit on error
 
 # Array of crates to compile
 crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort))
+
 # Array of crates to exclude
+# Used with the `contains` function.
+# shellcheck disable=SC2034
 exclude_crates=(
   # The following are not working yet, but known to be fixable
   reth-exex-types # https://github.com/paradigmxyz/reth/issues/9946
@@ -30,12 +33,10 @@ exclude_crates=(
   reth-engine-util
   reth-eth-wire
   reth-ethereum-cli
-  reth-ethereum-engine
   reth-ethereum-engine-primitives
   reth-ethereum-payload-builder
   reth-etl
   reth-evm-ethereum
-  reth-execution-errors
   reth-exex
   reth-exex-test-utils
   reth-ipc
@@ -49,7 +50,6 @@ exclude_crates=(
   reth-node-events
   reth-node-metrics
   reth-optimism-cli
-  reth-optimism-evm
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
@@ -63,9 +63,7 @@ exclude_crates=(
   reth-rpc-eth-api
   reth-rpc-eth-types
   reth-rpc-layer
-  reth-rpc-types
   reth-stages
-  reth-storage-errors
   reth-engine-local
   # The following are not supposed to be working
   reth # all of the crates below

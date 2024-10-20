@@ -1,5 +1,6 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
+use alloy_consensus::Transaction;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{
     AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,
@@ -101,8 +102,6 @@ impl ReceiptBuilder {
             gas_used: gas_used as u128,
             contract_address,
             effective_gas_price: transaction.effective_gas_price(meta.base_fee),
-            // TODO pre-byzantium receipts have a post-transaction state root
-            state_root: None,
             // EIP-4844 fields
             blob_gas_price,
             blob_gas_used: blob_gas_used.map(u128::from),

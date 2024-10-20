@@ -18,6 +18,7 @@ use reth_db::DatabaseEnv;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -144,6 +145,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
+        // Install the prometheus recorder to be sure to record task
+        // executor's metrics
+        let _ = install_prometheus_recorder();
 
         let runner = CliRunner::default();
         match self.command {

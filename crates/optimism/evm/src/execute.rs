@@ -3,13 +3,18 @@
 use crate::{
     l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
 };
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloy_consensus::Transaction as _;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, U256};
+use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    state_change::post_block_balance_increments,
     system_calls::{NoopHook, OnStateHook, SystemCaller},
     ConfigureEvm,
 };
@@ -18,15 +23,11 @@ use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
-use reth_revm::{
-    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
-    state_change::post_block_balance_increments, Evm, State,
-};
+use reth_revm::{batch::BlockBatchRecord, db::states::bundle_state::BundleRetention, Evm, State};
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::{fmt::Display, sync::Arc};
 use tracing::trace;
 
 /// Provides executors to execute regular optimism blocks
@@ -378,7 +379,7 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
-            requests: vec![],
+            requests: Requests::default(),
             gas_used,
         })
     }
@@ -401,7 +402,7 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
-            requests: vec![],
+            requests: Requests::default(),
             gas_used,
         })
     }
@@ -427,7 +428,7 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
-            requests: vec![],
+            requests: Requests::default(),
             gas_used,
         })
     }

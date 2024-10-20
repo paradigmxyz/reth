@@ -27,8 +27,10 @@ revm-primitives.workspace = true
 reth-trie.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false }
@@ -49,5 +51,8 @@ tracing.workspace = true
 
 [features]
 optimism = [
-    "reth-beacon-consensus/optimism",
+	"reth-beacon-consensus/optimism",
+	"reth-primitives/optimism",
+	"reth-provider/optimism",
+	"revm-primitives/optimism"
 ]

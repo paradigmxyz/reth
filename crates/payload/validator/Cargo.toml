@@ -18,4 +18,5 @@ reth-primitives.workspace = true
 reth-rpc-types-compat.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
