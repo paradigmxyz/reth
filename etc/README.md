@@ -19,55 +19,41 @@ the [docker docs](/book/installation/docker.md#using-docker-compose).
 
 #### Adding a new metric to Grafana
 
-To set up a new metric in Reth and its Grafana dashboard:
+To set up a new metric in Reth and its Grafana dashboard (this assumes running Reth and Grafana instances):
 
 1. Add the metric to the codebase following the [metrics section](../docs/design/metrics.md#creating-metrics)
    documentation.
 
-2. Build the Reth image:
-
-    ```bash
-    docker build . -t reth:local
-    ```
-
-   Modify the [docker-compose](./docker-compose.yml) file to use your locally built image for the Reth service.
-
-3. Run Docker Compose:
-
-    ```bash
-    docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml up -d
-    ```
-
-4. Access Grafana:
+2. Access Grafana:
 
     - Open `http://localhost:3000/` in a browser
     - Log in with username and password `admin`
     - Navigate to the `Dashboards` tab
 
-5. Create or modify a dashboard:
+3. Create or modify a dashboard:
 
     - Select an existing dashboard or create a new one
     - Click `Add` > `Visualization` to create a new panel
 
-6. Configure your metric panel:
+4. Configure your metric panel:
 
     - Set a panel title and description
     - Select metric(s) from the `Metrics browser` or use the `PromQL` terminal
     - Document your metric(s) by setting units, legends, etc.
     - When adding multiple metrics, use field overwrites if needed
 
-7. Save and arrange:
+5. Save and arrange:
 
     - Click `Apply` to save the panel
     - Drag the panel to desired position on the dashboard
 
-8. Export the dashboard:
+6. Export the dashboard:
 
     - Click `Share` > `Export`
     - Toggle `Export for sharing externally`
     - Click `Save to file`
 
-9. Update dashboard file:
+7. Update dashboard file:
     - Replace the content of the corresponding file in the [dashboards folder](./grafana/dashboards) with the exported
       JSON
 
@@ -75,7 +61,7 @@ Your new metric is now integrated into the Reth Grafana dashboard.
 
 #### Import Grafana dashboards
 
-In order to import new Grafana dashboards or update a dashboard:
+If you are running Reth and Grafana outside of docker, and wish to import new Grafana dashboards or update a dashboard:
 
 1. Go to `Home` > `Dashboards`
 
@@ -87,3 +73,6 @@ In order to import new Grafana dashboards or update a dashboard:
    avoid conflict
 
 5. Delete the old dashboard
+
+If you are running Reth and Grafana using docker, after having pulled the updated dashboards from `main`, restart the
+Grafana service. This will update all dashboards.
