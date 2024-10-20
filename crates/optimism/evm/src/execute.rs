@@ -14,7 +14,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, ConfigureEvmEnv,
+    ConfigureEvm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -52,8 +52,13 @@ impl<EvmConfig> OpExecutionStrategyFactory<EvmConfig> {
     }
 }
 
-impl BlockExecutionStrategyFactory for OpExecutionStrategyFactory {
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = OpExecutionStrategy<DB>;
+impl<EvmConfig> BlockExecutionStrategyFactory for OpExecutionStrategyFactory<EvmConfig>
+where
+    EvmConfig:
+        Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
+{
+    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+        OpExecutionStrategy<DB, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
@@ -67,7 +72,10 @@ impl BlockExecutionStrategyFactory for OpExecutionStrategyFactory {
 
 /// Block execution strategy for Optimism.
 #[allow(missing_debug_implementations)]
-pub struct OpExecutionStrategy<DB, EvmConfig = OptimismEvmConfig> {
+pub struct OpExecutionStrategy<DB, EvmConfig>
+where
+    EvmConfig: Clone,
+{
     /// The chainspec
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
@@ -78,19 +86,22 @@ pub struct OpExecutionStrategy<DB, EvmConfig = OptimismEvmConfig> {
     system_caller: SystemCaller<EvmConfig, OpChainSpec>,
 }
 
-impl<DB> OpExecutionStrategy<DB> {
+impl<DB, EvmConfig> OpExecutionStrategy<DB, EvmConfig>
+where
+    EvmConfig: Clone,
+{
     /// Creates a new [`OpExecutionStrategy`]
-    pub fn new(
-        state: State<DB>,
-        chain_spec: Arc<OpChainSpec>,
-        evm_config: OptimismEvmConfig,
-    ) -> Self {
+    pub fn new(state: State<DB>, chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), (*chain_spec).clone());
         Self { state, chain_spec, evm_config, system_caller }
     }
 }
 
-impl<DB> OpExecutionStrategy<DB> {
+impl<DB, EvmConfig> OpExecutionStrategy<DB, EvmConfig>
+where
+    DB: Database<Error: Into<ProviderError> + Display>,
+    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+{
     /// Configures a new evm configuration and block environment for the given block.
     ///
     /// Caution: this does not initialize the tx environment.
@@ -103,9 +114,10 @@ impl<DB> OpExecutionStrategy<DB> {
     }
 }
 
-impl<DB> BlockExecutionStrategy<DB> for OpExecutionStrategy<DB>
+impl<DB, EvmConfig> BlockExecutionStrategy<DB> for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
+    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
 {
     type Error = BlockExecutionError;
 
