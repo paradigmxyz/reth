@@ -421,8 +421,8 @@ mod tests {
         let mut rng = generators::rng();
 
         // Build mock data
-        let mut gas_used_ratios = Vec::new();
-        let mut base_fees_per_gas = Vec::new();
+        let mut gas_used_ratios = Vec::with_capacity(block_count as usize);
+        let mut base_fees_per_gas = Vec::with_capacity(block_count as usize);
         let mut last_header = None;
         let mut parent_hash = B256::default();
 
@@ -444,7 +444,7 @@ mod tests {
             last_header = Some(header.clone());
             parent_hash = hash;
 
-            let mut transactions = vec![];
+            let mut transactions = Vec::with_capacity(100);
             for _ in 0..100 {
                 let random_fee: u128 = rng.gen();
 
