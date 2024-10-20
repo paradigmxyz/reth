@@ -84,7 +84,8 @@ impl InnerTransport {
         let (auth, claims) =
             build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
 
-        let inner = WsConnect { url: url.to_string(), auth: Some(auth) }
+        let inner = WsConnect::new(url.clone())
+            .with_auth(auth)
             .into_service()
             .await
             .map(Self::Ws)

@@ -1,6 +1,5 @@
 //! Ethereum protocol-related constants
 
-use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, b256, Address, B256, U256};
 use core::time::Duration;
 
@@ -13,9 +12,6 @@ pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"
 
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
-
-/// Maximum extra data size in a block after genesis
-pub const MAXIMUM_EXTRA_DATA_SIZE: usize = 32;
 
 /// An EPOCH is a series of 32 slots.
 pub const EPOCH_SLOTS: u64 = 32;
@@ -106,24 +102,11 @@ pub const SEPOLIA_GENESIS_HASH: B256 =
 pub const HOLESKY_GENESIS_HASH: B256 =
     b256!("b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4");
 
-/// Keccak256 over empty array: `0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470`
-pub const KECCAK_EMPTY: B256 =
-    b256!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
-
 /// From address from Optimism system txs: `0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001`
 pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
 /// To address from Optimism system txs: `0x4200000000000000000000000000000000000015`
 pub const OP_SYSTEM_TX_TO_ADDR: Address = address!("4200000000000000000000000000000000000015");
-
-/// Transactions root of empty receipts set.
-pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;
-
-/// Transactions root of empty transactions set.
-pub const EMPTY_TRANSACTIONS: B256 = EMPTY_ROOT_HASH;
-
-/// Withdrawals root of empty withdrawals set.
-pub const EMPTY_WITHDRAWALS: B256 = EMPTY_ROOT_HASH;
 
 /// The number of blocks to unwind during a reorg that already became a part of canonical chain.
 ///
