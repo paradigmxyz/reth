@@ -105,7 +105,8 @@ impl BlockBuffer {
 
     /// Discard all blocks that precede block number from the buffer.
     pub fn remove_old_blocks(&mut self, block_number: BlockNumber) {
-        let mut block_hashes_to_remove = Vec::new();
+        let blocks_to_remove = self.earliest_blocks.range(..=block_number).count();
+        let mut block_hashes_to_remove = Vec::with_capacity(blocks_to_remove + 1);
 
         // discard all blocks that are before the finalized number.
         while let Some(entry) = self.earliest_blocks.first_entry() {

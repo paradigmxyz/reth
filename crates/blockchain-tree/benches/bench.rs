@@ -1,0 +1,53 @@
+#![allow(missing_docs)]
+
+use alloy_consensus::Header;
+use alloy_primitives::BlockHash;
+use criterion::{self, black_box, criterion_group, criterion_main, Criterion};
+use reth_blockchain_tree::BlockBuffer;
+use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader};
+
+pub fn create_block(_number: u64, _parent: BlockHash) -> SealedBlockWithSenders {
+    let _rng = rand::thread_rng();
+
+    let header = Header::default();
+    let s_header = SealedHeader::new(header, BlockHash::random());
+
+    let a = BlockBody::default();
+    let sealed_block = SealedBlock::new(s_header, a);
+    SealedBlockWithSenders::new(sealed_block, vec![]).unwrap()
+}
+
+pub fn setup_buffer(size: usize, max_number: u64) -> BlockBuffer {
+    let mut buffer = BlockBuffer::new(size as u32);
+    let _rng = rand::thread_rng();
+    let mut parent = BlockHash::random();
+
+    for i in 0..size {
+        let number = i as u64 % max_number;
+        let block = create_block(number, parent);
+        parent = block.hash();
+        buffer.insert_block(block);
+    }
+
+    buffer
+}
+
+fn bench_remove_old_blocks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("remove_old_blocks");
+
+    for size in &[100, 1000, 10000] {
+        group.bench_function(format!("size_{}", size), |b| {
+            b.iter_with_setup(
+                || setup_buffer(*size, 100),
+                |mut buffer| {
+                    buffer.remove_old_blocks(black_box(50));
+                },
+            )
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_remove_old_blocks);
+criterion_main!(benches);

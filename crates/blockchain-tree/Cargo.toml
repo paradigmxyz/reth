@@ -46,6 +46,8 @@ metrics.workspace = true
 # misc
 aquamarine.workspace = true
 linked_hash_set.workspace = true
+criterion.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 reth-chainspec.workspace = true
