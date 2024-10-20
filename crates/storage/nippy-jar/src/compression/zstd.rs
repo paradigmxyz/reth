@@ -12,10 +12,13 @@ pub use zstd::{bulk::Decompressor, dict::DecoderDictionary};
 
 type RawDictionary = Vec<u8>;
 
+/// Represents the state of a Zstandard compression operation.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ZstdState {
+    /// The compressor is pending a dictionary.
     #[default]
     PendingDictionary,
+    /// The compressor is ready to perform compression.
     Ready,
 }
 
@@ -51,6 +54,7 @@ impl Zstd {
         }
     }
 
+    /// Sets the compression level for the Zstd compression instance.
     pub const fn with_level(mut self, level: i32) -> Self {
         self.level = level;
         self
