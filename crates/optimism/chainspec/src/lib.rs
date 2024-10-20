@@ -40,7 +40,6 @@ use reth_optimism_forks::OptimismHardforks;
 use reth_primitives_traits::Header;
 #[cfg(feature = "std")]
 pub(crate) use std::sync::LazyLock;
-use tracing::warn;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -67,16 +66,6 @@ impl OpChainSpecBuilder {
             ChainSpecBuilder::default().chain(OP_MAINNET.chain).genesis(OP_MAINNET.genesis.clone());
         let forks = OP_MAINNET.hardforks.clone();
         inner = inner.with_forks(forks);
-
-        let is_bedrock_active = OP_MAINNET.is_bedrock_active_at_block(105235063);
-
-        if !is_bedrock_active {
-            warn!(
-                "Warning: Op-mainnet has been launched without importing the pre-Bedrock state. \
-                The chain will not progress without this import. \
-                Please ensure that the pre-Bedrock state is imported to avoid synchronization issues and ensure proper chain operation."
-            );
-        }
 
         Self { inner }
     }
