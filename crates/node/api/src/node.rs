@@ -123,3 +123,67 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
         Ok(())
     }
 }
+/// Returns the builder for type.
+pub trait BuilderProvider<N>: Send {
+    /// Context required to build type.
+    type Ctx<'a>;
+
+    /// Returns builder for type.
+    #[allow(clippy::type_complexity)]
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
+}
+
+impl<N> BuilderProvider<N> for () {
+    type Ctx<'a> = ();
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        Box::new(noop_builder)
+    }
+}
+
+const fn noop_builder(_: ()) {}
+
+/// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
+pub trait NodeTy {
+    /// Node's types with the database.
+    type Types;
+    /// The provider type used to interact with the node.
+    type Provider;
+}
+
+impl<T> NodeTy for T
+where
+    T: FullNodeTypes,
+{
+    type Types = T::Types;
+    type Provider = T::Provider;
+}
+
+/// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
+/// defining types.
+pub trait NodeCore: NodeTy + Clone {
+    /// Underlying database type used by the node to store and retrieve data.
+    type DB: Send + Sync + Clone + Unpin;
+    /// The provider type used to interact with the node.
+    type Provider: Send + Sync + Clone + Unpin;
+    /// The transaction pool of the node.
+    type Pool: Send + Sync + Clone + Unpin;
+    /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
+    type Evm: Send + Sync + Clone + Unpin;
+    /// The type that knows how to execute blocks.
+    type Executor: Send + Sync + Clone + Unpin;
+    /// Network API.
+    type Network: Send + Sync + Clone;
+}
+
+impl<T> NodeCore for T
+where
+    T: FullNodeComponents,
+{
+    type DB = <T::Types as NodeTypesWithDB>::DB;
+    type Provider = T::Provider;
+    type Pool = T::Pool;
+    type Network = <T as FullNodeComponents>::Network;
+    type Evm = <T as FullNodeComponents>::Evm;
+    type Executor = <T as FullNodeComponents>::Executor;
+}
