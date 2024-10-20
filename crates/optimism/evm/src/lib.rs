@@ -36,8 +36,6 @@ use revm_primitives::{
     BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
 };
 
-pub mod strategy;
-
 /// Optimism-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct OptimismEvmConfig {
