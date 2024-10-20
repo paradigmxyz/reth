@@ -36,9 +36,9 @@ pub fn setup_buffer(size: usize) -> BlockBuffer {
 
 fn bench_remove_old_blocks(c: &mut Criterion) {
     let mut group = c.benchmark_group("remove_old_blocks");
-
+    let mut i = 25;
     for size in &[100, 1000, 10000] {
-        let mut i = 25;
+    
         group.bench_function(format!("size_{}", size), |b| {
             b.iter_with_setup(
                 || setup_buffer(*size),
