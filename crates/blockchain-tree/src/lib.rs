@@ -57,7 +57,3 @@ pub mod noop;
 mod state;
 
 use aquamarine as _;
-
-/// Implementation used for benchmarking
-pub use rand;
-pub use criterion;
