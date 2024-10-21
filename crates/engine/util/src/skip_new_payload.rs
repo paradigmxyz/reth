@@ -41,19 +41,14 @@ where
         loop {
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match next {
-                Some(BeaconEngineMessage::NewPayload {
-                    payload,
-                    cancun_fields,
-                    execution_requests,
-                    tx,
-                }) => {
+                Some(BeaconEngineMessage::NewPayload { payload, sidecar, tx }) => {
                     if this.skipped < this.threshold {
                         *this.skipped += 1;
                         tracing::warn!(
                             target: "engine::stream::skip_new_payload",
                             block_number = payload.block_number(),
                             block_hash = %payload.block_hash(),
-                            ?cancun_fields,
+                            ?sidecar,
                             threshold=this.threshold,
                             skipped=this.skipped, "Skipping new payload"
                         );
@@ -61,12 +56,7 @@ where
                         continue
                     }
                     *this.skipped = 0;
-                    Some(BeaconEngineMessage::NewPayload {
-                        payload,
-                        cancun_fields,
-                        execution_requests,
-                        tx,
-                    })
+                    Some(BeaconEngineMessage::NewPayload { payload, sidecar, tx })
                 }
                 next => next,
             };

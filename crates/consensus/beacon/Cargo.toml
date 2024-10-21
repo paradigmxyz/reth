@@ -31,7 +31,6 @@ reth-node-types.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 
 # ethereum
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 
@@ -78,10 +77,10 @@ assert_matches.workspace = true
 
 [features]
 optimism = [
-	"reth-chainspec",
-	"reth-primitives/optimism",
-	"reth-provider/optimism",
-	"reth-blockchain-tree/optimism",
-	"reth-db/optimism",
-	"reth-db-api/optimism"
+    "reth-chainspec",
+    "reth-primitives/optimism",
+    "reth-provider/optimism",
+    "reth-blockchain-tree/optimism",
+    "reth-db/optimism",
+    "reth-db-api/optimism",
 ]
