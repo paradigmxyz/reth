@@ -2324,9 +2324,9 @@ mod tests {
         let original = EnrForkIdEntry {
             fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
         };
-        let mut encoded = Vec::new();
-        original.encode(&mut encoded);
         let expected: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let mut encoded = Vec::with_capacity(expected.len());
+        original.encode(&mut encoded);
         assert_eq!(&expected[..], encoded.as_slice());
     }
 

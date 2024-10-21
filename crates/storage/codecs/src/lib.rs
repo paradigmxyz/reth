@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn compact_address() {
-        let mut buf = vec![];
+        let mut buf = Vec::with_capacity(21);
         assert_eq!(Address::ZERO.to_compact(&mut buf), 20);
         assert_eq!(buf, vec![0; 20]);
 
