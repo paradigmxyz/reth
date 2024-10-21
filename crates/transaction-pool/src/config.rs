@@ -2,11 +2,9 @@ use crate::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_primitives::Address;
-use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    EIP4844_TX_TYPE_ID,
-};
+use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use std::{collections::HashSet, ops::Mul};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon

@@ -18,13 +18,13 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::{
-    constants::{
-        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-    },
+use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
+};
+use alloy_primitives::{Address, TxHash, B256};
+use reth_primitives::constants::{
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -106,6 +106,35 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.all().txs_iter(sender).last().map(|(_, tx)| Arc::clone(&tx.transaction))
+    }
+
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    ///
+    /// If the pool already tracks a higher nonce for the given sender, then this nonce is used
+    /// instead.
+    ///
+    /// Note: The next pending pooled transaction must have the on chain nonce.
+    pub(crate) fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        mut on_chain: TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut last_consecutive_tx = None;
+
+        // ensure this operates on the most recent
+        if let Some(current) = self.sender_info.get(&on_chain.sender) {
+            on_chain.nonce = on_chain.nonce.max(current.state_nonce);
+        }
+
+        let mut next_expected_nonce = on_chain.nonce;
+        for (id, tx) in self.all().descendant_txs_inclusive(&on_chain) {
+            if next_expected_nonce != id.nonce {
+                break
+            }
+            next_expected_nonce = id.next_nonce();
+            last_consecutive_tx = Some(tx);
+        }
+
+        last_consecutive_tx.map(|tx| Arc::clone(&tx.transaction))
     }
 
     /// Returns access to the [`AllTransactions`] container.
@@ -2753,6 +2782,47 @@ mod tests {
 
         // Validate that the retrieved highest transaction matches the expected transaction.
         assert_eq!(highest_tx.as_ref().transaction, tx1);
+    }
+
+    #[test]
+    fn get_highest_consecutive_transaction_by_sender() {
+        // Set up a mock transaction factory and a new transaction pool.
+        let mut pool = TxPool::new(MockOrdering::default(), PoolConfig::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Create transactions with nonces 0, 1, 2, 4, 5.
+        let sender = Address::random();
+        let txs: Vec<_> = vec![0, 1, 2, 4, 5, 8, 9];
+        for nonce in txs {
+            let mut mock_tx = MockTransaction::eip1559();
+            mock_tx.set_sender(sender);
+            mock_tx.set_nonce(nonce);
+
+            let validated_tx = f.validated(mock_tx);
+            pool.add_transaction(validated_tx, U256::from(1000), 0).unwrap();
+        }
+
+        // Get last consecutive transaction
+        let sender_id = f.ids.sender_id(&sender).unwrap();
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(0));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(2), "Expected nonce 2 for on-chain nonce 0");
+
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(4));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(5), "Expected nonce 5 for on-chain nonce 4");
+
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(5), "Expected nonce 5 for on-chain nonce 5");
+
+        // update the tracked nonce
+        let mut info = SenderInfo::default();
+        info.update(8, U256::ZERO);
+        pool.sender_info.insert(sender_id, info);
+        let next_tx =
+            pool.get_highest_consecutive_transaction_by_sender(sender_id.into_transaction_id(5));
+        assert_eq!(next_tx.map(|tx| tx.nonce()), Some(9), "Expected nonce 9 for on-chain nonce 8");
     }
 
     #[test]

@@ -228,11 +228,11 @@ impl Chain {
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
     pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
-        let mut receipt_attach = Vec::new();
+        let mut receipt_attach = Vec::with_capacity(self.blocks().len());
         for ((block_num, block), receipts) in
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
-            let mut tx_receipts = Vec::new();
+            let mut tx_receipts = Vec::with_capacity(receipts.len());
             for (tx, receipt) in block.body.transactions().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.hash(),
@@ -656,7 +656,6 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_primitives::{Receipt, Receipts, TxType};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
@@ -789,7 +788,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn receipts_by_block_hash() {
+        use reth_primitives::{Receipt, Receipts, TxType};
+
         // Create a default SealedBlockWithSenders object
         let block = SealedBlockWithSenders::default();
 
@@ -811,10 +813,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create another random receipt object, receipt2
@@ -823,10 +821,6 @@ mod tests {
             cumulative_gas_used: 1325345,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors

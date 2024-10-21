@@ -1,6 +1,6 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
 use alloy_primitives::Parity;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
@@ -183,7 +183,7 @@ pub fn build_block<T: TransactionCompat>(
 ) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
-    let mut receipts = Vec::new();
+    let mut receipts = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
     for (transaction_index, ((sender, result), tx)) in

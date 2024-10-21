@@ -10,7 +10,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![allow(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use memmap2::Mmap;
@@ -28,6 +27,7 @@ use std::os::windows::prelude::OpenOptionsExt;
 
 use tracing::*;
 
+/// Compression algorithms supported by `NippyJar`.
 pub mod compression;
 #[cfg(test)]
 use compression::Compression;
@@ -55,10 +55,13 @@ pub use writer::NippyJarWriter;
 mod consistency;
 pub use consistency::NippyJarChecker;
 
+/// The version number of the Nippy Jar format.
 const NIPPY_JAR_VERSION: usize = 1;
-
+/// The file extension used for index files.
 const INDEX_FILE_EXTENSION: &str = "idx";
+/// The file extension used for offsets files.
 const OFFSETS_FILE_EXTENSION: &str = "off";
+/// The file extension used for configuration files.
 pub const CONFIG_FILE_EXTENSION: &str = "conf";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a

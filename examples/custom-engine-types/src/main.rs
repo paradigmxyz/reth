@@ -34,11 +34,15 @@ use alloy_rpc_types::{
 use reth::{
     api::PayloadTypes,
     builder::{
-        components::{ComponentsBuilder, EngineValidatorBuilder, PayloadServiceBuilder},
+        components::{ComponentsBuilder, PayloadServiceBuilder},
         node::{NodeTypes, NodeTypesWithEngine},
-        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
+        rpc::{EngineValidatorBuilder, RpcAddOns},
+        BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
+        PayloadBuilderConfig,
     },
+    network::NetworkHandle,
     providers::{CanonStateSubscriptions, StateProviderFactory},
+    rpc::eth::EthApi,
     tasks::TaskManager,
     transaction_pool::TransactionPool,
 };
@@ -49,13 +53,13 @@ use reth_basic_payload_builder::{
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-    validate_version_specific_fields, EngineTypes, EngineValidator, PayloadAttributes,
-    PayloadBuilderAttributes,
+    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+    FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{
-        EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+        EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
         EthereumPoolBuilder,
     },
     EthEvmConfig,
@@ -153,9 +157,9 @@ impl PayloadTypes for CustomEngineTypes {
 
 impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
 }
 
 /// Custom engine validator
@@ -201,12 +205,14 @@ pub struct CustomEngineValidatorBuilder;
 
 impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+    >,
 {
     type Validator = CustomEngineValidator;
 
-    async fn build_validator(self, ctx: &BuilderContext<N>) -> eyre::Result<Self::Validator> {
-        Ok(CustomEngineValidator { chain_spec: ctx.chain_spec() })
+    async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        Ok(CustomEngineValidator { chain_spec: ctx.config.chain.clone() })
     }
 }
 
@@ -225,6 +231,18 @@ impl NodeTypesWithEngine for MyCustomNode {
     type Engine = CustomEngineTypes;
 }
 
+/// Custom addons configuring RPC types
+pub type MyNodeAddOns<N> = RpcAddOns<
+    N,
+    EthApi<
+        <N as FullNodeTypes>::Provider,
+        <N as FullNodeComponents>::Pool,
+        NetworkHandle,
+        <N as FullNodeComponents>::Evm,
+    >,
+    CustomEngineValidatorBuilder,
+>;
+
 /// Implement the Node trait for the custom node
 ///
 /// This provides a preset configuration for the node
@@ -239,9 +257,10 @@ where
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
-        CustomEngineValidatorBuilder,
     >;
-    type AddOns = EthereumAddOns;
+    type AddOns = MyNodeAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
@@ -251,11 +270,10 @@ where
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
-            .engine_validator(CustomEngineValidatorBuilder::default())
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        EthereumAddOns::default()
+        MyNodeAddOns::default()
     }
 }
 

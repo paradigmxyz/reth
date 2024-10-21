@@ -54,14 +54,30 @@ test-fuzz.workspace = true
 
 [features]
 default = ["std"]
-std = []
-test-utils = ["arbitrary"]
-arbitrary = [
-    "std",
-    "alloy-consensus/arbitrary",
-    "alloy-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-arbitrary-interop",
+std = [
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"revm-primitives/std",
+	"serde/std"
 ]
-serde-bincode-compat = ["serde_with", "alloy-consensus/serde-bincode-compat"]
+test-utils = [
+	"arbitrary",
+	"reth-codecs/test-utils"
+]
+arbitrary = [
+	"std",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"dep:proptest-arbitrary-interop",
+	"alloy-eips/arbitrary",
+	"revm-primitives/arbitrary"
+]
+serde-bincode-compat = [
+	"serde_with",
+	"alloy-consensus/serde-bincode-compat",
+	"alloy-eips/serde-bincode-compat"
+]
