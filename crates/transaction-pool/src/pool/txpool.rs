@@ -1424,11 +1424,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
+        on_chain_nonce: u64,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
-            if current_txs >= self.max_account_slots {
+
+            // Reject transactions if sender's capacity is exceeded.
+            // If transaction's nonce matches on-chain nonce always let it through
+            if current_txs >= self.max_account_slots && transaction.nonce() > on_chain_nonce {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
                 })
@@ -1595,7 +1599,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
-        let mut transaction = self.ensure_valid(transaction)?;
+        let mut transaction = self.ensure_valid(transaction, on_chain_nonce)?;
 
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
