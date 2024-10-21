@@ -544,6 +544,16 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
     /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
+    ///
+    /// This is primarily used by `eth_call`.
+    ///
+    /// # Blocking behaviour
+    ///
+    /// This assumes executing the call is relatively more expensive on IO than CPU because it
+    /// transacts a single transaction on an empty in memory database. Because `eth_call`s are
+    /// usually allowed to consume a lot of gas, this also allows a lot of memory operations so
+    /// we assume this is not primarily CPU bound and instead spawn the call on a regular tokio task
+    /// instead, where blocking IO is less problematic.
     fn spawn_with_call_at<F, R>(
         &self,
         request: TransactionRequest,
@@ -561,7 +571,7 @@ pub trait Call: LoadState + SpawnBlocking {
         async move {
             let (cfg, block_env, at) = self.evm_env_at(at).await?;
             let this = self.clone();
-            self.spawn_tracing(move |_| {
+            self.spawn_blocking_io(move |_| {
                 let state = this.state_at_block_id(at)?;
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
