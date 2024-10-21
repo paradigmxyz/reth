@@ -71,3 +71,81 @@ pub const fn find_fixed_range(
     let start = (block / blocks_per_static_file) * blocks_per_static_file;
     SegmentRangeInclusive::new(start, start + blocks_per_static_file - 1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_highest_static_files_highest() {
+        let files =
+            HighestStaticFiles { headers: Some(100), receipts: Some(200), transactions: None };
+
+        // Test for headers segment
+        assert_eq!(files.highest(StaticFileSegment::Headers), Some(100));
+
+        // Test for receipts segment
+        assert_eq!(files.highest(StaticFileSegment::Receipts), Some(200));
+
+        // Test for transactions segment
+        assert_eq!(files.highest(StaticFileSegment::Transactions), None);
+    }
+
+    #[test]
+    fn test_highest_static_files_as_mut() {
+        let mut files = HighestStaticFiles::default();
+
+        // Modify headers value
+        *files.as_mut(StaticFileSegment::Headers) = Some(150);
+        assert_eq!(files.headers, Some(150));
+
+        // Modify receipts value
+        *files.as_mut(StaticFileSegment::Receipts) = Some(250);
+        assert_eq!(files.receipts, Some(250));
+
+        // Modify transactions value
+        *files.as_mut(StaticFileSegment::Transactions) = Some(350);
+        assert_eq!(files.transactions, Some(350));
+    }
+
+    #[test]
+    fn test_highest_static_files_min() {
+        let files =
+            HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: None };
+
+        // Minimum value among the available segments
+        assert_eq!(files.min(), Some(100));
+
+        let empty_files = HighestStaticFiles::default();
+        // No values, should return None
+        assert_eq!(empty_files.min(), None);
+    }
+
+    #[test]
+    fn test_highest_static_files_max() {
+        let files =
+            HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: Some(500) };
+
+        // Maximum value among the available segments
+        assert_eq!(files.max(), Some(500));
+
+        let empty_files = HighestStaticFiles::default();
+        // No values, should return None
+        assert_eq!(empty_files.max(), None);
+    }
+
+    #[test]
+    fn test_find_fixed_range() {
+        // Test with default block size
+        let block: BlockNumber = 600_000;
+        let range = find_fixed_range(block, DEFAULT_BLOCKS_PER_STATIC_FILE);
+        assert_eq!(range.start(), 500_000);
+        assert_eq!(range.end(), 999_999);
+
+        // Test with a custom block size
+        let block: BlockNumber = 1_200_000;
+        let range = find_fixed_range(block, 1_000_000);
+        assert_eq!(range.start(), 1_000_000);
+        assert_eq!(range.end(), 1_999_999);
+    }
+}
