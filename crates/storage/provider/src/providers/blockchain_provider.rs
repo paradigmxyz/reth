@@ -66,7 +66,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// Create a new [`BlockchainProvider2`] using only the storage, fetching the latest
-    /// header from the database to initialize the factory.
+    /// header from the database to initialize the provider.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let best: ChainInfo = provider.chain_info()?;
@@ -79,7 +79,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         }
     }
 
-    /// Create new factory instance that wraps the database and the blockchain tree, using the
+    /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
     ///
     /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
