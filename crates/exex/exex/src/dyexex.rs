@@ -2,6 +2,21 @@
 
 /// Dynamically loaded ExEx entrypoint, that accepts the [`ExExContext`](`reth_exex::ExExContext`)
 /// and returns a Future that will be polled by the [`ExExManager`](`reth_exex::ExExManager`).
+///
+/// ## Example usage:
+/// ```rust
+/// use std::future::Future;
+/// use reth_exex::{define_exex, ExExContext};
+/// use reth_node_api::FullNodeComponents;
+///
+/// // Create a function to produce ExEx logic
+/// async fn exex<Node: FullNodeComponents>(_ctx: ExExContext<Node>) -> eyre::Result<()> {
+///     Ok(())
+/// }
+///
+/// // Use the macro to generate the entrypoint function
+/// define_exex!(exex,<Node>);
+/// ```
 #[macro_export]
 macro_rules! define_exex {
     ($user_fn:ident,<$node:ident>) => {
