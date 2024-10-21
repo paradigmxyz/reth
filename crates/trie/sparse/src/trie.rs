@@ -144,18 +144,19 @@ impl RevealedSparseTrie {
                 }
 
                 match self.nodes.get(&path) {
-                    // Empty, non-existing and blinded nodes can be replaced safely replaced.
-                    Some(SparseNode::Empty | SparseNode::Hash(_)) | None => {
+                    // Blinded and non-existent nodes can be replaced.
+                    Some(SparseNode::Hash(_)) | None => {
                         self.nodes.insert(
                             path,
                             SparseNode::Branch { state_mask: branch.state_mask, hash: None },
                         );
                     }
-                    // Branch nodes should not be modified.
-                    Some(SparseNode::Branch { .. }) => {}
-                    // All other node types can't be handled
-                    Some(node) => {
-                        panic!("node at path {path:?}: {node:?}")
+                    // Branch node already exists, or an extension node was placed where a branch
+                    // node was before.
+                    Some(SparseNode::Branch { .. } | SparseNode::Extension { .. }) => {}
+                    // All other node types can't be handled.
+                    Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
+                        return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
                     }
                 }
             }
@@ -165,12 +166,15 @@ impl RevealedSparseTrie {
                 self.reveal_node_or_hash(child_path, &ext.child)?;
                 self.nodes.insert(path, SparseNode::Extension { key: ext.key, hash: None });
             }
-            TrieNode::Leaf(leaf) => {
-                let mut full = path.clone();
-                full.extend_from_slice_unchecked(&leaf.key);
-                self.values.insert(full, leaf.value);
-                self.nodes.insert(path, SparseNode::new_leaf(leaf.key));
-            }
+            TrieNode::Leaf(leaf) => match self.nodes.get(&path) {
+                Some(SparseNode::Hash(_)) | None => {
+                    let mut full = path.clone();
+                    full.extend_from_slice_unchecked(&leaf.key);
+                    self.values.insert(full, leaf.value);
+                    self.nodes.insert(path, SparseNode::new_leaf(leaf.key));
+                }
+                _ => {}
+            },
         }
 
         Ok(())
@@ -178,8 +182,18 @@ impl RevealedSparseTrie {
 
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
-            // TODO: revise insert to not overwrite existing entries
-            self.nodes.insert(path, SparseNode::Hash(B256::from_slice(&child[1..])));
+            let hash = B256::from_slice(&child[1..]);
+            match self.nodes.get(&path) {
+                // Hash node with a different hash can't be handled
+                Some(node @ SparseNode::Hash(previous_hash)) if previous_hash != &hash => {
+                    return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
+                }
+                None => {
+                    self.nodes.insert(path, SparseNode::Hash(hash));
+                }
+                // All other node types mean that it has already been revealed
+                Some(_) => {}
+            }
             return Ok(())
         }
 
@@ -1177,30 +1191,26 @@ mod tests {
 
     #[test]
     fn sparse_trie_remove_leaf_blinded() {
-        let mut sparse = RevealedSparseTrie::default();
-
         let leaf = LeafNode::new(
             Nibbles::default(),
             alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
         );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)),
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut sparse = RevealedSparseTrie::from_root(branch.clone()).unwrap();
 
         // Reveal a branch node and one of its children
         //
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse
-            .reveal_node(
-                Nibbles::default(),
-                TrieNode::Branch(BranchNode::new(
-                    vec![
-                        RlpNode::word_rlp(&B256::repeat_byte(1)),
-                        RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
-                    ],
-                    TrieMask::new(0b11),
-                )),
-            )
-            .unwrap();
+        sparse.reveal_node(Nibbles::default(), branch).unwrap();
         sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf)).unwrap();
 
         // Removing a blinded leaf should result in an error
@@ -1278,129 +1288,142 @@ mod tests {
         });
     }
 
-    /// We have three leafs that share the same prefix: A, B, C. Hash builder trie has only nodes A
-    /// and C, and we have proofs for them. Node B is new and inserted in the sparse trie first.
+    /// We have three leaves that share the same prefix: 0x00, 0x01 and 0x02. Hash builder trie has
+    /// only nodes 0x00 and 0x01, and we have proofs for them. Node B is new and inserted in the
+    /// sparse trie first.
     ///
-    /// Reveal the hash builder proof to leaf A in the sparse trie, insert leaf B into the sparse
-    /// trie, reveal the hash builder proof to leaf C in the sparse trie.
+    /// Reveal the hash builder proof to leaf 0x00 in the sparse trie, insert leaf 0x01 into the
+    /// sparse trie, reveal the hash builder proof to leaf 0x02 in the sparse trie.
     ///
-    /// The hash builder proof to the leaf C didn't have the leaf B at the corresponding nibble of
-    /// the branch node, so we need to adjust the branch node instead of fully replacing it.
+    /// The hash builder proof to the leaf 0x02 didn't have the leaf 0x01 at the corresponding
+    /// nibble of the branch node, so we need to adjust the branch node instead of fully
+    /// replacing it.
     #[test]
     fn sparse_trie_reveal_node_1() {
-        // Generate three keys with the same prefix but different last nibble
-        let key1 = Nibbles::from_nibbles_unchecked([0x0]);
-        let key2 = Nibbles::from_nibbles_unchecked([0x1]);
-        let key3 = Nibbles::from_nibbles_unchecked([0x2]);
+        let key1 = || Nibbles::from_nibbles_unchecked([0x00]);
+        let key2 = || Nibbles::from_nibbles_unchecked([0x01]);
+        let key3 = || Nibbles::from_nibbles_unchecked([0x02]);
         let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
 
-        let mut trie = RevealedSparseTrie::default();
+        // Generate the proof for the root node and initialize the sparse trie with it
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(key1(), value()), (key3(), value())],
+            [Nibbles::default()],
+        );
+        let mut sparse = RevealedSparseTrie::from_root(
+            TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+        )
+        .unwrap();
 
         // Generate the proof for the first key and reveal it in the sparse trie
-        let (_, proof_nodes) = hash_builder_root_with_proofs(
-            [(key1.clone(), value()), (key3.clone(), value())],
-            [key1.clone()],
-        );
+        let (_, proof_nodes) =
+            hash_builder_root_with_proofs([(key1(), value()), (key3(), value())], [key1()]);
         for (path, node) in proof_nodes.nodes_sorted() {
-            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
         }
 
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
-            trie.nodes.get(&Nibbles::default()),
+            sparse.nodes.get(&Nibbles::default()),
             Some(&SparseNode::new_branch(0b101.into()))
         );
 
         // Insert the leaf for the second key
-        trie.update_leaf(key2.clone(), value().to_vec()).unwrap();
+        sparse.update_leaf(key2(), value().to_vec()).unwrap();
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
-            trie.nodes.get(&Nibbles::default()),
+            sparse.nodes.get(&Nibbles::default()),
             Some(&SparseNode::new_branch(0b111.into()))
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
-        let (_, proof_nodes_3) = hash_builder_root_with_proofs(
-            [(key1.clone(), value()), (key3.clone(), value())],
-            [key3.clone()],
-        );
+        let (_, proof_nodes_3) =
+            hash_builder_root_with_proofs([(key1(), value()), (key3(), value())], [key3()]);
         for (path, node) in proof_nodes_3.nodes_sorted() {
-            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
         }
 
         // Check that nothing changed in the branch node
         assert_eq!(
-            trie.nodes.get(&Nibbles::default()),
+            sparse.nodes.get(&Nibbles::default()),
             Some(&SparseNode::new_branch(0b111.into()))
         );
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
         // compare them to the sparse trie
         let (_, proof_nodes) = hash_builder_root_with_proofs(
-            [(key1.clone(), value()), (key2.clone(), value()), (key3.clone(), value())],
-            [key1, key2, key3],
+            [(key1(), value()), (key2(), value()), (key3(), value())],
+            [key1(), key2(), key3()],
         );
 
-        assert_eq_sparse_trie_proof_nodes(&trie, proof_nodes);
+        assert_eq_sparse_trie_proof_nodes(&sparse, proof_nodes);
     }
 
-    /// We have three leafs that share the same prefix: A, B, C. Hash builder trie has all three
-    /// nodes, and we have proofs for them.
+    /// We have three leaves: 0x0000, 0x0101, and 0x0102. Hash builder trie has all nodes, and we
+    /// have proofs for them.
     ///
-    /// Reveal the hash builder proofs to leafs A and B in the sparse trie, remove leaf B from
-    /// the sparse trie (that will not destroy the branch node, because there's also leaf C left),
-    /// reveal the hash builder proof to leaf C in the sparse trie.
+    /// Reveal the hash builder proof to leaf 0x00 in the sparse trie, remove leaf 0x00 from the
+    /// sparse trie (that will remove the branch node and create an extension node with the key
+    /// 0x0000), reveal the hash builder proof to leaf 0x0101 in the sparse trie.
     ///
-    /// The hash builder proof to the leaf C had a branch node with all three nibless set, but we
-    /// already deleted the leaf B, so it should not set the nibble for the leaf B again.
+    /// The hash builder proof to the leaf 0x0101 had a branch node in the path, but we turned it
+    /// into an extension node, so it should ignore this node.
     #[test]
     fn sparse_trie_reveal_node_2() {
-        // Generate three keys with the same prefix but different last nibble
-        let key1 = || Nibbles::from_nibbles_unchecked([0x0]);
-        let key2 = || Nibbles::from_nibbles_unchecked([0x1]);
-        let key3 = || Nibbles::from_nibbles_unchecked([0x2]);
+        let key1 = || Nibbles::from_nibbles_unchecked([0x00, 0x00]);
+        let key2 = || Nibbles::from_nibbles_unchecked([0x01, 0x01]);
+        let key3 = || Nibbles::from_nibbles_unchecked([0x01, 0x02]);
         let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
 
-        let mut trie = RevealedSparseTrie::default();
-
-        // Generate the proofs for the first and second keys and reveal them in the sparse trie
+        // Generate the proof for the root node and initialize the sparse trie with it
         let (_, proof_nodes) = hash_builder_root_with_proofs(
             [(key1(), value()), (key2(), value()), (key3(), value())],
-            [key1(), key2()],
+            [Nibbles::default()],
+        );
+        let mut sparse = RevealedSparseTrie::from_root(
+            TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+        )
+        .unwrap();
+
+        // Generate the proof for the children of the root branch node and reveal it in the sparse
+        // trie
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(key1(), value()), (key2(), value()), (key3(), value())],
+            [key1(), Nibbles::from_nibbles_unchecked([0x01])],
         );
         for (path, node) in proof_nodes.nodes_sorted() {
-            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
         }
 
-        // Check that the branch node exists with all three nibbles set
+        // Check that the branch node exists
         assert_eq!(
-            trie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            sparse.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b11.into()))
         );
 
-        // Remove the leaf for the second key
-        trie.remove_leaf(key2()).unwrap();
+        // Remove the leaf for the first key
+        sparse.remove_leaf(key1()).unwrap();
 
-        // Check that the branch node was updated and a nibble was unset
+        // Check that the branch node was turned into an extension node
         assert_eq!(
-            trie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b101.into()))
+            sparse.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
-        let (_, proof_nodes_3) = hash_builder_root_with_proofs(
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
             [(key1(), value()), (key2(), value()), (key3(), value())],
-            [key3()],
+            [key2()],
         );
-        for (path, node) in proof_nodes_3.nodes_sorted() {
-            trie.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        for (path, node) in proof_nodes.nodes_sorted() {
+            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
         }
 
-        // Check that nothing changed in the branch node
+        // Check that nothing changed in the extension node
         assert_eq!(
-            trie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b101.into()))
+            sparse.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
         );
     }
 }
