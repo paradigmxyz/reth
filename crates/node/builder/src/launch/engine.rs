@@ -78,19 +78,14 @@ where
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    // <CB::Components as NodeComponents<T>>::EngineForkchoiceValidator: EngineForkchoiceValidator<
-    // alloy_rpc_types_engine::PayloadAttributes>
     <CB::Components as NodeComponents<T>>::EngineForkchoiceValidator: EngineForkchoiceValidator<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
-    // <Types as NodeTypesWithEngine>::Engine: EngineTypes<PayloadAttributes =
-    // reth_ethereum_engine_primitives::EthPayloadAttributes>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
     async fn launch_node(
         self,
-
         target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx, engine_tree_config } = self;
