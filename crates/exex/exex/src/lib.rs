@@ -40,6 +40,8 @@ pub use backfill::*;
 mod context;
 pub use context::*;
 
+mod dyexex;
+
 mod event;
 pub use event::*;
 
