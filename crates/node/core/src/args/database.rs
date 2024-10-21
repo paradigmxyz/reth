@@ -20,6 +20,13 @@ pub struct DatabaseArgs {
     /// NFS volume.
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
+    /// Disable long-lived read transaction safety guarantees.
+    ///
+    /// CAUTION: In most of the cases, you want the safety guarantees for long read transactions
+    /// enabled. Use this only if you're trying to enable node to return historical state for
+    /// certain rpcs (e.g. `debug_executionWitness` or `eth_getProof`).
+    #[arg(long = "db.disable-long-read-transaction-safety")]
+    pub disable_long_read_transaction_safety: Option<bool>,
 }
 
 impl DatabaseArgs {
