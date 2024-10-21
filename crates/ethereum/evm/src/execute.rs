@@ -21,7 +21,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_primitives::{BlockWithSenders, Receipt};
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleState, State};
+use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
@@ -262,11 +262,6 @@ where
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
-    }
-
-    fn finish(&mut self) -> BundleState {
-        self.state.merge_transitions(BundleRetention::Reverts);
-        self.state.take_bundle()
     }
 
     fn validate_block_post_execution(

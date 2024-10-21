@@ -6,6 +6,7 @@ pub use reth_execution_errors::{
 };
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
+use revm::db::states::bundle_state::BundleRetention;
 
 use crate::system_calls::OnStateHook;
 use alloc::{boxed::Box, vec::Vec};
@@ -176,7 +177,10 @@ pub struct ExecuteOutput {
 }
 
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy<DB> {
+pub trait BlockExecutionStrategy<DB>
+where
+    DB: Database,
+{
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
@@ -209,18 +213,23 @@ pub trait BlockExecutionStrategy<DB> {
     fn state_mut(&mut self) -> &mut State<DB>;
 
     /// Sets a hook to be called after each state change during execution.
-    fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
+    fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
 
     /// Returns the final bundle state.
-    fn finish(&mut self) -> BundleState;
+    fn finish(&mut self) -> BundleState {
+        self.state_mut().merge_transitions(BundleRetention::Reverts);
+        self.state_mut().take_bundle()
+    }
 
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders,
-        receipts: &[Receipt],
-        requests: &Requests,
-    ) -> Result<(), ConsensusError>;
+        _block: &BlockWithSenders,
+        _receipts: &[Receipt],
+        _requests: &Requests,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
 }
 
 /// A strategy factory that can create block execution strategies.
@@ -293,6 +302,7 @@ where
 pub struct BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
     /// Block execution strategy.
     pub(crate) strategy: S,
@@ -302,6 +312,7 @@ where
 impl<S, DB> BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub const fn new(strategy: S) -> Self {
@@ -384,6 +395,7 @@ where
 pub struct BasicBatchExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
     /// Batch execution strategy.
     pub(crate) strategy: S,
@@ -395,6 +407,7 @@ where
 impl<S, DB> BasicBatchExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
     /// Creates a new `BasicBatchExecutor` with the given strategy.
     pub const fn new(strategy: S, batch_record: BlockBatchRecord) -> Self {
@@ -597,7 +610,10 @@ mod tests {
         }
     }
 
-    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig> {
+    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig>
+    where
+        DB: Database,
+    {
         type Error = BlockExecutionError;
 
         fn apply_pre_execution_changes(
