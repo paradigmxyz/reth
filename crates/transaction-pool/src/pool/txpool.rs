@@ -1405,12 +1405,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
-        let mut iter = self.txs_iter(tx.transaction_id.sender);
-        if let Some((_, existing)) = iter.next() {
-            return tx.tx_type_conflicts_with(&existing.transaction)
-        }
-        // no existing transaction for this sender
-        false
+        self.txs_iter(tx.transaction_id.sender)
+            .next()
+            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.
