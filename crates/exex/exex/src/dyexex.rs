@@ -28,7 +28,7 @@
 macro_rules! define_exex {
     ($user_fn:ident) => {
         #[no_mangle]
-        pub extern "C" fn _launch_exex<Node: FullNodeComponents>(
+        pub extern fn _launch_exex<Node: FullNodeComponents>(
             ctx: $crate::ExExContext<Node>,
         ) -> impl std::future::Future<
             Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>,
