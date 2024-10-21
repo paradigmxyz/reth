@@ -35,7 +35,8 @@ use std::{
 use tracing::trace;
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
-/// instantiation.
+/// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
+/// this provider.
 ///
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
