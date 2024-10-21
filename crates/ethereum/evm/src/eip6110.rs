@@ -79,6 +79,10 @@ where
 
 /// Find deposit logs in a list of receipts, and return the concatenated
 /// deposit request bytestring.
+///
+/// The address of the deposit contract is taken from the chain spec, and
+/// defaults to [`MAINNET_DEPOSIT_CONTRACT_ADDRESS`] if not specified in
+/// the chain spec.
 pub fn parse_deposits_from_receipts<'a, I>(
     chainspec: &ChainSpec,
     receipts: I,
