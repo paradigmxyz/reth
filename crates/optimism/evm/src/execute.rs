@@ -10,7 +10,7 @@ use reth_consensus::ConsensusError;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ProviderError,
+        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
@@ -155,7 +155,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), Self::Error> {
+    ) -> Result<ExecuteOutput, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -240,7 +240,7 @@ where
             });
         }
 
-        Ok((receipts, cumulative_gas_used))
+        Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
 
     fn apply_post_execution_changes(
