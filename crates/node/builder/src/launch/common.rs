@@ -414,10 +414,7 @@ where
             StaticFileProvider::read_write(self.data_dir().static_files())?,
         )
         .with_prune_modes(self.prune_modes())
-        .with_static_files_metrics()
-        .with_disable_long_read_transaction_safety(
-            self.node_config().db.disable_long_read_transaction_safety.unwrap_or(false),
-        );
+        .with_static_files_metrics();
 
         let has_receipt_pruning =
             self.toml_config().prune.as_ref().map_or(false, |a| a.has_receipts_pruning());

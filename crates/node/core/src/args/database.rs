@@ -1,12 +1,14 @@
 //! clap [Args](clap::Args) for database configuration
 
+use std::time::Duration;
+
 use crate::version::default_client_version;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::ClientVersion;
+use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -20,13 +22,9 @@ pub struct DatabaseArgs {
     /// NFS volume.
     #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
-    /// Disable long-lived read transaction safety guarantees.
-    ///
-    /// CAUTION: In most of the cases, you want the safety guarantees for long read transactions
-    /// enabled. Use this only if you're trying to enable node to return historical state for
-    /// certain rpcs (e.g. `debug_executionWitness` or `eth_getProof`).
-    #[arg(long = "db.disable-long-read-transaction-safety")]
-    pub disable_long_read_transaction_safety: Option<bool>,
+    /// Read transaction timeout in seconds, 0 means no timeout.
+    #[arg(long = "db.read-transaction-timeout")]
+    pub read_transaction_timeout: Option<u64>,
 }
 
 impl DatabaseArgs {
@@ -40,9 +38,16 @@ impl DatabaseArgs {
         &self,
         client_version: ClientVersion,
     ) -> reth_db::mdbx::DatabaseArguments {
+        let max_read_transaction_duration = match self.read_transaction_timeout {
+            None => None, // if not specified, use default value
+            Some(0) => Some(MaxReadTransactionDuration::Unbounded), // if 0, disable timeout
+            Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
+        };
+
         reth_db::mdbx::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
+            .with_max_read_transaction_duration(max_read_transaction_duration)
     }
 }
 
