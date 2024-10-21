@@ -14,8 +14,11 @@
 /// use std::future::Future;
 ///
 /// // Create a function to produce ExEx logic
-/// async fn exex<Node: FullNodeComponents>(_ctx: ExExContext<Node>) -> eyre::Result<()> {
-///     Ok(())
+/// async fn exex<Node: FullNodeComponents>(
+///     _ctx: ExExContext<Node>,
+/// ) -> eyre::Result<impl std::future::Future<Output = eyre::Result<()>>> {
+///     let _exex = async move { Ok(()) };
+///     Ok(_exex)
 /// }
 ///
 /// // Use the macro to generate the entrypoint function
@@ -30,7 +33,7 @@ macro_rules! define_exex {
         ) -> impl std::future::Future<
             Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>,
         > {
-            async move { Ok($user_fn(ctx)) }
+            $user_fn(ctx)
         }
     };
 }
