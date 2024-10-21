@@ -88,7 +88,6 @@ reth-discv4.workspace = true
 
 [features]
 default = []
-dev = ["arbitrary"]
 arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
