@@ -2638,6 +2638,7 @@ mod tests {
         let mut pool = AllTransactions::default();
 
         let mut tx = MockTransaction::eip1559();
+        let unblocked_tx = tx.clone();
         for _ in 0..pool.max_account_slots {
             tx = tx.next();
             pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
@@ -2651,6 +2652,10 @@ mod tests {
         let err =
             pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+
+        assert!(pool
+            .insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce)
+            .is_ok());
     }
 
     #[test]
