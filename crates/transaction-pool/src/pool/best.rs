@@ -208,7 +208,7 @@ pub struct BestTransactionFilter<I, P> {
 
 impl<I, P> BestTransactionFilter<I, P> {
     /// Create a new [`BestTransactionFilter`] with the given predicate.
-    pub(crate) const fn new(best: I, predicate: P) -> Self {
+    pub const fn new(best: I, predicate: P) -> Self {
         Self { best, predicate }
     }
 }
