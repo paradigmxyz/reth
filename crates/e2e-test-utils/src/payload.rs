@@ -1,20 +1,20 @@
 use futures_util::StreamExt;
-use reth::api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
+use reth::api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
-use reth_payload_primitives::{Events, PayloadBuilder};
+use reth_payload_primitives::{Events, PayloadBuilder, PayloadTypes};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
 #[derive(Debug)]
-pub struct PayloadTestContext<E: EngineTypes> {
-    pub payload_event_stream: BroadcastStream<Events<E>>,
-    payload_builder: PayloadBuilderHandle<E>,
+pub struct PayloadTestContext<T: PayloadTypes> {
+    pub payload_event_stream: BroadcastStream<Events<T>>,
+    payload_builder: PayloadBuilderHandle<T>,
     pub timestamp: u64,
 }
 
-impl<E: EngineTypes> PayloadTestContext<E> {
+impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Creates a new payload helper
-    pub async fn new(payload_builder: PayloadBuilderHandle<E>) -> eyre::Result<Self> {
+    pub async fn new(payload_builder: PayloadBuilderHandle<T>) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
         // Cancun timestamp
@@ -24,10 +24,10 @@ impl<E: EngineTypes> PayloadTestContext<E> {
     /// Creates a new payload job from static attributes
     pub async fn new_payload(
         &mut self,
-        attributes_generator: impl Fn(u64) -> E::PayloadBuilderAttributes,
-    ) -> eyre::Result<E::PayloadBuilderAttributes> {
+        attributes_generator: impl Fn(u64) -> T::PayloadBuilderAttributes,
+    ) -> eyre::Result<T::PayloadBuilderAttributes> {
         self.timestamp += 1;
-        let attributes: E::PayloadBuilderAttributes = attributes_generator(self.timestamp);
+        let attributes = attributes_generator(self.timestamp);
         self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
         Ok(attributes)
     }
@@ -35,10 +35,10 @@ impl<E: EngineTypes> PayloadTestContext<E> {
     /// Asserts that the next event is a payload attributes event
     pub async fn expect_attr_event(
         &mut self,
-        attrs: E::PayloadBuilderAttributes,
+        attrs: T::PayloadBuilderAttributes,
     ) -> eyre::Result<()> {
         let first_event = self.payload_event_stream.next().await.unwrap()?;
-        if let reth::payload::Events::Attributes(attr) = first_event {
+        if let Events::Attributes(attr) = first_event {
             assert_eq!(attrs.timestamp(), attr.timestamp());
         } else {
             panic!("Expect first event as payload attributes.")
@@ -59,9 +59,9 @@ impl<E: EngineTypes> PayloadTestContext<E> {
     }
 
     /// Expects the next event to be a built payload event or panics
-    pub async fn expect_built_payload(&mut self) -> eyre::Result<E::BuiltPayload> {
+    pub async fn expect_built_payload(&mut self) -> eyre::Result<T::BuiltPayload> {
         let second_event = self.payload_event_stream.next().await.unwrap()?;
-        if let reth::payload::Events::BuiltPayload(payload) = second_event {
+        if let Events::BuiltPayload(payload) = second_event {
             Ok(payload)
         } else {
             panic!("Expect a built payload event.");
