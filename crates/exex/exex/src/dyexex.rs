@@ -1,13 +1,13 @@
-//! Dynamically loading type-safe abstractions
+//! Type-safe abstractions for Dynamically Loaded ExExes
 
 /// Dynamically loaded ExEx entrypoint, that accepts the [`ExExContext`](`crate::ExExContext`)
 /// and returns a Future that will be polled by the [`ExExManager`](`crate::ExExManager`).
 ///
 /// ## Example usage:
 /// ```rust
-/// use std::future::Future;
 /// use reth_exex::{define_exex, ExExContext};
 /// use reth_node_api::FullNodeComponents;
+/// use std::future::Future;
 ///
 /// // Create a function to produce ExEx logic
 /// async fn exex<Node: FullNodeComponents>(_ctx: ExExContext<Node>) -> eyre::Result<()> {
@@ -15,14 +15,14 @@
 /// }
 ///
 /// // Use the macro to generate the entrypoint function
-/// define_exex!(exex,<Node>);
+/// define_exex!(exex);
 /// ```
 #[macro_export]
 macro_rules! define_exex {
-    ($user_fn:ident,<$node:ident>) => {
+    ($user_fn:ident) => {
         #[no_mangle]
-        pub extern "C" fn _launch_exex<$node: FullNodeComponents>(
-            ctx: $crate::ExExContext<$node>,
+        pub extern "C" fn _launch_exex<Node: FullNodeComponents>(
+            ctx: $crate::ExExContext<Node>,
         ) -> impl std::future::Future<
             Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>,
         > {
