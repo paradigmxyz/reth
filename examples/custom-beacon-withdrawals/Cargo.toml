@@ -19,3 +19,6 @@ alloy-eips.workspace = true
 alloy-consensus.workspace = true
 
 eyre.workspace = true
+
+[features]
+optimism = []
