@@ -233,18 +233,55 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 };
             }
 
-            let block_hash = match LoadPendingBlock::provider(self)
+            // Initialize the maximum number of retries for handling reorg cases.
+            //
+            // A reorg may cause the latest block to be temporarily absent from the cache.
+            //
+            // By retrying once, we give the system a chance to update the cache with
+            // the new latest block information after a reorganization.
+            //
+            // Only retry for the `Latest` block id
+            let max_retries = if block_id.is_latest() { 1 } else { 0 };
+
+            // We retrieve the block hash for the given block id via the provider
+            let mut block_hash = match LoadPendingBlock::provider(self)
                 .block_hash_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
             {
                 Some(block_hash) => block_hash,
+                // If the block hash is not found, we return `None` directly
                 None => return Ok(None),
             };
 
-            self.cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)
+            // Attempt to fetch the block from cache
+            for _ in 0..=max_retries {
+                match self.cache().get_sealed_block_with_senders(block_hash).await {
+                    // If a block is found in the cache, return it
+                    Ok(Some(block)) => return Ok(Some(block)),
+                    // If no block is found and the `block_id` refers to the latest block,
+                    // we retry the fetch, as this may indicate a reorg scenario
+                    Ok(None) if block_id.is_latest() => {
+                        // If latest block, refetch the block hash to handle reorgs
+                        if let Some(new_hash) = LoadPendingBlock::provider(self)
+                            .block_hash_for_id(BlockId::latest())
+                            .map_err(Self::Error::from_eth_err)?
+                        {
+                            // If the hash has changed due to a reorg, update and retry
+                            if new_hash != block_hash {
+                                block_hash = new_hash;
+                                continue;
+                            }
+                        }
+                    }
+                    // If no block is found and the `block_id` is not the latest, return `None`
+                    Ok(None) => return Ok(None),
+                    // If an error occurs while fetching from the cache, return it as an error
+                    Err(err) => return Err(Self::Error::from_eth_err(err)),
+                }
+            }
+
+            // Return `None` if all retries have been exhausted without finding the block
+            Ok(None)
         }
     }
 }
