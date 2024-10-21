@@ -7,9 +7,10 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_evm::execute::BlockValidationError;
 use reth_primitives::Receipt;
 
-/// The size of a deposit request in bytes.
-/// Consists of pubkey, withdrawal_credentials, amount, signature, index.
-/// While the event fields emit bytestrings, those bytestrings are fixed size.
+/// The size of a deposit request in bytes. While the event fields emit
+/// bytestrings, those bytestrings are fixed size. The fields are: 48-byte
+/// pubkey, 32-byte withdrawal credentials, 8-byte amount, 96-byte signature,
+/// and 8-byte index.
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 
 sol! {
