@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_eips::BlockNumHash;
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
@@ -514,7 +514,7 @@ impl CanonicalInMemoryState {
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider {
         let in_memory = if let Some(state) = self.state_by_hash(hash) {
-            state.chain().into_iter().map(|block_state| block_state.block()).collect()
+            state.chain().map(|block_state| block_state.block()).collect()
         } else {
             Vec::new()
         };
@@ -692,10 +692,8 @@ impl BlockState {
     /// Returns a vector of `BlockStates` representing the entire in memory chain.
     /// The block state order in the output vector is newest to oldest (highest to lowest),
     /// including self as the first element.
-    pub fn chain(&self) -> Vec<&Self> {
-        let mut chain = vec![self];
-        self.append_parent_chain(&mut chain);
-        chain
+    pub fn chain(&self) -> impl Iterator<Item = &Self> {
+        std::iter::successors(Some(self), |state| state.parent.as_deref())
     }
 
     /// Appends the parent chain of this [`BlockState`] to the given vector.
@@ -715,9 +713,58 @@ impl BlockState {
     /// This merges the state of all blocks that are part of the chain that the this block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider {
-        let in_memory = self.chain().into_iter().map(|block_state| block_state.block()).collect();
+        let in_memory = self.chain().map(|block_state| block_state.block()).collect();
 
         MemoryOverlayStateProvider::new(historical, in_memory)
+    }
+
+    /// Tries to find a block by [`BlockHashOrNumber`] in the chain ending at this block.
+    pub fn block_on_chain(&self, hash_or_num: BlockHashOrNumber) -> Option<&Self> {
+        self.chain().find(|block| match hash_or_num {
+            BlockHashOrNumber::Hash(hash) => block.hash() == hash,
+            BlockHashOrNumber::Number(number) => block.number() == number,
+        })
+    }
+
+    /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
+    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<TransactionSigned> {
+        self.chain().find_map(|block_state| {
+            block_state
+                .block_ref()
+                .block()
+                .body
+                .transactions()
+                .find(|tx| tx.hash() == hash)
+                .cloned()
+        })
+    }
+
+    /// Tries to find a transaction with meta by [`TxHash`] in the chain ending at this block.
+    pub fn transaction_meta_on_chain(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<(TransactionSigned, TransactionMeta)> {
+        self.chain().find_map(|block_state| {
+            block_state
+                .block_ref()
+                .block()
+                .body
+                .transactions()
+                .enumerate()
+                .find(|(_, tx)| tx.hash() == tx_hash)
+                .map(|(index, tx)| {
+                    let meta = TransactionMeta {
+                        tx_hash,
+                        index: index as u64,
+                        block_hash: block_state.hash(),
+                        block_number: block_state.block_ref().block.number,
+                        base_fee: block_state.block_ref().block.header.base_fee_per_gas,
+                        timestamp: block_state.block_ref().block.timestamp,
+                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas,
+                    };
+                    (tx.clone(), meta)
+                })
+        })
     }
 }
 
@@ -1382,7 +1429,7 @@ mod tests {
         let parents = single_block.parent_state_chain();
         assert_eq!(parents.len(), 0);
 
-        let block_state_chain = single_block.chain();
+        let block_state_chain = single_block.chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().block.number, single_block_number);
         assert_eq!(block_state_chain[0].block().block.hash(), single_block_hash);
@@ -1393,18 +1440,18 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::default();
         let chain = create_mock_state_chain(&mut test_block_builder, 3);
 
-        let block_state_chain = chain[2].chain();
+        let block_state_chain = chain[2].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 3);
         assert_eq!(block_state_chain[0].block().block.number, 3);
         assert_eq!(block_state_chain[1].block().block.number, 2);
         assert_eq!(block_state_chain[2].block().block.number, 1);
 
-        let block_state_chain = chain[1].chain();
+        let block_state_chain = chain[1].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 2);
         assert_eq!(block_state_chain[0].block().block.number, 2);
         assert_eq!(block_state_chain[1].block().block.number, 1);
 
-        let block_state_chain = chain[0].chain();
+        let block_state_chain = chain[0].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().block.number, 1);
     }
