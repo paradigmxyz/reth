@@ -37,6 +37,7 @@ impl PruneMode {
             Self::Full if segment.min_blocks(purpose) == 0 => Some((tip, *self)),
             Self::Distance(distance) if *distance > tip => None, // Nothing to prune yet
             Self::Distance(distance) if *distance >= segment.min_blocks(purpose) => {
+                println!("iciiiiiiiii: {}", tip - distance);
                 Some((tip - distance, *self))
             }
             Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
@@ -66,6 +67,11 @@ impl PruneMode {
     /// Returns true if the prune mode is [`PruneMode::Full`].
     pub const fn is_full(&self) -> bool {
         matches!(self, Self::Full)
+    }
+
+    /// Returns true if the prune mode is [`PruneMode::Distance`].
+    pub const fn is_distance(&self) -> bool {
+        matches!(self, Self::Distance(_))
     }
 }
 
