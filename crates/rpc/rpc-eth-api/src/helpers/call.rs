@@ -655,14 +655,14 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Returns the index of the target transaction in the given iterator.
     fn replay_transactions_until<'a, DB, I>(
         &self,
-        db: &mut CacheDB<DB>,
+        db: &mut DB,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         transactions: I,
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: DatabaseRef,
+        DB: Database + DatabaseCommit,
         EthApiError: From<DB::Error>,
         I: IntoIterator<Item = (&'a Address, &'a TransactionSigned)>,
     {
@@ -929,14 +929,15 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Executes the requests again after an out of gas error to check if the error is gas related
     /// or not
     #[inline]
-    fn map_out_of_gas_err<S>(
+    fn map_out_of_gas_err<DB>(
         &self,
         env_gas_limit: U256,
         mut env: EnvWithHandlerCfg,
-        db: &mut CacheDB<StateProviderDatabase<S>>,
+        db: &mut DB,
     ) -> Self::Error
     where
-        S: StateProvider,
+        DB: Database,
+        EthApiError: From<DB::Error>,
     {
         let req_gas_limit = env.tx.gas_limit;
         env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
