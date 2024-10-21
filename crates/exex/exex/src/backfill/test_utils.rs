@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_consensus::TxEip2930;
+use alloy_consensus::{constants::ETH_TO_WEI, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use eyre::OptionExt;
@@ -10,8 +10,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{
-    constants::ETH_TO_WEI, Block, BlockBody, BlockWithSenders, Header, Receipt,
-    SealedBlockWithSenders, Transaction,
+    Block, BlockBody, BlockWithSenders, Header, Receipt, SealedBlockWithSenders, Transaction,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,

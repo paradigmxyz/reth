@@ -31,24 +31,27 @@ revm.workspace = true
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = ["std"]
 std = [
-	"reth-primitives/std",
-	"alloy-primitives/std",
-	"revm/std",
-	"alloy-eips/std"
+    "reth-primitives/std",
+    "alloy-primitives/std",
+    "revm/std",
+    "alloy-eips/std",
+    "alloy-consensus/std",
 ]
 test-utils = [
-	"dep:reth-trie",
-	"reth-primitives/test-utils",
-	"reth-trie?/test-utils",
-	"revm/test-utils"
+    "dep:reth-trie",
+    "reth-primitives/test-utils",
+    "reth-trie?/test-utils",
+    "revm/test-utils",
 ]
 serde = [
-	"revm/serde",
-	"reth-trie?/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde"
+    "revm/serde",
+    "reth-trie?/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
 ]

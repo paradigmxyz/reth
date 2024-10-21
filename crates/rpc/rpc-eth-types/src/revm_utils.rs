@@ -315,7 +315,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::constants::GWEI_TO_WEI;
+    use alloy_consensus::constants::GWEI_TO_WEI;
 
     #[test]
     fn test_ensure_0_fallback() {
