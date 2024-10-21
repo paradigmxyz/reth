@@ -174,10 +174,6 @@ pub enum PersistenceAction {
     /// static files.
     RemoveBlocksAbove(u64, oneshot::Sender<Option<BlockNumHash>>),
 
-    /// Prune associated block data before the given block number, according to already-configured
-    /// prune modes.
-    PruneBefore(u64, oneshot::Sender<PrunerOutput>),
-
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
 
