@@ -508,20 +508,6 @@ impl CanonicalInMemoryState {
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    pub fn state_provider_from_state(
-        &self,
-        state: &BlockState,
-        historical: StateProviderBox,
-    ) -> MemoryOverlayStateProvider {
-        let in_memory = state.chain().into_iter().map(|block_state| block_state.block()).collect();
-
-        MemoryOverlayStateProvider::new(historical, in_memory)
-    }
-
-    /// Return state provider with reference to in-memory blocks that overlay database state.
-    ///
-    /// This merges the state of all blocks that are part of the chain that the requested block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(
         &self,
         hash: B256,
@@ -723,6 +709,16 @@ impl BlockState {
     pub fn iter(self: Arc<Self>) -> impl Iterator<Item = Arc<Self>> {
         std::iter::successors(Some(self), |state| state.parent.clone())
     }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the this block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider {
+        let in_memory = self.chain().into_iter().map(|block_state| block_state.block()).collect();
+
+        MemoryOverlayStateProvider::new(historical, in_memory)
+    }
 }
 
 /// Represents an executed block stored in-memory.
@@ -869,10 +865,11 @@ impl NewCanonicalChain {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
+    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{map::HashSet, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{Account, Bytecode, Receipt, Requests};
+    use reth_primitives::{Account, Bytecode, Receipt};
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,

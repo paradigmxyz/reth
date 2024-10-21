@@ -1,11 +1,13 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec};
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::Bytes;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::{Block, Header, Request};
+use reth_primitives::{Block, Header};
 use revm::{Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
 
@@ -119,17 +121,18 @@ where
     pub fn apply_post_execution_changes<DB, Ext>(
         &mut self,
         evm: &mut Evm<'_, Ext, DB>,
-    ) -> Result<Vec<Request>, BlockExecutionError>
+    ) -> Result<Requests, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
     {
+        // todo
         // Collect all EIP-7685 requests
         let withdrawal_requests = self.apply_withdrawal_requests_contract_call(evm)?;
 
         // Collect all EIP-7251 requests
         let consolidation_requests = self.apply_consolidation_requests_contract_call(evm)?;
-        Ok([withdrawal_requests, consolidation_requests].concat())
+        Ok(Requests::new(vec![withdrawal_requests, consolidation_requests]))
     }
 
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
@@ -247,7 +250,7 @@ where
         db: &mut DB,
         initialized_cfg: &CfgEnvWithHandlerCfg,
         initialized_block_env: &BlockEnv,
-    ) -> Result<Vec<Request>, BlockExecutionError>
+    ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
@@ -263,7 +266,7 @@ where
     pub fn apply_withdrawal_requests_contract_call<DB, Ext>(
         &mut self,
         evm: &mut Evm<'_, Ext, DB>,
-    ) -> Result<Vec<Request>, BlockExecutionError>
+    ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
@@ -285,7 +288,7 @@ where
         db: &mut DB,
         initialized_cfg: &CfgEnvWithHandlerCfg,
         initialized_block_env: &BlockEnv,
-    ) -> Result<Vec<Request>, BlockExecutionError>
+    ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
@@ -301,7 +304,7 @@ where
     pub fn apply_consolidation_requests_contract_call<DB, Ext>(
         &mut self,
         evm: &mut Evm<'_, Ext, DB>,
-    ) -> Result<Vec<Request>, BlockExecutionError>
+    ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,

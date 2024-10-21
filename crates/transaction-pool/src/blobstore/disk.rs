@@ -409,13 +409,9 @@ impl DiskFileBlobStoreInner {
     /// Returns an error if there are any missing blobs.
     #[inline]
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
-        let mut res = Vec::with_capacity(txs.len());
-        for tx in txs {
-            let blob = self.get_one(tx)?.ok_or_else(|| BlobStoreError::MissingSidecar(tx))?;
-            res.push(blob)
-        }
-
-        Ok(res)
+        txs.into_iter()
+            .map(|tx| self.get_one(tx)?.ok_or(BlobStoreError::MissingSidecar(tx)))
+            .collect()
     }
 }
 

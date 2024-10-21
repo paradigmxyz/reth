@@ -261,7 +261,6 @@ where
                     from: receipt.from(),
                     to: receipt.to(),
                     contract_address: receipt.contract_address(),
-                    state_root: receipt.state_root(),
                     authorization_list: receipt
                         .authorization_list()
                         .map(<[SignedAuthorization]>::to_vec),
@@ -334,6 +333,7 @@ where
             .eth
             .trace_block_with(
                 num.into(),
+                None,
                 TracingInspectorConfig::default_parity(),
                 |tx_info, inspector, _, _, _| {
                     Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))

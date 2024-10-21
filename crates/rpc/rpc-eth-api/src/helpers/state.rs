@@ -1,13 +1,14 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{BlockId, Header, KECCAK_EMPTY};
+use reth_primitives::{BlockId, Header};
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
@@ -269,6 +270,42 @@ pub trait LoadState: EthApiTypes {
 
             Ok((cfg, block_env))
         }
+    }
+
+    /// Returns the next available nonce without gaps for the given address
+    /// Next available nonce is either the on chain nonce of the account or the highest consecutive
+    /// nonce in the pool + 1
+    fn next_available_nonce(
+        &self,
+        address: Address,
+    ) -> impl Future<Output = Result<u64, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            // first fetch the on chain nonce of the account
+            let on_chain_account_nonce = this
+                .latest_state()?
+                .account_nonce(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
+            let mut next_nonce = on_chain_account_nonce;
+            // Retrieve the highest consecutive transaction for the sender from the transaction pool
+            if let Some(highest_tx) = this
+                .pool()
+                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            {
+                // Return the nonce of the highest consecutive transaction + 1
+                next_nonce = highest_tx.nonce().checked_add(1).ok_or_else(|| {
+                    Self::Error::from(EthApiError::InvalidTransaction(
+                        RpcInvalidTransactionError::NonceMaxValue,
+                    ))
+                })?;
+            }
+
+            Ok(next_nonce)
+        })
     }
 
     /// Returns the number of transactions sent from an address at the given block identifier.
