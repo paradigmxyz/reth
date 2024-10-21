@@ -77,22 +77,22 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
-                    if let Some(ref num_hash) = result {
+                    let result_number = result.map(|r| r.number);
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(result);
+
+                    if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: num_hash.number });
+                            .send(MetricEvent::SyncHeight { height: block_number });
 
-                        // If we send the result first, the caller might think that we no longer
-                        // need a database write transaction. However, we also require it for
-                        // pruning.
-                        if self.pruner.is_pruning_needed(num_hash.number) {
+                        if self.pruner.is_pruning_needed(block_number) {
                             // We log `PrunerOutput` inside the `Pruner`
-                            let _ = self.prune_before(num_hash.number)?;
+                            let _ = self.prune_before(block_number)?;
                         }
                     }
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
                     let provider = self.provider.database_provider_rw()?;
