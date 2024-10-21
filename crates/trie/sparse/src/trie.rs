@@ -727,7 +727,7 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use itertools::Itertools;
-    use prop::{arbitrary::arbitrary_with, sample::SizeRange};
+    use prop::sample::SizeRange;
     use proptest::prelude::*;
     use rand::seq::IteratorRandom;
     use reth_testing_utils::generators;
@@ -1163,6 +1163,11 @@ mod tests {
 
     #[test]
     fn sparse_trie_fuzz() {
+        // Having only the first 3 nibbles set, we narrow down the range of keys
+        // to 4096 different hashes. It allows us to generate collisions more likely
+        // to test the sparse trie updates.
+        const KEY_NIBBLES_LEN: usize = 3;
+
         fn test(updates: Vec<HashMap<Nibbles, Vec<u8>>>) {
             let mut rng = generators::rng();
 
@@ -1218,13 +1223,18 @@ mod tests {
             }
         }
 
+        /// Pad nibbles of length [`KEY_NIBBLES_LEN`] with zeros to the length of a B256 hash.
+        fn pad_nibbles(nibbles: Nibbles) -> Nibbles {
+            let mut base =
+                Nibbles::from_nibbles_unchecked([0; { B256::len_bytes() / 2 - KEY_NIBBLES_LEN }]);
+            base.extend_from_slice_unchecked(&nibbles);
+            base
+        }
+
         proptest!(ProptestConfig::with_cases(10), |(
             updates in proptest::collection::vec(
                 proptest::collection::hash_map(
-                    // Having only the first 3 nibbles set, we narrow down the range of keys
-                    // to 4096 different hashes. It allows us to generate collisions more likely
-                    // to test the sparse trie updates.
-                    arbitrary_with::<Nibbles, _, _>(SizeRange::new(3..=3)),
+                    any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles),
                     any::<Vec<u8>>(),
                     1..100,
                 ),
