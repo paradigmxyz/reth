@@ -1137,11 +1137,13 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for AtomicBlockchainProvider<N> 
             BlockId::Hash(rpc_block_hash) => {
                 let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
                 if receipts.is_none() && !rpc_block_hash.require_canonical.unwrap_or(false) {
-                    let block_state = self
-                        .canonical_in_memory_state
-                        .state_by_hash(rpc_block_hash.block_hash)
-                        .ok_or(ProviderError::StateForHashNotFound(rpc_block_hash.block_hash))?;
-                    receipts = Some(block_state.executed_block_receipts());
+                    if let Some(state) = self
+                        .head_block
+                        .as_ref()
+                        .and_then(|b| b.block_on_chain(rpc_block_hash.block_hash.into()))
+                    {
+                        receipts = Some(state.executed_block_receipts());
+                    }
                 }
                 Ok(receipts)
             }
