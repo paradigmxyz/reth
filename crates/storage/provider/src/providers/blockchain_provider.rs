@@ -6,7 +6,7 @@ use crate::{
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
     DatabaseProviderFactory, EvmEnvProvider, FullProvider, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -430,16 +430,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.atomic_provider()?.requests_by_block(id, timestamp)
-    }
-}
-
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.atomic_provider()?.get_stage_checkpoint(id)
@@ -802,8 +792,8 @@ mod tests {
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
-        ReceiptProviderIdExt, RequestsProvider, StateProviderFactory, TransactionVariant,
-        TransactionsProvider, WithdrawalsProvider,
+        ReceiptProviderIdExt, StateProviderFactory, TransactionVariant, TransactionsProvider,
+        WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1899,37 +1889,6 @@ mod tests {
                 .sorted_by_key(|(address, _, _)| *address)
                 .map(|(address, account, _)| AccountBeforeTx { address, info: Some(account) })
                 .collect::<Vec<_>>()
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_requests_provider() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_chain_spec_and_random_blocks(
-                &mut rng,
-                chain_spec.clone(),
-                TEST_BLOCKS_COUNT,
-                TEST_BLOCKS_COUNT,
-                BlockRangeParams { requests_count: Some(1..2), ..Default::default() },
-            )?;
-
-        let database_block = database_blocks.first().unwrap().clone();
-        let in_memory_block = in_memory_blocks.last().unwrap().clone();
-
-        let prague_timestamp =
-            chain_spec.hardforks.fork(EthereumHardfork::Prague).as_timestamp().unwrap();
-
-        assert_eq!(
-            provider.requests_by_block(database_block.number.into(), prague_timestamp,)?,
-            database_block.body.requests.clone()
-        );
-        assert_eq!(
-            provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
-            in_memory_block.body.requests.clone()
         );
 
         Ok(())

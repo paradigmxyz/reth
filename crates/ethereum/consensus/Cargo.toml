@@ -18,6 +18,7 @@ reth-primitives.workspace = true
 reth-consensus.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 

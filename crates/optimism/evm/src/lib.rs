@@ -10,7 +10,6 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-#[macro_use]
 extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
@@ -36,8 +35,6 @@ pub use error::OptimismBlockExecutionError;
 use revm_primitives::{
     BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
 };
-
-pub mod strategy;
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Clone)]
@@ -208,6 +205,7 @@ impl ConfigureEvm for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::ChainSpec;
@@ -216,7 +214,7 @@ mod tests {
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, Receipt, Receipts, SealedBlockWithSenders, TxType, KECCAK_EMPTY,
+        Header, Receipt, Receipts, SealedBlockWithSenders, TxType,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

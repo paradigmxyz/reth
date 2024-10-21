@@ -1198,24 +1198,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> RequestsProvider for AtomicBlockchainProvider<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        if !self.chain_spec().is_prague_active_at_timestamp(timestamp) {
-            return Ok(None)
-        }
-
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.requests_by_block(id, timestamp),
-            |block_state| Ok(block_state.block_ref().block().body.requests.clone()),
-        )
-    }
-}
-
 impl<N: ProviderNodeTypes> StageCheckpointReader for AtomicBlockchainProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.storage_provider.get_stage_checkpoint(id)

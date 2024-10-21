@@ -347,22 +347,6 @@ fn ensure_valid_body_response(
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
     }
 
-    match (header.requests_root, &block.requests) {
-        (Some(header_requests_root), Some(requests)) => {
-            let requests = requests.0.as_slice();
-            let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
-            if requests_root != header_requests_root {
-                return Err(ConsensusError::BodyRequestsRootDiff(
-                    GotExpected { got: requests_root, expected: header_requests_root }.into(),
-                ))
-            }
-        }
-        (None, None) => {
-            // this is ok because we assume the fork is not active in this case
-        }
-        _ => return Err(ConsensusError::RequestsRootUnexpected),
-    }
-
     Ok(())
 }
 
