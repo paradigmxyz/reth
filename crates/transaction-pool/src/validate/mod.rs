@@ -374,8 +374,8 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.is_eip4844() != other.is_eip4844()
     }
 
-    /// Determines whether a candidate transaction (maybe_replacement) is underpriced compared to an
-    /// existing transaction in the pool.
+    /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
+    /// an existing transaction in the pool.
     ///
     /// A transaction is considered underpriced if it doesn't meet the required fee bump threshold.
     /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
@@ -383,7 +383,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     #[inline]
     pub(crate) fn is_underpriced(
         &self,
-        maybe_replacement: &ValidPoolTransaction<T>,
+        maybe_replacement: &Self,
         price_bumps: &PriceBumpConfig,
     ) -> bool {
         // Retrieve the required price bump percentage for this type of transaction.
