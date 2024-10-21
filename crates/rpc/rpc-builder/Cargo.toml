@@ -51,6 +51,8 @@ serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
 
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
 [dev-dependencies]
 reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true
