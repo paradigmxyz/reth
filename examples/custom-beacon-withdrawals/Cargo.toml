@@ -21,4 +21,6 @@ alloy-consensus.workspace = true
 eyre.workspace = true
 
 [features]
-optimism = []
+optimism = [
+  "reth-primitives/optimism"
+]
