@@ -160,12 +160,16 @@ impl RevealedSparseTrie {
                     }
                 }
             }
-            TrieNode::Extension(ext) => {
-                let mut child_path = path.clone();
-                child_path.extend_from_slice_unchecked(&ext.key);
-                self.reveal_node_or_hash(child_path, &ext.child)?;
-                self.nodes.insert(path, SparseNode::Extension { key: ext.key, hash: None });
-            }
+            TrieNode::Extension(ext) => match self.nodes.get(&path) {
+                Some(SparseNode::Hash(_)) | None => {
+                    let mut child_path = path.clone();
+                    child_path.extend_from_slice_unchecked(&ext.key);
+                    self.reveal_node_or_hash(child_path, &ext.child)?;
+                    self.nodes.insert(path, SparseNode::Extension { key: ext.key, hash: None });
+                }
+                // TODO: do we need to return an error for any nodes type here?
+                _ => {}
+            },
             TrieNode::Leaf(leaf) => match self.nodes.get(&path) {
                 Some(SparseNode::Hash(_)) | None => {
                     let mut full = path.clone();
@@ -173,6 +177,7 @@ impl RevealedSparseTrie {
                     self.values.insert(full, leaf.value);
                     self.nodes.insert(path, SparseNode::new_leaf(leaf.key));
                 }
+                // TODO: do we need to return an error for any nodes type here?
                 _ => {}
             },
         }
@@ -184,14 +189,14 @@ impl RevealedSparseTrie {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
             match self.nodes.get(&path) {
-                // Hash node with a different hash can't be handled
+                // Hash node with a different hash can't be handled.
                 Some(node @ SparseNode::Hash(previous_hash)) if previous_hash != &hash => {
                     return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
                 }
                 None => {
                     self.nodes.insert(path, SparseNode::Hash(hash));
                 }
-                // All other node types mean that it has already been revealed
+                // All other node types mean that it has already been revealed.
                 Some(_) => {}
             }
             return Ok(())
