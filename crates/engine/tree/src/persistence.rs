@@ -83,6 +83,9 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: num_hash.number });
 
+                        // If we send the result first, the caller might think that we no longer
+                        // need a database write transaction. However, we also require it for
+                        // pruning.
                         if self.pruner.is_pruning_needed(num_hash.number) {
                             // We log `PrunerOutput` inside the `Pruner`
                             let _ = self.prune_before(num_hash.number)?;
