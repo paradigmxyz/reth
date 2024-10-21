@@ -82,15 +82,14 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: num_hash.number });
+
+                        if self.pruner.is_pruning_needed(num_hash.number) {
+                            // We log `PrunerOutput` inside the `Pruner`
+                            let _ = self.prune_before(num_hash.number)?;
+                        }
                     }
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
-                }
-                PersistenceAction::PruneBefore(block_num, sender) => {
-                    let res = self.prune_before(block_num)?;
-
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(res);
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
                     let provider = self.provider.database_provider_rw()?;
@@ -278,18 +277,6 @@ impl PersistenceHandle {
         tx: oneshot::Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
-    }
-
-    /// Tells the persistence service to remove block data before the given hash, according to the
-    /// configured prune config.
-    ///
-    /// The resulting [`PrunerOutput`] is returned in the receiver end of the sender argument.
-    pub fn prune_before(
-        &self,
-        block_num: u64,
-        tx: oneshot::Sender<PrunerOutput>,
-    ) -> Result<(), SendError<PersistenceAction>> {
-        self.send_action(PersistenceAction::PruneBefore(block_num, tx))
     }
 }
 
