@@ -1,7 +1,8 @@
 //! Type-safe abstractions for Dynamically Loaded ExExes
 
-/// Dynamically loads an ExEx entrypoint, which accepts a user-defined function representing the core ExEx logic.
-/// The provided function must take an [`ExExContext`](`crate::ExExContext`) as its argument.
+/// Dynamically loads an ExEx entrypoint, which accepts a user-defined function representing the
+/// core ExEx logic. The provided function must take an [`ExExContext`](`crate::ExExContext`) as its
+/// argument.
 ///
 /// # Returns
 /// A Future that will be polled by the [`ExExManager`](`crate::ExExManager`).
