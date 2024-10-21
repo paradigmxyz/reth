@@ -88,7 +88,8 @@ reth-discv4.workspace = true
 
 [features]
 default = []
-dev = [
+dev = ["arbitrary"]
+arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
