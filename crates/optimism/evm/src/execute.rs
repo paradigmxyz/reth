@@ -20,10 +20,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OptimismHardfork;
 use reth_primitives::{BlockWithSenders, Header, Receipt, TxType};
-use reth_revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
-    Database, State,
-};
+use reth_revm::{Database, State};
 use revm_primitives::{
     db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
 };
@@ -269,11 +266,6 @@ where
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
-    }
-
-    fn finish(&mut self) -> BundleState {
-        self.state.merge_transitions(BundleRetention::Reverts);
-        self.state.take_bundle()
     }
 
     fn validate_block_post_execution(
