@@ -265,15 +265,15 @@ impl RevealedSparseTrie {
     }
 
     /// Remove leaf node from the trie.
-    pub fn remove_leaf(&mut self, path: Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
-        let existing = self.values.remove(&path);
+        let existing = self.values.remove(path);
         if existing.is_none() {
             // trie structure unchanged, return immediately
             return Ok(())
         }
 
-        let mut removed_nodes = self.take_nodes_for_path(&path)?;
+        let mut removed_nodes = self.take_nodes_for_path(path)?;
         debug!(target: "trie::sparse", ?path, ?removed_nodes, "Removed nodes for path");
         // Pop the first node from the stack which is the leaf node we want to remove.
         let mut child = removed_nodes.pop().expect("leaf exists");
@@ -282,7 +282,7 @@ impl RevealedSparseTrie {
             let mut child_path = child.path.clone();
             let SparseNode::Leaf { key, .. } = &child.node else { panic!("expected leaf node") };
             child_path.extend_from_slice_unchecked(key);
-            assert_eq!(child_path, path);
+            assert_eq!(&child_path, path);
         }
 
         // If we don't have any other removed nodes, insert an empty node at the root.
@@ -727,6 +727,7 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use itertools::Itertools;
+    use prop::sample::SizeRange;
     use proptest::prelude::*;
     use rand::seq::IteratorRandom;
     use reth_testing_utils::generators;
@@ -998,7 +999,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1049,7 +1050,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1085,7 +1086,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1118,7 +1119,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -1140,7 +1141,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])).unwrap();
 
         // Leaf (Key = 53302)
         pretty_assertions::assert_eq!(
@@ -1151,7 +1152,7 @@ mod tests {
             ),])
         );
 
-        sparse.remove_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])).unwrap();
 
         // Empty
         pretty_assertions::assert_eq!(
@@ -1162,34 +1163,31 @@ mod tests {
 
     #[test]
     fn sparse_trie_fuzz() {
-        proptest!(ProptestConfig::with_cases(10), |(updates: Vec<HashMap<B256, U256>>)| {
+        // Having only the first 3 nibbles set, we narrow down the range of keys
+        // to 4096 different hashes. It allows us to generate collisions more likely
+        // to test the sparse trie updates.
+        const KEY_NIBBLES_LEN: usize = 3;
+
+        fn test(updates: Vec<HashMap<Nibbles, Vec<u8>>>) {
             let mut rng = generators::rng();
 
             let mut state = BTreeMap::default();
-            let mut unpacked_state = BTreeMap::default();
             let mut sparse = RevealedSparseTrie::default();
 
             for update in updates {
                 let keys_to_delete_len = update.len() / 2;
 
-                let unpacked_update = update.iter().map(|(key, value)| (
-                    Nibbles::unpack(key),
-                    alloy_rlp::encode_fixed_size(value).to_vec()
-                ));
-
                 // Insert state updates into the sparse trie and calculate the root
-                for (key, value) in unpacked_update.clone() {
+                for (key, value) in update.clone() {
                     sparse.update_leaf(key, value).unwrap();
                 }
                 let sparse_root = sparse.root();
 
                 // Insert state updates into the hash builder and calculate the root
-                unpacked_state.extend(unpacked_update);
                 state.extend(update);
-                let keys = state.keys().map(Nibbles::unpack).collect::<Vec<_>>();
                 let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
-                    unpacked_state.clone(),
-                    keys,
+                    state.clone(),
+                    state.keys().cloned().collect::<Vec<_>>(),
                 );
 
                 // Assert that the sparse trie root matches the hash builder root
@@ -1204,20 +1202,18 @@ mod tests {
                     .keys()
                     .choose_multiple(&mut rng, keys_to_delete_len)
                     .into_iter()
-                    .copied()
+                    .cloned()
                     .collect::<Vec<_>>();
                 for key in keys_to_delete {
                     state.remove(&key).unwrap();
-                    unpacked_state.remove(&Nibbles::unpack(key)).unwrap();
-                    sparse.remove_leaf(Nibbles::unpack(key)).unwrap();
+                    sparse.remove_leaf(&key).unwrap();
                 }
 
                 let sparse_root = sparse.root();
 
-                let keys = state.keys().map(Nibbles::unpack).collect::<Vec<_>>();
                 let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
-                    unpacked_state.clone(),
-                    keys,
+                    state.clone(),
+                    state.keys().cloned().collect::<Vec<_>>(),
                 );
 
                 // Assert that the sparse trie root matches the hash builder root
@@ -1225,6 +1221,25 @@ mod tests {
                 // Assert that the sparse trie nodes match the hash builder proof nodes
                 assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
             }
-        });
+        }
+
+        /// Pad nibbles of length [`KEY_NIBBLES_LEN`] with zeros to the length of a B256 hash.
+        fn pad_nibbles(nibbles: Nibbles) -> Nibbles {
+            let mut base =
+                Nibbles::from_nibbles_unchecked([0; { B256::len_bytes() / 2 - KEY_NIBBLES_LEN }]);
+            base.extend_from_slice_unchecked(&nibbles);
+            base
+        }
+
+        proptest!(ProptestConfig::with_cases(10), |(
+            updates in proptest::collection::vec(
+                proptest::collection::hash_map(
+                    any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles),
+                    any::<Vec<u8>>(),
+                    1..100,
+                ),
+                1..100,
+            )
+        )| { test(updates) });
     }
 }
