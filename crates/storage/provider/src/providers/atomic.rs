@@ -50,7 +50,7 @@ pub struct AtomicBlockchainProvider<N: ProviderNodeTypes> {
     /// Use `self.head_block.chain()` instead if you don't care about iteration order.
     memory_chain: RwLock<Arc<Vec<Arc<BlockState>>>>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
-    pub canonical_in_memory_state: CanonicalInMemoryState,
+    canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
