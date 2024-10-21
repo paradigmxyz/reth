@@ -188,22 +188,9 @@ pub struct OpChainSpec {
     pub inner: ChainSpec,
 }
 
-/// Fee trait for OP chain specs.
-pub trait Fee {
+impl OpChainSpec {
     /// Read from parent to determine the base fee for the next block
-    fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256;
-}
-
-/// Extracts the Holcene 1599 parameters from the encoded form:
-/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_holocene_1559_params(extra_data: Bytes) -> (u32, u32) {
-    let denominator = extra_data[1..5].try_into().unwrap();
-    let elasticity = extra_data[5..9].try_into().unwrap();
-    (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
-}
-
-impl Fee for OpChainSpec {
-    fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
+    pub fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
         let is_holocene = self.inner.is_fork_active_at_timestamp(
             reth_optimism_forks::OptimismHardfork::Holocene,
             timestamp,
@@ -211,18 +198,25 @@ impl Fee for OpChainSpec {
         // If we are in the Holocene, we need to use the base fee params from the parent block's
         // nonce Else, use the base fee params from chainspec
         if is_holocene {
-            // First 4 bytes of the nonce are the base fee denominator, the last 4 bytes are the
-            // elasticity
-            let (elasticity, denominator) = decode_holocene_1559_params(parent.extra_data.clone());
-            if elasticity == 0 && denominator == 0 {
-                return U256::from(
-                    parent
-                        .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
-                        .unwrap_or_default(),
-                );
+            match decode_holocene_1559_params(parent.extra_data.clone()) {
+                Ok((denominator, elasticity)) => {
+                    if elasticity == 0 && denominator == 0 {
+                        return U256::from(
+                            parent
+                                .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
+                                .unwrap_or_default(),
+                        );
+                    }
+                    let base_fee_params =
+                        BaseFeeParams::new(denominator as u128, elasticity as u128);
+                    return U256::from(
+                        parent.next_block_base_fee(base_fee_params).unwrap_or_default(),
+                    )
+                }
+                Err(e) => {
+                    panic!("Error occurred: {}", e)
+                }
             }
-            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
-            U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
         } else {
             U256::from(
                 parent
@@ -231,6 +225,19 @@ impl Fee for OpChainSpec {
             )
         }
     }
+}
+
+/// Extracts the Holcene 1599 parameters from the encoded form:
+/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
+pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), String> {
+    if extra_data.len() < 9 {
+        return Err("Insufficient data".to_string());
+    }
+    let denominator: [u8; 4] =
+        extra_data[1..5].try_into().map_err(|_| "Failed to extract denominator".to_string())?;
+    let elasticity: [u8; 4] =
+        extra_data[5..9].try_into().map_err(|_| "Failed to extract elasticity".to_string())?;
+    Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
 }
 
 /// Returns the signature for the optimism deposit transactions, which don't include a
@@ -470,7 +477,7 @@ mod tests {
     use std::sync::Arc;
 
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::{b256, hex::FromHex};
+    use alloy_primitives::{b256};
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};

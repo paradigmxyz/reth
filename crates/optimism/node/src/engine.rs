@@ -153,15 +153,12 @@ where
             OptimismHardfork::Holocene,
             attributes.payload_attributes.timestamp,
         ) {
-            if attributes.eip_1559_params.is_none() {
+            let Some(eip_1559_params) = attributes.eip_1559_params else {
                 return Err(EngineObjectValidationError::InvalidParams(
                     "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
                 ))
-            }
-
-            let (elasticity, denominator) = decode_eip_1559_params(
-                attributes.eip_1559_params.expect("eip_1559_params is none"),
-            );
+            };
+            let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
 
             if elasticity != 0 && denominator == 0 {
                 return Err(EngineObjectValidationError::InvalidParams(

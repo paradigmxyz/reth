@@ -1,7 +1,7 @@
 //! Optimism payload builder implementation.
 use std::sync::Arc;
 
-use alloy_primitives::{b64, B64, U256};
+use alloy_primitives::{B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{BaseFeeParams, ChainSpecProvider, EthereumHardforks};
@@ -558,8 +558,6 @@ where
 pub fn decode_eip_1559_params(eip_1559_params: B64) -> (u32, u32) {
     let elasticity: [u8; 4] = eip_1559_params.0[..4].try_into().unwrap();
     let denominator: [u8; 4] = eip_1559_params.0[4..].try_into().unwrap();
-    println!("denominator: {:?}", denominator);
-    println!("elasticity: {:?}", elasticity);
     (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
 }
 
@@ -570,24 +568,24 @@ fn get_holocene_extra_data(
     let mut extra_data = [0u8; 9];
     // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
     // The eip 1559 params should exist here since there was a check previously
-    if attributes.eip_1559_params.unwrap() == B64::ZERO {
-        let mut default_params = [0u8; 8];
-        default_params[..4].copy_from_slice(
+    let Some(eip_1559_params) = attributes.eip_1559_params else {
+        panic!("eip_1559_params is none")
+    };
+
+    if eip_1559_params == B64::ZERO {
+        extra_data[1..5].copy_from_slice(
             &(default_base_fee_params.max_change_denominator as u32).to_be_bytes(),
         );
-        default_params[4..]
+        extra_data[5..9]
             .copy_from_slice(&(default_base_fee_params.elasticity_multiplier as u32).to_be_bytes());
-        extra_data[1..].copy_from_slice(&default_params);
         Bytes::copy_from_slice(&extra_data)
     } else {
-        let (elasticity, denominator) =
-            decode_eip_1559_params(attributes.eip_1559_params.expect("eip_1559_params is none"));
-        let mut eip_1559_params = [0u8; 8];
-        println!("denominator: {}", denominator);
-        println!("elasticity: {}", elasticity);
-        eip_1559_params[..4].copy_from_slice(&(denominator as u32).to_be_bytes());
-        eip_1559_params[4..].copy_from_slice(&(elasticity as u32).to_be_bytes());
-        extra_data[1..].copy_from_slice(&eip_1559_params);
+        let Some(eip_1559_params) = attributes.eip_1559_params else {
+            panic!("eip_1559_params is none")
+        };
+        let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
+        extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
+        extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
         Bytes::copy_from_slice(&extra_data)
     }
 }
