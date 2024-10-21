@@ -7,6 +7,11 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_evm::execute::BlockValidationError;
 use reth_primitives::Receipt;
 
+/// The size of a deposit request in bytes.
+/// Consists of pubkey, withdrawal_credentials, amount, signature, index.
+/// While the event fields emit bytestrings, those bytestrings are fixed size.
+const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
+
 sol! {
     #[allow(missing_docs)]
     event DepositEvent(
@@ -20,13 +25,7 @@ sol! {
 
 /// Accumulate a deposit request from a log. containing a [`DepositEvent`].
 pub fn accumulate_deposit_from_log(log: &Log<DepositEvent>, out: &mut Vec<u8>) {
-    out.reserve(
-        log.pubkey.len() +
-            log.withdrawal_credentials.len() +
-            log.amount.len() +
-            log.signature.len() +
-            log.index.len(),
-    );
+    out.reserve(DEPOSIT_BYTES_SIZE);
     out.extend_from_slice(log.pubkey.as_ref());
     out.extend_from_slice(log.withdrawal_credentials.as_ref());
     out.extend_from_slice(log.amount.as_ref());
