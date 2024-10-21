@@ -1,7 +1,7 @@
 //! Dynamically loading type-safe abstractions
 
-/// Dynamically loaded ExEx entrypoint, that accepts the [`ExExContext`](`reth_exex::ExExContext`)
-/// and returns a Future that will be polled by the [`ExExManager`](`reth_exex::ExExManager`).
+/// Dynamically loaded ExEx entrypoint, that accepts the [`ExExContext`](`crate::ExExContext`)
+/// and returns a Future that will be polled by the [`ExExManager`](`crate::ExExManager`).
 ///
 /// ## Example usage:
 /// ```rust
