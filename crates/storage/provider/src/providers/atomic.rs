@@ -8,7 +8,6 @@ use crate::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
-use parking_lot::RwLock;
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
@@ -46,9 +45,6 @@ pub struct AtomicBlockchainProvider<N: ProviderNodeTypes> {
     storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
     /// Head block at time of [`Self`] creation
     head_block: Option<Arc<BlockState>>,
-    /// Snapshotted chain. It starts as empty, requiring [`Self::in_memory_chain()`] to be called.
-    /// Use `self.head_block.chain()` instead if you don't care about iteration order.
-    memory_chain: RwLock<Arc<Vec<Arc<BlockState>>>>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState,
 }
@@ -72,30 +68,7 @@ impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
         // entirely. Resulting in gaps on the range.
         let head_block = state.head_state();
         let storage_provider = storage_provider_factory.database_provider_ro()?;
-        Ok(Self {
-            storage_provider,
-            head_block,
-            canonical_in_memory_state: state,
-            memory_chain: RwLock::new(Arc::new(vec![])),
-        })
-    }
-
-    /// Returns a vector of in-memory blocks.
-    ///
-    /// If hasn't been requested yet in this provider, it also stores it in [`Self`].
-    ///
-    /// The blocks are ordered from newest to oldest (highest to lowest).
-    fn in_memory_chain(&self) -> Arc<Vec<Arc<BlockState>>> {
-        let chain = self.memory_chain.read();
-        if let Some(head_block) = &self.head_block {
-            if chain.is_empty() {
-                drop(chain);
-                let mut chain = self.memory_chain.write();
-                *chain = Arc::new(head_block.clone().iter().collect::<Vec<_>>());
-                return chain.clone()
-            }
-        }
-        chain.clone()
+        Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
     }
 
     // Helper function to convert range bounds
@@ -442,9 +415,9 @@ impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
             &DatabaseProviderRO<N::DB, N::ChainSpec>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
-        M: Fn(RangeInclusive<usize>, &Arc<BlockState>) -> ProviderResult<Vec<R>>,
+        M: Fn(RangeInclusive<usize>, &BlockState) -> ProviderResult<Vec<R>>,
     {
-        let in_mem_chain = self.in_memory_chain();
+        let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
         let provider = &self.storage_provider;
 
         // Get the last block number stored in the storage which does NOT overlap with in-memory
@@ -540,7 +513,7 @@ impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
         S: FnOnce(&DatabaseProviderRO<N::DB, N::ChainSpec>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, &BlockState) -> ProviderResult<Option<R>>,
     {
-        let in_mem_chain = self.in_memory_chain();
+        let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
         let provider = &self.storage_provider;
 
         // Get the last block number stored in the database which does NOT overlap with in-memory
