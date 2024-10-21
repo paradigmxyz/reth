@@ -71,7 +71,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<N>) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
+        let best = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);

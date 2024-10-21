@@ -118,7 +118,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<N>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
+        let best = provider.chain_info()?;
         let latest_header = provider
             .header_by_number(best.best_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
