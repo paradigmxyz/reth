@@ -870,7 +870,9 @@ impl Discv4Service {
         false
     }
 
-    /// Update the entry on RE-ping
+    /// Update the entry on RE-ping.
+    ///
+    /// Invoked when we received the Pong to our [`PingReason::RePing`] ping.
     ///
     /// On re-ping we check for a changed `enr_seq` if eip868 is enabled and when it changed we sent
     /// a followup request to retrieve the updated ENR
@@ -2259,7 +2261,7 @@ impl NodeEntry {
 impl NodeEntry {
     /// Returns true if the node should be re-pinged.
     fn is_expired(&self) -> bool {
-        self.last_seen.elapsed() > ENDPOINT_PROOF_EXPIRATION
+        self.last_seen.elapsed() > (ENDPOINT_PROOF_EXPIRATION / 2)
     }
 }
 

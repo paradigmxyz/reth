@@ -8,8 +8,6 @@ use alloy_rlp::Encodable;
 use reth_net_banlist::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_peers::NodeRecord;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -17,7 +15,7 @@ use std::{
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
@@ -118,7 +116,7 @@ impl Default for Discv4Config {
             // Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
             max_find_node_failures: 5,
-            ping_interval: Duration::from_secs(60 * 10),
+            ping_interval: Duration::from_secs(10),
             // Unified expiration and timeout durations, mirrors geth's `expiration` duration
             ping_expiration: Duration::from_secs(20),
             bond_expiration: Duration::from_secs(60 * 60),
@@ -144,7 +142,7 @@ impl Default for Discv4Config {
 
 /// Builder type for [`Discv4Config`]
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
 }
