@@ -158,12 +158,18 @@ where
                     "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
                 ))
             };
-            let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
 
-            if elasticity != 0 && denominator == 0 {
-                return Err(EngineObjectValidationError::InvalidParams(
-                    "Eip1559ParamsDenominatorZero".to_string().into(),
-                ))
+            match decode_eip_1559_params(eip_1559_params) {
+                Ok((elasticity, denominator)) => {
+                    if elasticity != 0 && denominator == 0 {
+                        return Err(EngineObjectValidationError::InvalidParams(
+                            "Eip1559ParamsDenominatorZero".to_string().into(),
+                        ))
+                    }
+                }
+                Err(e) => {
+                    return Err(EngineObjectValidationError::InvalidParams(e.to_string().into()))
+                }
             }
         }
 

@@ -555,10 +555,16 @@ where
 
 /// Extracts the Holcene 1599 parameters from the encoded form:
 /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_eip_1559_params(eip_1559_params: B64) -> (u32, u32) {
-    let elasticity: [u8; 4] = eip_1559_params.0[..4].try_into().unwrap();
-    let denominator: [u8; 4] = eip_1559_params.0[4..].try_into().unwrap();
-    (u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator))
+pub fn decode_eip_1559_params(eip_1559_params: B64) -> Result<(u32, u32), String> {
+    let elasticity: [u8; 4] = eip_1559_params.0[..4]
+        .try_into()
+        .map_err(|_| "Failed to extract elasticity".to_string())?;
+
+    let denominator: [u8; 4] = eip_1559_params.0[4..8]
+        .try_into()
+        .map_err(|_| "Failed to extract denominator".to_string())?;
+
+    Ok((u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator)))
 }
 
 fn get_holocene_extra_data(
@@ -583,10 +589,17 @@ fn get_holocene_extra_data(
         let Some(eip_1559_params) = attributes.eip_1559_params else {
             panic!("eip_1559_params is none")
         };
-        let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params);
-        extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
-        extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
-        Bytes::copy_from_slice(&extra_data)
+
+        match decode_eip_1559_params(eip_1559_params) {
+            Ok((elasticity, denominator)) => {
+                extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
+                extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
+                return Bytes::copy_from_slice(&extra_data);
+            }
+            Err(e) => {
+                panic!("Error occurred: {}", e)
+            }
+        }
     }
 }
 

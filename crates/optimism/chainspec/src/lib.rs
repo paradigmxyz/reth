@@ -477,7 +477,7 @@ mod tests {
     use std::sync::Arc;
 
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::{b256};
+    use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
