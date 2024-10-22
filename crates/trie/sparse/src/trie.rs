@@ -1297,8 +1297,9 @@ mod tests {
     /// only nodes 0x00 and 0x01, and we have proofs for them. Node B is new and inserted in the
     /// sparse trie first.
     ///
-    /// Reveal the hash builder proof to leaf 0x00 in the sparse trie, insert leaf 0x01 into the
-    /// sparse trie, reveal the hash builder proof to leaf 0x02 in the sparse trie.
+    /// 1. Reveal the hash builder proof to leaf 0x00 in the sparse trie.
+    /// 2. Insert leaf 0x01 into the sparse trie.
+    /// 3. Reveal the hash builder proof to leaf 0x02 in the sparse trie.
     ///
     /// The hash builder proof to the leaf 0x02 didn't have the leaf 0x01 at the corresponding
     /// nibble of the branch node, so we need to adjust the branch node instead of fully
@@ -1368,9 +1369,10 @@ mod tests {
     /// We have three leaves: 0x0000, 0x0101, and 0x0102. Hash builder trie has all nodes, and we
     /// have proofs for them.
     ///
-    /// Reveal the hash builder proof to leaf 0x00 in the sparse trie, remove leaf 0x00 from the
-    /// sparse trie (that will remove the branch node and create an extension node with the key
-    /// 0x0000), reveal the hash builder proof to leaf 0x0101 in the sparse trie.
+    /// 1. Reveal the hash builder proof to leaf 0x00 in the sparse trie.
+    /// 2. Remove leaf 0x00 from the sparse trie (that will remove the branch node and create an
+    ///    extension node with the key 0x0000).
+    /// 3. Reveal the hash builder proof to leaf 0x0101 in the sparse trie.
     ///
     /// The hash builder proof to the leaf 0x0101 had a branch node in the path, but we turned it
     /// into an extension node, so it should ignore this node.
@@ -1429,6 +1431,60 @@ mod tests {
         assert_eq!(
             sparse.nodes.get(&Nibbles::default()),
             Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
+        );
+    }
+
+    /// We have two leaves that share the same prefix: 0x0001 and 0x0002, and a leaf with a
+    /// different prefix: 0x0100. Hash builder trie has only the first two leaves, and we have
+    /// proofs for them.
+    ///
+    /// 1. Insert the leaf 0x0100 into the sparse trie, and check that the root extensino node was
+    ///    turned into a branch node.
+    /// 2. Reveal the leaf 0x0001 in the sparse trie, and check that the root branch node wasn't
+    ///    overwritten with the extension node from the proof.
+    #[test]
+    fn sparse_trie_reveal_node_3() {
+        let key1 = || Nibbles::from_nibbles_unchecked([0x00, 0x01]);
+        let key2 = || Nibbles::from_nibbles_unchecked([0x00, 0x02]);
+        let key3 = || Nibbles::from_nibbles_unchecked([0x01, 0x00]);
+        let value = || alloy_rlp::encode_fixed_size(&B256::repeat_byte(1));
+
+        // Generate the proof for the root node and initialize the sparse trie with it
+        let (_, proof_nodes) = hash_builder_root_with_proofs(
+            [(key1(), value()), (key2(), value())],
+            [Nibbles::default()],
+        );
+        let mut sparse = RevealedSparseTrie::from_root(
+            TrieNode::decode(&mut &proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+        )
+        .unwrap();
+
+        // Check that the root extension node exists
+        assert_matches!(
+            sparse.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Extension { key, hash: None }) if *key == Nibbles::from_nibbles([0x00])
+        );
+
+        // Insert the leaf with a different prefix
+        sparse.update_leaf(key3(), value().to_vec()).unwrap();
+
+        // Check that the extension node was turned into a branch node
+        assert_matches!(
+            sparse.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Branch { state_mask, hash: None }) if *state_mask == TrieMask::new(0b11)
+        );
+
+        // Generate the proof for the first key and reveal it in the sparse trie
+        let (_, proof_nodes) =
+            hash_builder_root_with_proofs([(key1(), value()), (key2(), value())], [key1()]);
+        for (path, node) in proof_nodes.nodes_sorted() {
+            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap()).unwrap();
+        }
+
+        // Check that the branch node wasn't overwritten by the extension node in the proof
+        assert_matches!(
+            sparse.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Branch { state_mask, hash: None }) if *state_mask == TrieMask::new(0b11)
         );
     }
 }
