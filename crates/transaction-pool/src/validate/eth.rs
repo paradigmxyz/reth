@@ -817,8 +817,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, CoinbaseTipOrdering,
-        EthPooledTransaction, Pool, TransactionPool,
+        blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
