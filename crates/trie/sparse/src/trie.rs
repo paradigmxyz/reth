@@ -1192,7 +1192,7 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
-            sparse.remove_leaf(Nibbles::from_nibbles([0x0])),
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x0])),
             Err(SparseTrieError::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
