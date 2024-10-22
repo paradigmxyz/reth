@@ -33,7 +33,8 @@ use reth_primitives::{
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
+    noop::NoopTransactionPool, BestTransactions, BestTransactionsAttributes, TransactionPool,
+    ValidPoolTransaction,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -44,6 +45,9 @@ use revm::{
 use revm_primitives::calc_excess_blob_gas;
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
+
+type BestTransactionsIter<Transaction> =
+    Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Transaction>>>>;
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +98,16 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
+        let pool = args.pool.clone();
+
+        let iterator_closure = |attributes| pool.best_transactions_with_attributes(attributes);
+        default_ethereum_payload(
+            self.evm_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            iterator_closure,
+        )
     }
 
     fn build_empty_payload(
@@ -102,19 +115,29 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments {
+        let args = BuildArguments::new(
             client,
-            config,
             // we use defaults here because for the empty payload we don't need to execute anything
-            pool: NoopTransactionPool::default(),
-            cached_reads: Default::default(),
-            cancel: Default::default(),
-            best_payload: None,
-        };
+            NoopTransactionPool::default(),
+            Default::default(),
+            config,
+            Default::default(),
+            None,
+        );
+
+        let pool = args.pool.clone();
+        let iterator_closure = |attributes| pool.best_transactions_with_attributes(attributes);
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+
+        default_ethereum_payload(
+            self.evm_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            iterator_closure,
+        )?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -124,16 +147,18 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
+pub fn default_ethereum_payload<EvmConfig, Pool, Client, IteratorClosure>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
+    build_best_txs_closure: IteratorClosure,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
+    IteratorClosure: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool::Transaction>,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
@@ -153,11 +178,10 @@ where
     let mut executed_txs = Vec::new();
     let mut executed_senders = Vec::new();
 
-    let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+    let mut best_txs = build_best_txs_closure(BestTransactionsAttributes::new(
         base_fee,
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
     ));
-
     let mut total_fees = U256::ZERO;
 
     let block_number = initialized_block_env.number.to::<u64>();
