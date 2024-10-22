@@ -112,7 +112,7 @@ where
             .inner
             .provider()
             .receipt_by_hash(hash)
-            .ok()
+            .ok() // todo: change sig to return result
             .flatten()
             .map(|receipt| receipt.deposit_receipt_version)
             .flatten();
