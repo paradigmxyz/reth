@@ -114,8 +114,7 @@ where
             .receipt_by_hash(hash)
             .ok() // todo: change sig to return result
             .flatten()
-            .map(|receipt| receipt.deposit_receipt_version)
-            .flatten();
+            .and_then(|receipt| receipt.deposit_receipt_version);
 
         Transaction {
             inner,
