@@ -1,0 +1,199 @@
+use alloy_primitives::{hex, private::getrandom::getrandom};
+use arbitrary::Arbitrary;
+use eyre::Result;
+use proptest::{
+    prelude::{ProptestConfig, RngCore},
+    test_runner::{TestRng, TestRunner},
+};
+use reth_codecs::alloy::{
+    authorization_list::Authorization,
+    genesis_account::GenesisAccount,
+    header::{Header, HeaderExt},
+    transaction::{eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702, legacy::TxLegacy},
+    withdrawal::Withdrawal,
+};
+use reth_db::{
+    models::{AccountBeforeTx, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
+    ClientVersion,
+};
+use reth_fs_util as fs;
+use reth_primitives::{Account, Log, LogData, StorageEntry, TransactionSignedNoHash};
+use reth_prune_types::{PruneCheckpoint, PruneMode};
+use reth_stages_types::{
+    AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
+    HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint,
+    StorageHashingCheckpoint,
+};
+use reth_trie::{hash_builder::HashBuilderValue, TrieMask};
+use reth_trie_common::{hash_builder::HashBuilderState, StoredNibbles, StoredNibblesSubKey};
+use std::{fs::File, io::BufReader};
+
+const VECTORS_FOLDER: &str = "testdata/micro/compact";
+const VECTOR_SIZE: usize = 100;
+
+macro_rules! compact_types {
+    ($($ty:ty),*) => {
+        const GENERATE_VECTORS: &[fn(&mut TestRunner) -> Result<()>] = &[
+            $(
+                generate_vector::<$ty> as fn(&mut TestRunner) -> Result<()>,
+            )*
+        ];
+
+        const READ_VECTORS: &[fn() -> Result<()>] = &[
+            $(
+                read_vector::<$ty> as fn() -> Result<()>,
+            )*
+        ];
+    };
+}
+
+// The type that **actually** implements `Compact` should go here. If it's an alloy type, import the
+// auxiliary type from reth_codecs::alloy instead.
+compact_types!(
+    // reth-primitives
+    Account,
+    // reth_codecs::alloy
+    Authorization,
+    GenesisAccount,
+    Header,
+    HeaderExt,
+    Withdrawal,
+    TxEip2930,
+    TxEip4844,
+    TxEip7702,
+    TxLegacy,
+    HashBuilderValue,
+    LogData,
+    Log,
+    // BranchNodeCompact, // todo requires arbitrary
+    TrieMask,
+    // TxDeposit, TODO(joshie): optimism
+    // reth_prune_types
+    PruneCheckpoint,
+    PruneMode,
+    // reth_stages_types
+    AccountHashingCheckpoint,
+    StorageHashingCheckpoint,
+    ExecutionCheckpoint,
+    HeadersCheckpoint,
+    IndexHistoryCheckpoint,
+    EntitiesCheckpoint,
+    CheckpointBlockRange,
+    StageCheckpoint,
+    StageUnitCheckpoint,
+    // reth_db_api
+    StoredBlockOmmers,
+    StoredBlockBodyIndices,
+    StoredBlockWithdrawals,
+    // Manual implementations
+    // Transaction & TxType & TxKind & Signature todo requires special handling, since from_compact
+    // receives a txidentifier,
+    TransactionSignedNoHash,
+    // Bytecode, // todo revm arbitrary
+    StorageEntry,
+    // MerkleCheckpoint, // todo storedsubnode -> branchnodecompact arbitrary
+    AccountBeforeTx,
+    ClientVersion,
+    StoredNibbles,
+    StoredNibblesSubKey,
+    // StorageTrieEntry, // todo branchnodecompact arbitrary
+    // StoredSubNode, // todo branchnodecompact arbitrary
+    HashBuilderState
+);
+
+pub(crate) fn generate_vectors() -> Result<()> {
+    // Prepare random seed for test (same method as used by proptest)
+    let mut seed = [0u8; 32];
+    getrandom(&mut seed)?;
+    println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
+
+    // Start the runner with the seed
+    let config = ProptestConfig::default();
+    let rng = TestRng::from_seed(config.rng_algorithm, &seed);
+    let mut runner = TestRunner::new_with_rng(config, rng);
+
+    fs::create_dir_all(VECTORS_FOLDER)?;
+
+    for generate_fn in GENERATE_VECTORS {
+        generate_fn(&mut runner)?;
+    }
+
+    Ok(())
+}
+
+pub fn read_vectors() -> Result<()> {
+    fs::create_dir_all(VECTORS_FOLDER)?;
+
+    for read_fn in READ_VECTORS {
+        read_fn()?;
+    }
+
+    Ok(())
+}
+
+/// Generates test vectors for a specific type `T`
+fn generate_vector<T>(runner: &mut TestRunner) -> Result<()>
+where
+    T: for<'a> Arbitrary<'a>
+        + reth_codecs::Compact
+        + serde::Serialize
+        + Clone
+        + std::fmt::Debug
+        + 'static,
+{
+    let mut bytes = std::iter::repeat(0u8).take(256).collect::<Vec<u8>>();
+    let mut compact_buffer = vec![];
+
+    let mut values = Vec::with_capacity(VECTOR_SIZE);
+    for _ in 0..VECTOR_SIZE {
+        runner.rng().fill_bytes(&mut bytes);
+        compact_buffer.clear();
+
+        let obj = T::arbitrary(&mut arbitrary::Unstructured::new(&bytes))?;
+        obj.to_compact(&mut compact_buffer);
+        values.push((obj, hex::encode(&compact_buffer)));
+    }
+
+    serde_json::to_writer(
+        std::io::BufWriter::new(
+            std::fs::File::create(format!("{VECTORS_FOLDER}/{}.json", type_name::<T>())).unwrap(),
+        ),
+        &values,
+    )?;
+
+    println!("{} ✅", type_name::<T>());
+
+    Ok(())
+}
+
+/// Reads vectors from the file and compares the original T with the one reconstructed using
+/// T::from_compact.
+fn read_vector<T>() -> Result<()>
+where
+    T: serde::de::DeserializeOwned + reth_codecs::Compact + PartialEq + Clone + std::fmt::Debug,
+{
+    // Read the file where the vectors are stored
+    let file_path = format!("{VECTORS_FOLDER}/{}.json", type_name::<T>());
+    let file = File::open(&file_path)?;
+    let reader = BufReader::new(file);
+
+    let stored_values: Vec<(T, String)> = serde_json::from_reader(reader)?;
+
+    for (original, hex_str) in stored_values {
+        let compact_bytes = hex::decode(hex_str)?;
+        let (reconstructed, _) = T::from_compact(&compact_bytes, compact_bytes.len());
+
+        if original != reconstructed {
+            println!("{} ❌", type_name::<T>());
+            panic!("mismatch found on {original:?} and {reconstructed:?}");
+        }
+    }
+
+    println!("{} ✅", type_name::<T>());
+
+    Ok(())
+}
+
+fn type_name<T>() -> String {
+    std::any::type_name::<T>().replace("::", "__")
+}

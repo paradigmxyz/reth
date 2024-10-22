@@ -25,7 +25,11 @@ use bytes::{Buf, BufMut};
 extern crate alloc;
 use alloc::vec::Vec;
 
+#[cfg(feature = "test-utils")]
+pub mod alloy;
+
 #[cfg(any(test, feature = "alloy"))]
+#[cfg(not(feature = "test-utils"))]
 mod alloy;
 
 #[cfg(any(test, feature = "test-utils"))]

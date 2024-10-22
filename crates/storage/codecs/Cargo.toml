@@ -27,6 +27,9 @@ op-alloy-consensus = { workspace = true, optional = true }
 # misc
 bytes.workspace = true
 modular-bitfield = { workspace = true, optional = true }
+visibility = { version = "0.1.1", optional = true}
+serde = { workspace = true, optional = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = [
@@ -66,4 +69,9 @@ alloy = [
     "dep:alloy-trie",
 ]
 optimism = ["alloy", "dep:op-alloy-consensus"]
-test-utils = []
+test-utils = [
+    "visibility",
+    "alloy",
+    "serde",
+    "arbitrary"
+]

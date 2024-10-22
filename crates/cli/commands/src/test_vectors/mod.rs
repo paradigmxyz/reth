@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 
+mod compact;
 mod tables;
 
 /// Generate test-vectors for different data types.
@@ -19,6 +20,18 @@ pub enum Subcommands {
         /// List of table names. Case-sensitive.
         names: Vec<String>,
     },
+    /// Generates test vectors for `Compact` types with `--write`. Reads and checks generated
+    /// vectors with `--read`.
+    #[group(multiple = false, required = true)]
+    Compact {
+        /// Write test vectors to a file.
+        #[arg(long)]
+        write: bool,
+
+        /// Read test vectors from a file.
+        #[arg(long)]
+        read: bool,
+    },
 }
 
 impl Command {
@@ -27,6 +40,13 @@ impl Command {
         match self.command {
             Subcommands::Tables { names } => {
                 tables::generate_vectors(names)?;
+            }
+            Subcommands::Compact { write, .. } => {
+                if write {
+                    compact::generate_vectors()?;
+                } else {
+                    compact::read_vectors()?;
+                }
             }
         }
         Ok(())

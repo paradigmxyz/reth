@@ -1,10 +1,12 @@
-pub(crate) mod eip1559;
-pub(crate) mod eip2930;
-pub(crate) mod eip4844;
-pub(crate) mod eip7702;
-pub(crate) mod legacy;
+//! Compact implementation for transaction types
+
+pub mod eip1559;
+pub mod eip2930;
+pub mod eip4844;
+pub mod eip7702;
+pub mod legacy;
 #[cfg(feature = "optimism")]
-pub(crate) mod optimism;
+pub mod optimism;
 
 #[cfg(test)]
 mod tests {

@@ -1,13 +1,15 @@
-mod access_list;
-mod authorization_list;
-mod genesis_account;
-mod header;
-mod log;
-mod signature;
-mod transaction;
-mod trie;
-mod txkind;
-mod withdrawal;
+//! Implements Compact for alloy types.
+
+pub mod access_list;
+pub mod authorization_list;
+pub mod genesis_account;
+pub mod header;
+pub mod log;
+pub mod signature;
+pub mod transaction;
+pub mod trie;
+pub mod txkind;
+pub mod withdrawal;
 
 #[cfg(test)]
 mod tests {
