@@ -135,7 +135,10 @@ where
                         }),
                         &mut shared_inspector,
                     )?;
-                    shared_inspector.as_mut().map(|i| i.fuse());
+
+                    if let Some(i) = shared_inspector.as_mut() {
+                        i.fuse();
+                    }
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
@@ -601,7 +604,9 @@ where
                             &mut shared_inspector,
                         )?;
 
-                        shared_inspector.as_mut().map(|i| i.fuse());
+                        if let Some(i) = shared_inspector.as_mut() {
+                            i.fuse();
+                        }
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -845,7 +850,7 @@ where
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
         inspector.set_transaction_gas_limit(env.tx.gas_limit);
-        let frame = inspector.geth_builder().geth_traces(gas_used, return_value, config.clone());
+        let frame = inspector.geth_builder().geth_traces(gas_used, return_value, *config);
 
         Ok((frame.into(), res.state))
     }
