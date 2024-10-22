@@ -61,8 +61,8 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
 
-mod atomic;
-pub use atomic::AtomicBlockchainProvider;
+mod consistent;
+pub use consistent::ConsistentProvider;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
 pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
@@ -121,7 +121,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<N>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
+        let best = provider.chain_info()?;
         let latest_header = provider
             .header_by_number(best.best_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;

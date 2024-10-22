@@ -1,6 +1,6 @@
 #![allow(unused)]
 use crate::{
-    providers::{AtomicBlockchainProvider, StaticFileProvider},
+    providers::{ConsistentProvider, StaticFileProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
@@ -69,7 +69,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// header from the database to initialize the provider.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
         let provider = storage.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
+        let best = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
@@ -120,8 +120,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     #[track_caller]
-    pub fn atomic_provider(&self) -> ProviderResult<AtomicBlockchainProvider<N>> {
-        AtomicBlockchainProvider::new(self.database.clone(), self.canonical_in_memory_state())
+    pub fn consistent_provider(&self) -> ProviderResult<ConsistentProvider<N>> {
+        ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
     /// This uses a given [`BlockState`] to initialize a state provider for that block.
@@ -141,7 +141,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<ExecutionOutcome>> {
-        self.atomic_provider()?.get_state(range)
+        self.consistent_provider()?.get_state(range)
     }
 }
 
@@ -167,34 +167,34 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> 
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
-        self.atomic_provider()?.header(block_hash)
+        self.consistent_provider()?.header(block_hash)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.atomic_provider()?.header_by_number(num)
+        self.consistent_provider()?.header_by_number(num)
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.atomic_provider()?.header_td(hash)
+        self.consistent_provider()?.header_td(hash)
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.atomic_provider()?.header_td_by_number(number)
+        self.consistent_provider()?.header_td_by_number(number)
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.atomic_provider()?.headers_range(range)
+        self.consistent_provider()?.headers_range(range)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.atomic_provider()?.sealed_header(number)
+        self.consistent_provider()?.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.atomic_provider()?.sealed_headers_range(range)
+        self.consistent_provider()?.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
@@ -202,13 +202,13 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.atomic_provider()?.sealed_headers_while(range, predicate)
+        self.consistent_provider()?.sealed_headers_while(range, predicate)
     }
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.atomic_provider()?.block_hash(number)
+        self.consistent_provider()?.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -216,7 +216,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.atomic_provider()?.canonical_hashes_range(start, end)
+        self.consistent_provider()?.canonical_hashes_range(start, end)
     }
 }
 
@@ -234,7 +234,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider2<N> {
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        self.atomic_provider()?.block_number(hash)
+        self.consistent_provider()?.block_number(hash)
     }
 }
 
@@ -254,11 +254,11 @@ impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
-        self.atomic_provider()?.find_block_by_hash(hash, source)
+        self.consistent_provider()?.find_block_by_hash(hash, source)
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
-        self.atomic_provider()?.block(id)
+        self.consistent_provider()?.block(id)
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
@@ -274,14 +274,14 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.atomic_provider()?.ommers(id)
+        self.consistent_provider()?.ommers(id)
     }
 
     fn block_body_indices(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.atomic_provider()?.block_body_indices(number)
+        self.consistent_provider()?.block_body_indices(number)
     }
 
     /// Returns the block with senders with matching number or hash from database.
@@ -295,7 +295,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        self.atomic_provider()?.block_with_senders(id, transaction_kind)
+        self.consistent_provider()?.block_with_senders(id, transaction_kind)
     }
 
     fn sealed_block_with_senders(
@@ -303,116 +303,116 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        self.atomic_provider()?.sealed_block_with_senders(id, transaction_kind)
+        self.consistent_provider()?.sealed_block_with_senders(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        self.atomic_provider()?.block_range(range)
+        self.consistent_provider()?.block_range(range)
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        self.atomic_provider()?.block_with_senders_range(range)
+        self.consistent_provider()?.block_with_senders_range(range)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        self.atomic_provider()?.sealed_block_with_senders_range(range)
+        self.consistent_provider()?.sealed_block_with_senders_range(range)
     }
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.atomic_provider()?.transaction_id(tx_hash)
+        self.consistent_provider()?.transaction_id(tx_hash)
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.atomic_provider()?.transaction_by_id(id)
+        self.consistent_provider()?.transaction_by_id(id)
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.atomic_provider()?.transaction_by_id_no_hash(id)
+        self.consistent_provider()?.transaction_by_id_no_hash(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        self.atomic_provider()?.transaction_by_hash(hash)
+        self.consistent_provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        self.atomic_provider()?.transaction_by_hash_with_meta(tx_hash)
+        self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.atomic_provider()?.transaction_block(id)
+        self.consistent_provider()?.transaction_block(id)
     }
 
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        self.atomic_provider()?.transactions_by_block(id)
+        self.consistent_provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        self.atomic_provider()?.transactions_by_block_range(range)
+        self.consistent_provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        self.atomic_provider()?.transactions_by_tx_range(range)
+        self.consistent_provider()?.transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.atomic_provider()?.senders_by_tx_range(range)
+        self.consistent_provider()?.senders_by_tx_range(range)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.atomic_provider()?.transaction_sender(id)
+        self.consistent_provider()?.transaction_sender(id)
     }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.atomic_provider()?.receipt(id)
+        self.consistent_provider()?.receipt(id)
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        self.atomic_provider()?.receipt_by_hash(hash)
+        self.consistent_provider()?.receipt_by_hash(hash)
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        self.atomic_provider()?.receipts_by_block(block)
+        self.consistent_provider()?.receipts_by_block(block)
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.atomic_provider()?.receipts_by_tx_range(range)
+        self.consistent_provider()?.receipts_by_tx_range(range)
     }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider2<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
-        self.atomic_provider()?.receipts_by_block_id(block)
+        self.consistent_provider()?.receipts_by_block_id(block)
     }
 }
 
@@ -422,25 +422,25 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        self.atomic_provider()?.withdrawals_by_block(id, timestamp)
+        self.consistent_provider()?.withdrawals_by_block(id, timestamp)
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.atomic_provider()?.latest_withdrawal()
+        self.consistent_provider()?.latest_withdrawal()
     }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        self.atomic_provider()?.get_stage_checkpoint(id)
+        self.consistent_provider()?.get_stage_checkpoint(id)
     }
 
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
-        self.atomic_provider()?.get_stage_checkpoint_progress(id)
+        self.consistent_provider()?.get_stage_checkpoint_progress(id)
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
-        self.atomic_provider()?.get_all_checkpoints()
+        self.consistent_provider()?.get_all_checkpoints()
     }
 }
 
@@ -455,7 +455,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
-        self.atomic_provider()?.fill_env_at(cfg, block_env, at, evm_config)
+        self.consistent_provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
 
     fn fill_env_with_header<EvmConfig>(
@@ -468,7 +468,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
-        self.atomic_provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
+        self.consistent_provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
 
     fn fill_cfg_env_at<EvmConfig>(
@@ -480,7 +480,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
-        self.atomic_provider()?.fill_cfg_env_at(cfg, at, evm_config)
+        self.consistent_provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
 
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -492,7 +492,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
-        self.atomic_provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
+        self.consistent_provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 
@@ -501,11 +501,11 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider2<N> {
         &self,
         segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        self.atomic_provider()?.get_prune_checkpoint(segment)
+        self.consistent_provider()?.get_prune_checkpoint(segment)
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        self.atomic_provider()?.get_prune_checkpoints()
+        self.consistent_provider()?.get_prune_checkpoints()
     }
 }
 
@@ -536,7 +536,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
-        let provider = self.atomic_provider()?;
+        let provider = self.consistent_provider()?;
         provider.ensure_canonical_block(block_number)?;
         let hash = provider
             .block_hash(block_number)?
@@ -547,7 +547,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
 
-        self.atomic_provider()?.get_in_memory_or_storage_by_block(
+        self.consistent_provider()?.get_in_memory_or_storage_by_block(
             block_hash.into(),
             |_| self.database.history_by_block_hash(block_hash),
             |block_state| {
@@ -665,30 +665,30 @@ where
     Self: BlockReader + ReceiptProviderIdExt,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
-        self.atomic_provider()?.block_by_id(id)
+        self.consistent_provider()?.block_by_id(id)
     }
 
     fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Header>> {
-        self.atomic_provider()?.header_by_number_or_tag(id)
+        self.consistent_provider()?.header_by_number_or_tag(id)
     }
 
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<SealedHeader>> {
-        self.atomic_provider()?.sealed_header_by_number_or_tag(id)
+        self.consistent_provider()?.sealed_header_by_number_or_tag(id)
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
-        self.atomic_provider()?.sealed_header_by_id(id)
+        self.consistent_provider()?.sealed_header_by_id(id)
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
-        self.atomic_provider()?.header_by_id(id)
+        self.consistent_provider()?.header_by_id(id)
     }
 
     fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
-        self.atomic_provider()?.ommers_by_id(id)
+        self.consistent_provider()?.ommers_by_id(id)
     }
 }
 
@@ -715,7 +715,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider2<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        self.atomic_provider()?.storage_changeset(block_number)
+        self.consistent_provider()?.storage_changeset(block_number)
     }
 }
 
@@ -724,14 +724,14 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        self.atomic_provider()?.account_block_changeset(block_number)
+        self.consistent_provider()?.account_block_changeset(block_number)
     }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        self.atomic_provider()?.basic_account(address)
+        self.consistent_provider()?.basic_account(address)
     }
 }
 
@@ -746,7 +746,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
     /// because the tree thread is responsible for modifying the [`CanonicalInMemoryState`] in the
     /// first place.
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
-        StateReader::get_state(&self.atomic_provider()?, block)
+        StateReader::get_state(&self.consistent_provider()?, block)
     }
 }
 

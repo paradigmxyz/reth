@@ -14,14 +14,14 @@ use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ProviderError,
+        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_primitives::{BlockWithSenders, Receipt};
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleState, State};
+use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
@@ -152,7 +152,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), Self::Error> {
+    ) -> Result<ExecuteOutput, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -203,7 +203,7 @@ where
                 },
             );
         }
-        Ok((receipts, cumulative_gas_used))
+        Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
 
     fn apply_post_execution_changes(
@@ -264,11 +264,6 @@ where
         self.system_caller.with_state_hook(hook);
     }
 
-    fn finish(&mut self) -> BundleState {
-        self.state.merge_transitions(BundleRetention::Reverts);
-        self.state.take_bundle()
-    }
-
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
@@ -301,7 +296,7 @@ impl EthExecutorProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, TxLegacy};
+    use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -314,9 +309,7 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{
-        constants::ETH_TO_WEI, public_key_to_address, Account, Block, BlockBody, Transaction,
-    };
+    use reth_primitives::{public_key_to_address, Account, Block, BlockBody, Transaction};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };

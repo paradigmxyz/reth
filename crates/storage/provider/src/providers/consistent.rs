@@ -41,7 +41,7 @@ use tracing::trace;
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
 #[derive(Debug)]
-pub struct AtomicBlockchainProvider<N: ProviderNodeTypes> {
+pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider.
     storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
     /// Head block at time of [`Self`] creation
@@ -50,7 +50,7 @@ pub struct AtomicBlockchainProvider<N: ProviderNodeTypes> {
     canonical_in_memory_state: CanonicalInMemoryState,
 }
 
-impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Create a new provider using [`ProviderFactory`] and [`CanonicalInMemoryState`],
     ///
     /// Underneath it will take a snapshot by fetching [`CanonicalInMemoryState::head_state`] and
@@ -588,7 +588,7 @@ impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Ensures that the given block number is canonical (synced)
     ///
     /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
@@ -608,13 +608,13 @@ impl<N: ProviderNodeTypes> AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StaticFileProviderFactory for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.storage_provider.static_file_provider()
     }
 }
 
-impl<N: ProviderNodeTypes> HeaderProvider for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
@@ -708,7 +708,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockHashReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> BlockHashReader for ConsistentProvider<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
@@ -734,7 +734,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockNumReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
         Ok(ChainInfo { best_hash: self.block_hash(best_number)?.unwrap_or_default(), best_number })
@@ -757,7 +757,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockIdReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> BlockIdReader for ConsistentProvider<N> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.canonical_in_memory_state.pending_block_num_hash())
     }
@@ -771,7 +771,7 @@ impl<N: ProviderNodeTypes> BlockIdReader for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
@@ -921,7 +921,7 @@ impl<N: ProviderNodeTypes> BlockReader for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> TransactionsProvider for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.get_in_memory_or_storage_by_tx(
             tx_hash.into(),
@@ -1049,7 +1049,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for AtomicBlockchainProvider<N> 
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProvider for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
@@ -1105,7 +1105,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> ReceiptProviderIdExt for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
@@ -1138,7 +1138,7 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for AtomicBlockchainProvider<N> 
     }
 }
 
-impl<N: ProviderNodeTypes> WithdrawalsProvider for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1174,7 +1174,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StageCheckpointReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> StageCheckpointReader for ConsistentProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.storage_provider.get_stage_checkpoint(id)
     }
@@ -1188,7 +1188,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for AtomicBlockchainProvider<N>
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> EvmEnvProvider for ConsistentProvider<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -1252,7 +1252,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> PruneCheckpointReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> PruneCheckpointReader for ConsistentProvider<N> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -1265,7 +1265,7 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for AtomicBlockchainProvider<N>
     }
 }
 
-impl<N: ProviderNodeTypes> ChainSpecProvider for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
@@ -1273,7 +1273,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> BlockReaderIdExt for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
@@ -1372,7 +1372,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StorageChangeSetReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
@@ -1425,7 +1425,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for AtomicBlockchainProvider<N
     }
 }
 
-impl<N: ProviderNodeTypes> ChangeSetReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -1471,7 +1471,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> AccountReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         // use latest state provider
@@ -1480,7 +1480,7 @@ impl<N: ProviderNodeTypes> AccountReader for AtomicBlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StateReader for AtomicBlockchainProvider<N> {
+impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
     /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
     ///
     /// If data for the block does not exist, this will return [`None`].
@@ -1584,7 +1584,7 @@ mod tests {
 
         // Create a new provider
         let provider = BlockchainProvider2::new(factory)?;
-        let atomic_provider = provider.atomic_provider()?;
+        let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
         let first_db_block = database_blocks.first().unwrap();
@@ -1593,17 +1593,18 @@ mod tests {
 
         // No block in memory before setting in memory state
         assert_eq!(
-            atomic_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
+            consistent_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
             None
         );
         assert_eq!(
-            atomic_provider
+            consistent_provider
                 .find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
             None
         );
         // No pending block in memory
         assert_eq!(
-            atomic_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Pending)?,
+            consistent_provider
+                .find_block_by_hash(first_in_mem_block.hash(), BlockSource::Pending)?,
             None
         );
 
@@ -1619,33 +1620,34 @@ mod tests {
                 Default::default(),
             )],
         };
-        atomic_provider.canonical_in_memory_state.update_chain(chain);
-        let atomic_provider = provider.atomic_provider()?;
+        consistent_provider.canonical_in_memory_state.update_chain(chain);
+        let consistent_provider = provider.consistent_provider()?;
 
         // Now the block should be found in memory
         assert_eq!(
-            atomic_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
+            consistent_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
             Some(first_in_mem_block.clone().into())
         );
         assert_eq!(
-            atomic_provider
+            consistent_provider
                 .find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
             Some(first_in_mem_block.clone().into())
         );
 
         // Find the first block in database by hash
         assert_eq!(
-            atomic_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Any)?,
+            consistent_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Any)?,
             Some(first_db_block.clone().into())
         );
         assert_eq!(
-            atomic_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Canonical)?,
+            consistent_provider
+                .find_block_by_hash(first_db_block.hash(), BlockSource::Canonical)?,
             Some(first_db_block.clone().into())
         );
 
         // No pending block in database
         assert_eq!(
-            atomic_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Pending)?,
+            consistent_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Pending)?,
             None
         );
 
@@ -1660,7 +1662,8 @@ mod tests {
 
         // Now the last block should be found in memory
         assert_eq!(
-            atomic_provider.find_block_by_hash(last_in_mem_block.hash(), BlockSource::Pending)?,
+            consistent_provider
+                .find_block_by_hash(last_in_mem_block.hash(), BlockSource::Pending)?,
             Some(last_in_mem_block.clone().into())
         );
 
@@ -1692,7 +1695,7 @@ mod tests {
 
         // Create a new provider
         let provider = BlockchainProvider2::new(factory)?;
-        let atomic_provider = provider.atomic_provider()?;
+        let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1701,11 +1704,11 @@ mod tests {
 
         // First in memory block should not be found yet as not integrated to the in-memory state
         assert_eq!(
-            atomic_provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?,
+            consistent_provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?,
             None
         );
         assert_eq!(
-            atomic_provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?,
+            consistent_provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?,
             None
         );
 
@@ -1721,27 +1724,27 @@ mod tests {
                 Default::default(),
             )],
         };
-        atomic_provider.canonical_in_memory_state.update_chain(chain);
+        consistent_provider.canonical_in_memory_state.update_chain(chain);
 
-        let atomic_provider = provider.atomic_provider()?;
+        let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block should be found
         assert_eq!(
-            atomic_provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?,
+            consistent_provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?,
             Some(first_in_mem_block.clone().into())
         );
         assert_eq!(
-            atomic_provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?,
+            consistent_provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?,
             Some(first_in_mem_block.clone().into())
         );
 
         // First database block should be found
         assert_eq!(
-            atomic_provider.block(BlockHashOrNumber::Hash(first_db_block.hash()))?,
+            consistent_provider.block(BlockHashOrNumber::Hash(first_db_block.hash()))?,
             Some(first_db_block.clone().into())
         );
         assert_eq!(
-            atomic_provider.block(BlockHashOrNumber::Number(first_db_block.number))?,
+            consistent_provider.block(BlockHashOrNumber::Number(first_db_block.number))?,
             Some(first_db_block.clone().into())
         );
 
@@ -1841,10 +1844,10 @@ mod tests {
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
-        let atomic_provider = provider.atomic_provider()?;
+        let consistent_provider = provider.consistent_provider()?;
 
         assert_eq!(
-            atomic_provider.account_block_changeset(last_database_block).unwrap(),
+            consistent_provider.account_block_changeset(last_database_block).unwrap(),
             database_changesets
                 .into_iter()
                 .last()
@@ -1855,7 +1858,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            atomic_provider.account_block_changeset(first_in_memory_block).unwrap(),
+            consistent_provider.account_block_changeset(first_in_memory_block).unwrap(),
             in_memory_changesets
                 .into_iter()
                 .sorted_by_key(|(address, _, _)| *address)

@@ -268,15 +268,16 @@ pub async fn test_exex_context_with_chain_spec(
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
             .with_unused_discovery_port()
+            .with_unused_listener_port()
             .build(provider_factory.clone()),
     )
     .await?;
     let network = network_manager.handle().clone();
-
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
-
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
+    tasks.executor().spawn(network_manager);
+
+    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
         components: Components {
