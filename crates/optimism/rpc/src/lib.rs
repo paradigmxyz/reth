@@ -10,12 +10,10 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-extern crate alloc;
-
 pub mod error;
 pub mod eth;
 pub mod sequencer;
 
 pub use error::{OpEthApiError, OptimismInvalidTransactionError, SequencerClientError};
-pub use eth::{transaction::OpTxBuilder, OpEthApi, OpReceiptBuilder};
+pub use eth::{OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;

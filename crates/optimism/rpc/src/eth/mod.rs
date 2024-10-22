@@ -39,7 +39,7 @@ use reth_tasks::{
 };
 use reth_transaction_pool::TransactionPool;
 
-use crate::{OpEthApiError, OpTxBuilder, SequencerClient};
+use crate::{OpEthApiError, SequencerClient};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -67,8 +67,6 @@ pub struct OpEthApi<N: FullNodeComponents> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    /// Builds RPC transaction response (transaction + block/chain metadata).
-    tx_resp_builder: OpTxBuilder<<N::Types as NodeTypes>::ChainSpec>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
@@ -93,19 +91,13 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        let tx_resp_builder = OpTxBuilder::new(inner.provider().chain_spec());
-
-        Self {
-            inner: Arc::new(inner),
-            sequencer_client: sequencer_http.map(SequencerClient::new),
-            tx_resp_builder,
-        }
+        Self { inner: Arc::new(inner), sequencer_client: sequencer_http.map(SequencerClient::new) }
     }
 }
 
 impl<N> EthApiTypes for OpEthApi<N>
 where
-    Self: TransactionCompat,
+    Self: Send + Sync,
     N: FullNodeComponents,
 {
     type Error = OpEthApiError;
@@ -113,7 +105,7 @@ where
     type TransactionCompat = Self;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        &self.tx_resp_builder
+        self
     }
 }
 
@@ -267,10 +259,6 @@ where
     N: FullNodeComponents,
 {
     fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            sequencer_client: self.sequencer_client.clone(),
-            tx_resp_builder: self.tx_resp_builder.clone(),
-        }
+        Self { inner: self.inner.clone(), sequencer_client: self.sequencer_client.clone() }
     }
 }

@@ -1,15 +1,12 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloc::{fmt, sync::Arc};
-
 use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
-use derive_more::Constructor;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -103,6 +100,7 @@ where
         tx_info: TransactionInfo,
     ) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
+        let hash = tx.hash;
 
         let mut inner = EthTxBuilder.fill(tx, tx_info).inner;
 
@@ -111,10 +109,13 @@ where
         }
 
         let deposit_receipt_version = self
+            .inner
             .provider()
             .receipt_by_hash(hash)
-            .map_err(Self::Error::from_eth_err)?
-            .deposit_receipt_version;
+            .ok()
+            .flatten()
+            .map(|receipt| receipt.deposit_receipt_version)
+            .flatten();
 
         Transaction {
             inner,
@@ -133,11 +134,5 @@ where
 
     fn tx_type(tx: &Self::Transaction) -> u8 {
         tx.inner.transaction_type.unwrap_or_default()
-    }
-}
-
-impl<T> Clone for OpTxBuilder<T> {
-    fn clone(&self) -> Self {
-        Self { chain_spec: self.chain_spec.clone() }
     }
 }
