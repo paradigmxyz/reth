@@ -1587,7 +1587,7 @@ mod tests {
 
         // Test with size below the limit
         // 1MB is below 2MB, should return false
-        assert!(!size_limit_2mb.exceeds(1 * 1024 * 1024));
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
 
         // Test with size exactly at the limit
         // 2MB equals the limit, should return false
