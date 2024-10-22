@@ -9,3 +9,9 @@ members = [
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
 resolver = "2"
 
+[patch."https://github.com/paradigmxyz/reth.git"]
+reth = { git = "https://www.github.com/paradigmxyz/reth.git", branch = "alexey/pin-serde" }
+reth-exex = { git = "https://www.github.com/paradigmxyz/reth.git", branch = "alexey/pin-serde" }
+reth-node-api = { git = "https://www.github.com/paradigmxyz/reth.git", branch = "alexey/pin-serde" }
+reth-node-ethereum = { git = "https://www.github.com/paradigmxyz/reth.git", branch = "alexey/pin-serde" }
+reth-tracing = { git = "https://www.github.com/paradigmxyz/reth.git", branch = "alexey/pin-serde" }
