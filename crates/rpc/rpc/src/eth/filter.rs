@@ -111,7 +111,9 @@ where
         eth_filter
     }
 
-    /// Create a background task and listener for reorged blocks updates relevant active filters
+    /// Create a background task and listener for reorged blocks updates relevant active filters.
+    /// In case of a chain reorg, previously emitted logs are emitted again but with the removed
+    /// field set to true.
     pub fn spawn_watch_reorgs<Events>(&self, events: Events)
     where
         Events: CanonStateSubscriptions + 'static,
@@ -160,7 +162,7 @@ where
         })
     }
 
-    /// Watch block reorgs and update filters accordingly
+    /// Watch block reorgs and update filters accordingly.
     async fn watch_reorgs(&self, mut notifications: CanonStateNotificationStream) {
         while let Some(notification) = notifications.next().await {
             if let CanonStateNotification::Reorg { old, .. } = notification {
@@ -169,12 +171,16 @@ where
         }
     }
 
-    /// update a reorg block for all active filters
+    /// Update a reorg block for all active filters.
+    ///
     async fn update_reorg(&self, old_blocks: &BTreeMap<BlockNumber, SealedBlockWithSenders>) {
         let reorg_blocks: HashMap<BlockHash, BlockNumber> =
             old_blocks.iter().map(|(k, v)| (v.header.hash(), *k)).collect();
 
-        for active_filter in self.active_filters().inner.lock().await.values_mut() {
+        // we need to acquire a lock first
+        let mut active_filters = self.active_filters().inner.lock().await;
+
+        for active_filter in active_filters.values_mut() {
             if let FilterKind::Log(filter) = &active_filter.kind {
                 match filter.block_option {
                     FilterBlockOption::AtBlockHash(block_hash) => {
@@ -668,7 +674,7 @@ struct ActiveFilter<T> {
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
     kind: FilterKind<T>,
-    /// reorg blocks that are relevant to this filter
+    /// Reorg blocks that are relevant to this filter
     reorg_blocks: Arc<RwLock<HashMap<BlockHash, BlockNumber>>>,
 }
 
