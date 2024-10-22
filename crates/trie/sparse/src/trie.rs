@@ -151,8 +151,8 @@ impl RevealedSparseTrie {
                             SparseNode::Branch { state_mask: branch.state_mask, hash: None },
                         );
                     }
-                    // Branch node already exists, or an extension node was placed where a branch
-                    // node was before.
+                    // Branch node already exists, or an extension node was placed where a
+                    // branch node was before.
                     Some(SparseNode::Branch { .. } | SparseNode::Extension { .. }) => {}
                     // All other node types can't be handled.
                     Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
@@ -167,8 +167,13 @@ impl RevealedSparseTrie {
                     self.reveal_node_or_hash(child_path, &ext.child)?;
                     self.nodes.insert(path, SparseNode::Extension { key: ext.key, hash: None });
                 }
-                // TODO: do we need to return an error for any nodes type here?
-                _ => {}
+                // Extension node already exists, or an extension node was placed where a branch
+                // node was before.
+                Some(SparseNode::Extension { .. } | SparseNode::Branch { .. }) => {}
+                // All other node types can't be handled.
+                Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
+                    return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) })
+                }
             },
             TrieNode::Leaf(leaf) => match self.nodes.get(&path) {
                 Some(SparseNode::Hash(_)) | None => {
@@ -177,8 +182,14 @@ impl RevealedSparseTrie {
                     self.values.insert(full, leaf.value);
                     self.nodes.insert(path, SparseNode::new_leaf(leaf.key));
                 }
-                // TODO: do we need to return an error for any nodes type here?
-                _ => {}
+                // Left node already exists.
+                Some(SparseNode::Leaf { .. }) => {}
+                // All other node types can't be handled.
+                Some(
+                    node @ (SparseNode::Empty |
+                    SparseNode::Extension { .. } |
+                    SparseNode::Branch { .. }),
+                ) => return Err(SparseTrieError::Reveal { path, node: Box::new(node.clone()) }),
             },
         }
 
