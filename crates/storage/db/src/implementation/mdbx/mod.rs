@@ -71,7 +71,7 @@ impl DatabaseEnvKind {
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
-    /// Database geometry settings. If [None], default values will be used.
+    /// Database geometry settings.
     geometry: Geometry<Range<usize>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
@@ -102,14 +102,14 @@ pub struct DatabaseArguments {
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub const fn new(client_version: ClientVersion) -> Self {
+    pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
             geometry: Geometry {
                 size: Some(0..(4 * TERABYTE)),
                 growth_step: Some(4 * GIGABYTE as isize),
                 shrink_threshold: Some(0),
-                page_size: Some(PageSize::Set(4096)),
+                page_size: Some(PageSize::Set(default_page_size())),
             },
             log_level: None,
             max_read_transaction_duration: None,
