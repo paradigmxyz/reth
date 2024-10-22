@@ -4,7 +4,7 @@ use alloy_chains::Chain;
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use core::fmt::{Debug, Display};
+use core::fmt::Debug;
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::Header;
 
@@ -38,7 +38,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn prune_delete_limit(&self) -> usize;
 
     /// Returns a string representation of the hardforks.
-    fn display_hardforks(&self) -> impl Display;
+    fn display_hardforks(&self) -> String;
 
     /// The genesis header.
     fn genesis_header(&self) -> &Header;
@@ -83,8 +83,8 @@ impl EthChainSpec for ChainSpec {
         self.prune_delete_limit
     }
 
-    fn display_hardforks(&self) -> impl Display {
-        self.display_hardforks()
+    fn display_hardforks(&self) -> String {
+        self.display_hardforks().to_string()
     }
 
     fn genesis_header(&self) -> &Header {

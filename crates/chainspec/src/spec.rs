@@ -971,7 +971,7 @@ mod tests {
     #[test]
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
-            MAINNET.display_hardforks().to_string(),
+            MAINNET.display_hardforks(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000

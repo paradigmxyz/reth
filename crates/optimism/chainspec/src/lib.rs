@@ -23,7 +23,6 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
-use core::fmt::Display;
 use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
@@ -209,8 +208,8 @@ impl EthChainSpec for OpChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> impl Display {
-        self.inner.display_hardforks()
+    fn display_hardforks(&self) -> String {
+        self.inner.display_hardforks().to_string()
     }
 
     fn genesis_header(&self) -> &Header {
