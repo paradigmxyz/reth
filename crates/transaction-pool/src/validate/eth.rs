@@ -223,7 +223,7 @@ where
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_BYTE_SIZE) {
+            if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
@@ -711,7 +711,7 @@ impl EthTransactionValidatorBuilder {
         EthTransactionValidator { inner: Arc::new(inner) }
     }
 
-    /// Builds a the [`EthTransactionValidator`] and spawns validation tasks via the
+    /// Builds a [`EthTransactionValidator`] and spawns validation tasks via the
     /// [`TransactionValidationTaskExecutor`]
     ///
     /// The validator will spawn `additional_tasks` additional tasks for validation.
@@ -780,22 +780,6 @@ impl ForkTracker {
     /// Returns `true` if Prague fork is activated.
     pub fn is_prague_activated(&self) -> bool {
         self.prague.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-/// Ensure that the code size is not greater than `max_init_code_size`.
-/// `max_init_code_size` should be configurable so this will take it as an argument.
-pub fn ensure_max_init_code_size<T: PoolTransaction>(
-    transaction: &T,
-    max_init_code_size: usize,
-) -> Result<(), InvalidPoolTransactionError> {
-    if transaction.kind().is_create() && transaction.input().len() > max_init_code_size {
-        Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-            transaction.size(),
-            max_init_code_size,
-        ))
-    } else {
-        Ok(())
     }
 }
 
