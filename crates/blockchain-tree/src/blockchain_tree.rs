@@ -113,9 +113,6 @@ where
     ///       is crucial for the correct execution of transactions.
     /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
     ///   its structure or performance.
-    /// - `prune_modes`: Configuration for pruning old blockchain data. This helps in managing the
-    ///   storage space efficiently. It's important to validate this configuration to ensure it does
-    ///   not lead to unintended data loss.
     pub fn new(
         externals: TreeExternals<N, E>,
         config: BlockchainTreeConfig,
@@ -902,6 +899,7 @@ where
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
         for chain in self.state.chains.values() {
+            all_chain_blocks.reserve_exact(chain.blocks().len());
             for (&number, block) in chain.blocks() {
                 all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
@@ -1634,7 +1632,6 @@ mod tests {
                         transactions: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                         ommers: Vec::new(),
                         withdrawals: Some(Withdrawals::default()),
-                        requests: None,
                     },
                 },
                 body.iter().map(|tx| tx.signer()).collect(),

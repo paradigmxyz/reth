@@ -18,13 +18,13 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::{
-    constants::{
-        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-    },
+use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
+};
+use alloy_primitives::{Address, TxHash, B256};
+use reth_primitives::constants::{
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -1405,12 +1405,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
-        let mut iter = self.txs_iter(tx.transaction_id.sender);
-        if let Some((_, existing)) = iter.next() {
-            return tx.tx_type_conflicts_with(&existing.transaction)
-        }
-        // no existing transaction for this sender
-        false
+        self.txs_iter(tx.transaction_id.sender)
+            .next()
+            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.
@@ -1424,11 +1421,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
+        on_chain_nonce: u64,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
-            if current_txs >= self.max_account_slots {
+
+            // Reject transactions if sender's capacity is exceeded.
+            // If transaction's nonce matches on-chain nonce always let it through
+            if current_txs >= self.max_account_slots && transaction.nonce() > on_chain_nonce {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
                 })
@@ -1595,7 +1596,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
-        let mut transaction = self.ensure_valid(transaction)?;
+        let mut transaction = self.ensure_valid(transaction, on_chain_nonce)?;
 
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
@@ -2634,6 +2635,7 @@ mod tests {
         let mut pool = AllTransactions::default();
 
         let mut tx = MockTransaction::eip1559();
+        let unblocked_tx = tx.clone();
         for _ in 0..pool.max_account_slots {
             tx = tx.next();
             pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
@@ -2647,6 +2649,10 @@ mod tests {
         let err =
             pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+
+        assert!(pool
+            .insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce)
+            .is_ok());
     }
 
     #[test]

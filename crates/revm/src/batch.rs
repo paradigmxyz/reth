@@ -1,9 +1,10 @@
 //! Helper for handling execution of multiple blocks.
 
 use alloc::vec::Vec;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{map::HashSet, Address, BlockNumber};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
-use reth_primitives::{Receipt, Receipts, Request, Requests};
+use reth_primitives::{Receipt, Receipts};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
 
@@ -170,8 +171,8 @@ impl BlockBatchRecord {
     }
 
     /// Save EIP-7685 requests to the executor.
-    pub fn save_requests(&mut self, requests: Vec<Request>) {
-        self.requests.push(requests.into());
+    pub fn save_requests(&mut self, requests: Requests) {
+        self.requests.push(requests);
     }
 }
 

@@ -71,10 +71,14 @@ tempfile.workspace = true
 
 [features]
 test-utils = [
-    "dep:tempfile",
-    "dep:reth-db-api",
-    "reth-db/test-utils",
-    "reth-consensus/test-utils",
-    "reth-network-p2p/test-utils",
-    "reth-testing-utils",
+	"dep:tempfile",
+	"dep:reth-db-api",
+	"reth-db/test-utils",
+	"reth-consensus/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-testing-utils",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-db-api?/test-utils",
+	"reth-provider/test-utils"
 ]

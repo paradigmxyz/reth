@@ -101,8 +101,36 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 [features]
 default = ["serde"]
 geth-tests = []
-serde = ["dep:serde", "secp256k1/serde", "enr/serde", "reth-network-types/serde"]
-test-utils = ["dep:reth-provider", "reth-provider?/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
+serde = [
+	"dep:serde",
+	"secp256k1/serde",
+	"enr/serde",
+	"reth-network-types/serde",
+	"reth-dns-discovery/serde",
+	"reth-eth-wire/serde",
+	"reth-provider?/serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"discv5/serde",
+	"parking_lot/serde",
+	"rand/serde",
+	"smallvec/serde",
+	"url/serde"
+]
+test-utils = [
+	"dep:reth-provider",
+	"reth-provider?/test-utils",
+	"dep:tempfile",
+	"reth-transaction-pool/test-utils",
+	"reth-network-types/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-discv4/test-utils",
+	"reth-network/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-primitives/test-utils"
+]
 
 [[bench]]
 name = "bench"
