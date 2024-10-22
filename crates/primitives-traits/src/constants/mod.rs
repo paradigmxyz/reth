@@ -85,15 +85,6 @@ pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 6;
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 pub const BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
 
-/// Multiplier for converting gwei to wei.
-pub const GWEI_TO_WEI: u64 = 1_000_000_000;
-
-/// Multiplier for converting finney (milliether) to wei.
-pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
-
-/// Multiplier for converting ether to wei.
-pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
-
 /// Sepolia genesis hash: `0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9`
 pub const SEPOLIA_GENESIS_HASH: B256 =
     b256!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9");
