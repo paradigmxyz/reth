@@ -1,0 +1,37 @@
+# Use the Rust 1.82 image based on Debian Bullseye
+FROM rust:1.82-bullseye@sha256:c42c8ca762560c182ba30edda0e0d71a8604040af2672370559d7e854653c66d AS builder
+
+# Install specific version of libclang-dev
+RUN apt-get update && apt-get install -y libclang-dev=1:11.0-51+nmu5
+
+# Clone the repository at the specific branch
+RUN git clone https://github.com/paradigmxyz/reth /app
+WORKDIR /app
+
+# Checkout the reproducible-build branch
+RUN git checkout reproducible-build
+
+# Get the latest commit timestamp and set SOURCE_DATE_EPOCH
+RUN SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) && \
+    echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> /etc/environment
+
+# Set environment variables for reproducibility
+ARG RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $(pwd)=."
+ENV SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH \
+    CARGO_INCREMENTAL=0 \
+    LC_ALL=C \
+    TZ=UTC \
+    RUSTFLAGS="${RUSTFLAGS}"
+
+# Set the default features if not provided
+ARG FEATURES="jemalloc asm-keccak"
+
+# Build the project with the reproducible settings
+RUN . /etc/environment && \
+    cargo build --bin reth --features "${FEATURES}" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
+
+# Create a minimal final image with just the binary
+FROM scratch AS binaries
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
