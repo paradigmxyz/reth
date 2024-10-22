@@ -518,34 +518,35 @@ impl RevealedSparseTrie {
         }
     }
 
-    /// Update node hashes only if their path exceeds the provided level.
-    pub fn update_rlp_node_level(&mut self, min_len: usize) {
-        let mut paths = Vec::from([Nibbles::default()]);
+    /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
+    /// depth. Root node has a level of 0.
+    pub fn update_rlp_node_level(&mut self, depth: usize) {
+        let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = HashSet::<Nibbles>::default();
 
-        while let Some(mut path) = paths.pop() {
+        while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
                 SparseNode::Leaf { .. } => {
                     targets.insert(path);
                 }
                 SparseNode::Extension { key, .. } => {
-                    if path.len() >= min_len {
+                    if level >= depth {
                         targets.insert(path);
                     } else {
                         path.extend_from_slice_unchecked(key);
-                        paths.push(path);
+                        paths.push((path, level + 1));
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    if path.len() >= min_len {
+                    if level >= depth {
                         targets.insert(path);
                     } else {
                         for bit in CHILD_INDEX_RANGE {
                             if state_mask.is_bit_set(bit) {
                                 let mut child_path = path.clone();
                                 child_path.push_unchecked(bit);
-                                paths.push(child_path);
+                                paths.push((child_path, level + 1));
                             }
                         }
                     }
