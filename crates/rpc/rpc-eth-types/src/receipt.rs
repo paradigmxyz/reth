@@ -2,10 +2,8 @@
 
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, TxKind};
-use alloy_rpc_types::{
-    AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,
-};
-use alloy_serde::{OtherFields, WithOtherFields};
+use alloy_rpc_types::{AnyReceiptEnvelope, Log, ReceiptWithBloom, TransactionReceipt};
+use alloy_serde::OtherFields;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use revm_primitives::calc_blob_gasprice;
 
@@ -118,8 +116,7 @@ impl ReceiptBuilder {
     }
 
     /// Builds a receipt response from the base response body, and any set additional fields.
-    pub fn build(self) -> AnyTransactionReceipt {
-        let Self { base, other } = self;
-        WithOtherFields { inner: base, other }
+    pub fn build(self) -> TransactionReceipt<AnyReceiptEnvelope<Log>> {
+        self.base
     }
 }
