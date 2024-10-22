@@ -105,12 +105,12 @@ impl<N: FullNodeComponents> OpEthApi<N> {
 
 impl<N> EthApiTypes for OpEthApi<N>
 where
-    Self: Send + Sync,
+    Self: TransactionCompat,
     N: FullNodeComponents,
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
-    type TransactionCompat = OpTxBuilder<<N::Types as NodeTypes>::ChainSpec>;
+    type TransactionCompat = Self;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder

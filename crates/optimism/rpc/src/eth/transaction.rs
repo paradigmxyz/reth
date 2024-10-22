@@ -91,17 +91,9 @@ where
     }
 }
 
-/// Builds OP transaction response type.
-#[derive(Debug, Constructor)]
-pub struct OpTxBuilder<T> {
-    /// Chain spec.
-    pub chain_spec: Arc<T>,
-}
-
-impl<T> TransactionCompat for OpTxBuilder<T>
+impl<N> TransactionCompat for OpEthApi<N>
 where
-    Self: Send + Sync,
-    T: fmt::Debug,
+    N: FullNodeComponents,
 {
     type Transaction = Transaction;
 
@@ -118,6 +110,12 @@ where
             inner.gas_price = Some(signed_tx.max_fee_per_gas())
         }
 
+        let deposit_receipt_version = self
+            .provider()
+            .receipt_by_hash(hash)
+            .map_err(Self::Error::from_eth_err)?
+            .deposit_receipt_version;
+
         Transaction {
             inner,
             source_hash: signed_tx.source_hash(),
@@ -125,7 +123,7 @@ where
             // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
             is_system_tx: (signed_tx.is_deposit() && signed_tx.is_system_transaction())
                 .then_some(true),
-            deposit_receipt_version: None, // todo: how to fill this field?
+            deposit_receipt_version,
         }
     }
 
