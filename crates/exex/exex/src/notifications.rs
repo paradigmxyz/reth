@@ -21,6 +21,7 @@ pub struct ExExNotifications<P, E> {
     inner: ExExNotificationsInner<P, E>,
 }
 
+#[allow(unused)] // TODO(0xurb) - remove when will be used for `ExExContext` or his variations.
 pub(crate) trait ExExNotificationsDyn<P, E>:
     Stream<Item = eyre::Result<ExExNotification>> + Unpin
 where
