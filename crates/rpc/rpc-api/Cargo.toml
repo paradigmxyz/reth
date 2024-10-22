@@ -37,12 +37,9 @@ alloy-rpc-types-engine.workspace = true
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 
-[dev-dependencies]
-serde_json.workspace = true
-
 [features]
 client = [
     "jsonrpsee/client",
     "jsonrpsee/async-client",
-    "reth-rpc-eth-api/client"
+    "reth-rpc-eth-api/client",
 ]

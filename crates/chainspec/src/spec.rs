@@ -2,11 +2,13 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
+use alloy_consensus::constants::EMPTY_WITHDRAWALS;
+use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
-use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 
+use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH};
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
@@ -17,8 +19,8 @@ use reth_network_peers::{
 };
 use reth_primitives_traits::{
     constants::{
-        DEV_GENESIS_HASH, EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT,
-        HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        EIP1559_INITIAL_BASE_FEE, ETHEREUM_BLOCK_GAS_LIMIT, HOLESKY_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header, SealedHeader,
 };
@@ -282,8 +284,9 @@ impl ChainSpec {
             };
 
         // If Prague is activated at genesis we set requests root to an empty trie root.
-        let requests_root =
-            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(EMPTY_ROOT_HASH);
+        let requests_hash = self
+            .is_prague_active_at_timestamp(self.genesis.timestamp)
+            .then_some(EMPTY_REQUESTS_HASH);
 
         Header {
             gas_limit: self.genesis.gas_limit,
@@ -299,7 +302,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            requests_root,
+            requests_hash,
             ..Default::default()
         }
     }
@@ -938,6 +941,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
+    use alloy_trie::EMPTY_ROOT_HASH;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 
@@ -1814,9 +1818,7 @@ Post-merge hard forks (timestamp based):
             hex!("078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
 
-        let expected_withdrawals_hash: B256 =
-            hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into();
-        assert_eq!(chainspec.genesis_header().withdrawals_root, Some(expected_withdrawals_hash));
+        assert_eq!(chainspec.genesis_header().withdrawals_root, Some(EMPTY_ROOT_HASH));
 
         let expected_hash: B256 =
             hex!("1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c").into();

@@ -7,6 +7,10 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Transaction as _,
+};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
@@ -16,7 +20,6 @@ use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
     BlobTransactionValidationError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -69,7 +72,6 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Imports all _external_ transactions
     ///
-    ///
     /// Consumer: Utility
     fn add_external_transactions(
         &self,
@@ -80,7 +82,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
     ///
-    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// This is the same as [`TransactionPool::add_transaction`] but returns an event stream for the
     /// given transaction.
     ///
     /// Consumer: Custom
@@ -354,6 +356,21 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_highest_transaction_by_sender(
         &self,
         sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    /// In other words the highest non nonce gapped transaction.
+    ///
+    /// Note: The next pending pooled transaction must have the on chain nonce.
+    ///
+    /// For example, for a given on chain nonce of `5`, the next transaction must have that nonce.
+    /// If the pool contains txs `[5,6,7]` this returns tx `7`.
+    /// If the pool contains txs `[6,7]` this returns `None` because the next valid nonce (5) is
+    /// missing, which means txs `[6,7]` are nonce gapped.
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns a transaction sent by a given user and a nonce
@@ -1167,7 +1184,7 @@ impl PoolTransaction for EthPooledTransaction {
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
     /// For legacy transactions: `gas_price - base_fee`.
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(Some(base_fee))
+        self.transaction.effective_tip_per_gas(base_fee)
     }
 
     /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
@@ -1183,7 +1200,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input().as_ref()
+        self.transaction.input()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.

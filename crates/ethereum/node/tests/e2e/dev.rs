@@ -6,8 +6,10 @@ use futures::StreamExt;
 use reth::{args::DevArgs, core::rpc::eth::helpers::EthTransactions};
 use reth_chainspec::ChainSpec;
 use reth_e2e_test_utils::setup;
-use reth_node_api::{FullNodeComponents, NodeAddOns};
-use reth_node_builder::{EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_api::FullNodeComponents;
+use reth_node_builder::{
+    rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
+};
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::{providers::BlockchainProvider2, CanonStateSubscriptions};
 use reth_tasks::TaskManager;
@@ -53,7 +55,7 @@ async fn can_run_dev_node_new_engine() -> eyre::Result<()> {
 async fn assert_chain_advances<N, AddOns>(node: FullNode<N, AddOns>)
 where
     N: FullNodeComponents<Provider: CanonStateSubscriptions>,
-    AddOns: NodeAddOns<N, EthApi: EthTransactions>,
+    AddOns: RethRpcAddOns<N, EthApi: EthTransactions>,
 {
     let mut notifications = node.provider.canonical_state_stream();
 

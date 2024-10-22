@@ -132,9 +132,8 @@ pub(crate) fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
 }
 
 /// Get an instance of subkey for given dupsort table
-fn table_subkey<T: DupSort>(subkey: &Option<String>) -> Result<T::SubKey, eyre::Error> {
-    serde_json::from_str::<T::SubKey>(&subkey.clone().unwrap_or_default())
-        .map_err(|e| eyre::eyre!(e))
+fn table_subkey<T: DupSort>(subkey: Option<&str>) -> Result<T::SubKey, eyre::Error> {
+    serde_json::from_str::<T::SubKey>(subkey.unwrap_or_default()).map_err(|e| eyre::eyre!(e))
 }
 
 struct GetValueViewer<'a, N: NodeTypesWithDB> {
@@ -175,7 +174,7 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
         let key = table_key::<T>(&self.key)?;
 
         // process dupsort table
-        let subkey = table_subkey::<T>(&self.subkey)?;
+        let subkey = table_subkey::<T>(self.subkey.as_deref())?;
 
         match self.tool.get_dup::<T>(key, subkey)? {
             Some(content) => {

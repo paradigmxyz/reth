@@ -51,5 +51,14 @@ reth-tracing.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
+serde = [
+	"dep:serde",
+	"alloy-primitives/serde",
+	"discv5/serde",
+	"enr/serde",
+	"generic-array/serde",
+	"parking_lot/serde",
+	"rand?/serde",
+	"secp256k1/serde"
+]
 test-utils = ["dep:rand"]

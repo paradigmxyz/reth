@@ -41,8 +41,19 @@ hash-db = "=0.15.2"
 plain_hasher = "0.2"
 
 [features]
-test-utils = ["dep:plain_hasher", "dep:hash-db", "arbitrary"]
+test-utils = [
+	"dep:plain_hasher",
+	"dep:hash-db",
+	"arbitrary",
+	"reth-primitives-traits/test-utils",
+	"reth-codecs/test-utils"
+]
 arbitrary = [
-    "alloy-trie/arbitrary",
-    "dep:arbitrary",
+	"alloy-trie/arbitrary",
+	"dep:arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"nybbles/arbitrary",
+	"revm-primitives/arbitrary"
 ]

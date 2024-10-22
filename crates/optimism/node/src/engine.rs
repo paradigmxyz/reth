@@ -38,9 +38,9 @@ where
         + TryInto<OpExecutionPayloadEnvelopeV4>,
 {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = OpExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = OpExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 }
 
 /// A default payload type for [`OptimismEngineTypes`]

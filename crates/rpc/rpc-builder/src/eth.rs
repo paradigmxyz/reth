@@ -10,7 +10,7 @@ use reth_tasks::TaskSpawner;
 
 /// Alias for `eth` namespace API builder.
 pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
-    Box<dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
+    Box<dyn FnOnce(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
