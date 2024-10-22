@@ -81,6 +81,9 @@ Database:
 
           [possible values: true, false]
 
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
