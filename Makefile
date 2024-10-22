@@ -11,6 +11,11 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 CARGO_TARGET_DIR ?= target
 
+DOCKER_BUILD_CACHE_FLAGS :=
+ifdef CI
+	DOCKER_BUILD_CACHE_FLAGS := --cache-from=type=gha --cache-to=type=gha,mode=max
+endif
+
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
@@ -238,6 +243,7 @@ define docker_build_push
 		--platform linux/amd64,linux/arm64 \
 		--tag $(DOCKER_IMAGE_NAME):$(1) \
 		--tag $(DOCKER_IMAGE_NAME):$(2) \
+		$(DOCKER_BUILD_CACHE_FLAGS) \
 		--provenance=false \
 		--push
 endef
@@ -290,6 +296,7 @@ define op_docker_build_push
 		--platform linux/amd64,linux/arm64 \
 		--tag $(DOCKER_IMAGE_NAME):$(1) \
 		--tag $(DOCKER_IMAGE_NAME):$(2) \
+		$(DOCKER_BUILD_CACHE_FLAGS) \
 		--provenance=false \
 		--push
 endef
