@@ -124,7 +124,9 @@ pub mod peers;
 pub mod protocol;
 pub mod transactions;
 
-mod budget;
+/// Default Budgets
+pub mod budget;
+
 mod builder;
 mod discovery;
 mod fetch;

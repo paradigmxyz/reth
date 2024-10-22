@@ -16,6 +16,12 @@ use reth_discv5::{
 };
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
+    budget::{
+        DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
+        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM, DEFAULT_BUDGET_TRY_DRAIN_SWARM,
+    },
     transactions::{
         constants::{
             tx_fetcher::{
@@ -154,6 +160,34 @@ pub struct NetworkArgs {
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
+
+    #[arg(long = "budget-try-drain-system", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_STREAM, verbatim_doc_comment)]
+    /// Default budget to try and drain streams
+    pub budget_try_drain_stream: u32,
+
+    #[arg(long = "budget-try-drain-downloaders", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, verbatim_doc_comment)]
+    /// Default budget to try and drain headers and bodies download streams.
+    pub budget_try_drain_downloaders: u32,
+
+    #[arg(long = "budget-try-drain-swarm", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_SWARM, verbatim_doc_comment)]
+    /// Budget for draining swarm
+    pub budget_try_drain_swarm: u32,
+
+    #[arg(long = "budget-try-drain-network-handle-channel", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, verbatim_doc_comment)]
+    /// Budget for draining network handle channel
+    pub budget_try_drain_network_handle_channel: u32,
+
+    #[arg(long = "budget-try-drain-network-transaction-events", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS, verbatim_doc_comment)]
+    /// Budget for draining network transaction events
+    pub budget_try_drain_network_transaction_events: u32,
+
+    #[arg(long = "budget-try-drain-pending-pool-imports", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
+    /// Budget for draining pending pool imports
+    pub budget_try_drain_pending_pool_imports: u32,
+
+    #[arg(long = "budget-try-drain-pool-imports", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS, verbatim_doc_comment)]
+    /// Budget for draining pool imports
+    pub budget_try_drain_pool_imports: u32,
 }
 
 impl NetworkArgs {
@@ -332,6 +366,13 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
+            budget_try_drain_stream: DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            budget_try_drain_downloaders: DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS,
+            budget_try_drain_swarm: DEFAULT_BUDGET_TRY_DRAIN_SWARM,
+            budget_try_drain_network_handle_channel: DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
+            budget_try_drain_network_transaction_events: DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
+            budget_try_drain_pending_pool_imports: DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+            budget_try_drain_pool_imports: DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
         }
     }
 }
