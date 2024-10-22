@@ -16,7 +16,7 @@ RUN SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) && \
     echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> /etc/environment
 
 # Set environment variables for reproducibility
-ARG RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $$(pwd)=."
+ARG RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $(pwd)=."
 ENV SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH \
     CARGO_INCREMENTAL=0 \
     LC_ALL=C \
@@ -31,7 +31,7 @@ RUN . /etc/environment && \
     cargo build --bin reth --features "${FEATURES}" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
 # Create a minimal final image with just the binary
-FROM scratch as binaries
+FROM scratch AS binaries
 
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
