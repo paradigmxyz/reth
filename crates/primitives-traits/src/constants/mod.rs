@@ -10,9 +10,6 @@ pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
-/// The first four bytes of the call data for a function call specifies the function to be called.
-pub const SELECTOR_LEN: usize = 4;
-
 /// An EPOCH is a series of 32 slots.
 pub const EPOCH_SLOTS: u64 = 32;
 
