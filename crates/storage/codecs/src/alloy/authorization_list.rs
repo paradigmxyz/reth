@@ -54,17 +54,15 @@ impl Compact for SignedAuthorization {
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let y = alloy_primitives::Parity::Parity(buf.get_u8() == 1);
+        let y_parity = buf.get_u8();
         let r = U256::from_le_slice(&buf[0..32]);
         buf.advance(32);
         let s = U256::from_le_slice(&buf[0..32]);
         buf.advance(32);
 
-        let signature = alloy_primitives::Signature::from_rs_and_parity(r, s, y)
-            .expect("invalid authorization signature");
         let (auth, buf) = AlloyAuthorization::from_compact(buf, len);
 
-        (auth.into_signed(signature), buf)
+        (Self::new_unchecked(auth, y_parity, r, s), buf)
     }
 }
 
