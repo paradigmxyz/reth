@@ -46,7 +46,7 @@ serde = { workspace = true, optional = true }
 [dev-dependencies]
 assert_matches.workspace = true
 rand.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reth-tracing.workspace = true
 
 [features]
