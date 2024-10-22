@@ -54,6 +54,7 @@ use tracing::info;
 // This allows us to manually enable node metrics features, required for proper jemalloc metric
 // reporting
 use reth_node_metrics as _;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 
 /// The main op-reth cli interface.
 ///
@@ -134,6 +135,9 @@ where
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
+        // Install the prometheus recorder to be sure to record all metrics
+        let _ = install_prometheus_recorder();
 
         let runner = CliRunner::default();
         match self.command {
