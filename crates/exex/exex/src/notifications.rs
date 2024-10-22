@@ -26,10 +26,9 @@ pub struct ExExNotifications<P, E> {
 ///
 /// If the stream is configured with a head via
 /// - [`ExExNotificationsDyn::set_with_head`] or
-/// - [`ExExNotificationsDyn::with_head`],
-///     it will run backfill jobs to catch up to the node head.
+/// - [`ExExNotificationsDyn::with_head`], it will run backfill jobs to catch up to the node head.
 #[allow(unused)] // TODO(0xurb) - remove when will be used for `ExExContext` or his variations.
-pub(crate) trait ExExNotificationsDyn<P, E>:
+pub trait ExExNotificationsDyn<P, E>:
     Stream<Item = eyre::Result<ExExNotification>> + Unpin
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
