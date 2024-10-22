@@ -27,7 +27,7 @@ pub struct ExExNotifications<P, E> {
 /// If the stream is configured with a head via
 /// - [`ExExNotificationsDyn::set_with_head`] or
 /// - [`ExExNotificationsDyn::with_head`],
-/// it will run backfill jobs to catch up to the node head.
+///     it will run backfill jobs to catch up to the node head.
 #[allow(unused)] // TODO(0xurb) - remove when will be used for `ExExContext` or his variations.
 pub(crate) trait ExExNotificationsDyn<P, E>:
     Stream<Item = eyre::Result<ExExNotification>> + Unpin
@@ -35,28 +35,28 @@ where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
-    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s without a head.
+    /// Sets [`ExExNotificationsDyn`] to a stream of [`ExExNotification`]s without a head.
     ///
     /// It's a no-op if the stream has already been configured without a head.
     ///
     /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
     fn set_without_head(&mut self);
 
-    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s with the provided head.
+    /// Sets [`ExExNotificationsDyn`] to a stream of [`ExExNotification`]s with the provided head.
     ///
     /// It's a no-op if the stream has already been configured with a head.
     ///
     /// See the documentation of [`ExExNotificationsWithHead`] for more details.
     fn set_with_head(&mut self, exex_head: ExExHead);
 
-    /// Returns a new [`ExExNotifications`] without a head.
+    /// Returns a new [`ExExNotificationsDyn`] without a head.
     ///
     /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
     fn without_head(self) -> Self
     where
         Self: Sized;
 
-    /// Returns a new [`ExExNotifications`] with the provided head.
+    /// Returns a new [`ExExNotificationsDyn`] with the provided head.
     ///
     /// See the documentation of [`ExExNotificationsWithHead`] for more details.
     fn with_head(self, exex_head: ExExHead) -> Self
