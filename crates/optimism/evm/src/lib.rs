@@ -156,7 +156,8 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp),
+            // basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp),
+            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp).unwrap(),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };

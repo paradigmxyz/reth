@@ -494,7 +494,8 @@ where
         extra_data = get_holocene_extra_data(
             &attributes,
             chain_spec.base_fee_params_at_timestamp(attributes.payload_attributes.timestamp),
-        );
+        )
+        .map_err(|err| PayloadBuilderError::other(err))?;
     }
 
     let header = Header {
@@ -554,16 +555,28 @@ where
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
 
+#[derive(Debug, thiserror::Error)]
+// Error type for EIP-1559 parameters
+pub enum EIP1559ParamError {
+    #[error("No EIP-1559 parameters provided")]
+    /// No EIP-1559 parameters provided
+    NoEIP1559Params,
+    #[error("Invalid elasticity parameter")]
+    /// Invalid denominator parameter
+    InvalidDenominator,
+    #[error("Invalid denominator parameter")]
+    /// Invalid elasticity parameter
+    InvalidElasticity,
+}
+
 /// Extracts the Holcene 1599 parameters from the encoded form:
 /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_eip_1559_params(eip_1559_params: B64) -> Result<(u32, u32), String> {
-    let elasticity: [u8; 4] = eip_1559_params.0[..4]
-        .try_into()
-        .map_err(|_| "Failed to extract elasticity".to_string())?;
+pub fn decode_eip_1559_params(eip_1559_params: B64) -> Result<(u32, u32), EIP1559ParamError> {
+    let elasticity: [u8; 4] =
+        eip_1559_params.0[..4].try_into().map_err(|_| EIP1559ParamError::InvalidElasticity)?;
 
-    let denominator: [u8; 4] = eip_1559_params.0[4..8]
-        .try_into()
-        .map_err(|_| "Failed to extract denominator".to_string())?;
+    let denominator: [u8; 4] =
+        eip_1559_params.0[4..8].try_into().map_err(|_| EIP1559ParamError::InvalidDenominator)?;
 
     Ok((u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator)))
 }
@@ -571,35 +584,27 @@ pub fn decode_eip_1559_params(eip_1559_params: B64) -> Result<(u32, u32), String
 fn get_holocene_extra_data(
     attributes: &OptimismPayloadBuilderAttributes,
     default_base_fee_params: BaseFeeParams,
-) -> Bytes {
-    let mut extra_data = [0u8; 9];
-    // If eip 1559 params are set, use them, otherwise use the canyon base fee param constants
-    // The eip 1559 params should exist here since there was a check previously
-    let Some(eip_1559_params) = attributes.eip_1559_params else {
-        panic!("eip_1559_params is none")
-    };
+) -> Result<Bytes, EIP1559ParamError> {
+    let eip_1559_params = attributes.eip_1559_params.ok_or(EIP1559ParamError::NoEIP1559Params)?;
 
+    let mut extra_data = [0u8; 9];
+    // If eip 1559 params aren't set, use the canyon base fee param constants
+    // otherwise use them
     if eip_1559_params == B64::ZERO {
         extra_data[1..5].copy_from_slice(
             &(default_base_fee_params.max_change_denominator as u32).to_be_bytes(),
         );
         extra_data[5..9]
             .copy_from_slice(&(default_base_fee_params.elasticity_multiplier as u32).to_be_bytes());
-        Bytes::copy_from_slice(&extra_data)
+        Ok(Bytes::copy_from_slice(&extra_data))
     } else {
-        let Some(eip_1559_params) = attributes.eip_1559_params else {
-            panic!("eip_1559_params is none")
-        };
-
         match decode_eip_1559_params(eip_1559_params) {
             Ok((elasticity, denominator)) => {
                 extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
                 extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
-                return Bytes::copy_from_slice(&extra_data);
+                Ok(Bytes::copy_from_slice(&extra_data))
             }
-            Err(e) => {
-                panic!("Error occurred: {}", e)
-            }
+            Err(e) => return Err(EIP1559ParamError::InvalidElasticity),
         }
     }
 }
@@ -617,7 +622,7 @@ mod tests {
             ..Default::default()
         };
         let extra_data = get_holocene_extra_data(&attributes, BaseFeeParams::new(80, 60));
-        assert_eq!(extra_data, Bytes::copy_from_slice(&[0, 0, 0, 0, 8, 0, 0, 0, 8]));
+        assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 8, 0, 0, 0, 8]));
     }
 
     #[test]
@@ -627,6 +632,6 @@ mod tests {
             ..Default::default()
         };
         let extra_data = get_holocene_extra_data(&attributes, BaseFeeParams::new(80, 60));
-        assert_eq!(extra_data, Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
+        assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
     }
 }

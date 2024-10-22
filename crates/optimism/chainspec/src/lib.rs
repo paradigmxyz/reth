@@ -190,7 +190,11 @@ pub struct OpChainSpec {
 
 impl OpChainSpec {
     /// Read from parent to determine the base fee for the next block
-    pub fn next_block_base_fee(&self, parent: &Header, timestamp: u64) -> U256 {
+    pub fn next_block_base_fee(
+        &self,
+        parent: &Header,
+        timestamp: u64,
+    ) -> Result<U256, DecodeError> {
         let is_holocene = self.inner.is_fork_active_at_timestamp(
             reth_optimism_forks::OptimismHardfork::Holocene,
             timestamp,
@@ -201,42 +205,51 @@ impl OpChainSpec {
             match decode_holocene_1559_params(parent.extra_data.clone()) {
                 Ok((denominator, elasticity)) => {
                     if elasticity == 0 && denominator == 0 {
-                        return U256::from(
+                        return Ok(U256::from(
                             parent
                                 .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
                                 .unwrap_or_default(),
-                        );
+                        ));
                     }
                     let base_fee_params =
                         BaseFeeParams::new(denominator as u128, elasticity as u128);
-                    return U256::from(
+                    return Ok(U256::from(
                         parent.next_block_base_fee(base_fee_params).unwrap_or_default(),
-                    )
+                    ))
                 }
-                Err(e) => {
-                    panic!("Error occurred: {}", e)
-                }
+                Err(e) => Err(e),
             }
         } else {
-            U256::from(
+            Ok(U256::from(
                 parent
                     .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
                     .unwrap_or_default(),
-            )
+            ))
         }
     }
 }
 
+#[derive(Debug)]
+/// Error type for decoding Holocene 1559 parameters
+pub enum DecodeError {
+    /// Insufficient data to decode
+    InsufficientData,
+    /// Invalid denominator parameter
+    InvalidDenominator,
+    /// Invalid elasticity parameter
+    InvalidElasticity,
+}
+
 /// Extracts the Holcene 1599 parameters from the encoded form:
 /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), String> {
+pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), DecodeError> {
     if extra_data.len() < 9 {
-        return Err("Insufficient data".to_string());
+        return Err(DecodeError::InsufficientData);
     }
     let denominator: [u8; 4] =
-        extra_data[1..5].try_into().map_err(|_| "Failed to extract denominator".to_string())?;
+        extra_data[1..5].try_into().map_err(|_| DecodeError::InvalidDenominator)?;
     let elasticity: [u8; 4] =
-        extra_data[5..9].try_into().map_err(|_| "Failed to extract elasticity".to_string())?;
+        extra_data[5..9].try_into().map_err(|_| DecodeError::InvalidElasticity)?;
     Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
 }
 
@@ -1002,7 +1015,7 @@ mod tests {
         };
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
         assert_eq!(
-            base_fee,
+            base_fee.unwrap(),
             U256::from(
                 parent
                     .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
@@ -1042,7 +1055,7 @@ mod tests {
         };
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
         assert_eq!(
-            base_fee,
+            base_fee.unwrap(),
             U256::from(
                 parent
                     .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
@@ -1065,7 +1078,7 @@ mod tests {
 
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
         assert_eq!(
-            base_fee,
+            base_fee.unwrap(),
             U256::from(
                 parent
                     .next_block_base_fee(BaseFeeParams::new(0x00000008, 0x00000008))
