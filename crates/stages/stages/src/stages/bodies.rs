@@ -917,7 +917,8 @@ mod tests {
                     return Poll::Ready(None)
                 }
 
-                let mut response = Vec::default();
+                let mut response =
+                    Vec::with_capacity(std::cmp::min(this.headers.len(), this.batch_size as usize));
                 while let Some(header) = this.headers.pop_front() {
                     if header.is_empty() {
                         response.push(BlockResponse::Empty(header))

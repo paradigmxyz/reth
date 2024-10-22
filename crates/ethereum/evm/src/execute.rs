@@ -14,14 +14,14 @@ use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ProviderError,
+        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm,
 };
 use reth_primitives::{BlockWithSenders, Receipt};
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleState, State};
+use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, U256,
@@ -152,7 +152,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), Self::Error> {
+    ) -> Result<ExecuteOutput, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -203,7 +203,7 @@ where
                 },
             );
         }
-        Ok((receipts, cumulative_gas_used))
+        Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
 
     fn apply_post_execution_changes(
@@ -262,11 +262,6 @@ where
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
-    }
-
-    fn finish(&mut self) -> BundleState {
-        self.state.merge_transitions(BundleRetention::Reverts);
-        self.state.take_bundle()
     }
 
     fn validate_block_post_execution(
