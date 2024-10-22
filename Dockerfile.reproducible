@@ -34,4 +34,4 @@ RUN . /etc/environment && \
 FROM scratch as binaries
 
 # Copy the compiled binary from the builder stage
-COPY --from=builder /app/target/reproducible/reth /reth
+COPY --from=builder /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
