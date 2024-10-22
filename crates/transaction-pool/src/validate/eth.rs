@@ -8,7 +8,7 @@ use crate::{
     },
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
+    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use alloy_consensus::constants::{
