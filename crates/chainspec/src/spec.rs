@@ -97,8 +97,15 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167009.into(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize taiko_a7 genesis json"),
+        genesis: {
+            #[cfg(not(target_os = "zkvm"))]
+            {
+                serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
+                    .expect("Can't deserialize taiko_a7 genesis json")
+            }
+            #[cfg(target_os = "zkvm")]
+            Default::default()
+        },
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -139,8 +146,15 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167001.into(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize taiko_dev genesis json"),
+        genesis: {
+            #[cfg(not(target_os = "zkvm"))]
+            {
+                serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
+                    .expect("Can't deserialize taiko_dev genesis json")
+            }
+            #[cfg(target_os = "zkvm")]
+            Default::default()
+        },
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -180,8 +194,15 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167000.into(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize Mainnet genesis json"),
+        genesis: {
+            #[cfg(not(target_os = "zkvm"))]
+            {
+                serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
+                    .expect("Can't deserialize Mainnet genesis json")
+            }
+            #[cfg(target_os = "zkvm")]
+            Default::default()
+        },
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -695,14 +716,14 @@ impl ChainSpec {
         matches!(
             self.chain.kind(),
             ChainKind::Named(
-                NamedChain::Mainnet
-                    | NamedChain::Morden
-                    | NamedChain::Ropsten
-                    | NamedChain::Rinkeby
-                    | NamedChain::Goerli
-                    | NamedChain::Kovan
-                    | NamedChain::Holesky
-                    | NamedChain::Sepolia
+                NamedChain::Mainnet |
+                    NamedChain::Morden |
+                    NamedChain::Ropsten |
+                    NamedChain::Rinkeby |
+                    NamedChain::Goerli |
+                    NamedChain::Kovan |
+                    NamedChain::Holesky |
+                    NamedChain::Sepolia
             )
         )
     }
@@ -1005,8 +1026,8 @@ impl ChainSpec {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
             // fork filter.
             Some(match condition {
-                ForkCondition::Block(block)
-                | ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Block(block) |
+                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
                 ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
                 _ => return None,
             })
@@ -1024,8 +1045,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block)
-            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block) |
+            ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
