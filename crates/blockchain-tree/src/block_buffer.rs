@@ -2,7 +2,7 @@ use crate::metrics::BlockBufferMetrics;
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_network::cache::LruCache;
 use reth_primitives::SealedBlockWithSenders;
-use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -83,6 +83,7 @@ impl BlockBuffer {
         }
         self.metrics.blocks.set(self.blocks.len() as f64);
     }
+
     /// Removes the given block from the buffer and also all the children of the block.
     ///
     /// This is used to get all the blocks that are dependent on the block that is included.
@@ -93,10 +94,11 @@ impl BlockBuffer {
         &mut self,
         parent_hash: &BlockHash,
     ) -> Vec<SealedBlockWithSenders> {
-        // remove parent block if present
-        let mut removed = self.remove_block(parent_hash).into_iter().collect::<Vec<_>>();
-
-        removed.extend(self.remove_children(vec![*parent_hash]));
+        let removed = self
+            .remove_block(parent_hash)
+            .into_iter()
+            .chain(self.remove_children(vec![*parent_hash]))
+            .collect();
         self.metrics.blocks.set(self.blocks.len() as f64);
         removed
     }
@@ -126,10 +128,10 @@ impl BlockBuffer {
 
     /// Remove block entry
     fn remove_from_earliest_blocks(&mut self, number: BlockNumber, hash: &BlockHash) {
-        if let btree_map::Entry::Occupied(mut entry) = self.earliest_blocks.entry(number) {
-            entry.get_mut().remove(hash);
-            if entry.get().is_empty() {
-                entry.remove();
+        if let Some(entry) = self.earliest_blocks.get_mut(&number) {
+            entry.remove(hash);
+            if entry.is_empty() {
+                self.earliest_blocks.remove(&number);
             }
         }
     }
@@ -137,13 +139,13 @@ impl BlockBuffer {
     /// Remove from parent child connection. This method does not remove children.
     fn remove_from_parent(&mut self, parent_hash: BlockHash, hash: &BlockHash) {
         // remove from parent to child connection, but only for this block parent.
-        if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent_hash) {
-            entry.get_mut().remove(hash);
+        if let Some(entry) = self.parent_to_child.get_mut(&parent_hash) {
+            entry.remove(hash);
             // if set is empty remove block entry.
-            if entry.get().is_empty() {
-                entry.remove();
+            if entry.is_empty() {
+                self.parent_to_child.remove(&parent_hash);
             }
-        };
+        }
     }
 
     /// Removes block from inner collections.

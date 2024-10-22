@@ -6,12 +6,17 @@ use alloy_rpc_types::{Header, Index};
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_types::{EthApiError, EthStateCache};
+use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+
+/// Result type of the fetched block receipts.
+pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
+/// Result type of the fetched block and its receipts.
+pub type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, E>;
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
@@ -47,13 +52,20 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
-            let total_difficulty = EthBlocks::provider(self)
+            let mut total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+                .map_err(Self::Error::from_eth_err)?;
+            if total_difficulty.is_none() {
+                // if we failed to find td after we successfully loaded the block, try again using
+                // the hash this only matters if the chain is currently transitioning the merge block and there's a reorg: <https://github.com/paradigmxyz/reth/issues/10941>
+                total_difficulty = EthBlocks::provider(self)
+                    .header_td(&block.hash())
+                    .map_err(Self::Error::from_eth_err)?;
+            }
+
             let block = from_block::<Self::TransactionCompat>(
-                block.unseal(),
-                total_difficulty,
+                (*block).clone().unseal(),
+                total_difficulty.unwrap_or_default(),
                 full.into(),
                 Some(block_hash),
             )
@@ -88,28 +100,30 @@ pub trait EthBlocks: LoadBlock {
 
             Ok(self
                 .cache()
-                .get_block_transactions(block_hash)
+                .get_sealed_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .map(|txs| txs.len()))
+                .map(|b| b.body.transactions.len()))
         }
     }
 
     /// Helper function for `eth_getBlockReceipts`.
     ///
     /// Returns all transaction receipts in block, or `None` if block wasn't found.
+    #[allow(clippy::type_complexity)]
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>> + Send
+    ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send
     where
         Self: LoadReceipt;
 
     /// Helper method that loads a bock and all its receipts.
+    #[allow(clippy::type_complexity)]
     fn load_block_and_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<(SealedBlock, Arc<Vec<Receipt>>)>, Self::Error>> + Send
+    ) -> impl Future<Output = BlockAndReceiptsResult<Self::Error>> + Send
     where
         Self: LoadReceipt,
     {
@@ -138,6 +152,7 @@ pub trait EthBlocks: LoadBlock {
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
+                    .map(|b| b.map(|(b, r)| (b.block.clone(), r)))
             }
 
             Ok(None)
@@ -197,36 +212,24 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
     fn cache(&self) -> &EthStateCache;
 
     /// Returns the block object for the given block id.
-    fn block(
-        &self,
-        block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<SealedBlock>, Self::Error>> + Send {
-        async move {
-            self.block_with_senders(block_id)
-                .await
-                .map(|maybe_block| maybe_block.map(|block| block.block))
-        }
-    }
-
-    /// Returns the block object for the given block id.
     fn block_with_senders(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<SealedBlockWithSenders>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Arc<SealedBlockWithSenders>>, Self::Error>> + Send {
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                let maybe_pending = LoadPendingBlock::provider(self)
+                if let Some(pending_block) = LoadPendingBlock::provider(self)
                     .pending_block_with_senders()
-                    .map_err(Self::Error::from_eth_err)?;
-                return if maybe_pending.is_some() {
-                    Ok(maybe_pending)
-                } else {
-                    // If no pending block from provider, try to get local pending block
-                    return match self.local_pending_block().await? {
-                        Some((block, _)) => Ok(Some(block)),
-                        None => Ok(None),
-                    };
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    return Ok(Some(Arc::new(pending_block)));
+                }
+
+                // If no pending block from provider, try to get local pending block
+                return match self.local_pending_block().await? {
+                    Some((block, _)) => Ok(Some(Arc::new(block))),
+                    None => Ok(None),
                 };
             }
 

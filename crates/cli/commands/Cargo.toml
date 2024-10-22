@@ -14,6 +14,7 @@ repository.workspace = true
 reth-beacon-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-cli.workspace = true
+reth-ethereum-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-config.workspace = true
@@ -60,7 +61,11 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 backon.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # io
 fdlimit.workspace = true
@@ -68,8 +73,8 @@ toml = { workspace = true, features = ["display"] }
 
 # tui
 comfy-table = "7.0"
-crossterm = "0.27.0"
-ratatui = { version = "0.27", default-features = false, features = [
+crossterm = "0.28.0"
+ratatui = { version = "0.28", default-features = false, features = [
     "crossterm",
 ] }
 
@@ -88,5 +93,5 @@ dev = [
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
     "reth-primitives/arbitrary",
-    "reth-db-api/arbitrary"
+    "reth-db-api/arbitrary",
 ]

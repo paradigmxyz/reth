@@ -118,7 +118,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         match self.command {
             Subcommands::Header { id } => {
                 let header = (move || get_single_header(fetch_client.clone(), id))
-                    .retry(&backoff)
+                    .retry(backoff)
                     .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                     .await?;
                 println!("Successfully downloaded header: {header:?}");
@@ -132,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         let header = (move || {
                             get_single_header(client.clone(), BlockHashOrNumber::Number(number))
                         })
-                        .retry(&backoff)
+                        .retry(backoff)
                         .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                         .await?;
                         header.hash()
@@ -142,7 +142,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     let client = fetch_client.clone();
                     client.get_block_bodies(vec![hash])
                 })
-                .retry(&backoff)
+                .retry(backoff)
                 .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
                 .await?
                 .split();

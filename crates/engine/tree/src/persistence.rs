@@ -4,7 +4,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
-    DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
+    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -77,20 +77,32 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
-                    if let Some(ref num_hash) = result {
+                    let result_number = result.map(|r| r.number);
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(result);
+
+                    if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: num_hash.number });
-                    }
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
-                }
-                PersistenceAction::PruneBefore(block_num, sender) => {
-                    let res = self.prune_before(block_num)?;
+                            .send(MetricEvent::SyncHeight { height: block_number });
 
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(res);
+                        if self.pruner.is_pruning_needed(block_number) {
+                            // We log `PrunerOutput` inside the `Pruner`
+                            let _ = self.prune_before(block_number)?;
+                        }
+                    }
+                }
+                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                    let provider = self.provider.database_provider_rw()?;
+                    provider.save_finalized_block_number(finalized_block)?;
+                    provider.commit()?;
+                }
+                PersistenceAction::SaveSafeBlock(safe_block) => {
+                    let provider = self.provider.database_provider_rw()?;
+                    provider.save_safe_block_number(safe_block)?;
+                    provider.commit()?;
                 }
             }
         }
@@ -165,9 +177,11 @@ pub enum PersistenceAction {
     /// static files.
     RemoveBlocksAbove(u64, oneshot::Sender<Option<BlockNumHash>>),
 
-    /// Prune associated block data before the given block number, according to already-configured
-    /// prune modes.
-    PruneBefore(u64, oneshot::Sender<PrunerOutput>),
+    /// Update the persisted finalized block on disk
+    SaveFinalizedBlock(u64),
+
+    /// Update the persisted safe block on disk
+    SaveSafeBlock(u64),
 }
 
 /// A handle to the persistence service
@@ -235,6 +249,22 @@ impl PersistenceHandle {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
 
+    /// Persists the finalized block number on disk.
+    pub fn save_finalized_block_number(
+        &self,
+        finalized_block: u64,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
+    }
+
+    /// Persists the finalized block number on disk.
+    pub fn save_safe_block_number(
+        &self,
+        safe_block: u64,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
+    }
+
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
@@ -246,18 +276,6 @@ impl PersistenceHandle {
         tx: oneshot::Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
-    }
-
-    /// Tells the persistence service to remove block data before the given hash, according to the
-    /// configured prune config.
-    ///
-    /// The resulting [`PrunerOutput`] is returned in the receiver end of the sender argument.
-    pub fn prune_before(
-        &self,
-        block_num: u64,
-        tx: oneshot::Sender<PrunerOutput>,
-    ) -> Result<(), SendError<PersistenceAction>> {
-        self.send_action(PersistenceAction::PruneBefore(block_num, tx))
     }
 }
 

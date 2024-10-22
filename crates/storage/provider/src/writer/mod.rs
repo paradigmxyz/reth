@@ -147,7 +147,7 @@ impl UnifiedStorageWriter<'_, (), ()> {
     }
 }
 
-impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, &'b StaticFileProvider>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, &StaticFileProvider>
 where
     ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
         + BlockWriter
@@ -318,7 +318,7 @@ where
     }
 }
 
-impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
     ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider,
 {
@@ -413,7 +413,7 @@ where
 
             let mut tx_index = first_tx_index
                 .or(last_tx_idx)
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             for tx in transactions.borrow() {
                 self.static_file_mut().append_transaction(tx_index, tx)?;
@@ -429,7 +429,7 @@ where
     }
 }
 
-impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
     ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider,
 {
@@ -483,7 +483,7 @@ where
 
             let first_tx_index = first_tx_index
                 .or(last_tx_idx)
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             // update for empty blocks
             last_tx_idx = Some(first_tx_index);
@@ -510,8 +510,8 @@ where
     }
 }
 
-impl<'a, 'b, ProviderDB> StateWriter
-    for UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
+impl<ProviderDB> StateWriter
+    for UnifiedStorageWriter<'_, ProviderDB, StaticFileProviderRWRefMut<'_>>
 where
     ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + StateChangeWriter + HeaderProvider,
 {

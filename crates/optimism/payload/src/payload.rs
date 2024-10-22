@@ -7,10 +7,8 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
 /// Re-export for use in downstream arguments.
-pub use op_alloy_rpc_types_engine::OptimismPayloadAttributes;
-use op_alloy_rpc_types_engine::{
-    OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
-};
+pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
@@ -20,8 +18,7 @@ use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
-    convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use std::sync::Arc;
 
@@ -40,13 +37,13 @@ pub struct OptimismPayloadBuilderAttributes {
 }
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
-    type RpcPayloadAttributes = OptimismPayloadAttributes;
+    type RpcPayloadAttributes = OpPayloadAttributes;
     type Error = alloy_rlp::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, Self::Error> {
+    fn try_new(parent: B256, attributes: OpPayloadAttributes) -> Result<Self, Self::Error> {
         let id = payload_id_optimism(&parent, &attributes);
 
         let transactions = attributes
@@ -183,7 +180,7 @@ impl BuiltPayload for OptimismBuiltPayload {
     }
 }
 
-impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
+impl BuiltPayload for &OptimismBuiltPayload {
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -213,7 +210,7 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
+impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
@@ -240,7 +237,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
         }
     }
 }
-impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
+impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
@@ -251,7 +248,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
                 B256::ZERO
             };
         Self {
-            execution_payload: block_to_payload_v4(block),
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -264,17 +261,15 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
             parent_beacon_block_root,
+            execution_requests: vec![],
         }
     }
 }
 
-/// Generates the payload id for the configured payload from the [`OptimismPayloadAttributes`].
+/// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(
-    parent: &B256,
-    attributes: &OptimismPayloadAttributes,
-) -> PayloadId {
+pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());

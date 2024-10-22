@@ -9,7 +9,7 @@ use reth_evm::{
     metrics::ExecutorMetrics,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_exex::{ExExManagerHandle, ExExNotification};
+use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::{Header, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
@@ -275,7 +275,7 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered((&block, td).into(), |input| {
+            self.metrics.metered_one((&block, td).into(), |input| {
                 let sealed = block.header.clone().seal_slow();
                 let (header, seal) = sealed.into_parts();
 
@@ -350,12 +350,13 @@ where
 
             let previous_input =
                 self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
-            debug_assert!(
-                previous_input.is_none(),
-                "Previous post execute commit input wasn't processed"
-            );
-            if let Some(previous_input) = previous_input {
-                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+
+            if previous_input.is_some() {
+                // Not processing the previous post execute commit input is a critical error, as it
+                // means that we didn't send the notification to ExExes
+                return Err(StageError::PostExecuteCommit(
+                    "Previous post execute commit input wasn't processed",
+                ))
             }
         }
 
@@ -388,9 +389,10 @@ where
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
-        let _ = self
-            .exex_manager_handle
-            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) });
+        let _ = self.exex_manager_handle.send(
+            ExExNotificationSource::Pipeline,
+            ExExNotification::ChainCommitted { new: Arc::new(chain) },
+        );
 
         Ok(())
     }
@@ -476,8 +478,10 @@ where
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
-        let _ =
-            self.exex_manager_handle.send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+        let _ = self.exex_manager_handle.send(
+            ExExNotificationSource::Pipeline,
+            ExExNotification::ChainReverted { old: Arc::new(chain) },
+        );
 
         Ok(())
     }
@@ -663,7 +667,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm::execute::BasicBlockExecutorProvider;
+    use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
@@ -674,10 +679,11 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<EthExecutorProvider> {
-        let executor_provider = EthExecutorProvider::ethereum(Arc::new(
+    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthExecutionStrategyFactory>> {
+        let strategy_factory = EthExecutionStrategyFactory::ethereum(Arc::new(
             ChainSpecBuilder::mainnet().berlin_activated().build(),
         ));
+        let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
         ExecutionStage::new(
             executor_provider,
             ExecutionStageThresholds {

@@ -2,9 +2,9 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
-    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -31,7 +31,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
+    TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -343,13 +344,8 @@ impl TransactionsProvider for MockEthProvider {
             .values()
             .flat_map(|block| &block.body.transactions)
             .enumerate()
-            .filter_map(|(tx_number, tx)| {
-                if range.contains(&(tx_number as TxNumber)) {
-                    Some(tx.clone().into())
-                } else {
-                    None
-                }
-            })
+            .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
+            .map(|(_, tx)| tx.clone().into())
             .collect();
 
         Ok(transactions)
@@ -365,11 +361,7 @@ impl TransactionsProvider for MockEthProvider {
             .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
-                if range.contains(&(tx_number as TxNumber)) {
-                    Some(tx.recover_signer()?)
-                } else {
-                    None
-                }
+                range.contains(&(tx_number as TxNumber)).then(|| tx.recover_signer()).flatten()
             })
             .collect();
 
@@ -639,6 +631,15 @@ impl StorageRootProvider for MockEthProvider {
     ) -> ProviderResult<B256> {
         Ok(EMPTY_ROOT_HASH)
     }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(StorageProof::new(slot))
+    }
 }
 
 impl StateProofProvider for MockEthProvider {
@@ -804,16 +805,6 @@ impl WithdrawalsProvider for MockEthProvider {
         Ok(None)
     }
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        Ok(None)
-    }
-}
-
-impl RequestsProvider for MockEthProvider {
-    fn requests_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         Ok(None)
     }
 }

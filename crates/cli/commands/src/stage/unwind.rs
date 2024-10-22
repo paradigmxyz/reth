@@ -17,7 +17,7 @@ use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -213,13 +213,13 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
-    use reth_node_core::args::utils::DefaultChainSpecParser;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     use super::*;
 
     #[test]
     fn parse_unwind() {
-        let cmd = Command::<DefaultChainSpecParser>::parse_from([
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--datadir",
             "dir",
@@ -228,7 +228,7 @@ mod tests {
         ]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
 
-        let cmd = Command::<DefaultChainSpecParser>::parse_from([
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--datadir",
             "dir",

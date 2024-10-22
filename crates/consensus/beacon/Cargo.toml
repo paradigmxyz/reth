@@ -28,8 +28,10 @@ reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
+reth-chainspec = { workspace = true, optional = true }
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 
@@ -47,8 +49,6 @@ tracing.workspace = true
 thiserror.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
-
-reth-chainspec = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -78,8 +78,10 @@ assert_matches.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-chainspec"
+	"reth-chainspec",
+	"reth-primitives/optimism",
+	"reth-provider/optimism",
+	"reth-blockchain-tree/optimism",
+	"reth-db/optimism",
+	"reth-db-api/optimism"
 ]

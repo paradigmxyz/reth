@@ -1,22 +1,28 @@
 //! Transaction types.
 
 use crate::BlockHashOrNumber;
-use alloy_eips::eip7702::SignedAuthorization;
-use alloy_primitives::{keccak256, Address, TxKind, B256, U256};
-
-use alloy_consensus::{SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_consensus::constants::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
+use alloy_consensus::{
+    SignableTransaction, Transaction as _, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
+};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
+    eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Bytes, TxHash};
+use alloy_primitives::{keccak256, Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::mem;
 use derive_more::{AsRef, Deref};
-use once_cell::sync::Lazy;
+use once_cell as _;
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
@@ -33,10 +39,7 @@ pub use compat::FillTxEnv;
 pub use signature::{
     extract_chain_id, legacy_parity, recover_signer, recover_signer_unchecked, Signature,
 };
-pub use tx_type::{
-    TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
-};
+pub use tx_type::TxType;
 pub use variant::TransactionSignedVariant;
 
 pub(crate) mod access_list;
@@ -51,9 +54,9 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-pub use op_alloy_consensus::TxDeposit;
+use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
-pub use reth_optimism_chainspec::optimism_deposit_tx_signature;
+use reth_optimism_chainspec::optimism_deposit_tx_signature;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
@@ -72,8 +75,8 @@ pub type TxHashOrNumber = BlockHashOrNumber;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
-pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
-    Lazy::new(|| match rayon::current_num_threads() {
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+    LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
         _ => 5,
@@ -193,19 +196,6 @@ impl Transaction {
         }
     }
 
-    /// Get `chain_id`.
-    pub const fn chain_id(&self) -> Option<u64> {
-        match self {
-            Self::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
-            Self::Eip2930(TxEip2930 { chain_id, .. }) |
-            Self::Eip1559(TxEip1559 { chain_id, .. }) |
-            Self::Eip4844(TxEip4844 { chain_id, .. }) |
-            Self::Eip7702(TxEip7702 { chain_id, .. }) => Some(*chain_id),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => None,
-        }
-    }
-
     /// Sets the transaction's chain id to the provided value.
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
@@ -255,33 +245,6 @@ impl Transaction {
         }
     }
 
-    /// Gets the transaction's value field.
-    pub const fn value(&self) -> U256 {
-        *match self {
-            Self::Legacy(TxLegacy { value, .. }) |
-            Self::Eip2930(TxEip2930 { value, .. }) |
-            Self::Eip1559(TxEip1559 { value, .. }) |
-            Self::Eip4844(TxEip4844 { value, .. }) |
-            Self::Eip7702(TxEip7702 { value, .. }) => value,
-            #[cfg(feature = "optimism")]
-            Self::Deposit(TxDeposit { value, .. }) => value,
-        }
-    }
-
-    /// Get the transaction's nonce.
-    pub const fn nonce(&self) -> u64 {
-        match self {
-            Self::Legacy(TxLegacy { nonce, .. }) |
-            Self::Eip2930(TxEip2930 { nonce, .. }) |
-            Self::Eip1559(TxEip1559 { nonce, .. }) |
-            Self::Eip4844(TxEip4844 { nonce, .. }) |
-            Self::Eip7702(TxEip7702 { nonce, .. }) => *nonce,
-            // Deposit transactions do not have nonces.
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => 0,
-        }
-    }
-
     /// Returns the [`AccessList`] of the transaction.
     ///
     /// Returns `None` for legacy transactions.
@@ -307,19 +270,6 @@ impl Transaction {
         }
     }
 
-    /// Get the gas limit of the transaction.
-    pub const fn gas_limit(&self) -> u64 {
-        match self {
-            Self::Legacy(TxLegacy { gas_limit, .. }) |
-            Self::Eip1559(TxEip1559 { gas_limit, .. }) |
-            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
-            Self::Eip7702(TxEip7702 { gas_limit, .. }) |
-            Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit,
-            #[cfg(feature = "optimism")]
-            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
-        }
-    }
-
     /// Returns true if the tx supports dynamic fees
     pub const fn is_dynamic_fee(&self) -> bool {
         match self {
@@ -327,40 +277,6 @@ impl Transaction {
             Self::Eip1559(_) | Self::Eip4844(_) | Self::Eip7702(_) => true,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => false,
-        }
-    }
-
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is `gas_price`.
-    ///
-    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
-    pub const fn max_fee_per_gas(&self) -> u128 {
-        match self {
-            Self::Legacy(TxLegacy { gas_price, .. }) |
-            Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Self::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
-            Self::Eip4844(TxEip4844 { max_fee_per_gas, .. }) |
-            Self::Eip7702(TxEip7702 { max_fee_per_gas, .. }) => *max_fee_per_gas,
-            // Deposit transactions buy their L2 gas on L1 and, as such, the L2 gas is not
-            // refundable.
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => 0,
-        }
-    }
-
-    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
-    /// is `None`
-    ///
-    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
-    pub const fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        match self {
-            Self::Legacy(_) | Self::Eip2930(_) => None,
-            Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
-            Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) |
-            Self::Eip7702(TxEip7702 { max_priority_fee_per_gas, .. }) => {
-                Some(*max_priority_fee_per_gas)
-            }
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => None,
         }
     }
 
@@ -379,18 +295,6 @@ impl Transaction {
         }
     }
 
-    /// Max fee per blob gas for eip4844 transaction [`TxEip4844`].
-    ///
-    /// Returns `None` for non-eip4844 transactions.
-    ///
-    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
-    pub const fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        match self {
-            Self::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => Some(*max_fee_per_blob_gas),
-            _ => None,
-        }
-    }
-
     /// Returns the blob gas used for all blobs of the EIP-4844 transaction if it is an EIP-4844
     /// transaction.
     ///
@@ -398,25 +302,6 @@ impl Transaction {
     /// [`DATA_GAS_PER_BLOB`](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
-    }
-
-    /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
-    /// otherwise return the gas price.
-    ///
-    /// # Warning
-    ///
-    /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
-    /// non-EIP-1559 transactions.
-    pub const fn priority_fee_or_price(&self) -> u128 {
-        match self {
-            Self::Legacy(TxLegacy { gas_price, .. }) |
-            Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
-            Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) |
-            Self::Eip7702(TxEip7702 { max_priority_fee_per_gas, .. }) => *max_priority_fee_per_gas,
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => 0,
-        }
     }
 
     /// Returns the effective gas price for the given base fee.
@@ -816,6 +701,188 @@ impl Encodable for Transaction {
             Self::Eip7702(set_code_tx) => set_code_tx.payload_len_for_signature(),
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
+        }
+    }
+}
+
+impl alloy_consensus::Transaction for Transaction {
+    fn chain_id(&self) -> Option<ChainId> {
+        match self {
+            Self::Legacy(tx) => tx.chain_id(),
+            Self::Eip2930(tx) => tx.chain_id(),
+            Self::Eip1559(tx) => tx.chain_id(),
+            Self::Eip4844(tx) => tx.chain_id(),
+            Self::Eip7702(tx) => tx.chain_id(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.chain_id(),
+        }
+    }
+
+    fn nonce(&self) -> u64 {
+        match self {
+            Self::Legacy(tx) => tx.nonce(),
+            Self::Eip2930(tx) => tx.nonce(),
+            Self::Eip1559(tx) => tx.nonce(),
+            Self::Eip4844(tx) => tx.nonce(),
+            Self::Eip7702(tx) => tx.nonce(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.nonce(),
+        }
+    }
+
+    fn gas_limit(&self) -> u64 {
+        match self {
+            Self::Legacy(tx) => tx.gas_limit(),
+            Self::Eip2930(tx) => tx.gas_limit(),
+            Self::Eip1559(tx) => tx.gas_limit(),
+            Self::Eip4844(tx) => tx.gas_limit(),
+            Self::Eip7702(tx) => tx.gas_limit(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_limit(),
+        }
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.gas_price(),
+            Self::Eip2930(tx) => tx.gas_price(),
+            Self::Eip1559(tx) => tx.gas_price(),
+            Self::Eip4844(tx) => tx.gas_price(),
+            Self::Eip7702(tx) => tx.gas_price(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_price(),
+        }
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.max_fee_per_gas(),
+            Self::Eip2930(tx) => tx.max_fee_per_gas(),
+            Self::Eip1559(tx) => tx.max_fee_per_gas(),
+            Self::Eip4844(tx) => tx.max_fee_per_gas(),
+            Self::Eip7702(tx) => tx.max_fee_per_gas(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.max_fee_per_gas(),
+        }
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip2930(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip1559(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip4844(tx) => tx.max_priority_fee_per_gas(),
+            Self::Eip7702(tx) => tx.max_priority_fee_per_gas(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.max_priority_fee_per_gas(),
+        }
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip2930(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip1559(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip4844(tx) => tx.max_fee_per_blob_gas(),
+            Self::Eip7702(tx) => tx.max_fee_per_blob_gas(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.max_fee_per_blob_gas(),
+        }
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Self::Legacy(tx) => tx.priority_fee_or_price(),
+            Self::Eip2930(tx) => tx.priority_fee_or_price(),
+            Self::Eip1559(tx) => tx.priority_fee_or_price(),
+            Self::Eip4844(tx) => tx.priority_fee_or_price(),
+            Self::Eip7702(tx) => tx.priority_fee_or_price(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.priority_fee_or_price(),
+        }
+    }
+
+    fn value(&self) -> U256 {
+        match self {
+            Self::Legacy(tx) => tx.value(),
+            Self::Eip2930(tx) => tx.value(),
+            Self::Eip1559(tx) => tx.value(),
+            Self::Eip4844(tx) => tx.value(),
+            Self::Eip7702(tx) => tx.value(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.value(),
+        }
+    }
+
+    fn input(&self) -> &Bytes {
+        match self {
+            Self::Legacy(tx) => tx.input(),
+            Self::Eip2930(tx) => tx.input(),
+            Self::Eip1559(tx) => tx.input(),
+            Self::Eip4844(tx) => tx.input(),
+            Self::Eip7702(tx) => tx.input(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.input(),
+        }
+    }
+
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.ty(),
+            Self::Eip2930(tx) => tx.ty(),
+            Self::Eip1559(tx) => tx.ty(),
+            Self::Eip4844(tx) => tx.ty(),
+            Self::Eip7702(tx) => tx.ty(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.ty(),
+        }
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        match self {
+            Self::Legacy(tx) => tx.access_list(),
+            Self::Eip2930(tx) => tx.access_list(),
+            Self::Eip1559(tx) => tx.access_list(),
+            Self::Eip4844(tx) => tx.access_list(),
+            Self::Eip7702(tx) => tx.access_list(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.access_list(),
+        }
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        match self {
+            Self::Legacy(tx) => tx.blob_versioned_hashes(),
+            Self::Eip2930(tx) => tx.blob_versioned_hashes(),
+            Self::Eip1559(tx) => tx.blob_versioned_hashes(),
+            Self::Eip4844(tx) => tx.blob_versioned_hashes(),
+            Self::Eip7702(tx) => tx.blob_versioned_hashes(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.blob_versioned_hashes(),
+        }
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        match self {
+            Self::Legacy(tx) => tx.authorization_list(),
+            Self::Eip2930(tx) => tx.authorization_list(),
+            Self::Eip1559(tx) => tx.authorization_list(),
+            Self::Eip4844(tx) => tx.authorization_list(),
+            Self::Eip7702(tx) => tx.authorization_list(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.authorization_list(),
+        }
+    }
+
+    fn kind(&self) -> TxKind {
+        match self {
+            Self::Legacy(tx) => tx.kind(),
+            Self::Eip2930(tx) => tx.kind(),
+            Self::Eip1559(tx) => tx.kind(),
+            Self::Eip4844(tx) => tx.kind(),
+            Self::Eip7702(tx) => tx.kind(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.kind(),
         }
     }
 }
@@ -1283,6 +1350,68 @@ impl TransactionSigned {
     }
 }
 
+impl alloy_consensus::Transaction for TransactionSigned {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn value(&self) -> U256 {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        alloy_consensus::Transaction::blob_versioned_hashes(self.deref())
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+}
+
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
     fn from(recovered: TransactionSignedEcRecovered) -> Self {
         recovered.signed_transaction
@@ -1472,6 +1601,11 @@ impl TransactionSignedEcRecovered {
         self.signer
     }
 
+    /// Returns a reference to [`TransactionSigned`]
+    pub const fn as_signed(&self) -> &TransactionSigned {
+        &self.signed_transaction
+    }
+
     /// Transform back to [`TransactionSigned`]
     pub fn into_signed(self) -> TransactionSigned {
         self.signed_transaction
@@ -1570,12 +1704,220 @@ impl<T> WithEncoded<Option<T>> {
     }
 }
 
+/// Bincode-compatible transaction type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_consensus::{
+        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
+        TxEip4844,
+    };
+    use alloy_primitives::{Signature, TxHash};
+    #[cfg(feature = "optimism")]
+    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::Transaction`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives::{serde_bincode_compat, Transaction};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::transaction::Transaction")]
+    ///     transaction: Transaction,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
+    pub enum Transaction<'a> {
+        Legacy(TxLegacy<'a>),
+        Eip2930(TxEip2930<'a>),
+        Eip1559(TxEip1559<'a>),
+        Eip4844(Cow<'a, TxEip4844>),
+        Eip7702(TxEip7702<'a>),
+        #[cfg(feature = "optimism")]
+        #[cfg(feature = "optimism")]
+        Deposit(TxDeposit<'a>),
+    }
+
+    impl<'a> From<&'a super::Transaction> for Transaction<'a> {
+        fn from(value: &'a super::Transaction) -> Self {
+            match value {
+                super::Transaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
+                super::Transaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
+                super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
+                super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
+                #[cfg(feature = "optimism")]
+                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
+            }
+        }
+    }
+
+    impl<'a> From<Transaction<'a>> for super::Transaction {
+        fn from(value: Transaction<'a>) -> Self {
+            match value {
+                Transaction::Legacy(tx) => Self::Legacy(tx.into()),
+                Transaction::Eip2930(tx) => Self::Eip2930(tx.into()),
+                Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
+                Transaction::Eip7702(tx) => Self::Eip7702(tx.into()),
+                #[cfg(feature = "optimism")]
+                Transaction::Deposit(tx) => Self::Deposit(tx.into()),
+            }
+        }
+    }
+
+    impl SerializeAs<super::Transaction> for Transaction<'_> {
+        fn serialize_as<S>(source: &super::Transaction, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Transaction::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::Transaction> for Transaction<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Transaction, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Transaction::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives::{serde_bincode_compat, TransactionSigned};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::transaction::TransactionSigned")]
+    ///     transaction: TransactionSigned,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TransactionSigned<'a> {
+        hash: TxHash,
+        signature: Signature,
+        transaction: Transaction<'a>,
+    }
+
+    impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
+        fn from(value: &'a super::TransactionSigned) -> Self {
+            Self {
+                hash: value.hash,
+                signature: value.signature,
+                transaction: Transaction::from(&value.transaction),
+            }
+        }
+    }
+
+    impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
+        fn from(value: TransactionSigned<'a>) -> Self {
+            Self {
+                hash: value.hash,
+                signature: value.signature,
+                transaction: value.transaction.into(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::TransactionSigned> for TransactionSigned<'_> {
+        fn serialize_as<S>(
+            source: &super::TransactionSigned,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TransactionSigned::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TransactionSigned> for TransactionSigned<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TransactionSigned, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TransactionSigned::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
+
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_testing_utils::generators;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_transaction_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::Transaction")]
+                transaction: Transaction,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: Transaction::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                    .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_transaction_signed_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::TransactionSigned")]
+                transaction: TransactionSigned,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                transaction: TransactionSigned::arbitrary(&mut arbitrary::Unstructured::new(
+                    &bytes,
+                ))
+                .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     };
+    use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
     use alloy_primitives::{address, b256, bytes, hex, Address, Bytes, Parity, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
@@ -1974,212 +2316,5 @@ mod tests {
         let res = TransactionSigned::decode_2718(&mut &data[..]);
 
         assert!(res.is_err());
-    }
-}
-
-/// Bincode-compatible transaction type serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
-    use alloc::borrow::Cow;
-    use alloy_consensus::{
-        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy},
-        TxEip4844, TxEip7702,
-    };
-    use alloy_primitives::{Signature, TxHash};
-    #[cfg(feature = "optimism")]
-    use op_alloy_consensus::serde_bincode_compat::TxDeposit;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use serde_with::{DeserializeAs, SerializeAs};
-
-    /// Bincode-compatible [`super::Transaction`] serde implementation.
-    ///
-    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    /// ```rust
-    /// use reth_primitives::{serde_bincode_compat, Transaction};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;
-    ///
-    /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
-    /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::transaction::Transaction")]
-    ///     transaction: Transaction,
-    /// }
-    /// ```
-    #[derive(Debug, Serialize, Deserialize)]
-    #[allow(missing_docs)]
-    pub enum Transaction<'a> {
-        Legacy(TxLegacy<'a>),
-        Eip2930(TxEip2930<'a>),
-        Eip1559(TxEip1559<'a>),
-        Eip4844(Cow<'a, TxEip4844>),
-        Eip7702(Cow<'a, TxEip7702>),
-        #[cfg(feature = "optimism")]
-        #[cfg(feature = "optimism")]
-        Deposit(TxDeposit<'a>),
-    }
-
-    impl<'a> From<&'a super::Transaction> for Transaction<'a> {
-        fn from(value: &'a super::Transaction) -> Self {
-            match value {
-                super::Transaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
-                super::Transaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
-                super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
-                super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
-                super::Transaction::Eip7702(tx) => Self::Eip7702(Cow::Borrowed(tx)),
-                #[cfg(feature = "optimism")]
-                super::Transaction::Deposit(tx) => Self::Deposit(TxDeposit::from(tx)),
-            }
-        }
-    }
-
-    impl<'a> From<Transaction<'a>> for super::Transaction {
-        fn from(value: Transaction<'a>) -> Self {
-            match value {
-                Transaction::Legacy(tx) => Self::Legacy(tx.into()),
-                Transaction::Eip2930(tx) => Self::Eip2930(tx.into()),
-                Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
-                Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
-                Transaction::Eip7702(tx) => Self::Eip7702(tx.into_owned()),
-                #[cfg(feature = "optimism")]
-                Transaction::Deposit(tx) => Self::Deposit(tx.into()),
-            }
-        }
-    }
-
-    impl<'a> SerializeAs<super::Transaction> for Transaction<'a> {
-        fn serialize_as<S>(source: &super::Transaction, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            Transaction::from(source).serialize(serializer)
-        }
-    }
-
-    impl<'de> DeserializeAs<'de, super::Transaction> for Transaction<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::Transaction, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            Transaction::deserialize(deserializer).map(Into::into)
-        }
-    }
-
-    /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
-    ///
-    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    /// ```rust
-    /// use reth_primitives::{serde_bincode_compat, TransactionSigned};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;
-    ///
-    /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
-    /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::transaction::TransactionSigned")]
-    ///     transaction: TransactionSigned,
-    /// }
-    /// ```
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TransactionSigned<'a> {
-        hash: TxHash,
-        signature: Signature,
-        transaction: Transaction<'a>,
-    }
-
-    impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
-        fn from(value: &'a super::TransactionSigned) -> Self {
-            Self {
-                hash: value.hash,
-                signature: value.signature,
-                transaction: Transaction::from(&value.transaction),
-            }
-        }
-    }
-
-    impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
-        fn from(value: TransactionSigned<'a>) -> Self {
-            Self {
-                hash: value.hash,
-                signature: value.signature,
-                transaction: value.transaction.into(),
-            }
-        }
-    }
-
-    impl<'a> SerializeAs<super::TransactionSigned> for TransactionSigned<'a> {
-        fn serialize_as<S>(
-            source: &super::TransactionSigned,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            TransactionSigned::from(source).serialize(serializer)
-        }
-    }
-
-    impl<'de> DeserializeAs<'de, super::TransactionSigned> for TransactionSigned<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::TransactionSigned, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            TransactionSigned::deserialize(deserializer).map(Into::into)
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
-
-        use arbitrary::Arbitrary;
-        use rand::Rng;
-        use reth_testing_utils::generators;
-        use serde::{Deserialize, Serialize};
-        use serde_with::serde_as;
-
-        #[test]
-        fn test_transaction_bincode_roundtrip() {
-            #[serde_as]
-            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-            struct Data {
-                #[serde_as(as = "serde_bincode_compat::Transaction")]
-                transaction: Transaction,
-            }
-
-            let mut bytes = [0u8; 1024];
-            generators::rng().fill(bytes.as_mut_slice());
-            let data = Data {
-                transaction: Transaction::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                    .unwrap(),
-            };
-
-            let encoded = bincode::serialize(&data).unwrap();
-            let decoded: Data = bincode::deserialize(&encoded).unwrap();
-            assert_eq!(decoded, data);
-        }
-
-        #[test]
-        fn test_transaction_signed_bincode_roundtrip() {
-            #[serde_as]
-            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-            struct Data {
-                #[serde_as(as = "serde_bincode_compat::TransactionSigned")]
-                transaction: TransactionSigned,
-            }
-
-            let mut bytes = [0u8; 1024];
-            generators::rng().fill(bytes.as_mut_slice());
-            let data = Data {
-                transaction: TransactionSigned::arbitrary(&mut arbitrary::Unstructured::new(
-                    &bytes,
-                ))
-                .unwrap(),
-            };
-
-            let encoded = bincode::serialize(&data).unwrap();
-            let decoded: Data = bincode::deserialize(&encoded).unwrap();
-            assert_eq!(decoded, data);
-        }
     }
 }

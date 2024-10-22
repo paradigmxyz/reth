@@ -1,6 +1,7 @@
 # Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
 .DEFAULT_GOAL := help
 
+GIT_SHA ?= $(shell git rev-parse HEAD)
 GIT_TAG ?= $(shell git describe --tags --abbrev=0)
 BIN_DIR = "dist/bin"
 
@@ -13,9 +14,9 @@ CARGO_TARGET_DIR ?= target
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES ?= asm-keccak
+    FEATURES ?= asm-keccak min-debug-logs
 else
-    FEATURES ?= jemalloc asm-keccak
+    FEATURES ?= jemalloc asm-keccak min-debug-logs
 endif
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
@@ -53,7 +54,7 @@ install: ## Build and install the reth binary under `~/.cargo/bin`.
 .PHONY: install-op
 install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 	cargo install --path crates/optimism/bin --bin op-reth --force --locked \
-		--features "optimism,$(FEATURES)" \
+		--features "optimism $(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
@@ -77,14 +78,14 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
-	cargo build --bin op-reth --features "optimism,$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+	cargo build --bin op-reth --features "optimism $(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 op-build-native-%:
-	cargo build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+	cargo build --bin op-reth --target $* --features "optimism $(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -116,7 +117,7 @@ build-%:
 
 op-build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
-		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+		cross build --bin op-reth --target $* --features "optimism $(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
@@ -213,6 +214,14 @@ docker-build-push: ## Build and push a cross-arch Docker image tagged with the l
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: docker-build-push-git-sha
+docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call docker_build_push,$(GIT_SHA),$(GIT_SHA))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
 .PHONY: docker-build-push-latest
 docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
 	$(call docker_build_push,$(GIT_TAG),latest)
@@ -252,6 +261,14 @@ endef
 .PHONY: op-docker-build-push
 op-docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
 	$(call op_docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push-git-sha
+op-docker-build-push-git-sha: ## Build and push a cross-arch Docker image tagged with the latest git sha.
+	$(call op_docker_build_push,$(GIT_SHA),$(GIT_SHA))
 
 # Note: This requires a buildx builder with emulation support. For example:
 #
@@ -487,5 +504,4 @@ check-features:
 		--package reth-codecs \
 		--package reth-primitives-traits \
 		--package reth-primitives \
-		--package reth-rpc-types \
 		--feature-powerset

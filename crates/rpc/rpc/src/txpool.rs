@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
+use alloy_consensus::Transaction;
 use alloy_primitives::Address;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
@@ -41,12 +42,12 @@ where
             tx: &Tx,
             content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
         ) where
-            Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+            Tx: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
             RpcTxB: TransactionCompat,
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                from_recovered::<RpcTxB>(tx.clone().into_consensus()),
+                from_recovered::<RpcTxB>(tx.clone().into_consensus().into()),
             );
         }
 
@@ -91,12 +92,12 @@ where
         trace!(target: "rpc::eth", "Serving txpool_inspect");
 
         #[inline]
-        fn insert<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+        fn insert<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>>(
             tx: &T,
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx = tx.clone().into_consensus();
+            let tx: TransactionSignedEcRecovered = tx.clone().into_consensus().into();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {

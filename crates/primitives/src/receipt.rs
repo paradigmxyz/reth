@@ -1,24 +1,24 @@
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{
-    logs_bloom, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    EIP7702_TX_TYPE_ID,
-};
+use crate::{logs_bloom, TxType};
 use alloc::{vec, vec::Vec};
+use alloy_consensus::constants::{
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+};
 use alloy_primitives::{Bloom, Bytes, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{DerefMut, From, IntoIterator};
 #[cfg(feature = "reth-codec")]
-use reth_codecs::{Compact, CompactZstd};
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// Receipt containing result of transaction execution.
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(CompactZstd))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::CompactZstd))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[rlp(trailing)]
 pub struct Receipt {
@@ -130,7 +130,7 @@ impl From<Receipt> for ReceiptWithBloom {
 /// [`Receipt`] with calculated bloom filter.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
@@ -332,7 +332,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    crate::DEPOSIT_TX_TYPE_ID => {
+                    crate::transaction::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -373,7 +373,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
     }
 }
 
-impl<'a> Encodable for ReceiptWithBloomRef<'a> {
+impl Encodable for ReceiptWithBloomRef<'_> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.as_encoder().encode_inner(out, true)
     }
@@ -394,7 +394,7 @@ struct ReceiptWithBloomEncoder<'a> {
     receipt: &'a Receipt,
 }
 
-impl<'a> ReceiptWithBloomEncoder<'a> {
+impl ReceiptWithBloomEncoder<'_> {
     /// Returns the rlp header for the receipt payload.
     fn receipt_rlp_header(&self) -> alloy_rlp::Header {
         let mut rlp_head = alloy_rlp::Header { list: true, payload_length: 0 };
@@ -468,7 +468,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(crate::DEPOSIT_TX_TYPE_ID);
+                out.put_u8(crate::transaction::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
@@ -481,7 +481,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     }
 }
 
-impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
+impl Encodable for ReceiptWithBloomEncoder<'_> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, true)
     }

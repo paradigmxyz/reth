@@ -39,16 +39,13 @@ pub use block::{
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use constants::{
-    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
-    MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
-};
+pub use constants::{HOLESKY_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, Request, Requests, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
+    LogData, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 
@@ -64,8 +61,6 @@ pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     InvalidTransactionError, Signature, Transaction, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHashOrNumber, TxType,
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
 };
 
 // Re-exports
@@ -77,16 +72,6 @@ pub use arbitrary;
 
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
-
-/// Optimism specific re-exports
-#[cfg(feature = "optimism")]
-mod optimism {
-    pub use crate::transaction::{optimism_deposit_tx_signature, TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
-}
-
-#[cfg(feature = "optimism")]
-pub use optimism::*;
 
 /// Bincode-compatible serde implementations for commonly used types in Reth.
 ///

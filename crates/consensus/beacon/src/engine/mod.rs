@@ -1,3 +1,4 @@
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -462,8 +463,7 @@ where
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
-        {
+        if reth_chainspec::EthChainSpec::is_optimism(&self.blockchain.chain_spec()) {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
@@ -945,7 +945,7 @@ where
             let safe = self
                 .blockchain
                 .find_block_by_hash(safe_block_hash, BlockSource::Any)?
-                .ok_or_else(|| ProviderError::UnknownBlockHash(safe_block_hash))?;
+                .ok_or(ProviderError::UnknownBlockHash(safe_block_hash))?;
             self.blockchain.set_safe(SealedHeader::new(safe.header, safe_block_hash));
         }
         Ok(())
@@ -965,7 +965,7 @@ where
             let finalized = self
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
-                .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
+                .ok_or(ProviderError::UnknownBlockHash(finalized_block_hash))?;
             self.blockchain.finalize_block(finalized.number)?;
             self.blockchain
                 .set_finalized(SealedHeader::new(finalized.header, finalized_block_hash));
@@ -1086,6 +1086,9 @@ where
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
+        // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
+        // workaround.
+        execution_requests: Option<Requests>,
     ) -> Result<Either<PayloadStatus, SealedBlock>, BeaconOnNewPayloadError> {
         self.metrics.new_payload_messages.increment(1);
 
@@ -1115,10 +1118,11 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-        let block = match self
-            .payload_validator
-            .ensure_well_formed_payload(payload, cancun_fields.into())
-        {
+        let block = match self.payload_validator.ensure_well_formed_payload(
+            payload,
+            cancun_fields.into(),
+            execution_requests,
+        ) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", %error, "Invalid payload");
@@ -1863,8 +1867,13 @@ where
                         BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);
                         }
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                            match this.on_new_payload(payload, cancun_fields) {
+                        BeaconEngineMessage::NewPayload {
+                            payload,
+                            cancun_fields,
+                            execution_requests,
+                            tx,
+                        } => {
+                            match this.on_new_payload(payload, cancun_fields, execution_requests) {
                                 Ok(Either::Right(block)) => {
                                     this.set_blockchain_tree_action(
                                         BlockchainTreeAction::InsertNewPayload { block, tx },

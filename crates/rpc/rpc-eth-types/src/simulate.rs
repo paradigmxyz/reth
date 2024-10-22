@@ -1,6 +1,6 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxType, TypedTransaction};
 use alloy_primitives::Parity;
 use alloy_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
@@ -16,7 +16,6 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types::ToRpcError;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::StateRootProvider;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -24,7 +23,8 @@ use revm::{db::CacheDB, Database};
 use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{
-    cache::db::StateProviderTraitObjWrapper, EthApiError, RevertError, RpcInvalidTransactionError,
+    cache::db::StateProviderTraitObjWrapper, error::ToRpcError, EthApiError, RevertError,
+    RpcInvalidTransactionError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -183,7 +183,7 @@ pub fn build_block<T: TransactionCompat>(
 ) -> Result<SimulatedBlock<Block<T::Transaction>>, EthApiError> {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
-    let mut receipts = Vec::new();
+    let mut receipts = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
     for (transaction_index, ((sender, result), tx)) in
