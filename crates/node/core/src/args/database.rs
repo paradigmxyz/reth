@@ -8,8 +8,8 @@ use clap::{
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_node_types::ByteSize;
 use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_node_types::ByteSize;
 use reth_storage_errors::db::LogLevel;
 
 fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
@@ -44,7 +44,8 @@ impl DatabaseArgs {
         self.get_database_args(default_client_version())
     }
 
-    /// Returns the database arguments with configured log level, client version, max_read_transaction_duration and geometry.
+    /// Returns the database arguments with configured log level, client version,
+    /// max read transaction duration, and geometry.
     pub fn get_database_args(
         &self,
         client_version: ClientVersion,
