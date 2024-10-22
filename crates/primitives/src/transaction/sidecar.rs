@@ -163,7 +163,7 @@ impl BlobTransaction {
 
         // The payload length is the length of the `tranascation_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
-        let payload_length = tx_length + self.transaction.sidecar.fields_len();
+        let payload_length = tx_length + self.transaction.sidecar.rlp_encoded_fields_length();
 
         // We use the calculated payload len to construct the first list header, which encompasses
         // everything in the tx - the length of the second, inner list header is part of
