@@ -97,15 +97,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167009.into(),
-        genesis: {
-            #[cfg(not(target_os = "zkvm"))]
-            {
-                serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-                    .expect("Can't deserialize taiko_a7 genesis json")
-            }
-            #[cfg(target_os = "zkvm")]
-            Default::default()
-        },
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -146,15 +137,6 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167001.into(),
-        genesis: {
-            #[cfg(not(target_os = "zkvm"))]
-            {
-                serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-                    .expect("Can't deserialize taiko_dev genesis json")
-            }
-            #[cfg(target_os = "zkvm")]
-            Default::default()
-        },
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -194,15 +176,6 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167000.into(),
-        genesis: {
-            #[cfg(not(target_os = "zkvm"))]
-            {
-                serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-                    .expect("Can't deserialize Mainnet genesis json")
-            }
-            #[cfg(target_os = "zkvm")]
-            Default::default()
-        },
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
