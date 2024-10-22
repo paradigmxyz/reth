@@ -6426,6 +6426,7 @@ name = "reth-basic-payload-builder"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "futures-core",
@@ -7967,6 +7968,7 @@ name = "reth-node-core"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
