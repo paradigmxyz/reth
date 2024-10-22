@@ -21,8 +21,8 @@ use reth_evm::{
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
-    StateProviderFactory, TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -81,7 +81,6 @@ where
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
-        + EvmEnvProvider
         + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
     BlockExecutor: BlockExecutorProvider,
@@ -686,7 +685,7 @@ where
 
                 let state =
                     state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
-                Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys: Some(keys) })
+                Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
             })
             .await
     }
@@ -842,7 +841,6 @@ where
         + HeaderProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
-        + EvmEnvProvider
         + 'static,
     Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
     BlockExecutor: BlockExecutorProvider,
@@ -979,15 +977,6 @@ where
             .map_err(Into::into)
     }
 
-    /// Handler for `debug_executionWitness`
-    async fn debug_execution_witness(
-        &self,
-        block: BlockNumberOrTag,
-    ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block).await.map_err(Into::into)
-    }
-
     /// Handler for `debug_traceCall`
     async fn debug_trace_call(
         &self,
@@ -1009,6 +998,15 @@ where
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
+    }
+
+    /// Handler for `debug_executionWitness`
+    async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<ExecutionWitness> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
