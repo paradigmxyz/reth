@@ -1,8 +1,8 @@
 //! Optimism payload builder implementation.
 use std::sync::Arc;
 
-use alloy_primitives::{B64, U256};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_primitives::{B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{BaseFeeParams, ChainSpecProvider, EthereumHardforks};

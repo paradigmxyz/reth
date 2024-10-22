@@ -169,7 +169,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
 }
 
 /// Container type for all components required to build a payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EthPayloadBuilderAttributes {
     /// Id of the payload
     pub id: PayloadId,
@@ -277,20 +277,6 @@ pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> Paylo
 
     let out = hasher.finalize();
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
-}
-
-impl Default for EthPayloadBuilderAttributes {
-    fn default() -> Self {
-        Self {
-            id: PayloadId::new([0; 8]),
-            parent: B256::default(),
-            timestamp: 0,
-            suggested_fee_recipient: Address::ZERO,
-            prev_randao: B256::default(),
-            withdrawals: Withdrawals::default(),
-            parent_beacon_block_root: None,
-        }
-    }
 }
 
 #[cfg(test)]
