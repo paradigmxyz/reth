@@ -11,7 +11,7 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
-use reth_network::NetworkHandle;
+use reth_network::{NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodePrimitives,
     NodeTypesWithDB,
@@ -314,7 +314,7 @@ where
     ) -> eyre::Result<NetworkHandle> {
         let network = ctx.network_builder().await?;
         let handle = ctx.start_network(network, pool);
-
+        info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
         Ok(handle)
     }
 }
