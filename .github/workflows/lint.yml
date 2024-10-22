@@ -39,7 +39,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run clippy on binaries
-        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"  --locked
         env:
           RUSTFLAGS: -D warnings
 
