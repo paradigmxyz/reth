@@ -758,14 +758,14 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                        let mut inspector = TracingInspector::new(
+                        let mut inspector = shared_inspector.get_or_insert(TracingInspector::new(
                             TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
-                        );
+                        ));
                         let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
+                        inspector.set_transaction_gas_limit(env.tx.gas_limit);
                         let frame = inspector
-                            .with_transaction_gas_limit(env.tx.gas_limit)
-                            .into_geth_builder()
+                            .geth_builder()
                             .geth_prestate_traces(&res, &prestate_config, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
@@ -842,10 +842,7 @@ where
 
         // default structlog tracer
         let inspector_config = TracingInspectorConfig::from_geth_config(config);
-
-        //let mut inspector = TracingInspector::new(inspector_config);
         let mut inspector = shared_inspector.get_or_insert(TracingInspector::new(inspector_config));
-
         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
