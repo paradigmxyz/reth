@@ -1,13 +1,15 @@
 //! clap [Args](clap::Args) for database configuration
 
+use std::time::Duration;
+
 use crate::version::default_client_version;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
     Arg, Args, Command, Error,
 };
-use reth_db::ClientVersion;
 use reth_node_types::ByteSize;
+use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
 use reth_storage_errors::db::LogLevel;
 
 fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
@@ -28,10 +30,12 @@ pub struct DatabaseArgs {
     /// Maximum database size (e.g., 4TB, 8MB)
     #[arg(long = "db.max-size", value_parser = parse_byte_size)]
     pub max_size: Option<ByteSize>,
-
     /// Database growth step (e.g., 4GB, 4KB)
     #[arg(long = "db.growth-step", value_parser = parse_byte_size)]
     pub growth_step: Option<ByteSize>,
+    /// Read transaction timeout in seconds, 0 means no timeout.
+    #[arg(long = "db.read-transaction-timeout")]
+    pub read_transaction_timeout: Option<u64>,
 }
 
 impl DatabaseArgs {
@@ -40,22 +44,22 @@ impl DatabaseArgs {
         self.get_database_args(default_client_version())
     }
 
-    /// Returns the database arguments with configured log level, client version and geometry.
+    /// Returns the database arguments with configured log level, client version, max_read_transaction_duration and geometry.
     pub fn get_database_args(
         &self,
         client_version: ClientVersion,
     ) -> reth_db::mdbx::DatabaseArguments {
-        self.get_const_database_args(client_version).with_geometry(self.max_size, self.growth_step)
-    }
+        let max_read_transaction_duration = match self.read_transaction_timeout {
+            None => None, // if not specified, use default value
+            Some(0) => Some(MaxReadTransactionDuration::Unbounded), // if 0, disable timeout
+            Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
+        };
 
-    /// Returns the const database arguments with configured log level and given client version.
-    pub const fn get_const_database_args(
-        &self,
-        client_version: ClientVersion,
-    ) -> reth_db::mdbx::DatabaseArguments {
         reth_db::mdbx::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
+            .with_max_read_transaction_duration(max_read_transaction_duration)
+            .with_geometry(self.max_size, self.growth_step)
     }
 }
 

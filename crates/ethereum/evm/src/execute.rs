@@ -296,7 +296,7 @@ impl EthExecutorProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, TxLegacy};
+    use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -309,9 +309,7 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{
-        constants::ETH_TO_WEI, public_key_to_address, Account, Block, BlockBody, Transaction,
-    };
+    use reth_primitives::{public_key_to_address, Account, Block, BlockBody, Transaction};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
