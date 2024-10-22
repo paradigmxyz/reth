@@ -548,7 +548,7 @@ tower = "0.4"
 tower-http = "0.5"
 
 # p2p
-discv5 = "0.7.0"
+discv5 = "0.8.0"
 if-addrs = "0.13"
 
 # rpc
