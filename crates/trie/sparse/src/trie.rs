@@ -1240,6 +1240,6 @@ mod tests {
                 ),
                 1..100,
             )
-        )| { test(updates.into_iter().collect()) });
+        )| { test(updates) });
     }
 }
