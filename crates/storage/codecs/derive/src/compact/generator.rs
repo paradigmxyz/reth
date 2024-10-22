@@ -2,6 +2,34 @@
 
 use super::*;
 use convert_case::{Case, Casing};
+use syn::{Attribute, Lit, parse_quote};
+
+/// Returns the path of the reth_codecs crate
+pub fn codecs_path(attrs: &[Attribute]) -> syn::Path {
+    // TODO: support reth_codecs(crate = "") attribute so we can set a custom path, if this is unset use `reth_codecs`
+    for attr in attrs {
+        if attr.path().is_ident("compact") {
+            let mut crate_path = None;
+            if let Err(e) = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("crate") {
+                    let lit: Lit = meta.input.parse()?;
+                    if let Lit::Str(lit_str) = lit {
+                        crate_path = Some(lit_str.value());
+                    } else {
+                        return Err(syn::Error::new_spanned(lit, "Expected a string literal for crate path"));
+                    }
+                    
+                }
+                Ok(())
+            }) {
+                panic!("Failed to parse `compact` attribute: {}", e);
+            }
+
+        }
+    }
+
+    parse_quote!(reth_codecs)
+}
 
 /// Generates code to implement the `Compact` trait for a data type.
 pub fn generate_from_to(
@@ -9,11 +37,13 @@ pub fn generate_from_to(
     has_lifetime: bool,
     fields: &FieldList,
     is_zstd: bool,
+    attrs: &[Attribute],
 ) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
     let to_compact = generate_to_compact(fields, ident, is_zstd);
     let from_compact = generate_from_compact(fields, ident, is_zstd);
+    let reth_codecs = codecs_path(attrs);
 
     let snake_case_ident = ident.to_string().to_case(Case::Snake);
 
@@ -28,11 +58,11 @@ pub fn generate_from_to(
 
     let impl_compact = if has_lifetime {
         quote! {
-           impl<#lifetime> Compact for #ident<#lifetime>
+            impl<#lifetime> #reth_codecs::Compact for #ident<#lifetime>
         }
     } else {
         quote! {
-           impl Compact for #ident
+            impl #reth_codecs::Compact for #ident
         }
     };
 

@@ -802,6 +802,16 @@ pub trait BestTransactionsFilter: BestTransactions {
     }
 }
 
+pub trait TransactionPoolProvider {
+    type Transaction: PoolTransaction;
+    type BestTransactionsIter: Iterator<Item = Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    fn best_transactions_iter(
+        &self,
+        attributes: BestTransactionsAttributes,
+    ) -> Self::BestTransactionsIter;
+}
+
 impl<T> BestTransactionsFilter for T where T: BestTransactions {}
 
 /// A no-op implementation that yields no transactions.
