@@ -21,6 +21,13 @@ pub struct ExExNotifications<P, E> {
     inner: ExExNotificationsInner<P, E>,
 }
 
+/// A trait, that represents a stream of [`ExExNotification`]s. The stream will emit notifications
+/// for all blocks.
+///
+/// If the stream is configured with a head via
+/// - [`ExExNotificationsDyn::set_with_head`] or
+/// - [`ExExNotificationsDyn::with_head`],
+/// it will run backfill jobs to catch up to the node head.
 #[allow(unused)] // TODO(0xurb) - remove when will be used for `ExExContext` or his variations.
 pub(crate) trait ExExNotificationsDyn<P, E>:
     Stream<Item = eyre::Result<ExExNotification>> + Unpin
