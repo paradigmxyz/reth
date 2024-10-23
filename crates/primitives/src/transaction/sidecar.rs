@@ -230,7 +230,6 @@ mod tests {
         eip4844::Bytes48,
     };
     use alloy_primitives::hex;
-    use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
 
     #[test]

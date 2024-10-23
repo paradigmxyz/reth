@@ -3,7 +3,6 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{TxHash, B256};
-use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::BlobTransactionSidecar;
 use schnellru::{ByLength, LruMap};
@@ -205,7 +204,7 @@ impl DiskFileBlobStoreInner {
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
-        data.encode(&mut buf);
+        data.rlp_encode_fields(&mut buf);
         self.blob_cache.lock().insert(tx, data);
         let size = self.write_one_encoded(tx, &buf)?;
 
@@ -220,7 +219,7 @@ impl DiskFileBlobStoreInner {
             .iter()
             .map(|(tx, data)| {
                 let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
-                data.encode(&mut buf);
+                data.rlp_encode_fields(&mut buf);
                 (self.blob_disk_file(*tx), buf)
             })
             .collect::<Vec<_>>();
