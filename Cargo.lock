@@ -7502,6 +7502,7 @@ dependencies = [
  "rmp-serde",
  "secp256k1",
  "tempfile",
+ "thiserror",
  "tokio",
  "tokio-util",
  "tracing",

@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use eyre::OptionExt;
+use crate::wal::{WalError, WalResult};
 use reth_exex_types::ExExNotification;
 use reth_tracing::tracing::debug;
 use tracing::instrument;
@@ -24,7 +24,7 @@ pub struct Storage {
 impl Storage {
     /// Creates a new instance of [`Storage`] backed by the file at the given path and creates
     /// it doesn't exist.
-    pub(super) fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
+    pub(super) fn new(path: impl AsRef<Path>) -> WalResult<Self> {
         reth_fs_util::create_dir_all(&path)?;
 
         Ok(Self { path: path.as_ref().to_path_buf() })
@@ -34,11 +34,11 @@ impl Storage {
         self.path.join(format!("{id}.{FILE_EXTENSION}"))
     }
 
-    fn parse_filename(filename: &str) -> eyre::Result<u32> {
+    fn parse_filename(filename: &str) -> WalResult<u32> {
         filename
             .strip_suffix(".wal")
             .and_then(|s| s.parse().ok())
-            .ok_or_eyre(format!("failed to parse file name: {filename}"))
+            .ok_or_else(|| WalError::Parse(filename.to_string()))
     }
 
     /// Removes notification for the given file ID from the storage.
@@ -66,12 +66,12 @@ impl Storage {
     /// Returns the range of file IDs in the storage.
     ///
     /// If there are no files in the storage, returns `None`.
-    pub(super) fn files_range(&self) -> eyre::Result<Option<RangeInclusive<u32>>> {
+    pub(super) fn files_range(&self) -> WalResult<Option<RangeInclusive<u32>>> {
         let mut min_id = None;
         let mut max_id = None;
 
         for entry in reth_fs_util::read_dir(&self.path)? {
-            let entry = entry?;
+            let entry = entry.map_err(|err| WalError::DirEntry(self.path.clone(), err))?;
 
             if entry.path().extension() == Some(FILE_EXTENSION.as_ref()) {
                 let file_name = entry.file_name();
@@ -93,7 +93,7 @@ impl Storage {
     pub(super) fn remove_notifications(
         &self,
         file_ids: impl IntoIterator<Item = u32>,
-    ) -> eyre::Result<(usize, u64)> {
+    ) -> WalResult<(usize, u64)> {
         let mut deleted_total = 0;
         let mut deleted_size = 0;
 
@@ -110,10 +110,10 @@ impl Storage {
     pub(super) fn iter_notifications(
         &self,
         range: RangeInclusive<u32>,
-    ) -> impl Iterator<Item = eyre::Result<(u32, u64, ExExNotification)>> + '_ {
+    ) -> impl Iterator<Item = WalResult<(u32, u64, ExExNotification)>> + '_ {
         range.map(move |id| {
             let (notification, size) =
-                self.read_notification(id)?.ok_or_eyre("notification {id} not found")?;
+                self.read_notification(id)?.ok_or(WalError::FileNotFound(id))?;
 
             Ok((id, size, notification))
         })
@@ -124,7 +124,7 @@ impl Storage {
     pub(super) fn read_notification(
         &self,
         file_id: u32,
-    ) -> eyre::Result<Option<(ExExNotification, u64)>> {
+    ) -> WalResult<Option<(ExExNotification, u64)>> {
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Reading notification from WAL");
 
@@ -133,14 +133,12 @@ impl Storage {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(reth_fs_util::FsPathError::open(err, &file_path).into()),
         };
-        let size = file.metadata()?.len();
+        let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
-            rmp_serde::decode::from_read(&mut file).map_err(|err| {
-                eyre::eyre!("failed to decode notification from {file_path:?}: {err:?}")
-            })?;
-
+            rmp_serde::decode::from_read(&mut file)
+                .map_err(|err| WalError::Decode(file_id, file_path, err))?;
         Ok(Some((notification.into(), size)))
     }
 
@@ -154,7 +152,7 @@ impl Storage {
         &self,
         file_id: u32,
         notification: &ExExNotification,
-    ) -> eyre::Result<u64> {
+    ) -> WalResult<u64> {
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
@@ -166,7 +164,7 @@ impl Storage {
             rmp_serde::encode::write(file, &notification)
         })?;
 
-        Ok(file_path.metadata()?.len())
+        Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
     }
 }
 

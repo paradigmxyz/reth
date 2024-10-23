@@ -635,6 +635,7 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wal::WalResult;
     use alloy_primitives::B256;
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
@@ -1278,7 +1279,7 @@ mod tests {
         );
         // WAL shouldn't contain the genesis notification, because it's finalized
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
             [notification.clone()]
         );
 
@@ -1286,7 +1287,7 @@ mod tests {
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
             [notification.clone()]
         );
 
@@ -1300,7 +1301,7 @@ mod tests {
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
             [notification]
         );
 
