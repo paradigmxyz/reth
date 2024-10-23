@@ -1,10 +1,13 @@
 [workspace]
-members = [
-    "exex/hello-world",
-    "exex/remote",
-    "exex/tracking-state",
-]
+members = ["exex/hello-world", "exex/remote", "exex/tracking-state"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
 resolver = "2"
+
+[patch.'https://github.com/paradigmxyz/reth']
+reth = { path = "../../bin/reth" }
+reth-exex = { path = "../../crates/exex/exex" }
+reth-node-ethereum = { path = "../../crates/ethereum/node" }
+reth-tracing = { path = "../../crates/tracing" }
+reth-node-api = { path = "../../crates/node/api" }

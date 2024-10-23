@@ -418,9 +418,9 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "16.0.0", features = ["std"], default-features = false }
-revm-inspectors = "0.9.0"
-revm-primitives = { version = "12.0.0", features = [
+revm = { version = "17.0.0", features = ["std"], default-features = false }
+revm-inspectors = "0.10.0"
+revm-primitives = { version = "13.0.0", features = [
     "std",
 ], default-features = false }
 
@@ -432,39 +432,39 @@ alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
 alloy-trie = { version = "0.7", default-features = false }
 
-alloy-consensus = { version = "0.5.2", default-features = false }
-alloy-eips = { version = "0.5.2", default-features = false }
-alloy-genesis = { version = "0.5.2", default-features = false }
-alloy-json-rpc = { version = "0.5.2", default-features = false }
-alloy-network = { version = "0.5.2", default-features = false }
-alloy-network-primitives = { version = "0.5.2", default-features = false }
-alloy-node-bindings = { version = "0.5.2", default-features = false }
-alloy-provider = { version = "0.5.2", features = [
+alloy-consensus = { version = "0.5.3", default-features = false }
+alloy-eips = { version = "0.5.3", default-features = false }
+alloy-genesis = { version = "0.5.3", default-features = false }
+alloy-json-rpc = { version = "0.5.3", default-features = false }
+alloy-network = { version = "0.5.3", default-features = false }
+alloy-network-primitives = { version = "0.5.3", default-features = false }
+alloy-node-bindings = { version = "0.5.3", default-features = false }
+alloy-provider = { version = "0.5.3", features = [
     "reqwest",
 ], default-features = false }
-alloy-pubsub = { version = "0.5.2", default-features = false }
-alloy-rpc-client = { version = "0.5.2", default-features = false }
-alloy-rpc-types = { version = "0.5.2", features = [
+alloy-pubsub = { version = "0.5.3", default-features = false }
+alloy-rpc-client = { version = "0.5.3", default-features = false }
+alloy-rpc-types = { version = "0.5.3", features = [
     "eth",
 ], default-features = false }
-alloy-rpc-types-admin = { version = "0.5.2", default-features = false }
-alloy-rpc-types-anvil = { version = "0.5.2", default-features = false }
-alloy-rpc-types-beacon = { version = "0.5.2", default-features = false }
-alloy-rpc-types-debug = { version = "0.5.2", default-features = false }
-alloy-rpc-types-engine = { version = "0.5.2", default-features = false }
-alloy-rpc-types-eth = { version = "0.5.2", default-features = false }
-alloy-rpc-types-mev = { version = "0.5.2", default-features = false }
-alloy-rpc-types-trace = { version = "0.5.2", default-features = false }
-alloy-rpc-types-txpool = { version = "0.5.2", default-features = false }
-alloy-serde = { version = "0.5.2", default-features = false }
-alloy-signer = { version = "0.5.2", default-features = false }
-alloy-signer-local = { version = "0.5.2", default-features = false }
-alloy-transport = { version = "0.5.2" }
-alloy-transport-http = { version = "0.5.2", features = [
+alloy-rpc-types-admin = { version = "0.5.3", default-features = false }
+alloy-rpc-types-anvil = { version = "0.5.3", default-features = false }
+alloy-rpc-types-beacon = { version = "0.5.3", default-features = false }
+alloy-rpc-types-debug = { version = "0.5.3", default-features = false }
+alloy-rpc-types-engine = { version = "0.5.3", default-features = false }
+alloy-rpc-types-eth = { version = "0.5.3", default-features = false }
+alloy-rpc-types-mev = { version = "0.5.3", default-features = false }
+alloy-rpc-types-trace = { version = "0.5.3", default-features = false }
+alloy-rpc-types-txpool = { version = "0.5.3", default-features = false }
+alloy-serde = { version = "0.5.3", default-features = false }
+alloy-signer = { version = "0.5.3", default-features = false }
+alloy-signer-local = { version = "0.5.3", default-features = false }
+alloy-transport = { version = "0.5.3" }
+alloy-transport-http = { version = "0.5.3", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ipc = { version = "0.5.2", default-features = false }
-alloy-transport-ws = { version = "0.5.2", default-features = false }
+alloy-transport-ipc = { version = "0.5.3", default-features = false }
+alloy-transport-ws = { version = "0.5.3", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.5"
