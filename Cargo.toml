@@ -411,9 +411,9 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "16.0.0", features = ["std"], default-features = false }
+revm = { version = "17.0.0", features = ["std"], default-features = false }
 revm-inspectors = "0.9.0"
-revm-primitives = { version = "12.0.0", features = [
+revm-primitives = { version = "13.0.0", features = [
     "std",
 ], default-features = false }
 
@@ -594,7 +594,7 @@ tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = "0.17.3"
 
-[patch.crates-io]
+#[patch.crates-io]
 #alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
 #alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "a971b3a" }
@@ -626,5 +626,3 @@ tracy-client = "0.17.3"
 #op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
 #op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "6a042e7681b1" }
-
-revm-primitives = { git = "https://github.com/klkvr/revm", rev = "65208a7" }
