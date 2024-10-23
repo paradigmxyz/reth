@@ -412,7 +412,7 @@ reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
 revm = { version = "17.0.0", features = ["std"], default-features = false }
-revm-inspectors = "0.9.0"
+revm-inspectors = "0.10.0"
 revm-primitives = { version = "13.0.0", features = [
     "std",
 ], default-features = false }
