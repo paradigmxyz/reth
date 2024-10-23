@@ -35,7 +35,6 @@ reth-network-peers.workspace = true
 reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
-reth-node-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true

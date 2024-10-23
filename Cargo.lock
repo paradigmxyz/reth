@@ -7956,7 +7956,6 @@ dependencies = [
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
- "reth-node-types",
  "reth-primitives",
  "reth-prune-types",
  "reth-rpc-api",
