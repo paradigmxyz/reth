@@ -4,7 +4,7 @@ use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
-    validate::ValidPoolTransaction,
+    validate::{ForkTracker, ValidPoolTransaction},
     AllTransactionsEvents,
 };
 use alloy_consensus::{
@@ -21,6 +21,7 @@ use reth_primitives::{
     BlobTransactionValidationError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
 };
+use revm::{interpreter::gas::validate_initial_tx_gas, primitives::SpecId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1005,6 +1006,36 @@ pub trait EthPoolTransaction:
 
     /// Returns the number of authorizations this transaction has.
     fn authorization_count(&self) -> usize;
+
+    /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
+    ///
+    /// Caution: This only checks past the Merge hardfork.
+    fn ensure_intrinsic_gas(
+        &self,
+        fork_tracker: &ForkTracker,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        let spec_id = if fork_tracker.is_prague_activated() {
+            SpecId::PRAGUE
+        } else if fork_tracker.is_shanghai_activated() {
+            SpecId::SHANGHAI
+        } else {
+            SpecId::MERGE
+        };
+
+        let gas_after_merge = validate_initial_tx_gas(
+            spec_id,
+            self.input(),
+            self.kind().is_create(),
+            self.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
+            self.authorization_count() as u64,
+        );
+
+        if self.gas_limit() < gas_after_merge {
+            Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
