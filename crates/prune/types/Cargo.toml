@@ -33,5 +33,10 @@ toml.workspace = true
 
 [features]
 test-utils = [
-    "arbitrary"
+	"dep:arbitrary",
+	"reth-codecs/test-utils"
+]
+arbitrary = [
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]

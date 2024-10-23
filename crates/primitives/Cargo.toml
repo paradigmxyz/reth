@@ -124,7 +124,8 @@ arbitrary = [
 	"alloy-rpc-types?/arbitrary",
 	"alloy-serde?/arbitrary",
 	"op-alloy-consensus?/arbitrary",
-	"op-alloy-rpc-types?/arbitrary"
+	"op-alloy-rpc-types?/arbitrary",
+	"reth-codecs?/arbitrary"
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [

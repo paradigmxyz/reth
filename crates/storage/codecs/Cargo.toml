@@ -70,6 +70,21 @@ alloy = [
 optimism = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [
     "alloy",
-    "visibility",
-    "arbitrary"
+    "dep:visibility",
+    "dep:arbitrary"
+]
+serde = [
+	"alloy-consensus?/serde",
+	"alloy-eips?/serde",
+	"alloy-primitives/serde",
+	"alloy-trie?/serde",
+	"bytes/serde",
+	"op-alloy-consensus?/serde"
+]
+arbitrary = [
+	"alloy-consensus?/arbitrary",
+	"alloy-eips?/arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-trie?/arbitrary",
+	"op-alloy-consensus?/arbitrary"
 ]

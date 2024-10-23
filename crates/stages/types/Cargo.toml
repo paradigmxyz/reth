@@ -30,5 +30,12 @@ rand.workspace = true
 
 [features]
 test-utils = [
-    "arbitrary"
+	"dep:arbitrary",
+	"reth-codecs/test-utils",
+	"reth-trie-common/test-utils"
+]
+arbitrary = [
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary",
+	"reth-trie-common/arbitrary"
 ]
