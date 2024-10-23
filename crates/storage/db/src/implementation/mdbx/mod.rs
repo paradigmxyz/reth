@@ -157,11 +157,6 @@ impl DatabaseArguments {
     pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
     }
-
-    /// Returns the geometry.
-    pub const fn geometry(&self) -> &Geometry<Range<usize>> {
-        &self.geometry
-    }
 }
 
 /// Wrapper for the libmdbx environment: [Environment]
