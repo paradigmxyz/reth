@@ -20,7 +20,6 @@ use reth_libmdbx::{
     ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
-use reth_node_types::ByteSize;
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
@@ -118,14 +117,19 @@ impl DatabaseArguments {
     }
 
     /// Set the geometry.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_size` - Maximum database size in bytes
+    /// * `growth_step` - Database growth step in bytes
     pub fn with_geometry(
         mut self,
-        max_size: Option<ByteSize>,
-        growth_step: Option<ByteSize>,
+        max_size: Option<usize>,
+        growth_step: Option<usize>,
     ) -> Self {
         self.geometry = Geometry {
-            size: max_size.map(|size| 0..size.0),
-            growth_step: growth_step.map(|growth_step| growth_step.0 as isize),
+            size: max_size.map(|size| 0..size),
+            growth_step: growth_step.map(|growth_step| growth_step as isize),
             shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         };
