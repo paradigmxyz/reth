@@ -138,30 +138,6 @@ impl NodeConfig<ChainSpec> {
     }
 }
 
-// Note: [`From`] trait is better, but it will be conflicting implementation (`impl<T> From<T>`)
-impl<ChainSpec: EthChainSpec + 'static> NodeConfig<ChainSpec> {
-    /// Converts [`NodeConfig`] with generic over chain spec into `NodeConfig<Box<dyn EthChainSpec>`
-    pub fn into_dyn(self) -> NodeConfig<Box<dyn EthChainSpec>> {
-        let chain: Arc<Box<dyn EthChainSpec + 'static>> =
-            Arc::new(Box::new(self.chain) as Box<dyn EthChainSpec>);
-        NodeConfig {
-            chain,
-            datadir: self.datadir,
-            config: self.config,
-            metrics: self.metrics,
-            instance: self.instance,
-            network: self.network,
-            rpc: self.rpc,
-            txpool: self.txpool,
-            builder: self.builder,
-            debug: self.debug,
-            db: self.db,
-            dev: self.dev,
-            pruning: self.pruning,
-        }
-    }
-}
-
 impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Creates a new config with given chain spec, setting all fields to default values.
     pub fn new(chain: Arc<ChainSpec>) -> Self {

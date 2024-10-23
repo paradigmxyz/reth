@@ -1,6 +1,8 @@
 //! Mirrored version of [`ExExContext`](`crate::ExExContext`)
 //! without generic abstraction over [<Node>](`reth_node_api::FullNodeComponents`)
 
+use std::sync::Arc;
+
 use reth_chainspec::{EthChainSpec, Head};
 use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
@@ -30,11 +32,25 @@ pub struct ExExContextDyn {
 
 impl<Node: FullNodeComponents> From<ExExContext<Node>> for ExExContextDyn {
     fn from(ctx: ExExContext<Node>) -> Self {
-        Self {
-            head: ctx.head,
-            config: ctx.config.into_dyn(),
-            reth_config: ctx.reth_config,
-            events: ctx.events,
-        }
+        // convert `NodeConfig` with generic over chainspec into `NodeConfig<Box<dyn EthChainSpec>`
+        let chain: Arc<Box<dyn EthChainSpec + 'static>> =
+            Arc::new(Box::new(ctx.config.chain) as Box<dyn EthChainSpec>);
+        let config = NodeConfig {
+            chain,
+            datadir: ctx.config.datadir,
+            config: ctx.config.config,
+            metrics: ctx.config.metrics,
+            instance: ctx.config.instance,
+            network: ctx.config.network,
+            rpc: ctx.config.rpc,
+            txpool: ctx.config.txpool,
+            builder: ctx.config.builder,
+            debug: ctx.config.debug,
+            db: ctx.config.db,
+            dev: ctx.config.dev,
+            pruning: ctx.config.pruning,
+        };
+
+        Self { head: ctx.head, config, reth_config: ctx.reth_config, events: ctx.events }
     }
 }
