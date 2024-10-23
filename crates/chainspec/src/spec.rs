@@ -617,6 +617,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
+            (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -861,6 +862,13 @@ impl ChainSpecBuilder {
     pub fn prague_activated(mut self) -> Self {
         self = self.cancun_activated();
         self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Osaka at genesis.
+    pub fn osaka_activated(mut self) -> Self {
+        self = self.prague_activated();
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
         self
     }
 

@@ -41,8 +41,6 @@ engine-withdrawals:
   - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org Sync (Paris) (reth)
 
-# https://github.com/paradigmxyz/reth/issues/8305
-# https://github.com/paradigmxyz/reth/issues/6217
 engine-api: []
 
 # https://github.com/paradigmxyz/reth/issues/8305
@@ -58,6 +56,4 @@ engine-cancun:
   - Invalid NewPayload, Incomplete VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, Extra VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
-# https://github.com/paradigmxyz/reth/issues/8579
-sync:
-  - sync reth -> reth
+sync: []

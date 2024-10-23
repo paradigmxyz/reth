@@ -40,6 +40,7 @@ reth-stages-types.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
@@ -76,18 +77,10 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
-optimism = [
-	"reth-primitives/optimism",
-	"reth-db/optimism"
-]
+optimism = ["reth-primitives/optimism", "reth-db/optimism"]
 # Features for vergen to generate correct env vars
-jemalloc = [
-	"reth-cli-util/jemalloc"
-]
-asm-keccak = [
-	"reth-primitives/asm-keccak",
-	"alloy-primitives/asm-keccak"
-]
+jemalloc = ["reth-cli-util/jemalloc"]
+asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
