@@ -312,7 +312,7 @@ impl DiskFileBlobStoreInner {
                 }
             }
         };
-        BlobTransactionSidecar::decode(&mut data.as_slice())
+        BlobTransactionSidecar::rlp_decode_fields(&mut data.as_slice())
             .map(Some)
             .map_err(BlobStoreError::DecodeError)
     }
@@ -322,7 +322,7 @@ impl DiskFileBlobStoreInner {
         self.read_many_raw(txs)
             .into_iter()
             .filter_map(|(tx, data)| {
-                BlobTransactionSidecar::decode(&mut data.as_slice())
+                BlobTransactionSidecar::rlp_decode_fields(&mut data.as_slice())
                     .map(|sidecar| (tx, sidecar))
                     .ok()
             })

@@ -188,40 +188,8 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP decoding methods, and does not
     /// represent the full RLP decoding of the `PooledTransactionsElement` type.
     pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        // decode the _first_ list header for the rest of the transaction
-        let outer_header = Header::decode(data)?;
-        if !outer_header.list {
-            return Err(RlpError::Custom("PooledTransactions blob tx must be encoded as a list"))
-        }
-
-        let outer_remaining_len = data.len();
-
-        // Now we need to decode the inner 4844 transaction and its signature:
-        //
-        // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-        let inner_header = Header::decode(data)?;
-        if !inner_header.list {
-            return Err(RlpError::Custom(
-                "PooledTransactions inner blob tx must be encoded as a list",
-            ))
-        }
-
-        let inner_remaining_len = data.len();
-
-        // inner transaction
-        let transaction = TxEip4844::decode_fields(data)?;
-
-        // signature
-        let signature = Signature::decode_rlp_vrs(data)?;
-
-        // the inner header only decodes the transaction and signature, so we check the length here
-        let inner_consumed = inner_remaining_len - data.len();
-        if inner_consumed != inner_header.payload_length {
-            return Err(RlpError::UnexpectedLength)
-        }
-
-        // All that's left are the blobs, commitments, and proofs
-        let sidecar = BlobTransactionSidecar::decode(data)?;
+        let (transaction, signature) =
+            TxEip4844WithSidecar::decode_signed_fields(data)?.into_parts();
 
         // # Calculating the hash
         //
@@ -240,16 +208,10 @@ impl BlobTransaction {
         // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
         // signature for hashing without a header. We then hash the result.
         let mut buf = Vec::new();
-        transaction.encode_with_signature(&signature, &mut buf, false);
+        transaction.tx().encode_with_signature(&signature, &mut buf, false);
         let hash = keccak256(&buf);
 
-        // the outer header is for the entire transaction, so we check the length here
-        let outer_consumed = outer_remaining_len - data.len();
-        if outer_consumed != outer_header.payload_length {
-            return Err(RlpError::UnexpectedLength)
-        }
-
-        Ok(Self { transaction: TxEip4844WithSidecar { tx: transaction, sidecar }, hash, signature })
+        Ok(Self { transaction, hash, signature })
     }
 }
 
@@ -392,7 +354,7 @@ mod tests {
         let mut encoded_rlp = Vec::new();
 
         // Encode the inner data of the BlobTransactionSidecar into RLP
-        sidecar.encode(&mut encoded_rlp);
+        sidecar.rlp_encode_fields(&mut encoded_rlp);
 
         // Assert the equality between the expected RLP from the JSON and the encoded RLP
         assert_eq!(json_value.get("rlp").unwrap().as_str().unwrap(), hex::encode(&encoded_rlp));
@@ -423,10 +385,11 @@ mod tests {
         let mut encoded_rlp = Vec::new();
 
         // Encode the inner data of the BlobTransactionSidecar into RLP
-        sidecar.encode(&mut encoded_rlp);
+        sidecar.rlp_encode_fields(&mut encoded_rlp);
 
         // Decode the RLP-encoded data back into a BlobTransactionSidecar
-        let decoded_sidecar = BlobTransactionSidecar::decode(&mut encoded_rlp.as_slice()).unwrap();
+        let decoded_sidecar =
+            BlobTransactionSidecar::rlp_decode_fields(&mut encoded_rlp.as_slice()).unwrap();
 
         // Assert the equality between the original BlobTransactionSidecar and the decoded one
         assert_eq!(sidecar, decoded_sidecar);
