@@ -107,7 +107,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}"
+      - run: cargo build --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}" --locked
         env:
           RUSTFLAGS: -D warnings
 

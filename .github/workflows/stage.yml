@@ -6,7 +6,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,7 +36,7 @@ jobs:
           cache-on-failure: true
       - name: Build reth
         run: |
-          cargo install --features asm-keccak,jemalloc --path bin/reth
+          make install
       - name: Run headers stage
         run: |
           reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints

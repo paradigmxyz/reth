@@ -88,7 +88,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
+      - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests" --locked
 
   doc:
     name: doc tests (${{ matrix.network }})
@@ -107,7 +107,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run doctests
-        run: cargo test --doc --workspace --features "${{ matrix.network }}"
+        run: cargo test --doc --workspace --features "${{ matrix.network }}" --locked
 
   unit-success:
     name: unit success
