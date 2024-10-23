@@ -30,8 +30,8 @@ pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
-    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
+    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
@@ -208,8 +208,8 @@ impl EthChainSpec for OpChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> String {
-        self.inner.display_hardforks().to_string()
+    fn display_hardforks(&self) -> DisplayHardforks {
+        self.inner.display_hardforks()
     }
 
     fn genesis_header(&self) -> &Header {
