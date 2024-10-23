@@ -512,7 +512,7 @@ impl RevealedSparseTrie {
         // take the current prefix set.
         let prefix_set = std::mem::take(&mut self.prefix_set).freeze().into();
         let (root_rlp, updates) = self.rlp_node(Nibbles::default(), &prefix_set);
-        self.apply_updates(updates);
+        self.apply_hash_updates(updates);
 
         if let Some(root_hash) = root_rlp.as_hash() {
             root_hash
@@ -565,10 +565,14 @@ impl RevealedSparseTrie {
                 updates
             })
             .collect();
-        self.apply_updates(updates);
+        self.apply_hash_updates(updates);
     }
 
-    fn rlp_node(&self, path: Nibbles, prefix_set: &PrefixSetLocal) -> (RlpNode, SparseNodeUpdates) {
+    fn rlp_node(
+        &self,
+        path: Nibbles,
+        prefix_set: &PrefixSetLocal,
+    ) -> (RlpNode, SparseNodeHashUpdates) {
         // stack of paths we need rlp nodes for
         let mut path_stack = Vec::from([path]);
         // reusable rlp buffer
@@ -580,8 +584,8 @@ impl RevealedSparseTrie {
         // reusable branch value stack
         let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
         // updates to the sparse trie hashes
-        let mut updates = SparseNodeUpdates::default();
-        // prefix set index
+        let mut updates = SparseNodeHashUpdates::default();
+        // reusable prefix set index
         let mut index = 0;
 
         'main: while let Some(path) = path_stack.pop() {
@@ -660,7 +664,15 @@ impl RevealedSparseTrie {
         (rlp_node_stack.pop().unwrap().1, updates)
     }
 
-    fn apply_updates(&mut self, updates: SparseNodeUpdates) {
+    /// Applies the given hash updates to the sparse trie.
+    ///
+    /// Updates the hashes of [`SparseNode::Leaf`], [`SparseNode::Extension`], and
+    /// [`SparseNode::Branch`] nodes.
+    ///
+    /// # Panics
+    /// - If the given path is not present in the trie.
+    /// - If the node at the given path cannot have a hash associated with it.
+    fn apply_hash_updates(&mut self, updates: SparseNodeHashUpdates) {
         for (path, updated_hash) in updates {
             let node = self.nodes.get_mut(&path).unwrap();
 
@@ -751,7 +763,8 @@ struct RemovedSparseNode {
     unset_branch_nibble: Option<u8>,
 }
 
-type SparseNodeUpdates = HashMap<Nibbles, Option<B256>>;
+/// A list of paths with updated hashes.
+type SparseNodeHashUpdates = HashMap<Nibbles, Option<B256>>;
 
 #[cfg(test)]
 mod tests {
