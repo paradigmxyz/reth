@@ -6819,7 +6819,6 @@ dependencies = [
  "reth-libmdbx",
  "reth-metrics",
  "reth-nippy-jar",
- "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
