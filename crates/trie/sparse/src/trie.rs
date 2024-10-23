@@ -674,8 +674,9 @@ impl RevealedSparseTrie {
             let node = self.nodes.get_mut(&path).unwrap();
 
             match node {
-                SparseNode::Empty => todo!(),
-                SparseNode::Hash(_) => todo!(),
+                SparseNode::Empty | SparseNode::Hash(_) => {
+                    unreachable!("Empty and Hash node hashes should not be updated")
+                }
                 SparseNode::Leaf { hash, .. } |
                 SparseNode::Extension { hash, .. } |
                 SparseNode::Branch { hash, .. } => *hash = updated_hash,
