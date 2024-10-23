@@ -24,34 +24,35 @@ pub struct ExExNotifications<P, E> {
 /// A trait, that represents a stream of [`ExExNotification`]s. The stream will emit notifications
 /// for all blocks. If the stream is configured with a head via [`ExExNotifications::set_with_head`]
 /// or [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
-pub trait ExExNotificationsDyn<P, E>:
+pub trait ExExNotificationsStream<P, E>:
     Stream<Item = eyre::Result<ExExNotification>> + Unpin
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
-    /// Sets [`ExExNotificationsDyn`] to a stream of [`ExExNotification`]s without a head.
+    /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s without a head.
     ///
     /// It's a no-op if the stream has already been configured without a head.
     ///
     /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
     fn set_without_head(&mut self);
 
-    /// Sets [`ExExNotificationsDyn`] to a stream of [`ExExNotification`]s with the provided head.
+    /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s with the provided
+    /// head.
     ///
     /// It's a no-op if the stream has already been configured with a head.
     ///
     /// See the documentation of [`ExExNotificationsWithHead`] for more details.
     fn set_with_head(&mut self, exex_head: ExExHead);
 
-    /// Returns a new [`ExExNotificationsDyn`] without a head.
+    /// Returns a new [`ExExNotificationsStream`] without a head.
     ///
     /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
     fn without_head(self) -> Self
     where
         Self: Sized;
 
-    /// Returns a new [`ExExNotificationsDyn`] with the provided head.
+    /// Returns a new [`ExExNotificationsStream`] with the provided head.
     ///
     /// See the documentation of [`ExExNotificationsWithHead`] for more details.
     fn with_head(self, exex_head: ExExHead) -> Self
@@ -92,7 +93,7 @@ impl<P, E> ExExNotifications<P, E> {
     }
 }
 
-impl<P, E> ExExNotificationsDyn<P, E> for ExExNotifications<P, E>
+impl<P, E> ExExNotificationsStream<P, E> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
