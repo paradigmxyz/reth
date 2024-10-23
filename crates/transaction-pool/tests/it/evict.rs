@@ -1,8 +1,9 @@
 //! Transaction pool eviction tests.
 
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use alloy_primitives::{Address, B256};
 use rand::distributions::Uniform;
-use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use reth_primitives::constants::MIN_PROTOCOL_BASE_FEE;
 use reth_transaction_pool::{
     error::PoolErrorKind,
     test_utils::{

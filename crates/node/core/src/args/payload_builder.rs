@@ -1,12 +1,11 @@
 use crate::{cli::config::PayloadBuilderConfig, version::default_extradata};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
-use alloy_eips::merge::SLOT_DURATION;
+use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, merge::SLOT_DURATION};
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
-use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
