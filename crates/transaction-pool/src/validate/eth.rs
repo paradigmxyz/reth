@@ -780,36 +780,6 @@ impl ForkTracker {
     }
 }
 
-// /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
-// ///
-// /// Caution: This only checks past the Merge hardfork.
-// pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
-//     transaction: &T,
-//     fork_tracker: &ForkTracker,
-// ) -> Result<(), InvalidPoolTransactionError> {
-//     let spec_id = if fork_tracker.is_prague_activated() {
-//         SpecId::PRAGUE
-//     } else if fork_tracker.is_shanghai_activated() {
-//         SpecId::SHANGHAI
-//     } else {
-//         SpecId::MERGE
-//     };
-
-//     let gas_after_merge = validate_initial_tx_gas(
-//         spec_id,
-//         transaction.input(),
-//         transaction.kind().is_create(),
-//         transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-//         transaction.authorization_count() as u64,
-//     );
-
-//     if transaction.gas_limit() < gas_after_merge {
-//         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
-//     } else {
-//         Ok(())
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
