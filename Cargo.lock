@@ -8060,6 +8060,7 @@ version = "1.1.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "derive_more 1.0.0",
