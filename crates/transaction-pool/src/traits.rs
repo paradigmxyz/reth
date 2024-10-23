@@ -1594,4 +1594,27 @@ mod tests {
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
+
+    #[test]
+    fn test_pooled_transaction_limit() {
+        // No limit should never exceed
+        let limit_none = GetPooledTransactionLimit::None;
+        // Any size should return false
+        assert!(!limit_none.exceeds(1000));
+
+        // Size limit of 2MB (2 * 1024 * 1024 bytes)
+        let size_limit_2mb = GetPooledTransactionLimit::ResponseSizeSoftLimit(2 * 1024 * 1024);
+
+        // Test with size below the limit
+        // 1MB is below 2MB, should return false
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
+
+        // Test with size exactly at the limit
+        // 2MB equals the limit, should return false
+        assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
+
+        // Test with size exceeding the limit
+        // 3MB is above the 2MB limit, should return true
+        assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
+    }
 }
