@@ -105,13 +105,7 @@ where
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        optimism_payload(
-            self.evm_config.clone(),
-            args,
-            cfg_env,
-            block_env,
-            self.compute_pending_block,
-        )
+        optimism_payload(&self.evm_config, args, cfg_env, block_env, self.compute_pending_block)
     }
 
     fn on_missing_payload(
@@ -140,7 +134,7 @@ where
             best_payload: None,
         };
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
+        optimism_payload(&self.evm_config, args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -156,7 +150,7 @@ where
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
-    evm_config: EvmConfig,
+    evm_config: &EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
@@ -430,7 +424,7 @@ where
         &mut db,
         &chain_spec,
         attributes.payload_attributes.timestamp,
-        attributes.clone().payload_attributes.withdrawals,
+        attributes.payload_attributes.withdrawals.clone(),
     )?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
