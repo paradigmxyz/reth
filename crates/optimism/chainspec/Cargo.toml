@@ -49,6 +49,7 @@ std = [
     "alloy-chains/std",
     "alloy-genesis/std",
     "alloy-primitives/std",
+    "alloy-eips/std",
     "op-alloy-rpc-types/std",
     "reth-chainspec/std",
     "reth-ethereum-forks/std",
