@@ -10,6 +10,7 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
+use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -22,8 +23,7 @@ use reth_payload_primitives::{
     BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
 use reth_primitives::{
-    constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
+    constants::RETH_CLIENT_VERSION, proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
