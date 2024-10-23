@@ -16,7 +16,7 @@ use futures::{
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives::{Receipt, SealedBlock, TransactionSigned};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, TransactionSigned};
 use reth_storage_api::BlockReaderIdExt;
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
@@ -375,6 +375,25 @@ impl FeeHistoryEntry {
             rewards: Vec::new(),
             timestamp: block.timestamp,
         }
+    }
+
+    ///Construct a complete a feeHistoryEntry using `(SealedBlockWithSenders),(receipts) and
+    /// (percentiles)`
+    pub fn from_block_and_receipts(
+        block: &SealedBlockWithSenders,
+        receipts: &[Receipt],
+        percentiles: &[f64],
+    ) -> Self {
+        let mut entry = Self::new(block);
+        entry.rewards = calculate_reward_percentiles_for_block(
+            percentiles,
+            entry.gas_used,
+            entry.base_fee_per_gas,
+            &block.body.transactions,
+            receipts,
+        )
+        .unwrap_or_default();
+        entry
     }
 
     /// Returns the base fee for the next block according to the EIP-1559 spec.
