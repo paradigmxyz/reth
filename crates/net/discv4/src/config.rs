@@ -23,7 +23,7 @@ pub struct Discv4Config {
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
     pub udp_ingress_message_buffer: usize,
-    /// The number of allowed failures for `FindNode` requests. Default: 5.
+    /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
     /// 10min.

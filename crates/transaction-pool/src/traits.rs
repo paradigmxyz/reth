@@ -2,7 +2,7 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::PoolResult,
+    error::{InvalidPoolTransactionError, PoolResult},
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
@@ -961,6 +961,26 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64>;
+
+    /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
+    ///
+    /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
+    /// where the input data contains the initialization code. If the input code size exceeds
+    /// the configured limit, an [`InvalidPoolTransactionError::ExceedsMaxInitCodeSize`] error is
+    /// returned.
+    fn ensure_max_init_code_size(
+        &self,
+        max_init_code_size: usize,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        if self.kind().is_create() && self.input().len() > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+                self.size(),
+                max_init_code_size,
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions
