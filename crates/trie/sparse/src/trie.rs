@@ -4,7 +4,7 @@ use alloy_rlp::Decodable;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_tracing::tracing::debug;
 use reth_trie::{
-    prefix_set::{PrefixSetLocal, PrefixSetMut},
+    prefix_set::{PrefixSet, PrefixSetMut},
     RlpNode,
 };
 use reth_trie_common::{
@@ -510,8 +510,8 @@ impl RevealedSparseTrie {
     /// Updates all remaining dirty nodes before calculating the root.
     pub fn root(&mut self) -> B256 {
         // take the current prefix set.
-        let prefix_set = std::mem::take(&mut self.prefix_set).freeze().into();
-        let (root_rlp, updates) = self.rlp_node(Nibbles::default(), &prefix_set);
+        let prefix_set = std::mem::take(&mut self.prefix_set).freeze();
+        let (root_rlp, updates) = self.rlp_node(Nibbles::default(), prefix_set);
         self.apply_hash_updates(updates);
 
         if let Some(root_hash) = root_rlp.as_hash() {
@@ -557,11 +557,12 @@ impl RevealedSparseTrie {
             }
         }
 
-        let prefix_set = self.prefix_set.clone().freeze().into();
+        let prefix_set = self.prefix_set.clone().freeze();
         let updates = targets
             .into_par_iter()
             .flat_map(|target| {
-                let (_, updates) = self.rlp_node(target, &prefix_set);
+                // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                let (_, updates) = self.rlp_node(target, prefix_set.clone());
                 updates
             })
             .collect();
@@ -571,7 +572,7 @@ impl RevealedSparseTrie {
     fn rlp_node(
         &self,
         path: Nibbles,
-        prefix_set: &PrefixSetLocal,
+        mut prefix_set: PrefixSet,
     ) -> (RlpNode, SparseNodeHashUpdates) {
         // stack of paths we need rlp nodes for
         let mut path_stack = Vec::from([path]);
@@ -585,8 +586,6 @@ impl RevealedSparseTrie {
         let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
         // updates to the sparse trie hashes
         let mut updates = SparseNodeHashUpdates::default();
-        // reusable prefix set index
-        let mut index = 0;
 
         'main: while let Some(path) = path_stack.pop() {
             let rlp_node = match self.nodes.get(&path).unwrap() {
@@ -596,9 +595,7 @@ impl RevealedSparseTrie {
                     rlp_buf.clear();
                     let mut full_path = path.clone();
                     full_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) =
-                        hash.filter(|_| !prefix_set.contains(&full_path, &mut index))
-                    {
+                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&full_path)) {
                         RlpNode::word_rlp(&hash)
                     } else {
                         let value = self.values.get(&full_path).unwrap();
@@ -610,7 +607,7 @@ impl RevealedSparseTrie {
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path, &mut index)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
                         RlpNode::word_rlp(&hash)
                     } else if rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
                         let (_, child) = rlp_node_stack.pop().unwrap();
@@ -624,7 +621,7 @@ impl RevealedSparseTrie {
                     }
                 }
                 SparseNode::Branch { state_mask, hash } => {
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path, &mut index)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
                         rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
