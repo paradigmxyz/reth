@@ -569,6 +569,10 @@ impl RevealedSparseTrie {
         self.apply_hash_updates(updates);
     }
 
+    /// Calculates the RLP node hash for a node at the given path and according to the provided
+    /// [`PrefixSet`] of changed paths.
+    ///
+    /// Returns the RLP node and a list of paths that need to be updated with the new hashes.
     fn rlp_node(
         &self,
         path: Nibbles,
