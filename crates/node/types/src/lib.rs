@@ -41,15 +41,6 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type ChainSpec: EthChainSpec;
 }
 
-/// Dynamic version of [`NodeTypes`] with node primitives block being [`reth_primitives::Block`].
-pub trait NodeTypesDyn: Send + Sync + Unpin + 'static {
-    /// The node's primitive types, defining basic operations and structures.
-    fn primitives(&self) -> &(dyn NodePrimitives<Block = reth_primitives::Block> + 'static);
-
-    /// The type used for configuration of the EVM.
-    fn chain_spec(&self) -> Box<dyn EthChainSpec + 'static>;
-}
-
 /// The type that configures an Ethereum-like node with an engine for consensus.
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
