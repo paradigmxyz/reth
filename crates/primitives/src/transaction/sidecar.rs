@@ -1,11 +1,9 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 use crate::{Signature, Transaction, TransactionSigned};
-use alloy_consensus::{
-    constants::EIP4844_TX_TYPE_ID, transaction::TxEip4844, TxEip4844WithSidecar,
-};
-use alloy_primitives::{keccak256, TxHash};
-use alloy_rlp::{Decodable, Error as RlpError, Header};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, TxEip4844WithSidecar};
+use alloy_primitives::TxHash;
+use alloy_rlp::Header;
 use serde::{Deserialize, Serialize};
 
 #[doc(inline)]
@@ -188,28 +186,8 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP decoding methods, and does not
     /// represent the full RLP decoding of the `PooledTransactionsElement` type.
     pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let (transaction, signature) =
+        let (transaction, signature, hash) =
             TxEip4844WithSidecar::decode_signed_fields(data)?.into_parts();
-
-        // # Calculating the hash
-        //
-        // The full encoding of the `PooledTransaction` response is:
-        // `tx_type (0x03) || rlp([tx_payload_body, blobs, commitments, proofs])`
-        //
-        // The transaction hash however, is:
-        // `keccak256(tx_type (0x03) || rlp(tx_payload_body))`
-        //
-        // Note that this is `tx_payload_body`, not `[tx_payload_body]`, which would be
-        // `[[chain_id, nonce, max_priority_fee_per_gas, ...]]`, i.e. a list within a list.
-        //
-        // Because the pooled transaction encoding is different than the hash encoding for
-        // EIP-4844 transactions, we do not use the original buffer to calculate the hash.
-        //
-        // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
-        // signature for hashing without a header. We then hash the result.
-        let mut buf = Vec::new();
-        transaction.tx().encode_with_signature(&signature, &mut buf, false);
-        let hash = keccak256(&buf);
 
         Ok(Self { transaction, hash, signature })
     }
