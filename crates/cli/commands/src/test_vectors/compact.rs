@@ -1,6 +1,6 @@
 use alloy_primitives::{hex, private::getrandom::getrandom, TxKind};
 use arbitrary::Arbitrary;
-use eyre::Result;
+use eyre::{Context, Result};
 use proptest::{
     prelude::{ProptestConfig, RngCore},
     test_runner::{TestRng, TestRunner},
@@ -211,7 +211,9 @@ where
 
     // Read the file where the vectors are stored
     let file_path = format!("{VECTORS_FOLDER}/{}.json", &type_name);
-    let file = File::open(&file_path)?;
+    let file = File::open(&file_path).wrap_err_with(|| {
+        "Failed to open vector. Make sure to run `reth test-vectors compact --write` first."
+    })?;
     let reader = BufReader::new(file);
 
     let stored_values: Vec<String> = serde_json::from_reader(reader)?;
