@@ -1,0 +1,35 @@
+# Ensures that `Compact` codec changes are backwards compatible.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+name: compact-codec
+jobs:
+  compact-codec:
+    runs-on:
+      group: Reth
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref || 'main' }}
+      # On `main` branch, generates test vectors and serializes them to disk using `serde-json`.
+      - name: Generate compact vectors
+        run: cargo run --bin reth --features dev -- test-vectors compact --write
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          clean: false
+      # On incoming merge try to read and decode previously generated vectors 
+      - name: Read vectors
+        run: cargo run --bin reth --features dev -- test-vectors compact --read
