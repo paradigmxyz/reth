@@ -569,6 +569,17 @@ impl RevealedSparseTrie {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
+        let targets = self.get_nodes_at_depth(depth);
+        let mut prefix_set = self.prefix_set.clone().freeze();
+        for target in targets {
+            self.rlp_node(target, &mut prefix_set);
+        }
+    }
+
+    /// Returns a list of paths to the nodes that are located at the provided depth when counting
+    /// from the root node. If there's a leaf at a depth less than the provided depth, it will be
+    /// included in the result.
+    fn get_nodes_at_depth(&self, depth: usize) -> HashSet<Nibbles> {
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = HashSet::<Nibbles>::default();
 
@@ -602,10 +613,7 @@ impl RevealedSparseTrie {
             }
         }
 
-        let mut prefix_set = self.prefix_set.clone().freeze();
-        for target in targets {
-            self.rlp_node(target, &mut prefix_set);
-        }
+        targets
     }
 
     fn rlp_node(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
@@ -1516,6 +1524,76 @@ mod tests {
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
             Some(SparseNode::Branch { state_mask, hash: None }) if *state_mask == TrieMask::new(0b11)
+        );
+    }
+
+    #[test]
+    fn sparse_trie_get_nodes_at_depth() {
+        let mut sparse = RevealedSparseTrie::default();
+
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+
+        // Extension (Key = 5) – Level 0
+        // └── Branch (Mask = 1011) – Level 1
+        //     ├── 0 -> Extension (Key = 23) – Level 2
+        //     │        └── Branch (Mask = 0101) – Level 3
+        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231) – Level 4
+        //     │              └── 3 -> Leaf (Key = 3, Path = 50233) – Level 4
+        //     ├── 2 -> Leaf (Key = 013, Path = 52013) – Level 2
+        //     └── 3 -> Branch (Mask = 0101) – Level 2
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102) – Level 3
+        //                └── 3 -> Branch (Mask = 1010) – Level 3
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+
+        assert_eq!(sparse.get_nodes_at_depth(0), HashSet::from([Nibbles::default()]));
+        assert_eq!(
+            sparse.get_nodes_at_depth(1),
+            HashSet::from([Nibbles::from_nibbles_unchecked([0x5])])
+        );
+        assert_eq!(
+            sparse.get_nodes_at_depth(2),
+            HashSet::from([
+                Nibbles::from_nibbles_unchecked([0x5, 0x0]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3])
+            ])
+        );
+        assert_eq!(
+            sparse.get_nodes_at_depth(3),
+            HashSet::from([
+                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
+            ])
+        );
+        assert_eq!(
+            sparse.get_nodes_at_depth(4),
+            HashSet::from([
+                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
+            ])
         );
     }
 }
