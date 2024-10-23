@@ -97,8 +97,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167009.into(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize taiko_a7 genesis json"),
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -139,8 +137,6 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167001.into(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize taiko_dev genesis json"),
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
@@ -180,8 +176,6 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167000.into(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize Mainnet genesis json"),
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
