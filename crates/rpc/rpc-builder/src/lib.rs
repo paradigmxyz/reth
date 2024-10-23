@@ -194,12 +194,7 @@ use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
 
-use crate::{
-    auth::AuthRpcModule,
-    error::WsHttpSamePortError,
-    metrics::RpcRequestMetrics,
-    rate_limiter::RpcRequestRateLimiter
-};
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 
 pub use cors::CorsDomainError;
 
@@ -1459,15 +1454,13 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
     where
-        RpcMiddleware: Layer<RpcRequestMetricsService<RpcRequestRateLimitingService<RpcService>>> + Clone + Send + 'static,
-        for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcRequestRateLimitingService<RpcService>>>>::Service:
+        RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
+        for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
             Send + Sync + 'static + RpcServiceT<'a>,
     {
         let mut http_handle = None;
         let mut ws_handle = None;
         let mut ipc_handle = None;
-
-        let rt = tokio::runtime::Handle::current();
 
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
@@ -1528,8 +1521,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 .or(modules.ws.as_ref())
                                 .map(RpcRequestMetrics::same_port)
                                 .unwrap_or_default(),
-                        )
-                        .layer(RpcRequestRateLimiter::new(rt.clone(), 100))
+                        ),
                     )
                     .build(http_socket_addr)
                     .await
@@ -1572,8 +1564,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_rpc_middleware(
                     self.rpc_middleware
                         .clone()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default())
-                        .layer(RpcRequestRateLimiter::new(rt.clone(), 100))
+                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
                 )
                 .build(ws_socket_addr)
                 .await
@@ -1598,8 +1589,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_rpc_middleware(
                     self.rpc_middleware.clone().layer(
                         modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
-                    )
-                    .layer(RpcRequestRateLimiter::new(rt.clone(), 100))
+                    ),
                 )
                 .build(http_socket_addr)
                 .await
