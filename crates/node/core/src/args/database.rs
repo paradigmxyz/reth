@@ -12,10 +12,6 @@ use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
 use reth_node_types::ByteSize;
 use reth_storage_errors::db::LogLevel;
 
-fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
-    s.parse()
-}
-
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "Database")]
@@ -102,6 +98,11 @@ impl TypedValueParser for LogLevelValueParser {
         Some(Box::new(values))
     }
 }
+
+fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
+    s.parse()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
