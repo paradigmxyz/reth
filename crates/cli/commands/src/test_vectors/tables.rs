@@ -17,7 +17,7 @@ const VECTORS_FOLDER: &str = "testdata/micro/db";
 const PER_TABLE: usize = 1000;
 
 /// Generates test vectors for specified `tables`. If list is empty, then generate for all tables.
-pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
+pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
     getrandom(&mut seed)?;

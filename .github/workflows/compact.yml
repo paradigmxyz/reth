@@ -16,6 +16,11 @@ jobs:
   compact-codec:
     runs-on:
       group: Reth
+    strategy:
+      matrix:
+        bin:
+          - cargo run --bin reth --features "dev"
+          - cargo run --bin op-reth --features "optimism dev" --manifest-path crates/optimism/bin/Cargo.toml
     steps:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -27,11 +32,11 @@ jobs:
           ref: ${{ github.base_ref || 'main' }}
       # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
-        run: cargo run --bin reth --features dev -- test-vectors compact --write
+        run: ${{ matrix.bin }} -- test-vectors compact --write
       - name: Checkout PR
         uses: actions/checkout@v4
         with:
           clean: false
       # On incoming merge try to read and decode previously generated vectors with `Compact`
       - name: Read vectors
-        run: cargo run --bin reth --features dev -- test-vectors compact --read
+        run: ${{ matrix.bin }} -- test-vectors compact --read

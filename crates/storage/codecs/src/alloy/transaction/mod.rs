@@ -88,4 +88,12 @@ mod tests {
             "112210080a8ba06a8d108540bb3140e9f71a0812c46226f9ea77ae880d98d19fe27e5911801175c3b32620b2e887af0296af343526e439b775ee3b1c06750058e9e5fc4cd5965c3010f86184"
         ));
     }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn test_decode_deposit() {
+        test_decode::<op_alloy_consensus::TxDeposit>(&hex!(
+            "8108ac8f15983d59b6ae4911a00ff7bfcd2e53d2950926f8c82c12afad02861c46fcb293e776204052725e1c08ff2e9ff602ca916357601fa972a14094891fe3598b718758f22c46f163c18bcaa6296ce87e5267ef3fd932112842fbbf79011548cdf067d93ce6098dfc0aaf5a94531e439f30d6dfd0c6"
+        )); 
+    }
 }
