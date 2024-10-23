@@ -1,6 +1,6 @@
 //! clap [Args](clap::Args) for database configuration
 
-use std::time::Duration;
+use std::{fmt, str::FromStr, time::Duration};
 
 use crate::version::default_client_version;
 use clap::{
@@ -9,7 +9,6 @@ use clap::{
     Arg, Args, Command, Error,
 };
 use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
-use reth_node_types::ByteSize;
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
@@ -96,6 +95,67 @@ impl TypedValueParser for LogLevelValueParser {
             .iter()
             .map(|v| PossibleValue::new(v.variant_name()).help(v.help_message()));
         Some(Box::new(values))
+    }
+}
+
+/// Size in bytes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ByteSize(pub usize);
+
+impl FromStr for ByteSize {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim().to_uppercase();
+        let parts: Vec<&str> = s.split_whitespace().collect();
+
+        let (num_str, unit) = match parts.len() {
+            1 => {
+                let (num, unit) =
+                    s.split_at(s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len()));
+                (num, unit)
+            }
+            2 => (parts[0], parts[1]),
+            _ => {
+                return Err("Invalid format. Use '<number><unit>' or '<number> <unit>'.".to_string())
+            }
+        };
+
+        let num: usize = num_str.parse().map_err(|_| "Invalid number".to_string())?;
+
+        let multiplier = match unit {
+            "B" | "" => 1, // Assume bytes if no unit is specified
+            "KB" => 1024,
+            "MB" => 1024 * 1024,
+            "GB" => 1024 * 1024 * 1024,
+            "TB" => 1024 * 1024 * 1024 * 1024,
+            _ => return Err(format!("Invalid unit: {}. Use B, KB, MB, GB, or TB.", unit)),
+        };
+
+        Ok(Self(num * multiplier))
+    }
+}
+
+impl fmt::Display for ByteSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const KB: usize = 1024;
+        const MB: usize = KB * 1024;
+        const GB: usize = MB * 1024;
+        const TB: usize = GB * 1024;
+
+        let (size, unit) = if self.0 >= TB {
+            (self.0 as f64 / TB as f64, "TB")
+        } else if self.0 >= GB {
+            (self.0 as f64 / GB as f64, "GB")
+        } else if self.0 >= MB {
+            (self.0 as f64 / MB as f64, "MB")
+        } else if self.0 >= KB {
+            (self.0 as f64 / KB as f64, "KB")
+        } else {
+            (self.0 as f64, "B")
+        };
+
+        write!(f, "{:.2}{}", size, unit)
     }
 }
 
