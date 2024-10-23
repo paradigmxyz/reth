@@ -809,11 +809,11 @@ mod tests {
         let mut fork_tracker =
             ForkTracker { shanghai: false.into(), cancun: false.into(), prague: false.into() };
 
-        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
+        let res = transaction.ensure_intrinsic_gas(&fork_tracker);
         assert!(res.is_ok());
 
         fork_tracker.shanghai = true.into();
-        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
+        let res = transaction.ensure_intrinsic_gas(&fork_tracker);
         assert!(res.is_ok());
 
         let provider = MockEthProvider::default();
