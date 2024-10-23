@@ -122,11 +122,7 @@ impl DatabaseArguments {
     ///
     /// * `max_size` - Maximum database size in bytes
     /// * `growth_step` - Database growth step in bytes
-    pub fn with_geometry(
-        mut self,
-        max_size: Option<usize>,
-        growth_step: Option<usize>,
-    ) -> Self {
+    pub fn with_geometry(mut self, max_size: Option<usize>, growth_step: Option<usize>) -> Self {
         self.geometry = Geometry {
             size: max_size.map(|size| 0..size),
             growth_step: growth_step.map(|growth_step| growth_step as isize),
