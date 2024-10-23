@@ -10,7 +10,7 @@ use alloy_primitives::{
     BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
 use reth_beacon_consensus::{
@@ -70,7 +70,6 @@ use crate::{
     engine::{EngineApiKind, EngineApiRequest},
     tree::metrics::EngineApiMetrics,
 };
-use alloy_eips::eip7685::Requests;
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -722,8 +721,7 @@ where
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
-        cancun_fields: Option<CancunPayloadFields>,
-        execution_requests: Option<Requests>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
@@ -754,11 +752,7 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-        let block = match self.payload_validator.ensure_well_formed_payload(
-            payload,
-            cancun_fields.into(),
-            execution_requests,
-        ) {
+        let block = match self.payload_validator.ensure_well_formed_payload(payload, sidecar) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "engine::tree", %error, "Invalid payload");
@@ -1241,14 +1235,8 @@ where
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload {
-                                payload,
-                                cancun_fields,
-                                execution_requests,
-                                tx,
-                            } => {
-                                let output =
-                                    self.on_new_payload(payload, cancun_fields, execution_requests);
+                            BeaconEngineMessage::NewPayload { payload, sidecar, tx } => {
+                                let output = self.on_new_payload(payload, sidecar);
                                 if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
                                     reth_beacon_consensus::BeaconOnNewPayloadError::Internal(
                                         Box::new(e),
@@ -2585,6 +2573,7 @@ mod tests {
     use crate::persistence::PersistenceAction;
     use alloy_primitives::{Bytes, Sealable};
     use alloy_rlp::Decodable;
+    use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
@@ -2862,11 +2851,10 @@ mod tests {
             self.tree
                 .on_new_payload(
                     payload.into(),
-                    Some(CancunPayloadFields {
+                    ExecutionPayloadSidecar::v3(CancunPayloadFields {
                         parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
                         versioned_hashes: vec![],
                     }),
-                    None,
                 )
                 .unwrap();
         }
@@ -3129,7 +3117,10 @@ mod tests {
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-        let outcome = test_harness.tree.on_new_payload(payload.into(), None, None).unwrap();
+        let outcome = test_harness
+            .tree
+            .on_new_payload(payload.into(), ExecutionPayloadSidecar::none())
+            .unwrap();
         assert!(outcome.outcome.is_syncing());
 
         // ensure block is buffered
@@ -3173,8 +3164,7 @@ mod tests {
             .on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::NewPayload {
                     payload: payload.clone().into(),
-                    cancun_fields: None,
-                    execution_requests: None,
+                    sidecar: ExecutionPayloadSidecar::none(),
                     tx,
                 }
                 .into(),

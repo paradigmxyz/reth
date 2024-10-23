@@ -8,8 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_eips::eip7685::Requests;
-use alloy_rpc_types::engine::{ExecutionPayload, MaybeCancunPayloadFields, PayloadError};
+use alloy_rpc_types::engine::{
+    ExecutionPayload, ExecutionPayloadSidecar, MaybeCancunPayloadFields, PayloadError,
+};
 use reth_chainspec::EthereumHardforks;
 use reth_primitives::SealedBlock;
 use reth_rpc_types_compat::engine::payload::try_into_block;
@@ -112,15 +113,12 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     pub fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
-        cancun_fields: MaybeCancunPayloadFields,
-        execution_requests: Option<Requests>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<SealedBlock, PayloadError> {
         let expected_hash = payload.block_hash();
 
         // First parse the block
-        let sealed_block =
-            try_into_block(payload, cancun_fields.parent_beacon_block_root(), execution_requests)?
-                .seal_slow();
+        let sealed_block = try_into_block(payload, &sidecar)?.seal_slow();
 
         // Ensure the hash included in the payload matches the block hash
         if expected_hash != sealed_block.hash() {
@@ -139,7 +137,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
                 // cancun active but excess blob gas not present
                 return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
             }
-            if cancun_fields.as_ref().is_none() {
+            if sidecar.cancun().is_none() {
                 // cancun active but cancun fields not present
                 return Err(PayloadError::PostCancunWithoutCancunFields)
             }
@@ -156,7 +154,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
                 // cancun not active but excess blob gas present
                 return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
             }
-            if cancun_fields.as_ref().is_some() {
+            if sidecar.cancun().is_some() {
                 // cancun not active but cancun fields present
                 return Err(PayloadError::PreCancunWithCancunFields)
             }
@@ -175,7 +173,10 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         // EIP-4844 checks
-        self.ensure_matching_blob_versioned_hashes(&sealed_block, &cancun_fields)?;
+        self.ensure_matching_blob_versioned_hashes(
+            &sealed_block,
+            &sidecar.cancun().cloned().into(),
+        )?;
 
         Ok(sealed_block)
     }
