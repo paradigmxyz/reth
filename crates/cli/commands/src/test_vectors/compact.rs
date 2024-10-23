@@ -129,6 +129,7 @@ compact_types!(
     ]
 );
 
+/// Generates a vector of type `T` to a file.
 pub(crate) fn generate_vectors() -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
@@ -149,6 +150,7 @@ pub(crate) fn generate_vectors() -> Result<()> {
     Ok(())
 }
 
+/// Reads multiple vectors of different types ensuring their correctness by decoding and re-encoding.
 pub fn read_vectors() -> Result<()> {
     fs::create_dir_all(VECTORS_FOLDER)?;
 
@@ -159,7 +161,7 @@ pub fn read_vectors() -> Result<()> {
     Ok(())
 }
 
-/// Generates test vectors for a specific type `T`
+/// Generates test vectors for a specific type `T`.
 fn generate_vector<T>(runner: &mut TestRunner) -> Result<()>
 where
     T: for<'a> Arbitrary<'a>
@@ -200,8 +202,8 @@ where
     Ok(())
 }
 
-/// Reads vectors from the file and compares the original T with the one reconstructed using
-/// T::from_compact.
+/// Reads a vector of type `T` from a file and compares each item with its reconstructed version
+/// using `T::from_compact`.
 fn read_vector<T>() -> Result<()>
 where
     T: serde::de::DeserializeOwned + reth_codecs::Compact + PartialEq + Clone + std::fmt::Debug,
