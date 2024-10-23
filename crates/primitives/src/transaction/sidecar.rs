@@ -32,7 +32,7 @@ impl BlobTransaction {
     /// Constructs a new [`BlobTransaction`] from a [`TransactionSigned`] and a
     /// [`BlobTransactionSidecar`].
     ///
-    /// Returns an error if the signed transaction is not [`TxEip4844`]
+    /// Returns an error if the signed transaction is not [`Transaction::Eip4844`]
     pub fn try_from_signed(
         tx: TransactionSigned,
         sidecar: BlobTransactionSidecar,
@@ -53,7 +53,7 @@ impl BlobTransaction {
 
     /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
     ///
-    /// See also [`TxEip4844::validate_blob`]
+    /// See also [`alloy_consensus::TxEip4844::validate_blob`]
     #[cfg(feature = "c-kzg")]
     pub fn validate(
         &self,
