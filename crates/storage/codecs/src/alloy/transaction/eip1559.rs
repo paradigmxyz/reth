@@ -18,6 +18,7 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
     derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 #[cfg_attr(any(test, feature = "test-utils"), crate::add_arbitrary_tests(compact))]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 pub(crate) struct TxEip1559 {
     chain_id: ChainId,
     nonce: u64,
