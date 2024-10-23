@@ -2146,11 +2146,11 @@ where
 
         let start = Instant::now();
 
-        trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
+        debug!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         self.validate_block(&block)?;
 
-        trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash, "Fetching block state provider");
+        debug!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash, "Fetching block state provider");
         let Some(state_provider) = self.state_provider(block.parent_hash)? else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
@@ -2180,7 +2180,7 @@ where
             return Err(e.into())
         }
 
-        trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
+        debug!(target: "engine::tree", block=?block.num_hash(), "Executing block");
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block_number = block.number;
@@ -2191,7 +2191,7 @@ where
         let exec_time = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
 
-        trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+        debug!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2208,7 +2208,7 @@ where
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
-        trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
+        debug!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();
         let mut state_root_result = None;
 
@@ -4094,7 +4094,7 @@ mod tests {
         // trigger the persistence task.
         let downloaded_blocks = test_harness
             .block_builder
-            .create_fork(&last_base_chain_block, tree_config.persistence_threshold() + 1);
+            .create_fork(last_base_chain_block, tree_config.persistence_threshold() + 1);
         test_harness.setup_range_insertion_for_valid_chain(downloaded_blocks.clone());
 
         let last_batch_block = downloaded_blocks.last().unwrap().clone();
