@@ -9,7 +9,10 @@ use reth_codecs::alloy::{
     authorization_list::Authorization,
     genesis_account::GenesisAccount,
     header::{Header, HeaderExt},
-    transaction::{eip2930::TxEip2930, eip1559::TxEip1559, eip4844::TxEip4844, eip7702::TxEip7702, legacy::TxLegacy},
+    transaction::{
+        eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
+        legacy::TxLegacy,
+    },
     withdrawal::Withdrawal,
 };
 use reth_db::{
@@ -18,7 +21,7 @@ use reth_db::{
 };
 use reth_fs_util as fs;
 use reth_primitives::{
-    Account, Log, LogData, Receipt, StorageEntry, Transaction, TransactionSignedNoHash, TxType
+    Account, Log, LogData, Receipt, StorageEntry, Transaction, TransactionSignedNoHash, TxType,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode};
 use reth_stages_types::{

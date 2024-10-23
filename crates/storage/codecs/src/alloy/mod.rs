@@ -1,15 +1,29 @@
 //! Implements Compact for alloy types.
 
-pub mod access_list;
-pub mod authorization_list;
-pub mod genesis_account;
-pub mod header;
-pub mod log;
-pub mod signature;
-pub mod transaction;
-pub mod trie;
-pub mod txkind;
-pub mod withdrawal;
+/// Will make it a pub mod if test-utils is enabled
+macro_rules! cond_mod {
+    ($($mod_name:ident),*) => {
+        $(
+            #[cfg(feature = "test-utils")]
+            pub mod $mod_name;
+            #[cfg(not(feature = "test-utils"))]
+            mod $mod_name;
+        )*
+    };
+}
+
+cond_mod!(
+    access_list,
+    authorization_list,
+    genesis_account,
+    header,
+    log,
+    signature,
+    transaction,
+    trie,
+    txkind,
+    withdrawal
+);
 
 #[cfg(test)]
 mod tests {

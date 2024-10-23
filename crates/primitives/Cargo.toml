@@ -64,7 +64,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 # eth
 reth-chainspec.workspace = true
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }

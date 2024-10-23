@@ -18,6 +18,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use reth_codecs_derive::*;
+use serde as _;
 
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
@@ -28,8 +29,8 @@ use alloc::vec::Vec;
 #[cfg(feature = "test-utils")]
 pub mod alloy;
 
-#[cfg(any(test, feature = "alloy"))]
 #[cfg(not(feature = "test-utils"))]
+#[cfg(any(test, feature = "alloy"))]
 mod alloy;
 
 #[cfg(any(test, feature = "test-utils"))]

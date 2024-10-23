@@ -1,4 +1,4 @@
-//! Compact implementation for [`AlloyTxEip7702`]
+//! Compact implementation for [`AlloyTxLegacy`]
 
 use crate::Compact;
 use alloy_consensus::TxLegacy as AlloyTxLegacy;

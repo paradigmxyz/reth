@@ -28,7 +28,7 @@ op-alloy-consensus = { workspace = true, optional = true }
 bytes.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 visibility = { version = "0.1.1", optional = true}
-serde = { workspace = true, optional = true }
+serde.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
@@ -48,7 +48,6 @@ serde_json.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-serde.workspace = true
 
 [features]
 default = ["std", "alloy"]
@@ -70,8 +69,7 @@ alloy = [
 ]
 optimism = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [
-    "visibility",
     "alloy",
-    "serde",
+    "visibility",
     "arbitrary"
 ]
