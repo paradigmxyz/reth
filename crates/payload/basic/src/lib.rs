@@ -14,10 +14,13 @@ use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{
     database::CachedReads, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
 };
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
+use reth_payload_primitives::{
+    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
+};
 use reth_primitives::{
     constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
@@ -25,7 +28,6 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
-use reth_revm::state_change::post_block_withdrawals_balance_increments;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{Database, State};
@@ -474,7 +476,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.take();
 
         if best_payload.is_none() && self.pending_block.is_none() {
@@ -530,7 +535,11 @@ where
             };
         }
 
-        let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
+        let fut = ResolveBestPayload {
+            best_payload,
+            maybe_better,
+            empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
+        };
 
         (fut, KeepPayloadJobAlive::No)
     }
@@ -784,6 +793,21 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
         BuildArguments {
             client: self.client,
             pool,
+            cached_reads: self.cached_reads,
+            config: self.config,
+            cancel: self.cancel,
+            best_payload: self.best_payload,
+        }
+    }
+
+    /// Maps the transaction pool to a new type using a closure with the current pool type as input.
+    pub fn map_pool<F, P>(self, f: F) -> BuildArguments<P, Client, Attributes, Payload>
+    where
+        F: FnOnce(Pool) -> P,
+    {
+        BuildArguments {
+            client: self.client,
+            pool: f(self.pool),
             cached_reads: self.cached_reads,
             config: self.config,
             cancel: self.cancel,

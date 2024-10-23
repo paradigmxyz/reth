@@ -1,12 +1,10 @@
 //! Collection of methods for block validation.
 
+use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
-    constants::{
-        eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-        MAXIMUM_EXTRA_DATA_SIZE,
-    },
+    constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
 };
 use revm_primitives::calc_excess_blob_gas;
@@ -77,24 +75,6 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
     Ok(())
 }
 
-/// Validate that requests root is present if Prague is active.
-///
-/// See [EIP-7685]: General purpose execution layer requests
-///
-/// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
-#[inline]
-pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
-    let requests_root =
-        block.body.calculate_requests_root().ok_or(ConsensusError::BodyRequestsMissing)?;
-    let header_requests_root = block.requests_root.ok_or(ConsensusError::RequestsRootMissing)?;
-    if requests_root != *header_requests_root {
-        return Err(ConsensusError::BodyRequestsRootDiff(
-            GotExpected { got: requests_root, expected: header_requests_root }.into(),
-        ));
-    }
-    Ok(())
-}
-
 /// Validate a block without regard for state:
 ///
 /// - Compares the ommer hash in the block header to the block body
@@ -125,10 +105,6 @@ pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
 
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
         validate_cancun_gas(block)?;
-    }
-
-    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        validate_prague_request(block)?;
     }
 
     Ok(())
@@ -460,7 +436,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
-            requests_root: None
+            requests_hash: None
         };
         // size: 0x9b5
 
@@ -480,7 +456,7 @@ mod tests {
         (
             SealedBlock {
                 header: SealedHeader::new(header, seal),
-                body: BlockBody { transactions, ommers, withdrawals: None, requests: None },
+                body: BlockBody { transactions, ommers, withdrawals: None },
             },
             parent,
         )
@@ -552,7 +528,6 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
-            requests: None,
         };
 
         let block = SealedBlock::new(header, body);

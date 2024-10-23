@@ -829,6 +829,24 @@ impl Discv4Service {
     /// table. Returns `true` if the node was in the table and `false` otherwise.
     pub fn remove_node(&mut self, node_id: PeerId) -> bool {
         let key = kad_key(node_id);
+        self.remove_key(node_id, key)
+    }
+
+    /// Removes a `node_id` from the routing table but only if there are enough other nodes in the
+    /// bucket (bucket must be at least half full)
+    ///
+    /// Returns `true` if the node was removed
+    pub fn soft_remove_node(&mut self, node_id: PeerId) -> bool {
+        let key = kad_key(node_id);
+        let Some(bucket) = self.kbuckets.get_bucket(&key) else { return false };
+        if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
+            // skip half empty bucket
+            return false;
+        }
+        self.remove_key(node_id, key)
+    }
+
+    fn remove_key(&mut self, node_id: PeerId, key: discv5::Key<NodeKey>) -> bool {
         let removed = self.kbuckets.remove(&key);
         if removed {
             trace!(target: "discv4", ?node_id, "removed node");
@@ -852,7 +870,9 @@ impl Discv4Service {
         false
     }
 
-    /// Update the entry on RE-ping
+    /// Update the entry on RE-ping.
+    ///
+    /// Invoked when we received the Pong to our [`PingReason::RePing`] ping.
     ///
     /// On re-ping we check for a changed `enr_seq` if eip868 is enabled and when it changed we sent
     /// a followup request to retrieve the updated ENR
@@ -1491,13 +1511,7 @@ impl Discv4Service {
             // the table, but only if there are enough other nodes in the bucket (bucket must be at
             // least half full)
             if failures > (self.config.max_find_node_failures as usize) {
-                if let Some(bucket) = self.kbuckets.get_bucket(&key) {
-                    if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
-                        // skip half empty bucket
-                        continue
-                    }
-                }
-                self.remove_node(node_id);
+                self.soft_remove_node(node_id);
             }
         }
     }
@@ -2247,7 +2261,7 @@ impl NodeEntry {
 impl NodeEntry {
     /// Returns true if the node should be re-pinged.
     fn is_expired(&self) -> bool {
-        self.last_seen.elapsed() > ENDPOINT_PROOF_EXPIRATION
+        self.last_seen.elapsed() > (ENDPOINT_PROOF_EXPIRATION / 2)
     }
 }
 
@@ -2324,9 +2338,9 @@ mod tests {
         let original = EnrForkIdEntry {
             fork_id: ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
         };
-        let mut encoded = Vec::new();
-        original.encode(&mut encoded);
         let expected: [u8; 8] = [0xc7, 0xc6, 0x84, 0xdc, 0xe9, 0x6c, 0x2d, 0x80];
+        let mut encoded = Vec::with_capacity(expected.len());
+        original.encode(&mut encoded);
         assert_eq!(&expected[..], encoded.as_slice());
     }
 

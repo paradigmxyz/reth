@@ -66,11 +66,22 @@ alloy-eips.workspace = true
 
 [features]
 arbitrary = [
-    "reth-primitives/arbitrary",
-    "reth-eth-wire-types/arbitrary",
-    "dep:arbitrary",
+	"reth-primitives/arbitrary",
+	"reth-eth-wire-types/arbitrary",
+	"dep:arbitrary",
+	"reth-chainspec/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary"
 ]
-serde = ["dep:serde", "reth-eth-wire-types/serde"]
+serde = [
+	"dep:serde",
+	"reth-eth-wire-types/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes/serde",
+	"rand/serde",
+	"secp256k1/serde"
+]
 
 [[test]]
 name = "fuzz_roundtrip"

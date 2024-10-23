@@ -73,7 +73,13 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx } => {
+            // todo(onbjerg): execution requests
+            BeaconEngineMessage::NewPayload {
+                payload,
+                cancun_fields,
+                execution_requests: _,
+                tx: _tx,
+            } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),

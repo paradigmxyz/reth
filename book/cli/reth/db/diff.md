@@ -45,6 +45,9 @@ Database:
 
           [possible values: true, false]
 
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
       --table <TABLE>
           The table name to diff. If not specified, all tables are diffed.
 

@@ -5,7 +5,6 @@ use std::{future::Future, marker::PhantomData};
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_consensus::Consensus;
-use reth_engine_primitives::EngineValidator;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
@@ -64,9 +63,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Network API.
     type Network: FullNetwork;
 
-    /// Validator for the engine API.
-    type EngineValidator: EngineValidator<<Self::Types as NodeTypesWithEngine>::Engine>;
-
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -86,9 +82,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn payload_builder(
         &self,
     ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
-
-    /// Returns the engine validator.
-    fn engine_validator(&self) -> &Self::EngineValidator;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;

@@ -10,12 +10,6 @@ pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
-/// The first four bytes of the call data for a function call specifies the function to be called.
-pub const SELECTOR_LEN: usize = 4;
-
-/// Maximum extra data size in a block after genesis
-pub const MAXIMUM_EXTRA_DATA_SIZE: usize = 32;
-
 /// An EPOCH is a series of 32 slots.
 pub const EPOCH_SLOTS: u64 = 32;
 
@@ -87,15 +81,6 @@ pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 6;
 /// Base fee max change denominator for Base Sepolia as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 pub const BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
-
-/// Multiplier for converting gwei to wei.
-pub const GWEI_TO_WEI: u64 = 1_000_000_000;
-
-/// Multiplier for converting finney (milliether) to wei.
-pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
-
-/// Multiplier for converting ether to wei.
-pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 
 /// Sepolia genesis hash: `0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9`
 pub const SEPOLIA_GENESIS_HASH: B256 =

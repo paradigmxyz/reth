@@ -88,10 +88,15 @@ reth-discv4.workspace = true
 
 [features]
 default = []
-dev = [
+arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
     "reth-primitives/arbitrary",
     "reth-db-api/arbitrary",
+    "reth-eth-wire/arbitrary",
+    "reth-db/arbitrary",
+    "reth-chainspec/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
 ]
