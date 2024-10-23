@@ -199,26 +199,20 @@ impl OpChainSpec {
             reth_optimism_forks::OptimismHardfork::Holocene,
             timestamp,
         );
-        // If we are in the Holocene, we need to use the base fee params from the parent block's
-        // nonce Else, use the base fee params from chainspec
+        // If we are in the Holocene, we need to use the base fee params
+        // from the parent block's extra data.
+        // Else, use the base fee params (default values) from chainspec
         if is_holocene {
-            match decode_holocene_1559_params(parent.extra_data.clone()) {
-                Ok((denominator, elasticity)) => {
-                    if elasticity == 0 && denominator == 0 {
-                        return Ok(U256::from(
-                            parent
-                                .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
-                                .unwrap_or_default(),
-                        ));
-                    }
-                    let base_fee_params =
-                        BaseFeeParams::new(denominator as u128, elasticity as u128);
-                    return Ok(U256::from(
-                        parent.next_block_base_fee(base_fee_params).unwrap_or_default(),
-                    ))
-                }
-                Err(e) => Err(e),
+            let (denominator, elasticity) = decode_holocene_1559_params(parent.extra_data.clone())?;
+            if elasticity == 0 && denominator == 0 {
+                return Ok(U256::from(
+                    parent
+                        .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
+                        .unwrap_or_default(),
+                ));
             }
+            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
+            Ok(U256::from(parent.next_block_base_fee(base_fee_params).unwrap_or_default()))
         } else {
             Ok(U256::from(
                 parent

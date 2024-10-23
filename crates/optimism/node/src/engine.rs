@@ -16,8 +16,7 @@ use reth_node_api::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OptimismHardfork;
 use reth_optimism_payload_builder::{
-    builder::{decode_eip_1559_params, EIP1559ParamError},
-    OptimismBuiltPayload, OptimismPayloadBuilderAttributes,
+    builder::decode_eip_1559_params, OptimismBuiltPayload, OptimismPayloadBuilderAttributes,
 };
 
 /// The types used in the optimism beacon consensus engine.
@@ -160,17 +159,12 @@ where
                 ))
             };
 
-            match decode_eip_1559_params(eip_1559_params) {
-                Ok((elasticity, denominator)) => {
-                    if elasticity != 0 && denominator == 0 {
-                        return Err(EngineObjectValidationError::InvalidParams(
-                            "Eip1559ParamsDenominatorZero".to_string().into(),
-                        ))
-                    }
-                }
-                Err(e) => {
-                    return Err(EngineObjectValidationError::InvalidParams(e.to_string().into()))
-                }
+            let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params)
+                .map_err(|e| EngineObjectValidationError::InvalidParams(e.to_string().into()))?;
+            if elasticity != 0 && denominator == 0 {
+                return Err(EngineObjectValidationError::InvalidParams(
+                    "Eip1559ParamsDenominatorZero".to_string().into(),
+                ))
             }
         }
 

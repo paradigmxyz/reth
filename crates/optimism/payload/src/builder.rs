@@ -495,7 +495,7 @@ where
             &attributes,
             chain_spec.base_fee_params_at_timestamp(attributes.payload_attributes.timestamp),
         )
-        .map_err(|err| PayloadBuilderError::other(err))?;
+        .map_err(PayloadBuilderError::other)?;
     }
 
     let header = Header {
@@ -567,6 +567,12 @@ pub enum EIP1559ParamError {
     #[error("Invalid denominator parameter")]
     /// Invalid elasticity parameter
     InvalidElasticity,
+    #[error("Denominator overflow")]
+    /// Denominator overflow
+    DenominatorOverflow,
+    #[error("Elasticity overflow")]
+    /// Elasticity overflow
+    ElasticityOverflow,
 }
 
 /// Extracts the Holcene 1599 parameters from the encoded form:
@@ -591,21 +597,26 @@ fn get_holocene_extra_data(
     // If eip 1559 params aren't set, use the canyon base fee param constants
     // otherwise use them
     if eip_1559_params == B64::ZERO {
-        extra_data[1..5].copy_from_slice(
-            &(default_base_fee_params.max_change_denominator as u32).to_be_bytes(),
-        );
-        extra_data[5..9]
-            .copy_from_slice(&(default_base_fee_params.elasticity_multiplier as u32).to_be_bytes());
+        // Try casting max_change_denominator to u32
+        let max_change_denominator: u32 = (default_base_fee_params.max_change_denominator)
+            .try_into()
+            .map_err(|_| EIP1559ParamError::DenominatorOverflow)?;
+
+        // Try casting elasticity_multiplier to u32
+        let elasticity_multiplier: u32 = (default_base_fee_params.elasticity_multiplier)
+            .try_into()
+            .map_err(|_| EIP1559ParamError::ElasticityOverflow)?;
+
+        // Copy the values safely
+        extra_data[1..5].copy_from_slice(&max_change_denominator.to_be_bytes());
+        extra_data[5..9].copy_from_slice(&elasticity_multiplier.to_be_bytes());
         Ok(Bytes::copy_from_slice(&extra_data))
     } else {
-        match decode_eip_1559_params(eip_1559_params) {
-            Ok((elasticity, denominator)) => {
-                extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
-                extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
-                Ok(Bytes::copy_from_slice(&extra_data))
-            }
-            Err(e) => return Err(EIP1559ParamError::InvalidElasticity),
-        }
+        let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params)
+            .map_err(|_| EIP1559ParamError::InvalidElasticity)?;
+        extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
+        extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
+        Ok(Bytes::copy_from_slice(&extra_data))
     }
 }
 
