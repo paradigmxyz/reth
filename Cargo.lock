@@ -7018,6 +7018,7 @@ dependencies = [
  "reth",
  "reth-chainspec",
  "reth-db",
+ "reth-engine-local",
  "reth-network-peers",
  "reth-node-builder",
  "reth-payload-builder",
@@ -7031,6 +7032,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7963,8 +7965,11 @@ dependencies = [
  "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer",
  "eyre",
  "futures",
+ "rand 0.8.5",
  "reth",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
