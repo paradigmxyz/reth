@@ -178,6 +178,20 @@ impl EthStateCache {
         Ok(block.zip(receipts))
     }
 
+    /// Fetches receipts and optionally fetches the block if available in the cache.
+    /// If the block is not in the cache, it only returns the receipts.
+    pub async fn get_receipts_and_maybe_block(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<(Arc<Vec<Receipt>>, Option<Arc<SealedBlockWithSenders>>)>> {
+        let block = self.get_sealed_block_with_senders(block_hash);
+        let receipts = self.get_receipts(block_hash);
+
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+
+        Ok(receipts.map(|r| (r, block)))
+    }
+
     /// Requests the evm env config for the block hash.
     ///
     /// Returns an error if the corresponding header (required for populating the envs) was not
