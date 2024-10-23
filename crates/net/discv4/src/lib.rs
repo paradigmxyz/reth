@@ -829,6 +829,24 @@ impl Discv4Service {
     /// table. Returns `true` if the node was in the table and `false` otherwise.
     pub fn remove_node(&mut self, node_id: PeerId) -> bool {
         let key = kad_key(node_id);
+        self.remove_key(node_id, key)
+    }
+
+    /// Removes a `node_id` from the routing table but only if there are enough other nodes in the
+    /// bucket (bucket must be at least half full)
+    ///
+    /// Returns `true` if the node was removed
+    pub fn soft_remove_node(&mut self, node_id: PeerId) -> bool {
+        let key = kad_key(node_id);
+        let Some(bucket) = self.kbuckets.get_bucket(&key) else { return false };
+        if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
+            // skip half empty bucket
+            return false;
+        }
+        self.remove_key(node_id, key)
+    }
+
+    fn remove_key(&mut self, node_id: PeerId, key: discv5::Key<NodeKey>) -> bool {
         let removed = self.kbuckets.remove(&key);
         if removed {
             trace!(target: "discv4", ?node_id, "removed node");
@@ -852,7 +870,9 @@ impl Discv4Service {
         false
     }
 
-    /// Update the entry on RE-ping
+    /// Update the entry on RE-ping.
+    ///
+    /// Invoked when we received the Pong to our [`PingReason::RePing`] ping.
     ///
     /// On re-ping we check for a changed `enr_seq` if eip868 is enabled and when it changed we sent
     /// a followup request to retrieve the updated ENR
@@ -1028,11 +1048,23 @@ impl Discv4Service {
 
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => {
-                is_proven = entry.value().has_endpoint_proof;
+                if entry.value().is_expired() {
+                    // If no communication with the sender has occurred within the last 12h, a ping
+                    // should be sent in addition to pong in order to receive an endpoint proof.
+                    needs_bond = true;
+                } else {
+                    is_proven = entry.value().has_endpoint_proof;
+                }
                 entry.value_mut().update_with_enr(ping.enr_sq)
             }
             kbucket::Entry::Pending(mut entry, _) => {
-                is_proven = entry.value().has_endpoint_proof;
+                if entry.value().is_expired() {
+                    // If no communication with the sender has occurred within the last 12h, a ping
+                    // should be sent in addition to pong in order to receive an endpoint proof.
+                    needs_bond = true;
+                } else {
+                    is_proven = entry.value().has_endpoint_proof;
+                }
                 entry.value().update_with_enr(ping.enr_sq)
             }
             kbucket::Entry::Absent(entry) => {
@@ -1205,7 +1237,8 @@ impl Discv4Service {
                 self.update_on_pong(node, pong.enr_sq);
             }
             PingReason::EstablishBond => {
-                // nothing to do here
+                // same as `InitialInsert` which renews the bond if the peer is in the table
+                self.update_on_pong(node, pong.enr_sq);
             }
             PingReason::RePing => {
                 self.update_on_reping(node, pong.enr_sq);
@@ -1491,13 +1524,7 @@ impl Discv4Service {
             // the table, but only if there are enough other nodes in the bucket (bucket must be at
             // least half full)
             if failures > (self.config.max_find_node_failures as usize) {
-                if let Some(bucket) = self.kbuckets.get_bucket(&key) {
-                    if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
-                        // skip half empty bucket
-                        continue
-                    }
-                }
-                self.remove_node(node_id);
+                self.soft_remove_node(node_id);
             }
         }
     }
@@ -2247,7 +2274,7 @@ impl NodeEntry {
 impl NodeEntry {
     /// Returns true if the node should be re-pinged.
     fn is_expired(&self) -> bool {
-        self.last_seen.elapsed() > ENDPOINT_PROOF_EXPIRATION
+        self.last_seen.elapsed() > (ENDPOINT_PROOF_EXPIRATION / 2)
     }
 }
 
@@ -2256,8 +2283,7 @@ impl NodeEntry {
 enum PingReason {
     /// Initial ping to a previously unknown peer that was inserted into the table.
     InitialInsert,
-    /// Initial ping to a previously unknown peer that didn't fit into the table. But we still want
-    /// to establish a bond.
+    /// A ping to a peer to establish a bond (endpoint proof).
     EstablishBond,
     /// Re-ping a peer.
     RePing,

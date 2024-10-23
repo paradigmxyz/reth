@@ -18,10 +18,10 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --bin reth --workspace
+            args: --bin reth --workspace --locked
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: optimism
-            args: --bin op-reth --workspace
+            args: --bin op-reth --workspace --locked
             features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
