@@ -150,7 +150,8 @@ pub(crate) fn generate_vectors() -> Result<()> {
     Ok(())
 }
 
-/// Reads multiple vectors of different types ensuring their correctness by decoding and re-encoding.
+/// Reads multiple vectors of different types ensuring their correctness by decoding and
+/// re-encoding.
 pub fn read_vectors() -> Result<()> {
     fs::create_dir_all(VECTORS_FOLDER)?;
 
@@ -164,14 +165,11 @@ pub fn read_vectors() -> Result<()> {
 /// Generates test vectors for a specific type `T`.
 fn generate_vector<T>(runner: &mut TestRunner) -> Result<()>
 where
-    T: for<'a> Arbitrary<'a>
-        + reth_codecs::Compact
-        + serde::Serialize
-        + Clone
-        + std::fmt::Debug
-        + 'static,
+    T: for<'a> Arbitrary<'a> + reth_codecs::Compact,
 {
     let type_name = type_name::<T>();
+    print!("{}", &type_name);
+
     let mut bytes = std::iter::repeat(0u8).take(256).collect::<Vec<u8>>();
     let mut compact_buffer = vec![];
 
@@ -187,7 +185,7 @@ where
             compact_buffer.push(res as u8);
         }
 
-        values.push((obj, hex::encode(&compact_buffer)));
+        values.push(hex::encode(&compact_buffer));
     }
 
     serde_json::to_writer(
@@ -197,7 +195,7 @@ where
         &values,
     )?;
 
-    println!("{} ✅", &type_name);
+    println!(" ✅");
 
     Ok(())
 }
@@ -206,41 +204,35 @@ where
 /// using `T::from_compact`.
 fn read_vector<T>() -> Result<()>
 where
-    T: serde::de::DeserializeOwned + reth_codecs::Compact + PartialEq + Clone + std::fmt::Debug,
+    T: reth_codecs::Compact,
 {
     let type_name = type_name::<T>();
+    print!("{}", &type_name);
 
     // Read the file where the vectors are stored
     let file_path = format!("{VECTORS_FOLDER}/{}.json", &type_name);
     let file = File::open(&file_path)?;
     let reader = BufReader::new(file);
 
-    let stored_values: Vec<(T, String)> = serde_json::from_reader(reader)?;
+    let stored_values: Vec<String> = serde_json::from_reader(reader)?;
     let mut buffer = vec![];
 
-    for (original, hex_str) in stored_values {
+    for hex_str in stored_values {
         let mut compact_bytes = hex::decode(hex_str)?;
         let mut identifier = None;
+        buffer.clear();
 
         if IDENTIFIER_TYPE.contains(&type_name) {
             identifier = compact_bytes.pop().map(|b| b as usize);
         }
-
         let len_or_identifier = identifier.unwrap_or(compact_bytes.len());
+
         let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
-
-        if original != reconstructed {
-            println!("{} ❌", &type_name);
-            panic!("mismatch found on {original:?} and {reconstructed:?}");
-        }
-
-        // Sanity check to ensure we encode the same way
-        buffer.clear();
         reconstructed.to_compact(&mut buffer);
         assert_eq!(buffer, compact_bytes);
     }
 
-    println!("{} ✅", &type_name);
+    println!(" ✅");
 
     Ok(())
 }

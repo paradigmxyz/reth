@@ -1,4 +1,9 @@
 # Ensures that `Compact` codec changes are backwards compatible.
+# 
+# 1) checkout `main`
+# 2) randomly generate and serialize to disk many different type vectors with `Compact` (eg. Header, Transaction, etc)
+# 3) checkout `pr`
+# 4) deserialize previously generated test vectors
 
 on:
   pull_request:
@@ -23,13 +28,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref || 'main' }}
-      # On `main` branch, generates test vectors and serializes them to disk using `serde-json`.
+      # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
         run: cargo run --bin reth --features dev -- test-vectors compact --write
       - name: Checkout PR
         uses: actions/checkout@v4
         with:
           clean: false
-      # On incoming merge try to read and decode previously generated vectors 
+      # On incoming merge try to read and decode previously generated vectors with `Compact`
       - name: Read vectors
         run: cargo run --bin reth --features dev -- test-vectors compact --read
