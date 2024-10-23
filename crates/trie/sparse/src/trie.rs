@@ -14,6 +14,10 @@ use reth_trie_common::{
 use smallvec::SmallVec;
 use std::{collections::HashSet, fmt};
 
+/// The minimum number of target paths needed to run the [`RevealedSparseTrie::rlp_node`] in
+/// parallel.
+const RLP_NODE_PARALLEL_THRESHOLD: usize = 10;
+
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
 #[derive(PartialEq, Eq, Default, Debug)]
@@ -87,7 +91,7 @@ pub struct RevealedSparseTrie {
     /// Prefix set.
     prefix_set: PrefixSetMut,
     /// Reusable buffer for RLP encoding of nodes.
-    rlp_buf: Vec<u8>,
+    rlp_buf: Option<Vec<u8>>,
 }
 
 impl fmt::Debug for RevealedSparseTrie {
@@ -96,7 +100,7 @@ impl fmt::Debug for RevealedSparseTrie {
             .field("nodes", &self.nodes)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
-            .field("rlp_buf", &hex::encode(&self.rlp_buf))
+            .field("rlp_buf", &self.rlp_buf.as_ref().map(hex::encode))
             .finish()
     }
 }
@@ -107,7 +111,7 @@ impl Default for RevealedSparseTrie {
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
+            rlp_buf: Some(Vec::new()),
         }
     }
 }
@@ -115,12 +119,7 @@ impl Default for RevealedSparseTrie {
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
     pub fn from_root(node: TrieNode) -> SparseTrieResult<Self> {
-        let mut this = Self {
-            nodes: HashMap::default(),
-            values: HashMap::default(),
-            prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
-        };
+        let mut this = Self { nodes: HashMap::default(), ..RevealedSparseTrie::default() };
         this.reveal_node(Nibbles::default(), node)?;
         Ok(this)
     }
@@ -558,14 +557,36 @@ impl RevealedSparseTrie {
         }
 
         let prefix_set = self.prefix_set.clone().freeze();
-        let updates = targets
-            .into_par_iter()
-            .flat_map(|target| {
-                // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
-                let (_, updates) = self.rlp_node(target, prefix_set.clone());
-                updates
-            })
-            .collect();
+        let updates = if targets.len() > RLP_NODE_PARALLEL_THRESHOLD {
+            targets
+                .into_par_iter()
+                .flat_map(|target| {
+                    let mut rlp_buf = Vec::with_capacity(128);
+
+                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                    let (_, updates) = self.rlp_node(target, prefix_set.clone(), &mut rlp_buf);
+                    updates
+                })
+                .collect()
+        } else {
+            targets
+                .into_iter()
+                .flat_map(|target| {
+                    // Reusable RLP buffer. Guaranteed to be available, because only taken here, in
+                    // the `&mut self`.
+                    let mut rlp_buf = self.rlp_buf.take().unwrap();
+
+                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                    let (_, updates) = self.rlp_node(target, prefix_set.clone(), &mut rlp_buf);
+
+                    // Return the reusable buffer back.
+                    self.rlp_buf = Some(rlp_buf);
+
+                    updates
+                })
+                .collect()
+        };
+
         self.apply_hash_updates(updates);
     }
 
@@ -577,11 +598,10 @@ impl RevealedSparseTrie {
         &self,
         path: Nibbles,
         mut prefix_set: PrefixSet,
+        mut rlp_buf: &mut Vec<u8>,
     ) -> (RlpNode, SparseNodeHashUpdates) {
         // stack of paths we need rlp nodes for
         let mut path_stack = Vec::from([path]);
-        // reusable rlp buffer
-        let mut rlp_buf = Vec::with_capacity(128);
         // stack of rlp nodes
         let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
         // reusable branch child path
