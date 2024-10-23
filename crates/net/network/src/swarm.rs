@@ -49,7 +49,7 @@ use crate::{
 /// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm {
+pub struct Swarm {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
@@ -333,7 +333,7 @@ impl Stream for Swarm {
 
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
-pub(crate) enum SwarmEvent {
+pub enum SwarmEvent {
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
