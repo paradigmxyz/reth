@@ -4074,4 +4074,43 @@ mod tests {
         let fork_tip_hash = side_chain.last().unwrap().hash();
         test_harness.send_fcu(fork_tip_hash, ForkchoiceStatus::Invalid).await;
     }
+
+    #[tokio::test]
+    async fn test_tree_new_payload_after_block_batch() {
+        reth_tracing::init_test_tracing();
+
+        let tree_config = TreeConfig::default();
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+        test_harness.tree.config = test_harness.tree.config.with_max_execute_block_batch_size(100);
+
+        let base_chain_len = 6;
+        let base_chain: Vec<_> =
+            test_harness.block_builder.get_executed_blocks(0..base_chain_len).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        let last_base_chain_block = base_chain.last().unwrap().block();
+        // we need more than tree_config.persistence_threshold() +1 blocks to
+        // trigger the persistence task.
+        let downloaded_blocks = test_harness
+            .block_builder
+            .create_fork(&last_base_chain_block, tree_config.persistence_threshold() + 1);
+        test_harness.setup_range_insertion_for_valid_chain(downloaded_blocks.clone());
+
+        let last_batch_block = downloaded_blocks.last().unwrap().clone();
+        test_harness.setup_range_insertion_for_valid_chain(downloaded_blocks.clone());
+        test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(downloaded_blocks)).unwrap();
+
+        // process the message
+        let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
+        test_harness.tree.on_engine_message(msg).unwrap();
+
+        // create a new chain building on top of the latest block in the downloaded batch.
+        let chain_a = test_harness.block_builder.create_fork(&last_batch_block, 3);
+        // insert chain A blocks using newPayload
+        test_harness.setup_range_insertion_for_valid_chain(chain_a.clone());
+        for block in &chain_a {
+            test_harness.send_new_payload(block.clone()).await;
+        }
+    }
 }
