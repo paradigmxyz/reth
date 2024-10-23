@@ -12,8 +12,6 @@ pub use alloy_eips::eip4844::BlobTransactionSidecar;
 #[cfg(feature = "c-kzg")]
 pub use alloy_eips::eip4844::BlobTransactionValidationError;
 
-use alloc::vec::Vec;
-
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
 ///
@@ -196,6 +194,7 @@ impl BlobTransaction {
 /// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar {
+    use alloc::vec::Vec;
     use alloy_eips::eip4844::env_settings::EnvKzgSettings;
     use c_kzg::{KzgCommitment, KzgProof};
 
@@ -225,6 +224,7 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
 mod tests {
     use super::*;
     use crate::{kzg::Blob, PooledTransactionsElement};
+    use alloc::vec::Vec;
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
         eip4844::Bytes48,
