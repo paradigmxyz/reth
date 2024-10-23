@@ -1048,11 +1048,23 @@ impl Discv4Service {
 
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => {
-                is_proven = entry.value().has_endpoint_proof;
+                if entry.value().is_expired() {
+                    // If no communication with the sender has occurred within the last 12h, a ping
+                    // should be sent in addition to pong in order to receive an endpoint proof.
+                    needs_bond = true;
+                } else {
+                    is_proven = entry.value().has_endpoint_proof;
+                }
                 entry.value_mut().update_with_enr(ping.enr_sq)
             }
             kbucket::Entry::Pending(mut entry, _) => {
-                is_proven = entry.value().has_endpoint_proof;
+                if entry.value().is_expired() {
+                    // If no communication with the sender has occurred within the last 12h, a ping
+                    // should be sent in addition to pong in order to receive an endpoint proof.
+                    needs_bond = true;
+                } else {
+                    is_proven = entry.value().has_endpoint_proof;
+                }
                 entry.value().update_with_enr(ping.enr_sq)
             }
             kbucket::Entry::Absent(entry) => {
@@ -1225,7 +1237,8 @@ impl Discv4Service {
                 self.update_on_pong(node, pong.enr_sq);
             }
             PingReason::EstablishBond => {
-                // nothing to do here
+                // same as `InitialInsert` which renews the bond if the peer is in the table
+                self.update_on_pong(node, pong.enr_sq);
             }
             PingReason::RePing => {
                 self.update_on_reping(node, pong.enr_sq);
@@ -2270,8 +2283,7 @@ impl NodeEntry {
 enum PingReason {
     /// Initial ping to a previously unknown peer that was inserted into the table.
     InitialInsert,
-    /// Initial ping to a previously unknown peer that didn't fit into the table. But we still want
-    /// to establish a bond.
+    /// A ping to a peer to establish a bond (endpoint proof).
     EstablishBond,
     /// Re-ping a peer.
     RePing,
