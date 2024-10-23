@@ -1,7 +1,6 @@
 //! Ethereum protocol-related constants
 
 use alloy_primitives::{address, b256, Address, B256, U256};
-use core::time::Duration;
 
 /// Gas units, for example [`GIGAGAS`].
 pub mod gas_units;
@@ -12,15 +11,6 @@ pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"
 
 /// An EPOCH is a series of 32 slots.
 pub const EPOCH_SLOTS: u64 = 32;
-
-/// The duration of a slot in seconds.
-///
-/// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
-/// block.
-pub const SLOT_DURATION: Duration = Duration::from_secs(12);
-
-/// An EPOCH is a series of 32 slots (~6.4min).
-pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
 
 /// The default block nonce in the beacon consensus
 pub const BEACON_NONCE: u64 = 0u64;
