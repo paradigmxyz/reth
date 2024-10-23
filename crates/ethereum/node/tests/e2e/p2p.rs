@@ -9,10 +9,7 @@ use alloy_provider::{
 };
 use alloy_signer::SignerSync;
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
-use reth::rpc::{
-    api::EngineApiClient,
-    types::{engine::ForkchoiceState, TransactionRequest},
-};
+use reth::rpc::types::TransactionRequest;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
@@ -88,8 +85,6 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     let dummy_bytecode = bytes!("6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a");
     let mut call_destinations = signers.iter().map(|s| s.address()).collect::<Vec<_>>();
 
-    let mut head = chain_spec.genesis_hash();
-
     // Produce 100 random blocks with random transactions
     for _ in 0..100 {
         let tx_count = rng.gen_range(1..20);
@@ -148,7 +143,6 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
         assert!(payload.block().raw_transactions().len() == tx_count);
 
         for pending in pending {
-            let tx_hash = *pending.tx_hash();
             let receipt = pending.get_receipt().await?;
             if let Some(address) = receipt.contract_address {
                 call_destinations.push(address);
@@ -156,7 +150,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
         }
     }
 
-    let mut second_node = nodes.pop().unwrap();
+    let second_node = nodes.pop().unwrap();
     let second_provider =
         ProviderBuilder::new().with_recommended_fillers().on_http(second_node.rpc_url());
 
@@ -165,14 +159,12 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     let head = provider.get_block_by_number(Default::default(), false).await?.unwrap().header.hash;
     second_node.engine_api.update_forkchoice(head, head).await?;
 
-    let mut start = std::time::Instant::now();
+    let start = std::time::Instant::now();
 
     while provider.get_block_number().await? != second_provider.get_block_number().await? {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        if start.elapsed() > std::time::Duration::from_secs(10) {
-            panic!("timed out");
-        }
+        assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
     }
 
     Ok(())
