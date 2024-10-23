@@ -502,11 +502,11 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 mod tests {
     use super::*;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
-    use reth_codecs::test_utils::test_decode;
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_decode_receipt() {
-        test_decode::<Receipt>(&hex!(
+        reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
             "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
         ));
     }
