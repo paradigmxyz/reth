@@ -146,12 +146,12 @@ where
     }
 }
 
-/// Constructs an Ethereum transaction payload from the transactions sent through the
+/// Constructs an Optimism transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
 /// the payload attributes, the transaction pool will be ignored and the only transactions
 /// included in the payload will be those sent through the attributes.
 ///
-/// Given build arguments including an Ethereum client, transaction pool,
+/// Given build arguments including an Optimism client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
