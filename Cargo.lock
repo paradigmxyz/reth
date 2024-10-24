@@ -8934,6 +8934,7 @@ dependencies = [
 name = "reth-stages-api"
 version = "1.1.0"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "aquamarine",
  "assert_matches",
