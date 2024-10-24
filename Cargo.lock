@@ -9152,6 +9152,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rayon",
+ "reth-db",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",

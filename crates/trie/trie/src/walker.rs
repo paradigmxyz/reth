@@ -235,3 +235,237 @@ impl<C: TrieCursor> TrieWalker<C> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        prefix_set::PrefixSet,
+        trie_cursor::{
+            noop::{NoopAccountTrieCursor, NoopStorageTrieCursor},
+            TrieCursor,
+        },
+        walker::TrieWalker,
+    };
+    use alloy_primitives::{hex, keccak256, Address, B256, U256};
+    use reth_db::{
+        test_utils::create_test_rw_db,
+        transaction::{DbTx, DbTxMut},
+        Database, DatabaseError, HashedAccounts, HashedStorages,
+    };
+    use reth_primitives::{Account, StorageEntry};
+    use reth_trie_common::{BranchNodeCompact, Nibbles, TrieMask};
+    use std::collections::HashMap;
+
+    struct MockCursor {
+        // Internal state for the mock
+        seek_exact_results: HashMap<Nibbles, Option<(Nibbles, BranchNodeCompact)>>,
+        seek_results: HashMap<Nibbles, Option<(Nibbles, BranchNodeCompact)>>,
+        next_results: Vec<Option<(Nibbles, BranchNodeCompact)>>,
+        current_results: Vec<Option<Nibbles>>,
+        next_index: usize,
+        current_index: usize,
+    }
+
+    #[allow(dead_code)]
+    impl MockCursor {
+        fn new() -> Self {
+            Self {
+                seek_exact_results: HashMap::new(),
+                seek_results: HashMap::new(),
+                next_results: Vec::new(),
+                current_results: Vec::new(),
+                next_index: 0,
+                current_index: 0,
+            }
+        }
+
+        fn expect_seek_exact(
+            &mut self,
+            key: Nibbles,
+            result: Option<(Nibbles, BranchNodeCompact)>,
+        ) {
+            self.seek_exact_results.insert(key, result);
+        }
+
+        fn expect_seek(&mut self, key: Nibbles, result: Option<(Nibbles, BranchNodeCompact)>) {
+            self.seek_results.insert(key, result);
+        }
+
+        fn expect_next(&mut self, result: Option<(Nibbles, BranchNodeCompact)>) {
+            self.next_results.push(result);
+        }
+
+        fn expect_current(&mut self, result: Option<Nibbles>) {
+            self.current_results.push(result);
+        }
+    }
+
+    // Create a modified mock implementation to track calls
+    impl TrieCursor for MockCursor {
+        fn seek_exact(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let result = self.seek_exact_results.get(&key).cloned().unwrap_or(None);
+            println!(
+                "seek_exact called with {:?} -> returns {:?}",
+                key,
+                result.as_ref().map(|(k, _)| k)
+            );
+            Ok(result)
+        }
+
+        fn seek(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let result = self.seek_results.get(&key).cloned().unwrap_or(None);
+            println!("seek called with {:?} -> returns {:?}", key, result.as_ref().map(|(k, _)| k));
+            Ok(result)
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let result = self.next_results.get(self.next_index).cloned().unwrap_or(None);
+            self.next_index += 1;
+            println!("next called -> returns {:?}", result.as_ref().map(|(k, _)| k));
+            Ok(result)
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            let result = self.current_results.get(self.current_index).cloned().unwrap();
+            self.current_index += 1;
+            println!("current called -> returns {:?}", result);
+            Ok(result)
+        }
+    }
+
+    #[test]
+    fn test_trie_walker_with_noop_cursor_accounts() {
+        let changes = PrefixSet::default();
+        let cursor = NoopAccountTrieCursor::default();
+        let walker = TrieWalker::new(cursor, changes);
+
+        assert!(walker.key().is_some());
+        assert!(walker.hash().is_none());
+        assert!(walker.children_are_in_trie());
+        assert!(!walker.can_skip_current_node);
+    }
+
+    #[test]
+    fn test_trie_walker_with_noop_cursor_storage() {
+        let changes = PrefixSet::default();
+        let cursor = NoopStorageTrieCursor::default();
+        let walker = TrieWalker::new(cursor, changes);
+
+        assert!(walker.key().is_some());
+        assert!(walker.hash().is_none());
+        assert!(walker.children_are_in_trie());
+        assert!(!walker.can_skip_current_node);
+    }
+
+    #[test]
+    fn test_trie_walker_with_mock_cursor_accounts() {
+        let mut mock_cursor = MockCursor::new();
+        let changes = PrefixSet::default();
+
+        let root_key = Nibbles::default();
+        let mut next_key = Nibbles::from_nibbles(&hex!("0d"));
+
+        // Root node with child at 0xd
+        let root_node = BranchNodeCompact::new(
+            TrieMask::new(1 << 0xd), // state mask
+            TrieMask::new(1 << 0xd), // tree mask
+            TrieMask::default(),     // hash mask
+            vec![],                  // no hashes
+            None,                    // no root hash
+        );
+        // Level 1 node - just exists, no children or other state
+        let level1_node = BranchNodeCompact::new(
+            TrieMask::new(1),    // no state
+            TrieMask::default(), // no children
+            TrieMask::default(), // no hashes
+            vec![],
+            None,
+        );
+
+        mock_cursor
+            .expect_seek_exact(root_key.clone(), Some((root_key.clone(), root_node.clone())));
+
+        mock_cursor.expect_seek(next_key.clone(), Some((next_key.clone(), level1_node.clone())));
+        mock_cursor.expect_current(Some(next_key.clone()));
+
+        let mut walker = TrieWalker::new(mock_cursor, changes);
+
+        let result = walker.advance().unwrap();
+
+        // when creating a new subnode in consume_node the key is modified like this.
+        next_key.push(0);
+        assert_eq!(result, Some(next_key));
+    }
+
+    #[test]
+    fn test_trie_walker_with_real_db_populated_account() {
+        let db = create_test_rw_db();
+
+        // Create test data
+        let address1 = Address::random();
+        let account1 = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+
+        let tx = db.db().tx_mut().unwrap();
+
+        // Add account to the database
+        tx.put::<HashedAccounts>(B256::from(keccak256(address1)), account1)
+            .expect("Failed to insert account");
+
+        // Commit the transaction
+        tx.inner.commit().expect("Failed to commit transaction");
+
+        // Create a read transaction for testing
+        let tx = db.tx().expect("Failed to create transaction");
+
+        let mut changes = PrefixSet::default();
+
+        // Test account trie walker
+        let account_cursor =
+            tx.cursor_read::<HashedAccounts>().expect("Failed to create account cursor");
+        let mut walker = TrieWalker::new(account_cursor, changes.clone());
+
+        assert!(walker.key().is_some());
+        let result = walker.advance().expect("Failed to advance walker");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_trie_walker_with_real_db_populated_storage() {
+        let db = create_test_rw_db();
+
+        // Create test data
+        let address1 = Address::random();
+        let account1 = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+
+        let tx = db.db().tx_mut().unwrap();
+
+        // Add storage entry
+        let storage_key = B256::random();
+        let storage_value = StorageEntry { key: storage_key, value: U256::from(42) };
+        tx.put::<HashedStorages>(B256::from(keccak256(address1)), storage_value)
+            .expect("Failed to insert storage");
+
+        // Commit the transaction
+        tx.inner.commit().expect("Failed to commit transaction");
+
+        // Create a read transaction for testing
+        let tx = db.tx().expect("Failed to create transaction");
+
+        let mut changes = PrefixSet::default();
+
+        // Test storage trie walker
+        let storage_cursor =
+            tx.cursor_read::<HashedStorages>().expect("Failed to create storage cursor");
+        let mut walker = TrieWalker::new(storage_cursor, changes);
+
+        assert!(walker.key().is_some());
+        let result = walker.advance().expect("Failed to advance walker");
+        assert!(result.is_some());
+    }
+}
