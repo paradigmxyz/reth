@@ -2,7 +2,7 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::PoolResult,
+    error::{InvalidPoolTransactionError, PoolResult},
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
@@ -72,7 +72,6 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Imports all _external_ transactions
     ///
-    ///
     /// Consumer: Utility
     fn add_external_transactions(
         &self,
@@ -83,7 +82,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
     ///
-    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// This is the same as [`TransactionPool::add_transaction`] but returns an event stream for the
     /// given transaction.
     ///
     /// Consumer: Custom
@@ -962,6 +961,26 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64>;
+
+    /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
+    ///
+    /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
+    /// where the input data contains the initialization code. If the input code size exceeds
+    /// the configured limit, an [`InvalidPoolTransactionError::ExceedsMaxInitCodeSize`] error is
+    /// returned.
+    fn ensure_max_init_code_size(
+        &self,
+        max_init_code_size: usize,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        if self.kind().is_create() && self.input().len() > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+                self.size(),
+                max_init_code_size,
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions
@@ -1574,5 +1593,28 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_pooled_transaction_limit() {
+        // No limit should never exceed
+        let limit_none = GetPooledTransactionLimit::None;
+        // Any size should return false
+        assert!(!limit_none.exceeds(1000));
+
+        // Size limit of 2MB (2 * 1024 * 1024 bytes)
+        let size_limit_2mb = GetPooledTransactionLimit::ResponseSizeSoftLimit(2 * 1024 * 1024);
+
+        // Test with size below the limit
+        // 1MB is below 2MB, should return false
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
+
+        // Test with size exactly at the limit
+        // 2MB equals the limit, should return false
+        assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
+
+        // Test with size exceeding the limit
+        // 3MB is above the 2MB limit, should return true
+        assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 }

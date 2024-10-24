@@ -1,6 +1,6 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use futures::{future::Either, FutureExt};
@@ -144,8 +144,9 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     NewPayload {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
-        /// The cancun-related newPayload fields, if any.
-        cancun_fields: Option<CancunPayloadFields>,
+        /// The execution payload sidecar with additional version-specific fields received by
+        /// engine API.
+        sidecar: ExecutionPayloadSidecar,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },

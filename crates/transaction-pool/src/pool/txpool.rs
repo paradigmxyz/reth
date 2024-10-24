@@ -22,10 +22,9 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::constants::{
-    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-};
+use reth_primitives::constants::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, MIN_PROTOCOL_BASE_FEE};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -1405,12 +1404,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
-        let mut iter = self.txs_iter(tx.transaction_id.sender);
-        if let Some((_, existing)) = iter.next() {
-            return tx.tx_type_conflicts_with(&existing.transaction)
-        }
-        // no existing transaction for this sender
-        false
+        self.txs_iter(tx.transaction_id.sender)
+            .next()
+            .map_or(false, |(_, existing)| tx.tx_type_conflicts_with(&existing.transaction))
     }
 
     /// Additional checks for a new transaction.
@@ -1424,11 +1420,15 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
+        on_chain_nonce: u64,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
-            if current_txs >= self.max_account_slots {
+
+            // Reject transactions if sender's capacity is exceeded.
+            // If transaction's nonce matches on-chain nonce always let it through
+            if current_txs >= self.max_account_slots && transaction.nonce() > on_chain_nonce {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
                 })
@@ -1510,52 +1510,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(new_blob_tx)
     }
 
-    /// Returns true if the replacement candidate is underpriced and can't replace the existing
-    /// transaction.
-    #[inline]
-    fn is_underpriced(
-        existing_transaction: &ValidPoolTransaction<T>,
-        maybe_replacement: &ValidPoolTransaction<T>,
-        price_bumps: &PriceBumpConfig,
-    ) -> bool {
-        let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
-
-        if maybe_replacement.max_fee_per_gas() <=
-            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100
-        {
-            return true
-        }
-
-        let existing_max_priority_fee_per_gas =
-            existing_transaction.transaction.max_priority_fee_per_gas().unwrap_or(0);
-        let replacement_max_priority_fee_per_gas =
-            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
-
-        if replacement_max_priority_fee_per_gas <=
-            existing_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
-            existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0
-        {
-            return true
-        }
-
-        // check max blob fee per gas
-        if let Some(existing_max_blob_fee_per_gas) =
-            existing_transaction.transaction.max_fee_per_blob_gas()
-        {
-            // this enforces that blob txs can only be replaced by blob txs
-            let replacement_max_blob_fee_per_gas =
-                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
-            if replacement_max_blob_fee_per_gas <=
-                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
-            {
-                return true
-            }
-        }
-
-        false
-    }
-
     /// Inserts a new _valid_ transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -1595,7 +1549,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
 
-        let mut transaction = self.ensure_valid(transaction)?;
+        let mut transaction = self.ensure_valid(transaction, on_chain_nonce)?;
 
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
@@ -1670,8 +1624,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 let maybe_replacement = transaction.as_ref();
 
                 // Ensure the new transaction is not underpriced
-                if Self::is_underpriced(existing_transaction, maybe_replacement, &self.price_bumps)
-                {
+                if existing_transaction.is_underpriced(maybe_replacement, &self.price_bumps) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
@@ -2634,6 +2587,7 @@ mod tests {
         let mut pool = AllTransactions::default();
 
         let mut tx = MockTransaction::eip1559();
+        let unblocked_tx = tx.clone();
         for _ in 0..pool.max_account_slots {
             tx = tx.next();
             pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
@@ -2647,6 +2601,10 @@ mod tests {
         let err =
             pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+
+        assert!(pool
+            .insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce)
+            .is_ok());
     }
 
     #[test]

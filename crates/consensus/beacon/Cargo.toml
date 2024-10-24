@@ -33,6 +33,7 @@ reth-chainspec = { workspace = true, optional = true }
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -81,4 +82,6 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-db/optimism",
+    "reth-db-api/optimism",
 ]

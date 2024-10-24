@@ -3,7 +3,6 @@ mod authorization_list;
 mod genesis_account;
 mod header;
 mod log;
-mod request;
 mod signature;
 mod transaction;
 mod trie;
@@ -14,7 +13,6 @@ mod withdrawal;
 mod tests {
     use crate::{
         alloy::{
-            authorization_list::Authorization,
             genesis_account::{GenesisAccount, GenesisAccountRef, StorageEntries, StorageEntry},
             header::{Header, HeaderExt},
             transaction::{
@@ -38,7 +36,6 @@ mod tests {
         validate_bitflag_backwards_compat!(StorageEntries, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntry, UnusedBits::Zero);
 
-        validate_bitflag_backwards_compat!(Authorization, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(GenesisAccountRef<'_>, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(GenesisAccount, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(TxEip1559, UnusedBits::NotZero);

@@ -27,5 +27,13 @@ once_cell.workspace = true
 
 [features]
 default = ["std"]
-std = []
-serde = ["dep:serde"]
+std = [
+	"alloy-primitives/std",
+	"once_cell/std",
+	"serde?/std"
+]
+serde = [
+	"dep:serde",
+	"alloy-chains/serde",
+	"alloy-primitives/serde"
+]

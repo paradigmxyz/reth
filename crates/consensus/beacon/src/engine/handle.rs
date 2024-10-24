@@ -5,7 +5,7 @@ use crate::{
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use futures::TryFutureExt;
 use reth_engine_primitives::EngineTypes;
@@ -46,10 +46,10 @@ where
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, sidecar, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
