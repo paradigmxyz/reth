@@ -761,6 +761,19 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Creates an iterator which uses a closure to determine whether a transaction should be
+    /// returned by the iterator.
+    ///
+    /// All items the closure returns false for are marked as invalid via [`Self::mark_invalid`] and
+    /// descendant transactions will be skipped.
+    fn filter_transactions<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
+    where
+        P: FnMut(&Self::Item) -> bool,
+        Self: Sized,
+    {
+        BestTransactionFilter::new(self, predicate)
+    }
 }
 
 impl<T> BestTransactions for Box<T>
@@ -812,6 +825,36 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn skip_blobs(&mut self) {}
 
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
+}
+
+/// A filter that allows to check if a transaction satisfies a set of conditions
+pub trait TransactionFilter {
+    /// The type of the transaction to check.
+    type Transaction;
+
+    /// Returns true if the transaction satisfies the conditions.
+    fn is_valid(&self, transaction: &Self::Transaction) -> bool;
+}
+
+/// A no-op implementation of [`TransactionFilter`] which
+/// marks all transactions as valid.
+#[derive(Debug, Clone)]
+pub struct NoopTransactionFilter<T>(std::marker::PhantomData<T>);
+
+// We can't derive Default because this forces T to be
+// Default as well, which isn't necessary.
+impl<T> Default for NoopTransactionFilter<T> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<T> TransactionFilter for NoopTransactionFilter<T> {
+    type Transaction = T;
+
+    fn is_valid(&self, _transaction: &Self::Transaction) -> bool {
+        true
+    }
 }
 
 /// A Helper type that bundles the best transactions attributes together.

@@ -9,7 +9,6 @@ use alloy_rpc_types::{
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
-    logs_bloom,
     proofs::{calculate_receipt_root, calculate_transaction_root},
     BlockBody, BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned,
     TransactionSignedNoHash,
@@ -290,7 +289,9 @@ pub fn build_block<T: TransactionCompat>(
         receipts_root: calculate_receipt_root(&receipts),
         transactions_root: calculate_transaction_root(&transactions),
         state_root,
-        logs_bloom: logs_bloom(receipts.iter().flat_map(|r| r.receipt.logs.iter())),
+        logs_bloom: alloy_primitives::logs_bloom(
+            receipts.iter().flat_map(|r| r.receipt.logs.iter()),
+        ),
         mix_hash: block_env.prevrandao.unwrap_or_default(),
         ..Default::default()
     };

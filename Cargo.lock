@@ -286,9 +286,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38f35429a652765189c1c5092870d8360ee7b7769b09b06d89ebaefd34676446"
+checksum = "c71738eb20c42c5fb149571e76536a0f309d142f3957c28791662b96baf77a3d"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -6743,6 +6743,7 @@ name = "reth-consensus-common"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "mockall",
  "rand 0.8.5",
@@ -7021,6 +7022,7 @@ dependencies = [
  "reth",
  "reth-chainspec",
  "reth-db",
+ "reth-engine-local",
  "reth-network-peers",
  "reth-node-builder",
  "reth-payload-builder",
@@ -7034,6 +7036,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7968,8 +7971,11 @@ dependencies = [
  "alloy-consensus",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer",
  "eyre",
  "futures",
+ "rand 0.8.5",
  "reth",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
