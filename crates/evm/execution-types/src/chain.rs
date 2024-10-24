@@ -161,7 +161,7 @@ impl Chain {
     }
 
     /// Returns an iterator over all the receipts of the blocks in the chain.
-    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Option<Receipt>>> + '_ {
+    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Receipt>> + '_ {
         self.execution_outcome.receipts().iter()
     }
 
@@ -173,7 +173,7 @@ impl Chain {
     /// Returns an iterator over all blocks and their receipts in the chain.
     pub fn blocks_and_receipts(
         &self,
-    ) -> impl Iterator<Item = (&SealedBlockWithSenders, &Vec<Option<Receipt>>)> + '_ {
+    ) -> impl Iterator<Item = (&SealedBlockWithSenders, &Vec<Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
@@ -221,7 +221,7 @@ impl Chain {
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
-        self.execution_outcome.receipts_by_block(num).iter().map(Option::as_ref).collect()
+        Some(self.execution_outcome.receipts_by_block(num).iter().collect())
     }
 
     /// Get all receipts with attachment.
@@ -234,10 +234,7 @@ impl Chain {
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
             for (tx, receipt) in block.body.transactions().zip(receipts.iter()) {
-                tx_receipts.push((
-                    tx.hash(),
-                    receipt.as_ref().expect("receipts have not been pruned").clone(),
-                ));
+                tx_receipts.push((tx.hash(), receipt.clone()));
             }
             let block_num_hash = BlockNumHash::new(*block_num, block.hash());
             receipt_attach.push(BlockReceipts { block: block_num_hash, tx_receipts });
