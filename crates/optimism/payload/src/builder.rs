@@ -616,14 +616,13 @@ fn get_holocene_extra_data(
         // Copy the values safely
         extra_data[1..5].copy_from_slice(&max_change_denominator.to_be_bytes());
         extra_data[5..9].copy_from_slice(&elasticity_multiplier.to_be_bytes());
-        Ok(Bytes::copy_from_slice(&extra_data))
     } else {
         let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params)
             .map_err(|_| EIP1559ParamError::InvalidElasticity)?;
         extra_data[1..5].copy_from_slice(&denominator.to_be_bytes());
         extra_data[5..9].copy_from_slice(&elasticity.to_be_bytes());
-        Ok(Bytes::copy_from_slice(&extra_data))
     }
+    Ok(Bytes::copy_from_slice(&extra_data))
 }
 
 #[cfg(test)]
