@@ -1,5 +1,6 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
+use alloy_serde::WithOtherFields;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
@@ -30,6 +31,6 @@ where
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
-        Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
+        Ok(WithOtherFields::new(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build()))
     }
 }
