@@ -12,19 +12,22 @@ use reth::{
         types::engine::{ForkchoiceState, PayloadStatusEnum},
     },
 };
+use reth_chainspec::EthereumHardforks;
+use reth_node_builder::BuiltPayload;
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Helper for engine api operations
 #[derive(Debug)]
-pub struct EngineApiTestContext<E> {
+pub struct EngineApiTestContext<E, ChainSpec> {
+    pub chain_spec: Arc<ChainSpec>,
     pub canonical_stream: CanonStateNotificationStream,
     pub engine_api_client: HttpClient<AuthClientService<HttpBackend>>,
     pub _marker: PhantomData<E>,
 }
 
-impl<E: EngineTypes> EngineApiTestContext<E> {
+impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, ChainSpec> {
     /// Retrieves a v3 payload from the engine api
     pub async fn get_payload_v3(
         &self,
@@ -51,18 +54,40 @@ impl<E: EngineTypes> EngineApiTestContext<E> {
     ) -> eyre::Result<B256>
     where
         E::ExecutionPayloadEnvelopeV3: From<E::BuiltPayload> + PayloadEnvelopeExt,
+        E::ExecutionPayloadEnvelopeV4: From<E::BuiltPayload> + PayloadEnvelopeExt,
     {
-        // setup payload for submission
-        let envelope_v3: <E as EngineTypes>::ExecutionPayloadEnvelopeV3 = payload.into();
-
         // submit payload to engine api
-        let submission = EngineApiClient::<E>::new_payload_v3(
-            &self.engine_api_client,
-            envelope_v3.execution_payload(),
-            versioned_hashes,
-            payload_builder_attributes.parent_beacon_block_root().unwrap(),
-        )
-        .await?;
+        let submission = if self
+            .chain_spec
+            .is_prague_active_at_timestamp(payload_builder_attributes.timestamp())
+        {
+            let requests = payload
+                .executed_block()
+                .unwrap()
+                .execution_outcome()
+                .requests
+                .first()
+                .unwrap()
+                .clone();
+            let envelope: <E as EngineTypes>::ExecutionPayloadEnvelopeV4 = payload.into();
+            EngineApiClient::<E>::new_payload_v4(
+                &self.engine_api_client,
+                envelope.execution_payload(),
+                versioned_hashes,
+                payload_builder_attributes.parent_beacon_block_root().unwrap(),
+                requests,
+            )
+            .await?
+        } else {
+            let envelope: <E as EngineTypes>::ExecutionPayloadEnvelopeV3 = payload.into();
+            EngineApiClient::<E>::new_payload_v3(
+                &self.engine_api_client,
+                envelope.execution_payload(),
+                versioned_hashes,
+                payload_builder_attributes.parent_beacon_block_root().unwrap(),
+            )
+            .await?
+        };
 
         assert_eq!(submission.status, expected_status);
 
