@@ -287,7 +287,7 @@ impl DiskFileBlobStoreInner {
         if let Some(blob) = &blob {
             let blob_arc = Arc::new(blob.clone());
             self.blob_cache.lock().insert(tx, blob_arc.clone());
-            return Ok(Some(blob_arc.clone()))
+            return Ok(Some(blob_arc))
         }
 
         Ok(None)
