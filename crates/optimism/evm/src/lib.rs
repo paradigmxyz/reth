@@ -226,7 +226,10 @@ mod tests {
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
-    use std::{collections::HashMap, collections::HashSet, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     fn test_evm_config() -> OptimismEvmConfig {
         OptimismEvmConfig::new(BASE_MAINNET.clone())
