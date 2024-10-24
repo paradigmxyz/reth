@@ -22,10 +22,9 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::constants::{
-    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-};
+use reth_primitives::constants::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, MIN_PROTOCOL_BASE_FEE};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -1511,52 +1510,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Ok(new_blob_tx)
     }
 
-    /// Returns true if the replacement candidate is underpriced and can't replace the existing
-    /// transaction.
-    #[inline]
-    fn is_underpriced(
-        existing_transaction: &ValidPoolTransaction<T>,
-        maybe_replacement: &ValidPoolTransaction<T>,
-        price_bumps: &PriceBumpConfig,
-    ) -> bool {
-        let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
-
-        if maybe_replacement.max_fee_per_gas() <=
-            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100
-        {
-            return true
-        }
-
-        let existing_max_priority_fee_per_gas =
-            existing_transaction.transaction.max_priority_fee_per_gas().unwrap_or(0);
-        let replacement_max_priority_fee_per_gas =
-            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
-
-        if replacement_max_priority_fee_per_gas <=
-            existing_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
-            existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0
-        {
-            return true
-        }
-
-        // check max blob fee per gas
-        if let Some(existing_max_blob_fee_per_gas) =
-            existing_transaction.transaction.max_fee_per_blob_gas()
-        {
-            // this enforces that blob txs can only be replaced by blob txs
-            let replacement_max_blob_fee_per_gas =
-                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
-            if replacement_max_blob_fee_per_gas <=
-                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
-            {
-                return true
-            }
-        }
-
-        false
-    }
-
     /// Inserts a new _valid_ transaction into the pool.
     ///
     /// If the transaction already exists, it will be replaced if not underpriced.
@@ -1671,8 +1624,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 let maybe_replacement = transaction.as_ref();
 
                 // Ensure the new transaction is not underpriced
-                if Self::is_underpriced(existing_transaction, maybe_replacement, &self.price_bumps)
-                {
+                if existing_transaction.is_underpriced(maybe_replacement, &self.price_bumps) {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),

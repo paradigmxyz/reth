@@ -297,9 +297,10 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
+    use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
-    use reth_optimism_chainspec::{optimism_deposit_tx_signature, OpChainSpecBuilder};
+    use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_primitives::{Account, Block, BlockBody, Signature, Transaction, TransactionSigned};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -465,7 +466,7 @@ mod tests {
                 gas_limit: MIN_TRANSACTION_GAS,
                 ..Default::default()
             }),
-            optimism_deposit_tx_signature(),
+            TxDeposit::signature(),
         );
 
         let provider = executor_provider(chain_spec);

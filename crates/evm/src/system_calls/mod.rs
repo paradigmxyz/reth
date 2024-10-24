@@ -171,7 +171,7 @@ where
         DB::Error: Display,
     {
         let result_and_state = eip2935::transact_blockhashes_contract_call(
-            &self.evm_config.clone(),
+            &self.evm_config,
             &self.chain_spec,
             timestamp,
             block_number,
@@ -226,7 +226,7 @@ where
         DB::Error: Display,
     {
         let result_and_state = eip4788::transact_beacon_root_contract_call(
-            &self.evm_config.clone(),
+            &self.evm_config,
             &self.chain_spec,
             timestamp,
             block_number,

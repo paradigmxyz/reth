@@ -27,6 +27,7 @@ alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 revm.workspace = true
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "time"] }

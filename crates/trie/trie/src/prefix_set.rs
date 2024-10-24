@@ -168,8 +168,7 @@ pub struct PrefixSet {
 }
 
 impl PrefixSet {
-    /// Returns `true` if any of the keys in the set has the given prefix or
-    /// if the given prefix is a prefix of any key in the set.
+    /// Returns `true` if any of the keys in the set has the given prefix
     #[inline]
     pub fn contains(&mut self, prefix: &[u8]) -> bool {
         if self.all {

@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_chainspec::ChainSpec;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
@@ -83,11 +84,10 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let provider = create_test_provider_factory_with_chain_spec(Arc::new(
-                    case.network.clone().into(),
-                ))
-                .database_provider_rw()
-                .unwrap();
+                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+                    .database_provider_rw()
+                    .unwrap();
 
                 // Insert initial test state into the provider.
                 provider.insert_historical_block(
@@ -127,9 +127,7 @@ impl Case for BlockchainTestCase {
                 // Execute the execution stage using the EVM processor factory for the test case
                 // network.
                 let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(Arc::new(
-                        case.network.clone().into(),
-                    )),
+                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec),
                 )
                 .execute(
                     &provider,
