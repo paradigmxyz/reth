@@ -30,6 +30,7 @@ use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
+    fmt::Debug,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
@@ -74,7 +75,6 @@ impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec: EthereumHard
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
@@ -82,6 +82,16 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
+}
+
+impl<N: ProviderNodeTypes> Debug for BlockchainProvider<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockchainProvider")
+            .field("database", &self.database)
+            .field("tree", &"...")
+            .field("chain_info", &self.chain_info)
+            .finish()
+    }
 }
 
 impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {
