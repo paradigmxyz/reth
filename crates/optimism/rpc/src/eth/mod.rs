@@ -17,7 +17,7 @@ use op_alloy_network::Optimism;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodeTypes, RpcNodeCore};
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
@@ -30,7 +30,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes,
+    EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
@@ -59,7 +59,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Deref)]
+#[derive(Deref, Clone)]
 pub struct OpEthApi<N: RpcNodeCore> {
     /// Gateway to node's core components.
     #[deref]
@@ -256,14 +256,5 @@ where
 impl<N: RpcNodeCore> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
-    }
-}
-
-impl<N> Clone for OpEthApi<N>
-where
-    N: FullNodeComponents,
-{
-    fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), sequencer_client: self.sequencer_client.clone() }
     }
 }

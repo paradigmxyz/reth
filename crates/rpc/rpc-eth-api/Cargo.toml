@@ -30,6 +30,7 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-api.workspace = true
 reth-trie.workspace = true
+reth-node-api.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
