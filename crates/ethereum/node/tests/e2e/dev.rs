@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::utils::eth_payload_attributes;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
@@ -13,7 +14,6 @@ use reth_node_builder::{
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::{providers::BlockchainProvider2, CanonStateSubscriptions};
 use reth_tasks::TaskManager;
-use crate::utils::eth_payload_attributes;
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
