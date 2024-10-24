@@ -20,7 +20,7 @@ mod op_sepolia;
 use alloc::{vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Parity, Signature, B256, U256};
+use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
@@ -175,12 +175,6 @@ impl OpChainSpecBuilder {
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,
-}
-
-/// Returns the signature for the optimism deposit transactions, which don't include a
-/// signature.
-pub fn optimism_deposit_tx_signature() -> Signature {
-    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
 }
 
 impl EthChainSpec for OpChainSpec {

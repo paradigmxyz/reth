@@ -209,9 +209,10 @@ pub trait EthTransactions: LoadTransaction {
                         index: Some(index as u64),
                     };
 
-                    return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
+                    return Ok(Some(from_recovered_with_block_context(
                         tx.clone().with_signer(*signer),
                         tx_info,
+                        self.tx_resp_builder(),
                     )))
                 }
             }
@@ -237,7 +238,7 @@ pub trait EthTransactions: LoadTransaction {
                     LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction.into())));
+                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
                 }
             }
 
@@ -288,9 +289,10 @@ pub trait EthTransactions: LoadTransaction {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context::<Self::TransactionCompat>(
+                            from_recovered_with_block_context(
                                 tx.clone().with_signer(*signer),
                                 tx_info,
+                                self.tx_resp_builder(),
                             )
                         })
                 })
