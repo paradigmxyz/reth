@@ -7,7 +7,7 @@ use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotifications};
+use crate::{ExExContextDyn, ExExEvent, ExExNotifications};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -52,6 +52,13 @@ where
             .field("notifications", &self.notifications)
             .field("components", &"...")
             .finish()
+    }
+}
+
+impl<Node: FullNodeComponents> ExExContext<Node> {
+    /// Returns dynamic version of the context
+    pub fn into_dyn(self) -> ExExContextDyn {
+        ExExContextDyn::from(self)
     }
 }
 
