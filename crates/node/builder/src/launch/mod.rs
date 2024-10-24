@@ -46,7 +46,7 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`NodeCore`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`RpcNodeCore`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as RpcNodeCore>::Provider,
     <N as RpcNodeCore>::Pool,
