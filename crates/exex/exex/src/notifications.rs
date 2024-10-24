@@ -24,7 +24,9 @@ pub struct ExExNotifications<P, E> {
 /// A trait, that represents a stream of [`ExExNotification`]s. The stream will emit notifications
 /// for all blocks. If the stream is configured with a head via [`ExExNotifications::set_with_head`]
 /// or [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
-pub trait ExExNotificationsStream: Stream<Item = eyre::Result<ExExNotification>> + Unpin {
+pub trait ExExNotificationsStream:
+    Debug + Stream<Item = eyre::Result<ExExNotification>> + Unpin
+{
     /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s without a head.
     ///
     /// It's a no-op if the stream has already been configured without a head.
@@ -90,8 +92,8 @@ impl<P, E> ExExNotifications<P, E> {
 
 impl<P, E> ExExNotificationsStream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Debug + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Debug + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
