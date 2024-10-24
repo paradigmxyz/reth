@@ -183,14 +183,14 @@ fn from_block_with_transactions<T>(
 /// an Uncle from its header.
 pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
     let hash = header.hash_slow();
-    let rpc_header = from_primitive_with_hash(SealedHeader::new(header.clone(), hash));
     let uncle_block = PrimitiveBlock { header, ..Default::default() };
     let size = Some(U256::from(uncle_block.length()));
+    let rpc_header = from_primitive_with_hash(SealedHeader::new(uncle_block.header, hash));
     Block {
         uncles: vec![],
         header: rpc_header,
         transactions: BlockTransactions::Uncle,
-        withdrawals: Some(vec![]),
+        withdrawals: None,
         size,
     }
 }
