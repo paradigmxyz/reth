@@ -2849,6 +2849,7 @@ dependencies = [
  "eyre",
  "reth",
  "reth-chainspec",
+ "reth-evm",
  "reth-evm-ethereum",
  "reth-node-api",
  "reth-node-core",
@@ -3033,6 +3034,7 @@ dependencies = [
  "parking_lot",
  "reth",
  "reth-chainspec",
+ "reth-evm",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
@@ -7429,6 +7431,7 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "revm-primitives",
+ "thiserror",
 ]
 
 [[package]]
@@ -8093,6 +8096,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -8179,6 +8183,7 @@ dependencies = [
  "reth-revm",
  "revm",
  "revm-primitives",
+ "thiserror",
  "tracing",
 ]
 

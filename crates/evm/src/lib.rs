@@ -107,6 +107,14 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
+#[derive(thiserror::Error, Debug)]
+/// Error type for [`ConfigureEvmEnv::next_cfg_and_block_env`].
+pub enum NextCfgError {
+    /// Another type of error that is not covered by the above variants.
+    #[error("Invalid params: {0}")]
+    InvalidConfigError(#[from] Box<dyn core::error::Error + Send + Sync>),
+}
+
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
 ///
@@ -192,7 +200,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError>;
 }
 
 /// Represents additional attributes required to configure the next block.

@@ -23,6 +23,7 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_chainspec::{Chain, ChainSpec};
+use reth_evm::NextCfgError;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -115,7 +116,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
         self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }

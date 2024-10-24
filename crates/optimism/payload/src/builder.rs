@@ -6,7 +6,9 @@ use alloy_primitives::{B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{BaseFeeParams, ChainSpecProvider, EthereumHardforks};
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes, NextCfgError,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -79,7 +81,7 @@ where
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -103,7 +105,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_block)
+            .map_err(PayloadBuilderError::other)?;
         optimism_payload(
             self.evm_config.clone(),
             args,
@@ -138,7 +142,9 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_block)
+            .map_err(PayloadBuilderError::other)?;
         optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
@@ -556,7 +562,7 @@ where
 }
 
 #[derive(Debug, thiserror::Error)]
-// Error type for EIP-1559 parameters
+/// Error type for EIP-1559 parameters
 pub enum EIP1559ParamError {
     #[error("No EIP-1559 parameters provided")]
     /// No EIP-1559 parameters provided

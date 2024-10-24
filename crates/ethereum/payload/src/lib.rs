@@ -19,7 +19,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes, NextCfgError};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -69,7 +69,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -93,7 +93,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_block)
+            .map_err(PayloadBuilderError::other)?;
         default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
     }
 
@@ -111,7 +113,9 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        let (cfg_env, block_env) = self
+            .cfg_and_block_env(&args.config, &args.config.parent_block)
+            .map_err(PayloadBuilderError::other)?;
         default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)

@@ -223,13 +223,16 @@ impl OpChainSpec {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Error type for decoding Holocene 1559 parameters
 pub enum DecodeError {
+    #[error("Insufficient data to decode")]
     /// Insufficient data to decode
     InsufficientData,
+    #[error("Invalid denominator parameter")]
     /// Invalid denominator parameter
     InvalidDenominator,
+    #[error("Invalid elasticity parameter")]
     /// Invalid elasticity parameter
     InvalidElasticity,
 }
