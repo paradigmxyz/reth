@@ -55,14 +55,24 @@ where
     }
 }
 
-impl<Node: FullNodeComponents> ExExContext<Node> {
+impl<Node> ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
     /// Returns dynamic version of the context
     pub fn into_dyn(self) -> ExExContextDyn {
         ExExContextDyn::from(self)
     }
 }
 
-impl<Node: FullNodeComponents> ExExContext<Node> {
+impl<Node> ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
         self.components.pool()
