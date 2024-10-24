@@ -148,11 +148,6 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             .or_else(|| (spec_id.is_enabled_in(SpecId::CANCUN)).then_some(0))
             .map(BlobExcessGasAndPrice::new);
 
-        let base_fee = self
-            .chain_spec
-            .next_block_base_fee(parent, attributes.timestamp)
-            .map_err(|e| NextCfgError::InvalidConfigError(e.to_string().into()))?;
-
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
             coinbase: attributes.suggested_fee_recipient,
@@ -161,7 +156,10 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: base_fee,
+            basefee: self
+                .chain_spec
+                .next_block_base_fee(parent, attributes.timestamp)
+                .map_err(|e| NextCfgError::InvalidConfigError(e.to_string().into()))?,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };

@@ -158,7 +158,6 @@ where
                     "MissingEip1559ParamsInPayloadAttributes".to_string().into(),
                 ))
             };
-
             let (elasticity, denominator) = decode_eip_1559_params(eip_1559_params)
                 .map_err(|e| EngineObjectValidationError::InvalidParams(e.to_string().into()))?;
             if elasticity != 0 && denominator == 0 {

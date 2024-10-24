@@ -8,7 +8,7 @@ use crate::{
     },
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
+    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use alloy_consensus::constants::{
@@ -223,7 +223,7 @@ where
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_BYTE_SIZE) {
+            if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
@@ -711,7 +711,7 @@ impl EthTransactionValidatorBuilder {
         EthTransactionValidator { inner: Arc::new(inner) }
     }
 
-    /// Builds a the [`EthTransactionValidator`] and spawns validation tasks via the
+    /// Builds a [`EthTransactionValidator`] and spawns validation tasks via the
     /// [`TransactionValidationTaskExecutor`]
     ///
     /// The validator will spawn `additional_tasks` additional tasks for validation.
@@ -783,22 +783,6 @@ impl ForkTracker {
     }
 }
 
-/// Ensure that the code size is not greater than `max_init_code_size`.
-/// `max_init_code_size` should be configurable so this will take it as an argument.
-pub fn ensure_max_init_code_size<T: PoolTransaction>(
-    transaction: &T,
-    max_init_code_size: usize,
-) -> Result<(), InvalidPoolTransactionError> {
-    if transaction.kind().is_create() && transaction.input().len() > max_init_code_size {
-        Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-            transaction.size(),
-            max_init_code_size,
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 ///
 /// Caution: This only checks past the Merge hardfork.
@@ -833,8 +817,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, CoinbaseTipOrdering,
-        EthPooledTransaction, Pool, TransactionPool,
+        blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};

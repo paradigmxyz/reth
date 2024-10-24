@@ -56,8 +56,6 @@ mod variant;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
-use reth_optimism_chainspec::optimism_deposit_tx_signature;
-#[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(any(test, feature = "reth-codec"))]
 use tx_type::{
@@ -955,7 +953,7 @@ impl TransactionSignedNoHash {
             // transactions with an empty signature
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-            if self.is_legacy() && self.signature == optimism_deposit_tx_signature() {
+            if self.is_legacy() && self.signature == TxDeposit::signature() {
                 return Some(Address::ZERO)
             }
         }
@@ -1530,7 +1528,7 @@ impl Decodable2718 for TransactionSigned {
             #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::from_transaction_and_signature(
                 Transaction::Deposit(TxDeposit::decode(buf)?),
-                optimism_deposit_tx_signature(),
+                TxDeposit::signature(),
             )),
         }
     }
@@ -1575,8 +1573,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         }
 
         #[cfg(feature = "optimism")]
-        let signature =
-            if transaction.is_deposit() { optimism_deposit_tx_signature() } else { signature };
+        let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
 
         Ok(Self::from_transaction_and_signature(transaction, signature))
     }

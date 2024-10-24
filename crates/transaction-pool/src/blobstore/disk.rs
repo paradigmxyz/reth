@@ -3,7 +3,6 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{TxHash, B256};
-use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::BlobTransactionSidecar;
 use schnellru::{ByLength, LruMap};
@@ -204,8 +203,8 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
-        let mut buf = Vec::with_capacity(data.fields_len());
-        data.encode(&mut buf);
+        let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
+        data.rlp_encode_fields(&mut buf);
         self.blob_cache.lock().insert(tx, data);
         let size = self.write_one_encoded(tx, &buf)?;
 
@@ -219,8 +218,8 @@ impl DiskFileBlobStoreInner {
         let raw = txs
             .iter()
             .map(|(tx, data)| {
-                let mut buf = Vec::with_capacity(data.fields_len());
-                data.encode(&mut buf);
+                let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
+                data.rlp_encode_fields(&mut buf);
                 (self.blob_disk_file(*tx), buf)
             })
             .collect::<Vec<_>>();
@@ -312,7 +311,7 @@ impl DiskFileBlobStoreInner {
                 }
             }
         };
-        BlobTransactionSidecar::decode(&mut data.as_slice())
+        BlobTransactionSidecar::rlp_decode_fields(&mut data.as_slice())
             .map(Some)
             .map_err(BlobStoreError::DecodeError)
     }
@@ -322,7 +321,7 @@ impl DiskFileBlobStoreInner {
         self.read_many_raw(txs)
             .into_iter()
             .filter_map(|(tx, data)| {
-                BlobTransactionSidecar::decode(&mut data.as_slice())
+                BlobTransactionSidecar::rlp_decode_fields(&mut data.as_slice())
                     .map(|sidecar| (tx, sidecar))
                     .ok()
             })

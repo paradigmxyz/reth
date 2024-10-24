@@ -44,11 +44,9 @@ impl Compact for SignedAuthorization {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let signature = self.signature();
-        let (v, r, s) = (signature.v(), signature.r(), signature.s());
-        buf.put_u8(v.y_parity_byte());
-        buf.put_slice(r.as_le_slice());
-        buf.put_slice(s.as_le_slice());
+        buf.put_u8(self.y_parity());
+        buf.put_slice(self.r().as_le_slice());
+        buf.put_slice(self.s().as_le_slice());
 
         // to_compact doesn't write the len to buffer.
         // By placing it as last, we don't need to store it either.
@@ -56,17 +54,15 @@ impl Compact for SignedAuthorization {
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let y = alloy_primitives::Parity::Parity(buf.get_u8() == 1);
+        let y_parity = buf.get_u8();
         let r = U256::from_le_slice(&buf[0..32]);
         buf.advance(32);
         let s = U256::from_le_slice(&buf[0..32]);
         buf.advance(32);
 
-        let signature = alloy_primitives::Signature::from_rs_and_parity(r, s, y)
-            .expect("invalid authorization signature");
         let (auth, buf) = AlloyAuthorization::from_compact(buf, len);
 
-        (auth.into_signed(signature), buf)
+        (Self::new_unchecked(auth, y_parity, r, s), buf)
     }
 }
 
