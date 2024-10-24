@@ -17,7 +17,7 @@ use serde::{
 /// Key features:
 /// - Efficient compression: the underlying Roaring Bitmaps significantly reduce memory usage.
 /// - Direct access: elements can be accessed or queried without needing to decode the entire list.
-/// - RoaringTreemap backing: internally backed by [`RoaringTreemap`], which supports 64-bit
+/// - [`RoaringTreemap`] backing: internally backed by [`RoaringTreemap`], which supports 64-bit
 ///   integers.
 #[derive(Clone, PartialEq, Default, Deref)]
 pub struct IntegerList(pub RoaringTreemap);
@@ -62,7 +62,7 @@ impl IntegerList {
 
     /// Pushes a new integer to the list.
     pub fn push(&mut self, value: u64) -> Result<(), IntegerListError> {
-        self.0.push(value).then(|| ()).ok_or(IntegerListError::UnsortedInput)
+        self.0.push(value).then_some(()).ok_or(IntegerListError::UnsortedInput)
     }
 
     /// Clears the list.
