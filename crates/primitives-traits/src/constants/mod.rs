@@ -9,9 +9,6 @@ pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
-/// The default block nonce in the beacon consensus
-pub const BEACON_NONCE: u64 = 0u64;
-
 /// The minimum tx fee below which the txpool will reject the transaction.
 ///
 /// Configured to `7` WEI which is the lowest possible value of base fee under mainnet EIP-1559
