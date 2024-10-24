@@ -114,10 +114,7 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn pooled_transaction_hashes_max(
-        &self,
-        _max: usize,
-    ) -> Vec<TxHash> {
+    fn pooled_transaction_hashes_max(&self, _max: usize) -> Vec<TxHash> {
         vec![]
     }
 

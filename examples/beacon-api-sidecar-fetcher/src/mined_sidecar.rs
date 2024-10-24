@@ -113,7 +113,7 @@ where
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
                     let transaction =
                         BlobTransaction::try_from_signed(tx.clone(), (*sidecar).clone())
-                        .expect("should not fail to convert blob tx if it is already eip4844");
+                            .expect("should not fail to convert blob tx if it is already eip4844");
 
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),

@@ -91,7 +91,10 @@ impl BlobStore for InMemoryBlobStore {
         Ok(txs.into_iter().filter_map(|tx| store.get(&tx).map(|item| (tx, item.clone()))).collect())
     }
 
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         let store = self.inner.store.read();
         Ok(txs.into_iter().filter_map(|tx| store.get(&tx).cloned()).collect())
     }

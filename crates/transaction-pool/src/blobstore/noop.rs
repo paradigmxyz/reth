@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTransactionSidecar};
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::B256;
+use std::sync::Arc;
 
 /// A blobstore implementation that does nothing
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Eq, Default)]
