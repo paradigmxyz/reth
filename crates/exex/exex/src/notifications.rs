@@ -24,9 +24,7 @@ pub struct ExExNotifications<P, E> {
 /// A trait, that represents a stream of [`ExExNotification`]s. The stream will emit notifications
 /// for all blocks. If the stream is configured with a head via [`ExExNotifications::set_with_head`]
 /// or [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
-pub trait ExExNotificationsStream:
-    Debug + Stream<Item = eyre::Result<ExExNotification>> + Unpin
-{
+pub trait ExExNotificationsStream: Stream<Item = eyre::Result<ExExNotification>> {
     /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s without a head.
     ///
     /// It's a no-op if the stream has already been configured without a head.
