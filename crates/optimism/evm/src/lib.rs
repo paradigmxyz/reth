@@ -704,7 +704,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-
                 deposit_nonce: Some(18),
                 deposit_receipt_version: Some(34),
             })]],
