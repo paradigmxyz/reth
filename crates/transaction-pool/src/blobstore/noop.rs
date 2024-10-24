@@ -44,7 +44,10 @@ impl BlobStore for NoopBlobStore {
         Ok(vec![])
     }
 
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(vec![])
         }

@@ -114,7 +114,10 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn pooled_transaction_hashes_max(&self, _max: usize) -> Vec<TxHash> {
+    fn pooled_transaction_hashes_max(
+        &self,
+        _max: usize,
+    ) -> Vec<TxHash> {
         vec![]
     }
 
@@ -261,7 +264,10 @@ impl TransactionPool for NoopTransactionPool {
         Default::default()
     }
 
-    fn get_blob(&self, _tx_hash: TxHash) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    fn get_blob(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         Ok(None)
     }
 
