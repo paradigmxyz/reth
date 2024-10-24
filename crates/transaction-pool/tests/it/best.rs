@@ -5,6 +5,7 @@ use reth_transaction_pool::{noop::NoopTransactionPool, BestTransactions, Transac
 #[test]
 fn test_best_transactions() {
     let noop = NoopTransactionPool::default();
-    let mut best = noop.best_transactions().filter_transactions(|_| true);
+    let mut best =
+        noop.best_transactions().filter_transactions(|_| true).without_blobs().without_updates();
     assert!(best.next().is_none());
 }
