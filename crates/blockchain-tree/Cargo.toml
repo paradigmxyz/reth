@@ -25,13 +25,14 @@ reth-execution-types.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
-reth-trie-parallel = { workspace = true, features = ["parallel"] }
+reth-trie-parallel.workspace = true
 reth-network.workspace = true
 reth-consensus.workspace = true
 reth-node-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 # common
 parking_lot.workspace = true
@@ -56,10 +57,31 @@ reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-revm.workspace = true
 reth-evm-ethereum.workspace = true
+reth-execution-types.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 alloy-genesis.workspace = true
+alloy-consensus.workspace = true
 
 [features]
-test-utils = []
-optimism = ["reth-primitives/optimism", "reth-provider/optimism"]
+test-utils = [
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-network/test-utils",
+	"reth-primitives/test-utils",
+	"reth-revm/test-utils",
+	"reth-stages-api/test-utils",
+	"reth-db/test-utils",
+	"reth-db-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-trie-db/test-utils",
+	"reth-trie/test-utils"
+]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-provider/optimism",
+	"reth-execution-types/optimism",
+	"reth-db/optimism",
+	"reth-db-api/optimism"
+]

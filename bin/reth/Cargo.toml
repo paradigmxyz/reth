@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 # reth
 reth-cli.workspace = true
+reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-primitives.workspace = true
@@ -37,7 +38,6 @@ reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-rpc-eth-types.workspace = true
@@ -67,7 +67,11 @@ reth-engine-util.workspace = true
 reth-prune.workspace = true
 
 # crypto
+alloy-eips.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -92,22 +96,28 @@ backon.workspace = true
 similar-asserts.workspace = true
 
 [dev-dependencies]
-reth-discv4.workspace = true
 tempfile.workspace = true
 
 [features]
 default = ["jemalloc"]
 
-dev = ["reth-cli-commands/dev"]
+dev = ["reth-cli-commands/arbitrary"]
 
-asm-keccak = ["reth-node-core/asm-keccak", "reth-primitives/asm-keccak"]
+asm-keccak = [
+	"reth-node-core/asm-keccak",
+	"reth-primitives/asm-keccak",
+	"alloy-primitives/asm-keccak"
+]
 
 jemalloc = [
     "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
 ]
-jemalloc-prof = ["reth-cli-util/jemalloc"]
+jemalloc-prof = [
+	"reth-cli-util/jemalloc",
+	"reth-cli-util/jemalloc-prof"
+]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 min-error-logs = ["tracing/release_max_level_error"]

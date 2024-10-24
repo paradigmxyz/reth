@@ -8,6 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub use reth_primitives_traits::{Block, BlockBody};
+
 use std::marker::PhantomData;
 
 use reth_chainspec::EthChainSpec;
@@ -18,11 +20,14 @@ use reth_db_api::{
 use reth_engine_primitives::EngineTypes;
 
 /// Configures all the primitive types of the node.
-// TODO(mattsse): this is currently a placeholder
-pub trait NodePrimitives {}
+pub trait NodePrimitives {
+    /// Block primitive.
+    type Block;
+}
 
-// TODO(mattsse): Placeholder
-impl NodePrimitives for () {}
+impl NodePrimitives for () {
+    type Block = reth_primitives::Block;
+}
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///
@@ -121,7 +126,7 @@ impl<P, C> AnyNodeTypes<P, C> {
 impl<P, C> NodeTypes for AnyNodeTypes<P, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -157,7 +162,7 @@ impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -167,7 +172,7 @@ impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec,
+    C: EthChainSpec + 'static,
 {
     type Engine = E;
 }

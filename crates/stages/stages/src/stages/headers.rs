@@ -1,5 +1,5 @@
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
-use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_consensus::Consensus;
 use reth_db::{tables, RawKey, RawTable, RawValue};
@@ -10,7 +10,8 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{BlockHash, BlockNumber, SealedHeader, StaticFileSegment, B256};
+use reth_primitives::{SealedHeader, StaticFileSegment};
+use reth_primitives_traits::serde_bincode_compat;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
@@ -53,8 +54,8 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     sync_gap: Option<HeaderSyncGap>,
     /// ETL collector with `HeaderHash` -> `BlockNumber`
     hash_collector: Collector<BlockHash, BlockNumber>,
-    /// ETL collector with `BlockNumber` -> `SealedHeader`
-    header_collector: Collector<BlockNumber, SealedHeader>,
+    /// ETL collector with `BlockNumber` -> `BincodeSealedHeader`
+    header_collector: Collector<BlockNumber, Bytes>,
     /// Returns true if the ETL collector has all necessary headers to fill the gap.
     is_etl_ready: bool,
 }
@@ -120,7 +121,11 @@ where
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
-            let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
+            let sealed_header: SealedHeader =
+                bincode::deserialize::<serde_bincode_compat::SealedHeader<'_>>(&header_buf)
+                    .map_err(|err| StageError::Fatal(Box::new(err)))?
+                    .into();
+
             let (header, header_hash) = sealed_header.split();
             if header.number == 0 {
                 continue
@@ -133,7 +138,7 @@ where
             // Header validation
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
-                    block: Box::new(header.clone().seal(header_hash)),
+                    block: Box::new(SealedHeader::new(header.clone(), header_hash)),
                     error: BlockErrorKind::Validation(error),
                 }
             })?;
@@ -239,7 +244,15 @@ where
                         let header_number = header.number;
 
                         self.hash_collector.insert(header.hash(), header_number)?;
-                        self.header_collector.insert(header_number, header)?;
+                        self.header_collector.insert(
+                            header_number,
+                            Bytes::from(
+                                bincode::serialize(&serde_bincode_compat::SealedHeader::from(
+                                    &header,
+                                ))
+                                .map_err(|err| StageError::Fatal(Box::new(err)))?,
+                            ),
+                        )?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.
@@ -377,9 +390,10 @@ mod tests {
     use crate::test_utils::{
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
+    use alloy_primitives::{Sealable, B256};
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
+    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
@@ -489,7 +503,9 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let header = header.unwrap().seal_slow();
+                            let sealed = header.unwrap().seal_slow();
+                            let (header, seal) = sealed.into_parts();
+                            let header = SealedHeader::new(header, seal);
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty

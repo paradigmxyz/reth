@@ -2,8 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{keccak256, U256};
+use alloy_primitives::{Keccak256, U256};
+use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
+use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
@@ -11,7 +13,6 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{FromEthApiError, FromEvmError};
-use reth_rpc_types::mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
@@ -25,7 +26,6 @@ use reth_rpc_eth_api::{
     EthCallBundleApiServer,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
-
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.
@@ -36,6 +36,11 @@ impl<Eth> EthBundle<Eth> {
     /// Create a new `EthBundle` instance.
     pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
         Self { inner: Arc::new(EthBundleInner { eth_api, blocking_task_guard }) }
+    }
+
+    /// Access the underlying `Eth` API.
+    pub fn eth_api(&self) -> &Eth {
+        &self.inner.eth_api
     }
 }
 
@@ -101,9 +106,9 @@ where
             .into())
         }
 
-        let block_id: reth_rpc_types::BlockId = state_block_number.into();
+        let block_id: alloy_rpc_types::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
-        let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
+        let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
@@ -125,12 +130,12 @@ where
         } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
             let parent_block = block_env.number.saturating_to::<u64>();
             // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
-            let parent = LoadPendingBlock::provider(&self.inner.eth_api)
+            let parent = LoadPendingBlock::provider(self.eth_api())
                 .header_by_number(parent_block)
                 .map_err(Eth::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
             if let Some(base_fee) = parent.next_block_base_fee(
-                LoadPendingBlock::provider(&self.inner.eth_api)
+                LoadPendingBlock::provider(self.eth_api())
                     .chain_spec()
                     .base_fee_params_at_block(parent_block),
             ) {
@@ -142,10 +147,9 @@ where
         // use the block number of the request
         block_env.number = U256::from(block_number);
 
-        let eth_api = self.inner.eth_api.clone();
+        let eth_api = self.eth_api().clone();
 
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
@@ -160,7 +164,7 @@ where
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
                 let mut total_gas_fess = U256::ZERO;
-                let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
+                let mut hasher = Keccak256::new();
 
                 let mut evm = Call::evm_config(&eth_api).evm_with_env(db, env);
 
@@ -178,7 +182,7 @@ where
 
                     let tx = tx.into_transaction();
 
-                    hash_bytes.extend_from_slice(tx.hash().as_slice());
+                    hasher.update(tx.hash());
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
@@ -243,7 +247,7 @@ where
                     coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
                 let res = EthCallBundleResponse {
                     bundle_gas_price,
-                    bundle_hash: keccak256(&hash_bytes),
+                    bundle_hash: hasher.finalize(),
                     coinbase_diff,
                     eth_sent_to_coinbase,
                     gas_fees: total_gas_fess,

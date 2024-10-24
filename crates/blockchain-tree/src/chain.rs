@@ -5,6 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use alloy_eips::ForkBlock;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, InsertBlockErrorKind},
@@ -14,7 +15,7 @@ use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::{ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
     FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,

@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
     path::PathBuf,
     sync::Arc,
@@ -7,6 +6,7 @@ use std::{
 
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
+    map::{HashMap, HashSet},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use reth_chain_state::{
@@ -37,7 +37,7 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader, StateProvider, StateProviderBox,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateRootProvider, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
@@ -356,6 +356,15 @@ impl StorageRootProvider for NoopProvider {
     ) -> ProviderResult<B256> {
         Ok(B256::default())
     }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(reth_trie::StorageProof::new(slot))
+    }
 }
 
 impl StateProofProvider for NoopProvider {
@@ -526,16 +535,6 @@ impl WithdrawalsProvider for NoopProvider {
         Ok(None)
     }
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        Ok(None)
-    }
-}
-
-impl RequestsProvider for NoopProvider {
-    fn requests_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         Ok(None)
     }
 }

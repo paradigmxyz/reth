@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, pin::Pin};
 
-use alloy_network::Network;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
@@ -11,15 +10,18 @@ use reth::{
     network::PeersHandleProvider,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
-        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
-        types::{engine::PayloadStatusEnum, AnyTransactionReceipt},
+        api::eth::{
+            helpers::{EthApiSpec, EthTransactions, TraceExt},
+            FullEthApiTypes,
+        },
+        types::engine::PayloadStatusEnum,
     },
 };
-use reth_chainspec::ChainSpec;
-use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypesWithEngine};
-use reth_rpc_types::WithOtherFields;
+use reth_chainspec::EthereumHardforks;
+use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
+use url::Url;
 
 use crate::{
     engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
@@ -31,7 +33,7 @@ use crate::{
 pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
-    AddOns: NodeAddOns<Node>,
+    AddOns: RethRpcAddOns<Node>,
 {
     /// The core structure representing the full node.
     pub inner: FullNode<Node, AddOns>,
@@ -40,7 +42,10 @@ where
     /// Context for testing network functionalities.
     pub network: NetworkTestContext<Node::Network>,
     /// Context for testing the Engine API.
-    pub engine_api: EngineApiTestContext<<Node::Types as NodeTypesWithEngine>::Engine>,
+    pub engine_api: EngineApiTestContext<
+        <Node::Types as NodeTypesWithEngine>::Engine,
+        <Node::Types as NodeTypes>::ChainSpec,
+    >,
     /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
 }
@@ -49,9 +54,9 @@ impl<Node, Engine, AddOns> NodeTestContext<Node, AddOns>
 where
     Engine: EngineTypes,
     Node: FullNodeComponents,
-    Node::Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Engine = Engine>,
+    Node::Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine = Engine>,
     Node::Network: PeersHandleProvider,
-    AddOns: NodeAddOns<Node>,
+    AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
     pub async fn new(node: FullNode<Node, AddOns>) -> eyre::Result<Self> {
@@ -62,11 +67,12 @@ where
             payload: PayloadTestContext::new(builder).await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
+                chain_spec: node.chain_spec(),
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
                 _marker: PhantomData::<Engine>,
             },
-            rpc: RpcTestContext { inner: node.rpc_registry },
+            rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
         })
     }
 
@@ -87,13 +93,9 @@ where
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + Copy,
     ) -> eyre::Result<Vec<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>>
     where
-        <Engine as EngineTypes>::ExecutionPayloadV3:
-            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
-        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
-        <AddOns::EthApi as EthApiTypes>::NetworkTypes: Network<
-            TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
-            ReceiptResponse = AnyTransactionReceipt,
-        >,
+        Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        Engine::ExecutionPayloadEnvelopeV4: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt + FullEthApiTypes,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
@@ -117,7 +119,7 @@ where
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
-        <Engine as EngineTypes>::ExecutionPayloadV3:
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
             From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
         // trigger new payload building draining the pool
@@ -139,7 +141,9 @@ where
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
-        <Engine as EngineTypes>::ExecutionPayloadV3:
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
             From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
         let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
@@ -239,5 +243,11 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Returns the RPC URL.
+    pub fn rpc_url(&self) -> Url {
+        let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
+        format!("http://{}", addr).parse().unwrap()
     }
 }

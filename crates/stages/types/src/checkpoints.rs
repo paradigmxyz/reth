@@ -8,7 +8,7 @@ use std::ops::RangeInclusive;
 use super::StageId;
 
 /// Saves the progress of Merkle stage.
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct MerkleCheckpoint {
     /// The target block number.
     pub target_block: BlockNumber,

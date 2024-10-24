@@ -1,11 +1,10 @@
 use crate::EthPooledTransaction;
-use alloy_primitives::{Address, B256, U256};
+use alloy_consensus::{TxEip1559, TxEip4844, TxLegacy};
+use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2718::Encodable2718, eip2930::AccessList};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
-use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Bytes, Transaction,
-    TransactionSigned, TxEip1559, TxEip4844, TxKind, TxLegacy,
-};
+use reth_primitives::{sign_message, Transaction, TransactionSigned};
 
 /// A generator for transactions for testing purposes.
 #[derive(Debug)]
@@ -105,7 +104,7 @@ impl<R: Rng> TransactionGenerator<R> {
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.
     pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
         let tx = self.gen_eip4844().into_ecrecovered().unwrap();
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         EthPooledTransaction::new(tx, encoded_length)
     }
 }
@@ -144,7 +143,7 @@ impl TransactionBuilder {
             TxLegacy {
                 chain_id: Some(self.chain_id),
                 nonce: self.nonce,
-                gas_limit: self.gas_limit.into(),
+                gas_limit: self.gas_limit,
                 gas_price: self.max_fee_per_gas,
                 to: self.to,
                 value: self.value,
@@ -161,7 +160,7 @@ impl TransactionBuilder {
             TxEip1559 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
-                gas_limit: self.gas_limit.into(),
+                gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
                 to: self.to,
@@ -179,7 +178,7 @@ impl TransactionBuilder {
             TxEip4844 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
-                gas_limit: self.gas_limit as u128,
+                gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
                 to: match self.to {

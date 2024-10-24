@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-db.workspace = true
-reth-db-api.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 reth-execution-errors.workspace = true
@@ -31,14 +30,8 @@ tracing.workspace = true
 # misc
 thiserror.workspace = true
 derive_more.workspace = true
-
-# `async` feature
-reth-tasks = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true, default-features = false }
-itertools = { workspace = true, optional = true }
-
-# `parallel` feature
-rayon = { workspace = true, optional = true }
+rayon.workspace = true
+itertools.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -52,19 +45,20 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
+tokio = { workspace = true, default-features = false, features = [
+    "sync",
+    "rt",
+    "macros",
+] }
 rayon.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
 [features]
-default = ["metrics", "async", "parallel"]
+default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
-async = ["reth-tasks/rayon", "tokio/sync", "itertools"]
-parallel = ["rayon"]
 
 [[bench]]
 name = "root"
-required-features = ["async", "parallel"]
 harness = false

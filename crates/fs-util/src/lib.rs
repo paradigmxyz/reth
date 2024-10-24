@@ -8,8 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fs::{self, File, ReadDir},
-    io::{self, BufWriter, Write},
+    fs::{self, File, OpenOptions, ReadDir},
+    io::{self, BufWriter, Error, ErrorKind, Write},
     path::{Path, PathBuf},
 };
 
@@ -138,6 +138,14 @@ pub enum FsPathError {
         /// The path related to the operation.
         path: PathBuf,
     },
+    /// Error variant for failed fsync operation with additional path context.
+    #[error("failed to sync path {path:?}: {source}")]
+    Fsync {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
 }
 
 impl FsPathError {
@@ -194,6 +202,11 @@ impl FsPathError {
     /// Returns the complementary error variant for [`std::fs::File::metadata`].
     pub fn metadata(source: io::Error, path: impl Into<PathBuf>) -> Self {
         Self::Metadata { source, path: path.into() }
+    }
+
+    /// Returns the complementary error variant for `fsync`.
+    pub fn fsync(source: io::Error, path: impl Into<PathBuf>) -> Self {
+        Self::Fsync { source, path: path.into() }
     }
 }
 
@@ -276,4 +289,65 @@ pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
     serde_json::to_writer_pretty(&mut writer, obj)
         .map_err(|source| FsPathError::WriteJson { source, path: path.into() })?;
     writer.flush().map_err(|e| FsPathError::write(e, path))
+}
+
+/// Writes atomically to file.
+///
+/// 1. Creates a temporary file with a `.tmp` extension in the same file directory.
+/// 2. Writes content with `write_fn`.
+/// 3. Fsyncs the temp file to disk.
+/// 4. Renames the temp file to the target path.
+/// 5. Fsyncs the file directory.
+///
+/// Atomic writes are hard:
+/// * <https://github.com/paradigmxyz/reth/issues/8622>
+/// * <https://users.rust-lang.org/t/how-to-write-replace-files-atomically/42821/13>
+pub fn atomic_write_file<F, E>(file_path: &Path, write_fn: F) -> Result<()>
+where
+    F: FnOnce(&mut File) -> std::result::Result<(), E>,
+    E: Into<Box<dyn core::error::Error + Send + Sync>>,
+{
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let mut tmp_path = file_path.to_path_buf();
+    tmp_path.set_extension("tmp");
+
+    // Write to the temporary file
+    let mut file =
+        File::create(&tmp_path).map_err(|err| FsPathError::create_file(err, &tmp_path))?;
+
+    write_fn(&mut file).map_err(|err| FsPathError::Write {
+        source: Error::new(ErrorKind::Other, err.into()),
+        path: tmp_path.clone(),
+    })?;
+
+    // fsync() file
+    file.sync_all().map_err(|err| FsPathError::fsync(err, &tmp_path))?;
+
+    // Rename file, not move
+    rename(&tmp_path, file_path)?;
+
+    // fsync() directory
+    if let Some(parent) = file_path.parent() {
+        #[cfg(windows)]
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
+            .open(parent)
+            .map_err(|err| FsPathError::open(err, parent))?
+            .sync_all()
+            .map_err(|err| FsPathError::fsync(err, parent))?;
+
+        #[cfg(not(windows))]
+        OpenOptions::new()
+            .read(true)
+            .open(parent)
+            .map_err(|err| FsPathError::open(err, parent))?
+            .sync_all()
+            .map_err(|err| FsPathError::fsync(err, parent))?;
+    }
+
+    Ok(())
 }

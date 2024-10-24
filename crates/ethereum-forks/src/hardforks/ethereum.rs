@@ -21,6 +21,11 @@ pub trait EthereumHardforks: Hardforks {
         self.is_fork_active_at_timestamp(EthereumHardfork::Prague, timestamp)
     }
 
+    /// Convenience method to check if [`EthereumHardfork::Osaka`] is active at a given timestamp.
+    fn is_osaka_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.is_fork_active_at_timestamp(EthereumHardfork::Osaka, timestamp)
+    }
+
     /// Convenience method to check if [`EthereumHardfork::Byzantium`] is active at a given block
     /// number.
     fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
@@ -51,6 +56,9 @@ pub trait EthereumHardforks: Hardforks {
             _ => None,
         }
     }
+
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    fn get_final_paris_total_difficulty(&self) -> Option<U256>;
 
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///

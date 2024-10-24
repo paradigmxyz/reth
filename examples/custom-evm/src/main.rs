@@ -3,17 +3,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_genesis::Genesis;
+use alloy_primitives::{address, Address, Bytes, U256};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
-    primitives::{
-        address,
-        revm_primitives::{Env, PrecompileResult},
-        Bytes,
-    },
+    primitives::revm_primitives::{Env, PrecompileResult},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
@@ -34,11 +31,11 @@ use reth_node_api::{
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
-    EthExecutorProvider, EthereumNode,
+    BasicBlockExecutorProvider, EthExecutionStrategyFactory, EthereumNode,
 };
 use reth_primitives::{
     revm_primitives::{CfgEnvWithHandlerCfg, TxEnv},
-    Address, Header, TransactionSigned, U256,
+    Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
@@ -161,7 +158,7 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type EVM = MyEvmConfig;
-    type Executor = EthExecutorProvider<Self::EVM>;
+    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
 
     async fn build_evm(
         self,
@@ -169,7 +166,10 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         Ok((
             MyEvmConfig::new(ctx.chain_spec()),
-            EthExecutorProvider::new(ctx.chain_spec(), MyEvmConfig::new(ctx.chain_spec())),
+            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
+                ctx.chain_spec(),
+                MyEvmConfig::new(ctx.chain_spec()),
+            )),
         ))
     }
 }
@@ -229,7 +229,7 @@ async fn main() -> eyre::Result<()> {
                 .executor(MyExecutorBuilder::default())
                 .payload(MyPayloadBuilder::default()),
         )
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .launch()
         .await
         .unwrap();

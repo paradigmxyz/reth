@@ -26,7 +26,7 @@ impl<'a, TX> PrefixSetLoader<'a, TX> {
     }
 }
 
-impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
+impl<TX: DbTx> PrefixSetLoader<'_, TX> {
     /// Load all account and storage changes for the given block range.
     pub fn load(self, range: RangeInclusive<BlockNumber>) -> Result<TriePrefixSets, DatabaseError> {
         // Initialize prefix sets.

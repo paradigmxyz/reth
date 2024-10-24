@@ -8,6 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -18,7 +20,6 @@ use reth_consensus_common::validation::{
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -64,6 +65,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             };
 
         // Check for an increase in gas limit beyond the allowed threshold.
+
         if header.gas_limit > parent_gas_limit {
             if header.gas_limit - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
                 return Err(ConsensusError::GasLimitInvalidIncrease {
@@ -119,11 +121,11 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         }
 
         if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
-            if header.requests_root.is_none() {
-                return Err(ConsensusError::RequestsRootMissing)
+            if header.requests_hash.is_none() {
+                return Err(ConsensusError::RequestsHashMissing)
             }
-        } else if header.requests_root.is_some() {
-            return Err(ConsensusError::RequestsRootUnexpected)
+        } else if header.requests_hash.is_some() {
+            return Err(ConsensusError::RequestsHashUnexpected)
         }
 
         Ok(())
@@ -167,7 +169,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
-            if header.nonce != 0 {
+            if !header.nonce.is_zero() {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
@@ -226,18 +228,19 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Sealable, B256};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_primitives::{proofs, B256};
+    use reth_primitives::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = Header { gas_limit, ..Default::default() };
-        header.seal(B256::ZERO)
+        SealedHeader::new(header, B256::ZERO)
     }
 
     #[test]
     fn test_valid_gas_limit_increase() {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
-        let child = header_with_gas_limit(parent.gas_limit + 5);
+        let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
@@ -254,7 +257,7 @@ mod tests {
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
                 .validate_against_parent_gas_limit(&child, &parent),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
+            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
         );
     }
 
@@ -310,13 +313,17 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let header = Header {
-            base_fee_per_gas: Some(1337u64),
+        let sealed = Header {
+            base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
         }
         .seal_slow();
+        let (header, seal) = sealed.into_parts();
 
-        assert_eq!(EthBeaconConsensus::new(chain_spec).validate_header(&header), Ok(()));
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::new(header, seal)),
+            Ok(())
+        );
     }
 }

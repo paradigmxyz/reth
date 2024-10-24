@@ -6,7 +6,6 @@ use std::sync::Arc;
 use alloy_network::AnyNetwork;
 use alloy_primitives::U256;
 use derive_more::Deref;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
@@ -19,9 +18,11 @@ use reth_rpc_eth_types::{
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskExecutor, TaskSpawner, TokioTaskExecutor,
+    TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::Mutex;
+
+use crate::eth::EthTxBuilder;
 
 /// `Eth` API implementation.
 ///
@@ -35,12 +36,15 @@ use tokio::sync::Mutex;
 #[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
+    #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+    /// Transaction RPC response builder.
+    pub tx_resp_builder: EthTxBuilder,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -80,7 +84,7 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -118,7 +122,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -127,7 +131,13 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
+    // todo: replace with alloy_network::Ethereum
     type NetworkTypes = AnyNetwork;
+    type TransactionCompat = EthTxBuilder;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        &self.tx_resp_builder
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
@@ -156,18 +166,6 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.blocking_task_guard()
-    }
-}
-
-impl<N> BuilderProvider<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
-where
-    N: FullNodeComponents,
-{
-    type Ctx<'a> =
-        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, N::Network, TaskExecutor, N::Provider>;
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(Self::with_spawner)
     }
 }
 
@@ -363,11 +361,12 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{B256, U64};
+    use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use reth_chainspec::{BaseFeeParams, ChainSpec};
+    use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned};
+    use reth_primitives::{Block, BlockBody, BlockNumberOrTag, Header, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
@@ -379,7 +378,6 @@ mod tests {
     use reth_rpc_server_types::constants::{
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
-    use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -403,7 +401,7 @@ mod tests {
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 
-        let gas_cap = provider.chain_spec().max_gas_limit;
+        let gas_cap = provider.chain_spec().max_gas_limit();
         EthApi::new(
             provider.clone(),
             testing_pool(),
@@ -430,37 +428,38 @@ mod tests {
         let mut rng = generators::rng();
 
         // Build mock data
-        let mut gas_used_ratios = Vec::new();
-        let mut base_fees_per_gas = Vec::new();
+        let mut gas_used_ratios = Vec::with_capacity(block_count as usize);
+        let mut base_fees_per_gas = Vec::with_capacity(block_count as usize);
         let mut last_header = None;
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
             let hash = rng.gen();
-            let gas_limit: u64 = rng.gen();
-            let gas_used: u64 = rng.gen();
-            // Note: Generates a u32 to avoid overflows later
+            // Note: Generates saner values to avoid invalid overflows later
+            let gas_limit = rng.gen::<u32>() as u64;
             let base_fee_per_gas: Option<u64> = rng.gen::<bool>().then(|| rng.gen::<u32>() as u64);
+            let gas_used = rng.gen::<u32>() as u64;
 
             let header = Header {
                 number: newest_block - i,
                 gas_limit,
                 gas_used,
-                base_fee_per_gas,
+                base_fee_per_gas: base_fee_per_gas.map(Into::into),
                 parent_hash,
                 ..Default::default()
             };
             last_header = Some(header.clone());
             parent_hash = hash;
 
-            let mut transactions = vec![];
-            for _ in 0..100 {
+            const TOTAL_TRANSACTIONS: usize = 100;
+            let mut transactions = Vec::with_capacity(TOTAL_TRANSACTIONS);
+            for _ in 0..TOTAL_TRANSACTIONS {
                 let random_fee: u128 = rng.gen();
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned {
                         transaction: reth_primitives::Transaction::Eip1559(
-                            reth_primitives::TxEip1559 {
+                            alloy_consensus::TxEip1559 {
                                 max_priority_fee_per_gas: random_fee,
                                 max_fee_per_gas: random_fee + base_fee_per_gas as u128,
                                 ..Default::default()
@@ -482,7 +481,10 @@ mod tests {
 
             mock_provider.add_block(
                 hash,
-                Block { header: header.clone(), body: transactions, ..Default::default() },
+                Block {
+                    header: header.clone(),
+                    body: BlockBody { transactions, ..Default::default() },
+                },
             );
             mock_provider.add_header(hash, header);
 
@@ -494,10 +496,10 @@ mod tests {
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
         base_fees_per_gas.push(BaseFeeParams::ethereum().next_block_base_fee(
-            last_header.gas_used as u128,
-            last_header.gas_limit as u128,
-            last_header.base_fee_per_gas.unwrap_or_default() as u128,
-        ));
+            last_header.gas_used,
+            last_header.gas_limit,
+            last_header.base_fee_per_gas.unwrap_or_default(),
+        ) as u128);
 
         let eth_api = build_test_eth_api(mock_provider);
 

@@ -12,13 +12,14 @@ impl Compress for IntegerList {
     fn compress(self) -> Self::Compressed {
         self.to_bytes()
     }
+
     fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
         self.to_mut_bytes(buf)
     }
 }
 
 impl Decompress for IntegerList {
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Self::from_bytes(value.as_ref()).map_err(|_| DatabaseError::Decode)
+    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
+        Self::from_bytes(value).map_err(|_| DatabaseError::Decode)
     }
 }

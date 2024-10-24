@@ -16,6 +16,7 @@ workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-cli-util.workspace = true
 reth-config.workspace = true
@@ -25,6 +26,7 @@ reth-db = { workspace = true, features = ["mdbx"], optional = true }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
+reth-engine-local.workspace = true
 reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
@@ -40,17 +42,17 @@ reth-node-core.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
+reth-rpc = { workspace = true, features = ["js-tracer"] }
 reth-rpc-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
-reth-rpc-types.workspace = true
-reth-rpc.workspace = true
 reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-tasks.workspace = true
@@ -59,8 +61,8 @@ reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 
 ## ethereum
-alloy-network.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 ## async
 futures.workspace = true
@@ -94,4 +96,21 @@ tempfile.workspace = true
 
 [features]
 default = []
-test-utils = ["reth-db/test-utils"]
+test-utils = [
+	"reth-db/test-utils",
+	"reth-blockchain-tree/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-engine-tree/test-utils",
+	"reth-evm/test-utils",
+	"reth-downloaders/test-utils",
+	"reth-network/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-stages/test-utils",
+	"reth-db-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-transaction-pool/test-utils"
+]

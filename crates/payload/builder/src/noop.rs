@@ -20,7 +20,7 @@ pub struct NoopPayloadBuilderService<T: PayloadTypes> {
 
 impl<T> NoopPayloadBuilderService<T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
 {
     /// Creates a new [`NoopPayloadBuilderService`].
     pub fn new() -> (Self, PayloadBuilderHandle<T>) {
@@ -51,7 +51,7 @@ where
                 }
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
-                PayloadServiceCommand::Resolve(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::Resolve(_, _, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Subscribe(_) => None,
             };
         }

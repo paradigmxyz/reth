@@ -6,6 +6,7 @@ use std::{
 use futures_util::TryStreamExt;
 use tracing::*;
 
+use alloy_primitives::TxNumber;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -13,7 +14,7 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::{StaticFileSegment, TxNumber};
+use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
@@ -120,7 +121,6 @@ where
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
@@ -172,7 +172,7 @@ where
             let block_indices = StoredBlockBodyIndices {
                 first_tx_num: next_tx_num,
                 tx_count: match &response {
-                    BlockResponse::Full(block) => block.body.len() as u64,
+                    BlockResponse::Full(block) => block.body.transactions.len() as u64,
                     BlockResponse::Empty(_) => 0,
                 },
             };
@@ -195,12 +195,12 @@ where
             match response {
                 BlockResponse::Full(block) => {
                     // write transaction block index
-                    if !block.body.is_empty() {
+                    if !block.body.transactions.is_empty() {
                         tx_block_cursor.append(block_indices.last_tx_num(), block.number)?;
                     }
 
                     // Write transactions
-                    for transaction in block.body {
+                    for transaction in block.body.transactions {
                         let appended_tx_number = static_file_producer
                             .append_transaction(next_tx_num, &transaction.into())?;
 
@@ -219,23 +219,18 @@ where
                     }
 
                     // Write ommers if any
-                    if !block.ommers.is_empty() {
-                        ommers_cursor
-                            .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
+                    if !block.body.ommers.is_empty() {
+                        ommers_cursor.append(
+                            block_number,
+                            StoredBlockOmmers { ommers: block.body.ommers },
+                        )?;
                     }
 
                     // Write withdrawals if any
-                    if let Some(withdrawals) = block.withdrawals {
+                    if let Some(withdrawals) = block.body.withdrawals {
                         if !withdrawals.is_empty() {
                             withdrawals_cursor
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
-                        }
-                    }
-
-                    // Write requests if any
-                    if let Some(requests) = block.requests {
-                        if !requests.0.is_empty() {
-                            requests_cursor.append(block_number, requests)?;
                         }
                     }
                 }
@@ -273,7 +268,6 @@ where
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
         // Cursors to unwind transitions
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -291,11 +285,6 @@ where
             // Delete the withdrawals entry if any
             if withdrawals_cursor.seek_exact(number)?.is_some() {
                 withdrawals_cursor.delete_current()?;
-            }
-
-            // Delete the requests entry if any
-            if requests_cursor.seek_exact(number)?.is_some() {
-                requests_cursor.delete_current()?;
             }
 
             // Delete all transaction to block values.
@@ -619,6 +608,7 @@ mod tests {
                 UnwindStageTestRunner,
             },
         };
+        use alloy_primitives::{BlockHash, BlockNumber, TxNumber, B256};
         use futures_util::Stream;
         use reth_db::{static_file::HeaderMask, tables};
         use reth_db_api::{
@@ -633,10 +623,7 @@ mod tests {
             },
             error::DownloadResult,
         };
-        use reth_primitives::{
-            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader,
-            StaticFileSegment, TxNumber, B256,
-        };
+        use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader, StaticFileSegment};
         use reth_provider::{
             providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
             ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
@@ -657,15 +644,7 @@ mod tests {
 
         /// A helper to create a collection of block bodies keyed by their hash.
         pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
-            (
-                block.hash(),
-                BlockBody {
-                    transactions: block.body.clone(),
-                    ommers: block.ommers.clone(),
-                    withdrawals: block.withdrawals.clone(),
-                    requests: block.requests.clone(),
-                },
-            )
+            (block.hash(), block.body.clone())
         }
 
         /// A helper struct for running the [`BodyStage`].
@@ -738,7 +717,7 @@ mod tests {
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
-                            tx_count: progress.body.len() as u64,
+                            tx_count: progress.body.transactions.len() as u64,
                         };
 
                         static_file_producer.set_block_range(0..=progress.number);
@@ -762,7 +741,7 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers { ommers: progress.ommers.clone() },
+                                StoredBlockOmmers { ommers: progress.body.ommers.clone() },
                             )?;
                         }
 
@@ -922,7 +901,7 @@ mod tests {
                     |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
                 )? {
                     let (header, hash) = header?;
-                    self.headers.push_back(header.seal(hash));
+                    self.headers.push_back(SealedHeader::new(header, hash));
                 }
 
                 Ok(())
@@ -938,20 +917,15 @@ mod tests {
                     return Poll::Ready(None)
                 }
 
-                let mut response = Vec::default();
+                let mut response =
+                    Vec::with_capacity(std::cmp::min(this.headers.len(), this.batch_size as usize));
                 while let Some(header) = this.headers.pop_front() {
                     if header.is_empty() {
                         response.push(BlockResponse::Empty(header))
                     } else {
                         let body =
                             this.responses.remove(&header.hash()).expect("requested unknown body");
-                        response.push(BlockResponse::Full(SealedBlock {
-                            header,
-                            body: body.transactions,
-                            ommers: body.ommers,
-                            withdrawals: body.withdrawals,
-                            requests: body.requests,
-                        }));
+                        response.push(BlockResponse::Full(SealedBlock { header, body }));
                     }
 
                     if response.len() as u64 >= this.batch_size {

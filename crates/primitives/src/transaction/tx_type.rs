@@ -1,4 +1,8 @@
-use crate::{U64, U8};
+use alloy_consensus::constants::{
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
+};
+use alloy_primitives::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -23,23 +27,7 @@ pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
 #[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
-/// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
-/// typed.
-pub const LEGACY_TX_TYPE_ID: u8 = 0;
-
-/// Identifier for [`TxEip2930`](crate::TxEip2930) transaction.
-pub const EIP2930_TX_TYPE_ID: u8 = 1;
-
-/// Identifier for [`TxEip1559`](crate::TxEip1559) transaction.
-pub const EIP1559_TX_TYPE_ID: u8 = 2;
-
-/// Identifier for [`TxEip4844`](crate::TxEip4844) transaction.
-pub const EIP4844_TX_TYPE_ID: u8 = 3;
-
-/// Identifier for [`TxEip7702`](crate::TxEip7702) transaction.
-pub const EIP7702_TX_TYPE_ID: u8 = 4;
-
-/// Identifier for [`TxDeposit`](crate::TxDeposit) transaction.
+/// Identifier for [`TxDeposit`](op_alloy_consensus::TxDeposit) transaction.
 #[cfg(feature = "optimism")]
 pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
@@ -246,7 +234,7 @@ impl From<alloy_consensus::TxType> for TxType {
 
 #[cfg(test)]
 mod tests {
-    use crate::hex;
+    use alloy_primitives::hex;
     use rand::Rng;
     use reth_codecs::Compact;
 

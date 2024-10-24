@@ -1,8 +1,8 @@
 //! OP mainnet bedrock related data.
 
-use alloy_primitives::{b256, bloom, bytes, B256, U256};
-use reth_primitives::{address, Header};
-use reth_primitives_traits::constants::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+use alloy_primitives::{address, b256, bloom, bytes, B256, B64, U256};
+use reth_primitives::Header;
 
 /// Transaction 0x9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9 in block 985,
 /// replayed in blocks:
@@ -55,6 +55,10 @@ pub fn is_dup_tx(block_number: u64) -> bool {
     false
 }
 
+/// OVM Header #1 hash.
+pub const OVM_HEADER_1_HASH: B256 =
+    b256!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+
 /// Bedrock hash on Optimism Mainnet.
 pub const BEDROCK_HEADER_HASH: B256 =
     b256!("dbf6a80fef073de06add9b0d14026d6e5a86c85f6d102c36d3d8e9cf89c2afd3");
@@ -66,13 +70,13 @@ pub const BEDROCK_HEADER: Header = Header {
     gas_limit: 30000000,
     gas_used: 0,
     logs_bloom: bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-    nonce: 0,
+    nonce: B64::ZERO,
     number: 105235063,
     parent_hash: b256!("21a168dfa5e727926063a28ba16fd5ee84c814e847c81a699c7a0ea551e4ca50"),
-    receipts_root: b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+    receipts_root: EMPTY_ROOT_HASH,
     state_root: b256!("920314c198da844a041d63bf6cbe8b59583165fd2229d1b3f599da812fd424cb"),
     timestamp: 1686068903,
-    transactions_root: b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+    transactions_root: EMPTY_ROOT_HASH,
     ommers_hash: EMPTY_OMMER_ROOT_HASH,
     beneficiary: address!("4200000000000000000000000000000000000011"),
     withdrawals_root: None,
@@ -81,7 +85,7 @@ pub const BEDROCK_HEADER: Header = Header {
     blob_gas_used: None,
     excess_blob_gas: None,
     parent_beacon_block_root: None,
-    requests_root: None,
+    requests_hash: None,
 };
 
 /// Bedrock total difficulty on Optimism Mainnet.

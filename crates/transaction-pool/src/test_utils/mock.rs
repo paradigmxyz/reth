@@ -7,6 +7,11 @@ use crate::{
     CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
     ValidPoolTransaction,
 };
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
+    TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+};
+use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2930::AccessList};
 use alloy_primitives::{Address, Bytes, ChainId, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{
@@ -14,12 +19,9 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    transaction::TryFromRecoveredTransactionError,
-    AccessList, BlobTransactionSidecar, BlobTransactionValidationError,
-    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    constants::eip4844::DATA_GAS_PER_BLOB, transaction::TryFromRecoveredTransactionError,
+    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElementEcRecovered,
+    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -796,7 +798,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 sender,
                 nonce,
                 gas_price,
-                gas_limit: gas_limit as u64,
+                gas_limit,
                 to,
                 value,
                 input,
@@ -817,7 +819,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 sender,
                 nonce,
                 gas_price,
-                gas_limit: gas_limit as u64,
+                gas_limit,
                 to,
                 value,
                 input,
@@ -841,7 +843,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 nonce,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
-                gas_limit: gas_limit as u64,
+                gas_limit,
                 to,
                 value,
                 input,
@@ -868,7 +870,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 max_fee_per_blob_gas,
-                gas_limit: gas_limit as u64,
+                gas_limit,
                 to,
                 value,
                 input,
@@ -893,7 +895,7 @@ impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx = TransactionSigned {
             hash: *tx.hash(),
-            signature: Signature::default(),
+            signature: Signature::test_signature(),
             transaction: tx.clone().into(),
         };
 
@@ -915,15 +917,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 input,
                 size: _,
-            } => Self::Legacy(TxLegacy {
-                chain_id,
-                nonce,
-                gas_price,
-                gas_limit: gas_limit.into(),
-                to,
-                value,
-                input,
-            }),
+            } => Self::Legacy(TxLegacy { chain_id, nonce, gas_price, gas_limit, to, value, input }),
             MockTransaction::Eip2930 {
                 chain_id,
                 hash: _,
@@ -940,7 +934,7 @@ impl From<MockTransaction> for Transaction {
                 chain_id,
                 nonce,
                 gas_price,
-                gas_limit: gas_limit.into(),
+                gas_limit,
                 to,
                 value,
                 access_list,
@@ -962,7 +956,7 @@ impl From<MockTransaction> for Transaction {
             } => Self::Eip1559(TxEip1559 {
                 chain_id,
                 nonce,
-                gas_limit: gas_limit.into(),
+                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 to,
@@ -988,7 +982,7 @@ impl From<MockTransaction> for Transaction {
             } => Self::Eip4844(TxEip4844 {
                 chain_id,
                 nonce,
-                gas_limit: gas_limit.into(),
+                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 to,
@@ -1025,7 +1019,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     hash: tx_hash,
                     nonce: *nonce,
                     gas_price: *gas_price,
-                    gas_limit: *gas_limit as u64,
+                    gas_limit: { *gas_limit },
                     to: *to,
                     value: *value,
                     input: input.clone(),
@@ -1047,7 +1041,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     hash: tx_hash,
                     nonce: *nonce,
                     gas_price: *gas_price,
-                    gas_limit: *gas_limit as u64,
+                    gas_limit: { *gas_limit },
                     to: *to,
                     value: *value,
                     input: input.clone(),
@@ -1071,7 +1065,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     nonce: *nonce,
                     max_fee_per_gas: *max_fee_per_gas,
                     max_priority_fee_per_gas: *max_priority_fee_per_gas,
-                    gas_limit: *gas_limit as u64,
+                    gas_limit: { *gas_limit },
                     to: *to,
                     value: *value,
                     input: input.clone(),
@@ -1098,7 +1092,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     max_fee_per_gas: *max_fee_per_gas,
                     max_priority_fee_per_gas: *max_priority_fee_per_gas,
                     max_fee_per_blob_gas: *max_fee_per_blob_gas,
-                    gas_limit: *gas_limit as u64,
+                    gas_limit: { *gas_limit },
                     to: *to,
                     value: *value,
                     input: input.clone(),
@@ -1345,10 +1339,8 @@ impl MockTransactionDistribution {
         nonce_range: Range<u64>,
         rng: &mut impl rand::Rng,
     ) -> MockTransactionSet {
-        let mut txs = Vec::new();
-        for nonce in nonce_range {
-            txs.push(self.tx(nonce, rng).with_sender(sender));
-        }
+        let txs =
+            nonce_range.map(|nonce| self.tx(nonce, rng).with_sender(sender)).collect::<Vec<_>>();
         MockTransactionSet::new(txs)
     }
 

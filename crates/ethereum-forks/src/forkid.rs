@@ -258,32 +258,24 @@ impl ForkFilter {
     }
 
     fn set_head_priv(&mut self, head: Head) -> Option<ForkTransition> {
-        let recompute_cache = {
-            let head_in_past = match self.cache.epoch_start {
-                ForkFilterKey::Block(epoch_start_block) => head.number < epoch_start_block,
-                ForkFilterKey::Time(epoch_start_time) => head.timestamp < epoch_start_time,
-            };
-            let head_in_future = match self.cache.epoch_end {
-                Some(ForkFilterKey::Block(epoch_end_block)) => head.number >= epoch_end_block,
-                Some(ForkFilterKey::Time(epoch_end_time)) => head.timestamp >= epoch_end_time,
-                None => false,
-            };
-
-            head_in_past || head_in_future
+        let head_in_past = match self.cache.epoch_start {
+            ForkFilterKey::Block(epoch_start_block) => head.number < epoch_start_block,
+            ForkFilterKey::Time(epoch_start_time) => head.timestamp < epoch_start_time,
         };
-
-        // recompute the cache
-        let transition = if recompute_cache {
-            let past = self.current();
-            self.cache = Cache::compute_cache(&self.forks, head);
-            Some(ForkTransition { current: self.current(), past })
-        } else {
-            None
+        let head_in_future = match self.cache.epoch_end {
+            Some(ForkFilterKey::Block(epoch_end_block)) => head.number >= epoch_end_block,
+            Some(ForkFilterKey::Time(epoch_end_time)) => head.timestamp >= epoch_end_time,
+            None => false,
         };
 
         self.head = head;
 
-        transition
+        // Recompute the cache if the head is in the past or future epoch.
+        (head_in_past || head_in_future).then(|| {
+            let past = self.current();
+            self.cache = Cache::compute_cache(&self.forks, head);
+            ForkTransition { current: self.current(), past }
+        })
     }
 
     /// Set the current head.
@@ -454,15 +446,12 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::b256;
-
-    const GENESIS_HASH: B256 =
-        b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
+    use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 
     // EIP test vectors.
     #[test]
     fn forkhash() {
-        let mut fork_hash = ForkHash::from(GENESIS_HASH);
+        let mut fork_hash = ForkHash::from(MAINNET_GENESIS_HASH);
         assert_eq!(fork_hash.0, hex!("fc64ec04"));
 
         fork_hash += 1_150_000u64;
@@ -476,7 +465,7 @@ mod tests {
     fn compatibility_check() {
         let mut filter = ForkFilter::new(
             Head { number: 0, ..Default::default() },
-            GENESIS_HASH,
+            MAINNET_GENESIS_HASH,
             0,
             vec![
                 ForkFilterKey::Block(1_150_000),
@@ -735,7 +724,7 @@ mod tests {
 
         let mut fork_filter = ForkFilter::new(
             Head { number: 0, ..Default::default() },
-            GENESIS_HASH,
+            MAINNET_GENESIS_HASH,
             0,
             vec![ForkFilterKey::Block(b1), ForkFilterKey::Block(b2)],
         );

@@ -278,6 +278,7 @@ where
             network_builder,
             executor_builder,
             consensus_builder: _,
+
             _marker,
         } = self;
         ComponentsBuilder {

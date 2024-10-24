@@ -5,23 +5,38 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use alloy_primitives::BlockNumber;
 use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
+use reth_tracing::tracing::debug;
 use tokio::task::JoinHandle;
+
+use super::job::BackfillJobResult;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
 pub(crate) const DEFAULT_PARALLELISM: usize = 4;
 /// The default batch size for active tasks in [`StreamBackfillJob`].
 const DEFAULT_BATCH_SIZE: usize = 100;
 
-type BackfillTasks<T> = FuturesOrdered<JoinHandle<Result<T, BlockExecutionError>>>;
+/// Boxed thread-safe iterator that yields [`BackfillJobResult`]s.
+type BackfillTaskIterator<T> =
+    Box<dyn Iterator<Item = BackfillJobResult<T>> + Send + Sync + 'static>;
+
+/// Backfill task output.
+struct BackfillTaskOutput<T> {
+    job: BackfillTaskIterator<T>,
+    result: Option<BackfillJobResult<T>>,
+}
+
+/// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
+type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
 type SingleBlockStreamItem = (BlockWithSenders, BlockExecutionOutput<Receipt>);
 type BatchBlockStreamItem = Chain;
@@ -39,9 +54,13 @@ pub struct StreamBackfillJob<E, P, T> {
     tasks: BackfillTasks<T>,
     parallelism: usize,
     batch_size: usize,
+    thresholds: ExecutionStageThresholds,
 }
 
-impl<E, P, T> StreamBackfillJob<E, P, T> {
+impl<E, P, T> StreamBackfillJob<E, P, T>
+where
+    T: Send + Sync + 'static,
+{
     /// Configures the parallelism of the [`StreamBackfillJob`] to handle active tasks.
     pub const fn with_parallelism(mut self, parallelism: usize) -> Self {
         self.parallelism = parallelism;
@@ -54,14 +73,30 @@ impl<E, P, T> StreamBackfillJob<E, P, T> {
         self
     }
 
-    fn poll_next_task(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<T, BlockExecutionError>>> {
-        match ready!(self.tasks.poll_next_unpin(cx)) {
-            Some(res) => Poll::Ready(Some(res.map_err(BlockExecutionError::other)?)),
-            None => Poll::Ready(None),
+    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
+    /// [`BackfillTasks`] queue.
+    fn push_task(&mut self, mut job: BackfillTaskIterator<T>) {
+        self.tasks.push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
+            result: job.next(),
+            job,
+        }));
+    }
+
+    /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
+    fn poll_next_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<BackfillJobResult<T>>> {
+        while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
+            let task_result = res.map_err(BlockExecutionError::other)?;
+
+            if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
+                // If the task returned a non-empty result, a new task advancing the job is created
+                // and pushed to the front of the queue.
+                self.push_task(job);
+
+                return Poll::Ready(Some(job_result))
+            };
         }
+
+        Poll::Ready(None)
     }
 }
 
@@ -70,27 +105,28 @@ where
     E: BlockExecutorProvider + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
-    type Item = Result<SingleBlockStreamItem, BlockExecutionError>;
+    type Item = BackfillJobResult<SingleBlockStreamItem>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
         // Spawn new tasks only if we are below the parallelism configured.
         while this.tasks.len() < this.parallelism {
-            // If we have a block number, then we can spawn a new task for that block
-            if let Some(block_number) = this.range.next() {
-                let mut job = SingleBlockBackfillJob {
-                    executor: this.executor.clone(),
-                    provider: this.provider.clone(),
-                    range: block_number..=block_number,
-                    stream_parallelism: this.parallelism,
-                };
-                let task =
-                    tokio::task::spawn_blocking(move || job.next().expect("non-empty range"));
-                this.tasks.push_back(task);
-            } else {
+            // Get the next block number from the range. If it is empty, we are done.
+            let Some(block_number) = this.range.next() else {
+                debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more single blocks to backfill");
                 break;
-            }
+            };
+
+            // Spawn a new task for that block
+            debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?block_number, "Spawning new single block backfill task");
+            let job = Box::new(SingleBlockBackfillJob {
+                executor: this.executor.clone(),
+                provider: this.provider.clone(),
+                range: block_number..=block_number,
+                stream_parallelism: this.parallelism,
+            }) as BackfillTaskIterator<_>;
+            this.push_task(job);
         }
 
         this.poll_next_task(cx)
@@ -102,7 +138,7 @@ where
     E: BlockExecutorProvider + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
-    type Item = Result<BatchBlockStreamItem, BlockExecutionError>;
+    type Item = BackfillJobResult<BatchBlockStreamItem>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -114,23 +150,23 @@ where
             let start = range.next();
             let range_bounds = start.zip(range.last().or(start));
 
-            // If we have range bounds, then we can spawn a new task for that range
-            if let Some((first, last)) = range_bounds {
-                let range = first..=last;
-                let mut job = BackfillJob {
-                    executor: this.executor.clone(),
-                    provider: this.provider.clone(),
-                    prune_modes: this.prune_modes.clone(),
-                    thresholds: ExecutionStageThresholds::default(),
-                    range,
-                    stream_parallelism: this.parallelism,
-                };
-                let task =
-                    tokio::task::spawn_blocking(move || job.next().expect("non-empty range"));
-                this.tasks.push_back(task);
-            } else {
+            // Create the range from the range bounds. If it is empty, we are done.
+            let Some(range) = range_bounds.map(|(first, last)| first..=last) else {
+                debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more block batches to backfill");
                 break;
-            }
+            };
+
+            // Spawn a new task for that range
+            debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
+            let job = Box::new(BackfillJob {
+                executor: this.executor.clone(),
+                provider: this.provider.clone(),
+                prune_modes: this.prune_modes.clone(),
+                thresholds: this.thresholds.clone(),
+                range,
+                stream_parallelism: this.parallelism,
+            }) as BackfillTaskIterator<_>;
+            this.push_task(job);
         }
 
         this.poll_next_task(cx)
@@ -147,12 +183,14 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
             batch_size: 1,
+            thresholds: ExecutionStageThresholds { max_blocks: Some(1), ..Default::default() },
         }
     }
 }
 
 impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem> {
     fn from(job: BackfillJob<E, P>) -> Self {
+        let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
         Self {
             executor: job.executor,
             provider: job.provider,
@@ -160,7 +198,11 @@ impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamI
             range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
-            batch_size: job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize),
+            batch_size,
+            thresholds: ExecutionStageThresholds {
+                max_blocks: Some(batch_size as u64),
+                ..job.thresholds
+            },
         }
     }
 }

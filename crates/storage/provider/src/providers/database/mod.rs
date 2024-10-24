@@ -4,8 +4,8 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
-    PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -519,16 +519,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> RequestsProvider for ProviderFactory<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.provider()?.requests_by_block(id, timestamp)
-    }
-}
-
 impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
@@ -708,9 +698,9 @@ mod tests {
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body[0].recover_signer().unwrap()
+                if sender == block.body.transactions[0].recover_signer().unwrap()
             );
-            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
+            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(Some(0)));
         }
 
         {
@@ -725,7 +715,7 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
+            assert_matches!(provider.transaction_id(block.body.transactions[0].hash), Ok(None));
         }
     }
 
@@ -753,7 +743,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body[tx_number as usize].recover_signer().unwrap()
+                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );
@@ -766,7 +756,13 @@ mod tests {
                 result,
                 Ok(vec![(
                     0,
-                    block.body.iter().cloned().map(|tx| tx.into_ecrecovered().unwrap()).collect()
+                    block
+                        .body
+                        .transactions
+                        .iter()
+                        .cloned()
+                        .map(|tx| tx.into_ecrecovered().unwrap())
+                        .collect()
                 )])
             )
         }

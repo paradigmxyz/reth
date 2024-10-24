@@ -1,9 +1,9 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
-use reth_primitives::constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
@@ -169,5 +169,16 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn txpool_parse_locals() {
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .args;
+        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 }

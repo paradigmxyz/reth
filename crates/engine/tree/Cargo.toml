@@ -29,7 +29,6 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
-reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie.workspace = true
@@ -38,6 +37,7 @@ reth-trie-parallel.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # common
 futures.workspace = true
@@ -76,15 +76,24 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
-rand.workspace = true
 
 [features]
 test-utils = [
-  "reth-db/test-utils",
-  "reth-chain-state/test-utils",
-  "reth-network-p2p/test-utils",
-  "reth-prune-types",
-  "reth-stages/test-utils",
-  "reth-static-file",
-  "reth-tracing"
+	"reth-db/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-prune-types",
+	"reth-stages/test-utils",
+	"reth-static-file",
+	"reth-tracing",
+	"reth-blockchain-tree/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-revm/test-utils",
+	"reth-stages-api/test-utils",
+	"reth-provider/test-utils",
+	"reth-trie/test-utils"
 ]

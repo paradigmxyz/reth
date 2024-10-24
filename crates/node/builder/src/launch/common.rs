@@ -10,7 +10,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_chainspec::{Chain, ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -39,7 +39,7 @@ use reth_node_metrics::{
 };
 use reth_primitives::Head;
 use reth_provider::{
-    providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
+    providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
     ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
     TreeViewer,
@@ -180,10 +180,10 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system.
-        // If the system has less than 2 cores, it will use 1 core.
+        // Limit the global rayon thread pool, reserving 1 core for the rest of the system.
+        // If the system only has 1 core the pool will use it.
         let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(1));
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(1).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -400,7 +400,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
 impl<DB, ChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpec>, DB>>
 where
     DB: Database + Clone + 'static,
-    ChainSpec: EthChainSpec + EthereumHardforks,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
@@ -483,7 +483,7 @@ where
 
 impl<T> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, ProviderFactory<T>>>
 where
-    T: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    T: NodeTypesWithDB<ChainSpec: EthereumHardforks + EthChainSpec>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &T::DB {
@@ -523,7 +523,7 @@ where
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
-                ChainSpecInfo { name: self.left().config.chain.chain.to_string() },
+                ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
                 self.task_executor().clone(),
                 Hooks::new(self.database().clone(), self.static_file_provider()),
             );
@@ -621,7 +621,7 @@ impl<T>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithMeteredProviders<T>>,
     >
 where
-    T: FullNodeTypes<Types: NodeTypesWithDB<ChainSpec = ChainSpec>, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
@@ -746,7 +746,10 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<Provider: WithTree, Types: NodeTypes<ChainSpec = ChainSpec>>,
+    T: FullNodeTypes<
+        Provider: WithTree,
+        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks>,
+    >,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -801,6 +804,15 @@ where
         }
 
         Ok(initial_target)
+    }
+
+    /// Returns true if the node should terminate after the initial backfill run.
+    ///
+    /// This is the case if any of these configs are set:
+    ///  `--debug.max-block`
+    ///  `--debug.terminate`
+    pub const fn terminate_after_initial_backfill(&self) -> bool {
+        self.node_config().debug.terminate || self.node_config().debug.max_block.is_some()
     }
 
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
@@ -876,8 +888,8 @@ impl<T, CB>
     >
 where
     T: FullNodeTypes<
-        Provider: WithTree + StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-        Types: NodeTypes<ChainSpec = ChainSpec>,
+        Provider: WithTree + StateProviderFactory + ChainSpecProvider,
+        Types: NodeTypes<ChainSpec: EthereumHardforks>,
     >,
     CB: NodeComponentsBuilder<T>,
 {
@@ -925,9 +937,9 @@ where
                 // Verify that the healthy node is running the same chain as the current node.
                 let chain_id = futures::executor::block_on(async {
                     EthApiClient::<
-                        reth_rpc_types::Transaction,
-                        reth_rpc_types::Block,
-                        reth_rpc_types::Receipt,
+                        alloy_rpc_types::Transaction,
+                        alloy_rpc_types::Block,
+                        alloy_rpc_types::Receipt,
                     >::chain_id(&client)
                     .await
                 })?
@@ -1060,7 +1072,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
-                    block_interval: 0,
+                    block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,
                     sender_recovery_before: None,

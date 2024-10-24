@@ -1,0 +1,15 @@
+participants:
+  - el_type: geth
+    cl_type: lighthouse
+  - el_type: reth
+    el_extra_params:
+      - --engine.experimental
+    el_image: "ghcr.io/paradigmxyz/reth:kurtosis-ci"
+    cl_type: teku
+additional_services:
+  - assertoor
+assertoor_params:
+  run_block_proposal_check: true
+  run_transaction_test: true
+  run_blob_transaction_test: true
+  run_opcodes_transaction_test: true

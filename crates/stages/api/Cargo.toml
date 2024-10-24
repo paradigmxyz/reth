@@ -46,4 +46,9 @@ tokio-stream.workspace = true
 reth-testing-utils.workspace = true
 
 [features]
-test-utils = []
+test-utils = [
+	"reth-consensus/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-provider/test-utils"
+]

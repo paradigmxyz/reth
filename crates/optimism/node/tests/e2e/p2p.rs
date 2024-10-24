@@ -1,6 +1,6 @@
 use crate::utils::{advance_chain, setup};
+use alloy_rpc_types_engine::PayloadStatusEnum;
 use reth::blockchain_tree::error::BlockchainTreeError;
-use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

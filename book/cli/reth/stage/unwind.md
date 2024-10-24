@@ -74,6 +74,9 @@ Database:
 
           [possible values: true, false]
 
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
 Networking:
   -d, --disable-discovery
           Disable the discovery service
@@ -86,6 +89,9 @@ Networking:
 
       --enable-discv5-discovery
           Enable Discv5 discovery
+
+      --disable-nat
+          Disable Nat discovery
 
       --discovery.addr <DISCOVERY_ADDR>
           The UDP address to use for devp2p peer discovery version 4

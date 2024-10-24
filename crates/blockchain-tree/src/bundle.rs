@@ -1,7 +1,7 @@
 //! [`ExecutionDataProvider`] implementations used by the tree.
 
+use alloy_eips::ForkBlock;
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_primitives::ForkBlock;
 use reth_provider::{BlockExecutionForkProvider, ExecutionDataProvider, ExecutionOutcome};
 use std::collections::BTreeMap;
 
@@ -18,7 +18,7 @@ pub struct BundleStateDataRef<'a> {
     pub canonical_fork: ForkBlock,
 }
 
-impl<'a> ExecutionDataProvider for BundleStateDataRef<'a> {
+impl ExecutionDataProvider for BundleStateDataRef<'_> {
     fn execution_outcome(&self) -> &ExecutionOutcome {
         self.execution_outcome
     }
@@ -33,7 +33,7 @@ impl<'a> ExecutionDataProvider for BundleStateDataRef<'a> {
     }
 }
 
-impl<'a> BlockExecutionForkProvider for BundleStateDataRef<'a> {
+impl BlockExecutionForkProvider for BundleStateDataRef<'_> {
     fn canonical_fork(&self) -> ForkBlock {
         self.canonical_fork
     }

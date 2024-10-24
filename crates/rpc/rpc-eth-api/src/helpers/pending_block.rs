@@ -4,33 +4,34 @@
 use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
+
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
-    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
     ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
+    constants::eip4844::MAX_DATA_GAS_PER_BLOCK,
     proofs::calculate_transaction_root,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
-    SealedHeader, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, Header, Receipt, SealedBlockWithSenders, SealedHeader,
+    TransactionSignedEcRecovered,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
     ReceiptProvider, StateProviderFactory,
 };
-use reth_revm::{
-    database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_rpc_types::BlockNumberOrTag;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -50,7 +51,7 @@ pub trait LoadPendingBlock: EthApiTypes {
         &self,
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
            + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
@@ -157,7 +158,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())))
+                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
                 }
             }
 
@@ -255,38 +256,33 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let (withdrawals, withdrawals_root) = match origin {
             PendingBlockEnvOrigin::ActualPending(ref block) => {
-                (block.withdrawals.clone(), block.withdrawals_root)
+                (block.body.withdrawals.clone(), block.withdrawals_root)
             }
             PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
         };
 
         let chain_spec = self.provider().chain_spec();
 
+        let mut system_caller = SystemCaller::new(self.evm_config().clone(), chain_spec.clone());
+
         let parent_beacon_block_root = if origin.is_actual_pending() {
             // apply eip-4788 pre block contract call if we got the block from the CL with the real
             // parent beacon block root
-            pre_block_beacon_root_contract_call(
-                &mut db,
-                self.evm_config(),
-                chain_spec.as_ref(),
-                &cfg,
-                &block_env,
-                origin.header().parent_beacon_block_root,
-            )
-            .map_err(|err| EthApiError::Internal(err.into()))?;
+            system_caller
+                .pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &cfg,
+                    &block_env,
+                    origin.header().parent_beacon_block_root,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
             origin.header().parent_beacon_block_root
         } else {
             None
         };
-        pre_block_blockhashes_contract_call(
-            &mut db,
-            self.evm_config(),
-            chain_spec.as_ref(),
-            &cfg,
-            &block_env,
-            origin.header().hash(),
-        )
-        .map_err(|err| EthApiError::Internal(err.into()))?;
+        system_caller
+            .pre_block_blockhashes_contract_call(&mut db, &cfg, &block_env, origin.header().hash())
+            .map_err(|err| EthApiError::Internal(err.into()))?;
 
         let mut receipts = Vec::new();
 
@@ -329,7 +325,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             let env = Env::boxed(
                 cfg.cfg_env.clone(),
                 block_env.clone(),
-                Self::evm_config(self).tx_env(&tx),
+                Self::evm_config(self).tx_env(tx.as_signed(), tx.signer()),
             );
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
@@ -421,16 +417,11 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
-            if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+            (cfg.handler_cfg.spec_id >= SpecId::CANCUN).then_some(sum_blob_gas_used);
 
-        // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
-        // set these to empty
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-            } else {
-                (None, None)
-            };
+        let requests_hash = chain_spec
+            .is_prague_active_at_timestamp(block_env.timestamp.to::<u64>())
+            .then_some(EMPTY_REQUESTS_HASH);
 
         let header = Header {
             parent_hash,
@@ -443,24 +434,27 @@ pub trait LoadPendingBlock: EthApiTypes {
             logs_bloom,
             timestamp: block_env.timestamp.to::<u64>(),
             mix_hash: block_env.prevrandao.unwrap_or_default(),
-            nonce: BEACON_NONCE,
+            nonce: BEACON_NONCE.into(),
             base_fee_per_gas: Some(base_fee),
             number: block_number,
             gas_limit: block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas: block_env.get_blob_excess_gas(),
+            blob_gas_used: blob_gas_used.map(Into::into),
+            excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
             extra_data: Default::default(),
             parent_beacon_block_root,
-            requests_root,
+            requests_hash,
         };
 
         // Convert Vec<Option<Receipt>> to Vec<Receipt>
         let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
+        let block = Block {
+            header,
+            body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
+        };
         Ok((SealedBlockWithSenders { block: block.seal_slow(), senders }, receipts))
     }
 }

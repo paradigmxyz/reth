@@ -1,12 +1,10 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::B256;
+use alloy_rpc_types::{Block, BlockTransactions};
+use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
 use reth_node_api::EngineTypes;
-use reth_node_core::{
-    primitives::B256,
-    rpc::types::{Block, BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3},
-};
 use reth_rpc_builder::auth::AuthServerHandle;
-use reth_rpc_types::ExecutionPayloadV1;
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::future::Future;
@@ -132,7 +130,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
                     continue;
                 }
             };
-            let state = reth_rpc_types::engine::ForkchoiceState {
+            let state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: block_hash,
                 safe_block_hash,
                 finalized_block_hash,
@@ -199,8 +197,8 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                 logs_bloom: block.header.logs_bloom,
                 prev_randao: block.header.mix_hash.unwrap(),
                 block_number: block.header.number,
-                gas_limit: block.header.gas_limit.try_into().unwrap(),
-                gas_used: block.header.gas_used.try_into().unwrap(),
+                gas_limit: block.header.gas_limit,
+                gas_used: block.header.gas_used,
                 timestamp: block.header.timestamp,
                 extra_data: block.header.extra_data.clone(),
                 base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
@@ -217,8 +215,8 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
             },
             withdrawals: block.withdrawals.clone().unwrap_or_default(),
         },
-        blob_gas_used: block.header.blob_gas_used.unwrap().try_into().unwrap(),
-        excess_blob_gas: block.header.excess_blob_gas.unwrap().try_into().unwrap(),
+        blob_gas_used: block.header.blob_gas_used.unwrap(),
+        excess_blob_gas: block.header.excess_blob_gas.unwrap(),
     };
 
     ExecutionNewPayload {

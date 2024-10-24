@@ -5,7 +5,7 @@ use crate::{
     headers::client::{HeadersClient, SingleHeaderRequest},
     BlockClient,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Sealable, B256};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
@@ -94,7 +94,7 @@ where
             client,
             headers: None,
             pending_headers: VecDeque::new(),
-            bodies: HashMap::new(),
+            bodies: HashMap::default(),
             consensus: Arc::clone(&self.consensus),
         }
     }
@@ -177,13 +177,23 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        // preemptive yield point
+        let mut budget = 4;
+
         loop {
             match ready!(this.request.poll(cx)) {
                 ResponseResult::Header(res) => {
                     match res {
                         Ok(maybe_header) => {
-                            let (peer, maybe_header) =
-                                maybe_header.map(|h| h.map(|h| h.seal_slow())).split();
+                            let (peer, maybe_header) = maybe_header
+                                .map(|h| {
+                                    h.map(|h| {
+                                        let sealed = h.seal_slow();
+                                        let (header, seal) = sealed.into_parts();
+                                        SealedHeader::new(header, seal)
+                                    })
+                                })
+                                .split();
                             if let Some(header) = maybe_header {
                                 if header.hash() == this.hash {
                                     this.header = Some(header);
@@ -224,6 +234,14 @@ where
 
             if let Some(res) = this.take_block() {
                 return Poll::Ready(res)
+            }
+
+            // ensure we still have enough budget for another iteration
+            budget -= 1;
+            if budget == 0 {
+                // make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
     }
@@ -327,22 +345,6 @@ fn ensure_valid_body_response(
             // this is ok because we assume the fork is not active in this case
         }
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
-    }
-
-    match (header.requests_root, &block.requests) {
-        (Some(header_requests_root), Some(requests)) => {
-            let requests = requests.0.as_slice();
-            let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
-            if requests_root != header_requests_root {
-                return Err(ConsensusError::BodyRequestsRootDiff(
-                    GotExpected { got: requests_root, expected: header_requests_root }.into(),
-                ))
-            }
-        }
-        (None, None) => {
-            // this is ok because we assume the fork is not active in this case
-        }
-        _ => return Err(ConsensusError::RequestsRootUnexpected),
     }
 
     Ok(())
@@ -483,8 +485,17 @@ where
     }
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Header>>) {
-        let (peer, mut headers_falling) =
-            headers.map(|h| h.into_iter().map(|h| h.seal_slow()).collect::<Vec<_>>()).split();
+        let (peer, mut headers_falling) = headers
+            .map(|h| {
+                h.into_iter()
+                    .map(|h| {
+                        let sealed = h.seal_slow();
+                        let (header, seal) = sealed.into_parts();
+                        SealedHeader::new(header, seal)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .split();
 
         // fill in the response if it's the correct length
         if headers_falling.len() == self.count as usize {
@@ -719,7 +730,10 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
 
-            sealed_header = header.seal_slow();
+            let sealed = header.seal_slow();
+            let (header, seal) = sealed.into_parts();
+            sealed_header = SealedHeader::new(header, seal);
+
             client.insert(sealed_header.clone(), body.clone());
         }
 

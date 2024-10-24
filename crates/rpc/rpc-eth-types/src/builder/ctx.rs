@@ -43,52 +43,13 @@ where
         Tasks: TaskSpawner,
         Events: CanonStateSubscriptions,
     {
-        FeeHistoryCacheBuilder::build(self)
-    }
-
-    /// Returns a new [`GasPriceOracle`] for the context.
-    pub fn new_gas_price_oracle(&self) -> GasPriceOracle<Provider> {
-        GasPriceOracleBuilder::build(self)
-    }
-}
-
-/// Builds `eth_` core api component [`GasPriceOracle`], for given context.
-#[derive(Debug)]
-pub struct GasPriceOracleBuilder;
-
-impl GasPriceOracleBuilder {
-    /// Builds a [`GasPriceOracle`], for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> GasPriceOracle<Provider>
-    where
-        Provider: BlockReaderIdExt + Clone,
-    {
-        GasPriceOracle::new(ctx.provider.clone(), ctx.config.gas_oracle, ctx.cache.clone())
-    }
-}
-
-/// Builds `eth_` core api component [`FeeHistoryCache`], for given context.
-#[derive(Debug)]
-pub struct FeeHistoryCacheBuilder;
-
-impl FeeHistoryCacheBuilder {
-    /// Builds a [`FeeHistoryCache`], for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> FeeHistoryCache
-    where
-        Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
-        Tasks: TaskSpawner,
-        Events: CanonStateSubscriptions,
-    {
         let fee_history_cache =
-            FeeHistoryCache::new(ctx.cache.clone(), ctx.config.fee_history_cache);
+            FeeHistoryCache::new(self.cache.clone(), self.config.fee_history_cache);
 
-        let new_canonical_blocks = ctx.events.canonical_state_stream();
+        let new_canonical_blocks = self.events.canonical_state_stream();
         let fhc = fee_history_cache.clone();
-        let provider = ctx.provider.clone();
-        ctx.executor.spawn_critical(
+        let provider = self.provider.clone();
+        self.executor.spawn_critical(
             "cache canonical blocks for fee history task",
             Box::pin(async move {
                 fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider).await;
@@ -96,5 +57,10 @@ impl FeeHistoryCacheBuilder {
         );
 
         fee_history_cache
+    }
+
+    /// Returns a new [`GasPriceOracle`] for the context.
+    pub fn new_gas_price_oracle(&self) -> GasPriceOracle<Provider> {
+        GasPriceOracle::new(self.provider.clone(), self.config.gas_oracle, self.cache.clone())
     }
 }

@@ -15,9 +15,10 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::args::utils::DefaultChainSpecParser;
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -34,7 +35,8 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
+{
     /// The command to run
     #[command(subcommand)]
     command: Commands<C, Ext>,
@@ -116,14 +118,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
+    /// use reth::cli::Cli;
+    /// use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::<DefaultChainSpecParser, MyArgs>::parse()
+    /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
     ///     .run(|builder, my_args: MyArgs| async move {
     ///         // launch the node
     ///
@@ -142,6 +145,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
+        // Install the prometheus recorder to be sure to record all metrics
+        let _ = install_prometheus_recorder();
 
         let runner = CliRunner::default();
         match self.command {
@@ -237,7 +243,7 @@ mod tests {
     use super::*;
     use crate::args::ColorMode;
     use clap::CommandFactory;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
 
     #[test]
     fn parse_color_mode() {
@@ -250,7 +256,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<DefaultChainSpecParser, NoArgs>::command();
+        let reth = Cli::<EthereumChainSpecParser, NoArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()

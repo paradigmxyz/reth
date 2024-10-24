@@ -33,7 +33,7 @@ fn basic_exex() {
         .with_database(db)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .with_add_ons::<EthereumAddOns>()
+        .with_add_ons(EthereumAddOns::default())
         .install_exex("dummy", move |ctx| future::ok(DummyExEx { _ctx: ctx }))
         .check_launch();
 }

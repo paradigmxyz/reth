@@ -1,9 +1,12 @@
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, Bytes, B256,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
+    TrieInput,
 };
-use std::collections::{HashMap, HashSet};
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -44,6 +47,15 @@ pub trait StorageRootProvider: Send + Sync {
     /// state.
     fn storage_root(&self, address: Address, hashed_storage: HashedStorage)
         -> ProviderResult<B256>;
+
+    /// Returns the storage proof of the `HashedStorage` for target slot on top of the current
+    /// state.
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof>;
 }
 
 /// A type that can generate state proof on top of a given post state.

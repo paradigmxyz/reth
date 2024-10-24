@@ -1,13 +1,10 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
+use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState};
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
 use reth_fs_util as fs;
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState},
-    ExecutionPayload,
-};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -33,8 +30,9 @@ pub enum StoredEngineApiMessage<Attributes> {
     NewPayload {
         /// The [`ExecutionPayload`] sent in the persisted call.
         payload: ExecutionPayload,
-        /// The Cancun-specific fields sent in the persisted call, if any.
-        cancun_fields: Option<CancunPayloadFields>,
+        /// The execution payload sidecar with additional version-specific fields received by
+        /// engine API.
+        sidecar: ExecutionPayloadSidecar,
     },
 }
 
@@ -76,14 +74,14 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx } => {
+            BeaconEngineMessage::NewPayload { payload, sidecar, tx: _tx } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
                     serde_json::to_vec(
                         &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
                             payload: payload.clone(),
-                            cancun_fields: cancun_fields.clone(),
+                            sidecar: sidecar.clone(),
                         },
                     )?,
                 )?;

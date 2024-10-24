@@ -1,10 +1,11 @@
 use crate::BeaconSidecarConfig;
+use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{BlobTransaction, SealedBlockWithSenders, B256},
+    primitives::{BlobTransaction, SealedBlockWithSenders},
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -108,6 +109,7 @@ where
 
         match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
             Ok(blobs) => {
+                actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
                     let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
                         .expect("should not fail to convert blob tx if it is already eip4844");

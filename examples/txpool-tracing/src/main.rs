@@ -10,23 +10,18 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_primitives::Address;
+use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    args::utils::DefaultChainSpecParser,
-    builder::NodeHandle,
-    cli::Cli,
-    primitives::{Address, IntoRecoveredTransaction},
-    rpc::{
-        compat::transaction::transaction_to_call_request,
-        types::trace::{parity::TraceType, tracerequest::TraceCallRequest},
-    },
-    transaction_pool::TransactionPool,
+    builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
+    rpc::compat::transaction::transaction_to_call_request, transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
-    Cli::<DefaultChainSpecParser, RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

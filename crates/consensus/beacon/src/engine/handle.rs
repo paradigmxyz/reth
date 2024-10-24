@@ -4,12 +4,12 @@ use crate::{
     engine::message::OnForkChoiceUpdated, BeaconConsensusEngineEvent, BeaconEngineMessage,
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
+use alloy_rpc_types_engine::{
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+};
 use futures::TryFutureExt;
 use reth_engine_primitives::EngineTypes;
 use reth_errors::RethResult;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
-};
 use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -46,10 +46,10 @@ where
     pub async fn new_payload(
         &self,
         payload: ExecutionPayload,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, sidecar, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 

@@ -2,21 +2,24 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::PoolResult,
+    error::{InvalidPoolTransactionError, PoolResult},
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_consensus::{
+    constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    Transaction as _,
+};
+use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList, eip4844::BlobAndProofV1};
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList,
-    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, BlobTransactionSidecar,
+    BlobTransactionValidationError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -44,10 +47,7 @@ pub type PeerId = alloy_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction<
-        Pooled = PooledTransactionsElementEcRecovered,
-        Consensus = TransactionSignedEcRecovered,
-    >;
+    type Transaction: EthPoolTransaction;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -72,7 +72,6 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Imports all _external_ transactions
     ///
-    ///
     /// Consumer: Utility
     fn add_external_transactions(
         &self,
@@ -83,7 +82,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
     ///
-    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// This is the same as [`TransactionPool::add_transaction`] but returns an event stream for the
     /// given transaction.
     ///
     /// Consumer: Custom
@@ -296,12 +295,28 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Removes all transactions corresponding to the given hashes.
     ///
-    /// Also removes all _dependent_ transactions.
-    ///
     /// Consumer: Utility
     fn remove_transactions(
         &self,
         hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Removes all transactions corresponding to the given hashes.
+    ///
+    /// Also removes all _dependent_ transactions.
+    ///
+    /// Consumer: Utility
+    fn remove_transactions_and_descendants(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Removes all transactions from the given sender
+    ///
+    /// Consumer: Utility
+    fn remove_transactions_by_sender(
+        &self,
+        sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
@@ -336,6 +351,27 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns the highest transaction sent by a given user
+    fn get_highest_transaction_by_sender(
+        &self,
+        sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns the transaction with the highest nonce that is executable given the on chain nonce.
+    /// In other words the highest non nonce gapped transaction.
+    ///
+    /// Note: The next pending pooled transaction must have the on chain nonce.
+    ///
+    /// For example, for a given on chain nonce of `5`, the next transaction must have that nonce.
+    /// If the pool contains txs `[5,6,7]` this returns tx `7`.
+    /// If the pool contains txs `[6,7]` this returns `None` because the next valid nonce (5) is
+    /// missing, which means txs `[6,7]` are nonce gapped.
+    fn get_highest_consecutive_transaction_by_sender(
+        &self,
+        sender: Address,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns a transaction sent by a given user and a nonce
     fn get_transaction_by_sender_and_nonce(
@@ -496,12 +532,12 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 }
 
@@ -647,7 +683,7 @@ pub struct CanonicalStateUpdate<'a> {
     pub mined_transactions: Vec<B256>,
 }
 
-impl<'a> CanonicalStateUpdate<'a> {
+impl CanonicalStateUpdate<'_> {
     /// Returns the number of the tip block.
     pub fn number(&self) -> u64 {
         self.new_tip.number
@@ -843,19 +879,25 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
     type TryFromConsensusError;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self> + TryInto<Self>;
+    type Consensus: From<Self> + TryInto<Self, Error = Self::TryFromConsensusError>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
 
     /// Define a method to convert from the `Consensus` type to `Self`
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError>;
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
 
     /// Define a method to convert from the `Self` type to `Consensus`
-    fn into_consensus(self) -> Self::Consensus;
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
-    fn from_pooled(pooled: Self::Pooled) -> Self;
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -949,14 +991,33 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64>;
+
+    /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
+    ///
+    /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
+    /// where the input data contains the initialization code. If the input code size exceeds
+    /// the configured limit, an [`InvalidPoolTransactionError::ExceedsMaxInitCodeSize`] error is
+    /// returned.
+    fn ensure_max_init_code_size(
+        &self,
+        max_init_code_size: usize,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        if self.kind().is_create() && self.input().len() > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+                self.size(),
+                max_init_code_size,
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
-/// An extension trait that provides additional interfaces for the
-/// [`EthTransactionValidator`](crate::EthTransactionValidator).
+/// Super trait for transactions that can be converted to and from Eth transactions
 pub trait EthPoolTransaction:
     PoolTransaction<
-    Pooled = PooledTransactionsElementEcRecovered,
-    Consensus = TransactionSignedEcRecovered,
+    Consensus: From<TransactionSignedEcRecovered> + Into<TransactionSignedEcRecovered>,
+    Pooled: From<PooledTransactionsElementEcRecovered> + Into<PooledTransactionsElementEcRecovered>,
 >
 {
     /// Extracts the blob sidecar from the transaction.
@@ -1073,7 +1134,7 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
@@ -1098,18 +1159,6 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
-
-    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
-        tx.try_into()
-    }
-
-    fn into_consensus(self) -> Self::Consensus {
-        self.into()
-    }
-
-    fn from_pooled(pooled: Self::Pooled) -> Self {
-        pooled.into()
-    }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
@@ -1185,7 +1234,7 @@ impl PoolTransaction for EthPooledTransaction {
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
     /// For legacy transactions: `gas_price - base_fee`.
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(Some(base_fee))
+        self.transaction.effective_tip_per_gas(base_fee)
     }
 
     /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
@@ -1201,7 +1250,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input().as_ref()
+        self.transaction.input()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.
@@ -1281,7 +1330,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
         };
 
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         let transaction = Self::new(tx, encoded_length);
         Ok(transaction)
     }
@@ -1422,10 +1471,8 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned, TxEip1559, TxEip2930,
-        TxEip4844, TxEip7702, TxLegacy,
-    };
+    use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+    use reth_primitives::{constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned};
 
     #[test]
     fn test_pool_size_invariants() {
@@ -1473,7 +1520,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1495,7 +1542,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1517,7 +1564,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1541,7 +1588,7 @@ mod tests {
             blob_versioned_hashes: vec![B256::default()],
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1565,7 +1612,7 @@ mod tests {
             value: U256::from(100),
             ..Default::default()
         });
-        let signature = Signature::default();
+        let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
         let transaction =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
@@ -1576,5 +1623,28 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_pooled_transaction_limit() {
+        // No limit should never exceed
+        let limit_none = GetPooledTransactionLimit::None;
+        // Any size should return false
+        assert!(!limit_none.exceeds(1000));
+
+        // Size limit of 2MB (2 * 1024 * 1024 bytes)
+        let size_limit_2mb = GetPooledTransactionLimit::ResponseSizeSoftLimit(2 * 1024 * 1024);
+
+        // Test with size below the limit
+        // 1MB is below 2MB, should return false
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
+
+        // Test with size exactly at the limit
+        // 2MB equals the limit, should return false
+        assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
+
+        // Test with size exceeding the limit
+        // 3MB is above the 2MB limit, should return true
+        assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 }

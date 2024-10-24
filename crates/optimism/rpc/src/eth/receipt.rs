@@ -1,27 +1,24 @@
 //! Loads and formats OP receipt RPC response.
 
+use alloy_eips::eip2718::Encodable2718;
+use alloy_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
-use op_alloy_rpc_types::{
-    receipt::L1BlockInfo, OpTransactionReceipt, OptimismTransactionReceiptFields,
-};
-use reth_chainspec::{ChainSpec, OptimismHardforks};
-use reth_evm_optimism::RethL1BlockInfo;
+use op_alloy_rpc_types::{receipt::L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::RethL1BlockInfo;
+use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
-use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, LoadReceipt, LoadTransaction},
-    FromEthApiError,
-};
+use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyReceiptEnvelope, AnyTransactionReceipt, Log, TransactionReceipt};
 
 use crate::{OpEthApi, OpEthApiError};
 
 impl<N> LoadReceipt for OpEthApi<N>
 where
-    Self: EthApiSpec + LoadTransaction<Error = OpEthApiError>,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Self: Send + Sync,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
@@ -33,7 +30,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> Result<AnyTransactionReceipt, Self::Error> {
+    ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let (block, receipts) = LoadReceipt::cache(self)
             .get_block_and_receipts(meta.block_hash)
             .await
@@ -42,39 +39,18 @@ where
                 meta.block_hash.into(),
             )))?;
 
-        let block = block.unseal();
         let l1_block_info =
-            reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
+            reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
 
-        let op_receipt_meta = self
-            .build_op_receipt_meta(&tx, l1_block_info, &receipt)
-            .map_err(OpEthApiError::from)?;
-
-        let receipt_resp = ReceiptBuilder::new(&tx, meta, &receipt, &receipts)
-            .map_err(Self::Error::from_eth_err)?
-            .add_other_fields(op_receipt_meta.into())
-            .build();
-
-        Ok(receipt_resp)
-    }
-}
-
-impl<N> OpEthApi<N>
-where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
-{
-    /// Builds a receipt w.r.t. chain spec.
-    pub fn build_op_receipt_meta(
-        &self,
-        tx: &TransactionSigned,
-        l1_block_info: revm::L1BlockInfo,
-        receipt: &Receipt,
-    ) -> Result<OptimismTransactionReceiptFields, OpEthApiError> {
-        Ok(OpReceiptFieldsBuilder::default()
-            .l1_block_info(&self.inner.provider().chain_spec(), tx, l1_block_info)?
-            .deposit_nonce(receipt.deposit_nonce)
-            .deposit_version(receipt.deposit_receipt_version)
-            .build())
+        Ok(OpReceiptBuilder::new(
+            &self.inner.provider().chain_spec(),
+            &tx,
+            meta,
+            &receipt,
+            &receipts,
+            l1_block_info,
+        )?
+        .build())
     }
 }
 
@@ -117,11 +93,11 @@ impl OpReceiptFieldsBuilder {
     /// Applies [`L1BlockInfo`](revm::L1BlockInfo).
     pub fn l1_block_info(
         mut self,
-        chain_spec: &ChainSpec,
+        chain_spec: &OpChainSpec,
         tx: &TransactionSigned,
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
-        let raw_tx = tx.envelope_encoded();
+        let raw_tx = tx.encoded_2718();
         let timestamp = self.l1_block_timestamp;
 
         self.l1_fee = Some(
@@ -163,8 +139,8 @@ impl OpReceiptFieldsBuilder {
         self
     }
 
-    /// Builds the [`OptimismTransactionReceiptFields`] object.
-    pub const fn build(self) -> OptimismTransactionReceiptFields {
+    /// Builds the [`OpTransactionReceiptFields`] object.
+    pub const fn build(self) -> OpTransactionReceiptFields {
         let Self {
             l1_block_timestamp: _, // used to compute other fields
             l1_fee,
@@ -178,7 +154,7 @@ impl OpReceiptFieldsBuilder {
             l1_blob_base_fee_scalar,
         } = self;
 
-        OptimismTransactionReceiptFields {
+        OpTransactionReceiptFields {
             l1_block_info: L1BlockInfo {
                 l1_gas_price,
                 l1_gas_used,
@@ -202,13 +178,13 @@ pub struct OpReceiptBuilder {
     /// Transaction type.
     pub tx_type: TxType,
     /// Additional OP receipt fields.
-    pub op_receipt_fields: OptimismTransactionReceiptFields,
+    pub op_receipt_fields: OpTransactionReceiptFields,
 }
 
 impl OpReceiptBuilder {
     /// Returns a new builder.
     pub fn new(
-        chain_spec: &ChainSpec,
+        chain_spec: &OpChainSpec,
         transaction: &TransactionSigned,
         meta: TransactionMeta,
         receipt: &Receipt,
@@ -235,11 +211,8 @@ impl OpReceiptBuilder {
     pub fn build(self) -> OpTransactionReceipt {
         let Self { core_receipt, tx_type, op_receipt_fields } = self;
 
-        let OptimismTransactionReceiptFields {
-            l1_block_info,
-            deposit_nonce,
-            deposit_receipt_version,
-        } = op_receipt_fields;
+        let OpTransactionReceiptFields { l1_block_info, deposit_nonce, deposit_receipt_version } =
+            op_receipt_fields;
 
         let TransactionReceipt {
             inner: AnyReceiptEnvelope { inner: receipt_with_bloom, .. },
@@ -254,7 +227,6 @@ impl OpReceiptBuilder {
             from,
             to,
             contract_address,
-            state_root,
             authorization_list,
         } = core_receipt;
 
@@ -262,10 +234,11 @@ impl OpReceiptBuilder {
             TxType::Legacy => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
             TxType::Eip2930 => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
             TxType::Eip1559 => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
-            TxType::Eip4844 => OpReceiptEnvelope::<Log>::Eip4844(receipt_with_bloom),
-            TxType::Eip7702 => {
-                unimplemented!("not implemented yet for OpReceiptEnvelope")
+            TxType::Eip4844 => {
+                // TODO: unreachable
+                OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom)
             }
+            TxType::Eip7702 => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
             TxType::Deposit => {
                 OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
                     receipt: OpDepositReceipt::<Log> {
@@ -291,7 +264,6 @@ impl OpReceiptBuilder {
             from,
             to,
             contract_address,
-            state_root,
             authorization_list,
         };
 
@@ -302,8 +274,9 @@ impl OpReceiptBuilder {
 #[cfg(test)]
 mod test {
     use alloy_primitives::hex;
+    use op_alloy_network::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
-    use reth_primitives::Block;
+    use reth_primitives::{Block, BlockBody};
 
     use super::*;
 
@@ -325,8 +298,8 @@ mod test {
     /// L1 block info for transaction at index 1 in block 124665056.
     ///
     /// <https://optimistic.etherscan.io/tx/0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a>
-    const TX_META_TX_1_OP_MAINNET_BLOCK_124665056: OptimismTransactionReceiptFields =
-        OptimismTransactionReceiptFields {
+    const TX_META_TX_1_OP_MAINNET_BLOCK_124665056: OpTransactionReceiptFields =
+        OpTransactionReceiptFields {
             l1_block_info: L1BlockInfo {
                 l1_gas_price: Some(1055991687), // since bedrock l1 base fee
                 l1_gas_used: Some(4471),
@@ -343,19 +316,21 @@ mod test {
     #[test]
     fn op_receipt_fields_from_block_and_tx() {
         // rig
-        let tx_0 = TransactionSigned::decode_enveloped(
+        let tx_0 = TransactionSigned::decode_2718(
             &mut TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056.as_slice(),
         )
         .unwrap();
 
-        let tx_1 =
-            TransactionSigned::decode_enveloped(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
-                .unwrap();
+        let tx_1 = TransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
+            .unwrap();
 
-        let block = Block { body: [tx_0, tx_1.clone()].to_vec(), ..Default::default() };
+        let block = Block {
+            body: BlockBody { transactions: [tx_0, tx_1.clone()].to_vec(), ..Default::default() },
+            ..Default::default()
+        };
 
         let l1_block_info =
-            reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");
+            reth_optimism_evm::extract_l1_info(&block.body).expect("should extract l1 info");
 
         // test
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));

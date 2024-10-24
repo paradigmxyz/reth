@@ -1,7 +1,10 @@
 //! Contains RPC handler implementations specific to transactions
 
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
-use reth_rpc_eth_api::helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking};
+use reth_rpc_eth_api::{
+    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    FullEthApiTypes,
+};
 use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
 
@@ -28,7 +31,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: SpawnBlocking,
+    Self: SpawnBlocking + FullEthApiTypes,
     Provider: TransactionsProvider,
     Pool: TransactionPool,
 {
@@ -52,11 +55,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
     use reth_rpc_eth_types::{

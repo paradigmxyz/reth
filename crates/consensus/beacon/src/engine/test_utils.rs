@@ -1,6 +1,13 @@
 #![allow(missing_docs)]
-
-use alloy_primitives::{BlockNumber, B256};
+use crate::{
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
+use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_rpc_types_engine::{
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -18,6 +25,7 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
+use reth_primitives::SealedHeader;
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
@@ -25,20 +33,11 @@ use reth_provider::{
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
-};
 use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
-
-use crate::{
-    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
-    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
 
 type DatabaseEnv = TempDatabase<DE>;
 
@@ -69,9 +68,9 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.engine_handle.new_payload(payload.into(), cancun_fields).await
+        self.engine_handle.new_payload(payload.into(), sidecar).await
     }
 
     /// Sends the `ExecutionPayload` message to the consensus engine and retries if the engine
@@ -79,11 +78,11 @@ impl<DB> TestEnv<DB> {
     pub async fn send_new_payload_retry_on_syncing<T: Into<ExecutionPayload>>(
         &self,
         payload: T,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let payload: ExecutionPayload = payload.into();
         loop {
-            let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
+            let result = self.send_new_payload(payload.clone(), sidecar.clone()).await?;
             if !result.is_syncing() {
                 return Ok(result)
             }
@@ -395,10 +394,17 @@ where
             BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
                 .expect("failed to create tree"),
         ));
-        let genesis_block = self.base_config.chain_spec.genesis_header().clone().seal_slow();
+        let sealed = self.base_config.chain_spec.genesis_header().clone().seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let genesis_block = SealedHeader::new(header, seal);
 
-        let blockchain_provider =
-            BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
+        let blockchain_provider = BlockchainProvider::with_blocks(
+            provider_factory.clone(),
+            tree,
+            genesis_block,
+            None,
+            None,
+        );
 
         let pruner = Pruner::new_with_factory(
             provider_factory.clone(),

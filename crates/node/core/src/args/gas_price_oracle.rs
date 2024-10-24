@@ -1,4 +1,4 @@
-use crate::primitives::U256;
+use alloy_primitives::U256;
 use clap::Args;
 use reth_rpc_eth_types::GasPriceOracleConfig;
 use reth_rpc_server_types::constants::gas_oracle::{

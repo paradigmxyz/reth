@@ -14,19 +14,7 @@ cd my-exex
 And add Reth as a dependency in `Cargo.toml`
 
 ```toml
-[package]
-name = "my-exex"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-reth = { git = "https://github.com/paradigmxyz/reth.git" } # Reth
-reth-exex = { git = "https://github.com/paradigmxyz/reth.git" } # Execution Extensions
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git" } # Ethereum Node implementation
-reth-tracing = { git = "https://github.com/paradigmxyz/reth.git" } # Logging
-
-eyre = "0.6" # Easy error handling
-futures-util = "0.3" # Stream utilities for consuming notifications
+{{#include ../../sources/exex/hello-world/Cargo.toml}}
 ```
 
 ### Default Reth node
@@ -34,15 +22,7 @@ futures-util = "0.3" # Stream utilities for consuming notifications
 Now, let's jump to our `main.rs` and start by initializing and launching a default Reth node
 
 ```rust,norun,noplayground,ignore
-use reth_node_ethereum::EthereumNode;
-
-fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let handle = builder.node(EthereumNode::default()).launch().await?;
-
-        handle.wait_for_node_exit().await
-    })
-}
+{{#include ../../sources/exex/hello-world/src/bin/1.rs}}
 ```
 
 You can already test that it works by running the binary and initializing the Holesky node in a custom datadir
@@ -63,26 +43,7 @@ $ cargo run -- init --chain holesky --datadir data
 The simplest ExEx is just an async function that never returns. We need to install it into our node
 
 ```rust,norun,noplayground,ignore
-use reth::api::FullNodeComponents;
-use reth_exex::{ExExContext, ExExEvent, ExExNotification};
-use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
-
-async fn my_exex<Node: FullNodeComponents>(mut _ctx: ExExContext<Node>) -> eyre::Result<()> {
-    loop {}
-}
-
-fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let handle = builder
-            .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(my_exex(ctx)) })
-            .launch()
-            .await?;
-
-        handle.wait_for_node_exit().await
-    })
-}
+{{#include ../../sources/exex/hello-world/src/bin/2.rs}}
 ```
 
 See that unused `_ctx`? That's the context that we'll use to listen to new notifications coming from the main node,
@@ -103,46 +64,7 @@ If you try running a node with an ExEx that exits, the node will exit as well.
 Now, let's extend our simplest ExEx and start actually listening to new notifications, log them, and send events back to the main node
 
 ```rust,norun,noplayground,ignore
-use futures_util::StreamExt;
-use reth::api::FullNodeComponents;
-use reth_exex::{ExExContext, ExExEvent, ExExNotification};
-use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
-
-async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.next().await {
-        match &notification {
-            ExExNotification::ChainCommitted { new } => {
-                info!(committed_chain = ?new.range(), "Received commit");
-            }
-            ExExNotification::ChainReorged { old, new } => {
-                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-            }
-            ExExNotification::ChainReverted { old } => {
-                info!(reverted_chain = ?old.range(), "Received revert");
-            }
-        };
-
-        if let Some(committed_chain) = notification.committed_chain() {
-            ctx.events
-                .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
-        }
-    }
-
-    Ok(())
-}
-
-fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let handle = builder
-            .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(my_exex(ctx)) })
-            .launch()
-            .await?;
-
-        handle.wait_for_node_exit().await
-    })
-}
+{{#include ../../sources/exex/hello-world/src/bin/3.rs}}
 ```
 
 Woah, there's a lot of new stuff here! Let's go through it step by step:

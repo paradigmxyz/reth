@@ -1,14 +1,14 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FinalizedBlockReader, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
+    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
@@ -61,6 +61,9 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
 
+mod consistent;
+pub use consistent::ConsistentProvider;
+
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
 pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
 
@@ -109,18 +112,19 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         tree: Arc<dyn TreeViewer>,
         latest: SealedHeader,
         finalized: Option<SealedHeader>,
+        safe: Option<SealedHeader>,
     ) -> Self {
-        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) }
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized, safe) }
     }
 
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<N>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
+        let best = provider.chain_info()?;
         let latest_header = provider
             .header_by_number(best.best_number)?
-            .ok_or(ProviderError::HeaderNotFound(best.best_number.into()))?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
 
         let finalized_header = provider
             .last_finalized_block_number()?
@@ -128,7 +132,19 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .transpose()?
             .flatten();
 
-        Ok(Self::with_blocks(database, tree, latest_header.seal(best.best_hash), finalized_header))
+        let safe_header = provider
+            .last_safe_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+
+        Ok(Self::with_blocks(
+            database,
+            tree,
+            SealedHeader::new(latest_header, best.best_hash),
+            finalized_header,
+            safe_header,
+        ))
     }
 
     /// Ensures that the given block number is canonical (synced)
@@ -491,16 +507,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.database.requests_by_block(id, timestamp)
-    }
-}
-
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
@@ -798,7 +804,7 @@ where
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 where
-    Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
+    Self: BlockReader + ReceiptProviderIdExt,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
         match id {
@@ -839,20 +845,34 @@ where
             BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
             BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
             BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header()),
-            BlockNumberOrTag::Earliest => {
-                self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
-            }
+            BlockNumberOrTag::Earliest => self.header_by_number(0)?.map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            ),
             BlockNumberOrTag::Pending => Ok(self.tree.pending_header()),
-            BlockNumberOrTag::Number(num) => {
-                self.header_by_number(num)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
-            }
+            BlockNumberOrTag::Number(num) => self.header_by_number(num)?.map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
+                },
+            ),
         }
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| h.seal_slow()),
+            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(|h| {
+                let sealed = h.seal_slow();
+                let (header, seal) = sealed.into_parts();
+                SealedHeader::new(header, seal)
+            }),
         })
     }
 

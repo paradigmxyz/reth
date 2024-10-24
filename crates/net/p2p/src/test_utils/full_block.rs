@@ -5,13 +5,12 @@ use crate::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader};
 use std::{collections::HashMap, sync::Arc};
 
 /// A headers+bodies client implementation that does nothing.
@@ -107,8 +106,8 @@ pub struct TestFullBlockClient {
 impl Default for TestFullBlockClient {
     fn default() -> Self {
         Self {
-            headers: Arc::new(Mutex::new(HashMap::new())),
-            bodies: Arc::new(Mutex::new(HashMap::new())),
+            headers: Arc::new(Mutex::new(HashMap::default())),
+            bodies: Arc::new(Mutex::new(HashMap::default())),
             soft_limit: 20,
         }
     }
@@ -131,10 +130,9 @@ impl TestFullBlockClient {
     pub fn highest_block(&self) -> Option<SealedBlock> {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
-                self.bodies
-                    .lock()
-                    .get(hash)
-                    .map(|body| SealedBlock::new(header.clone().seal(*hash), body.clone()))
+                self.bodies.lock().get(hash).map(|body| {
+                    SealedBlock::new(SealedHeader::new(header.clone(), *hash), body.clone())
+                })
             },
         )
     }
@@ -187,15 +185,15 @@ impl HeadersClient for TestFullBlockClient {
             .filter_map(|_| {
                 headers.iter().find_map(|(hash, header)| {
                     // Checks if the header matches the specified block or number.
-                    if BlockNumHash::new(header.number, *hash).matches_block_or_num(&block) {
-                        match request.direction {
-                            HeadersDirection::Falling => block = header.parent_hash.into(),
-                            HeadersDirection::Rising => block = (header.number + 1).into(),
-                        }
-                        Some(header.clone())
-                    } else {
-                        None
-                    }
+                    BlockNumHash::new(header.number, *hash).matches_block_or_num(&block).then(
+                        || {
+                            match request.direction {
+                                HeadersDirection::Falling => block = header.parent_hash.into(),
+                                HeadersDirection::Rising => block = (header.number + 1).into(),
+                            }
+                            header.clone()
+                        },
+                    )
                 })
             })
             .collect::<Vec<_>>();
