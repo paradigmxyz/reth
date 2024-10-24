@@ -38,6 +38,7 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::Enr;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
 use reth_ethereum_forks::ForkId;
@@ -56,7 +57,6 @@ use std::{
     task::{ready, Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use itertools::Itertools;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
@@ -751,8 +751,8 @@ impl Discv4Service {
             self.kbuckets
                 .closest_values(&target_key)
                 .filter(|node| {
-                    node.value.has_endpoint_proof
-                        && !self.pending_find_nodes.contains_key(&node.key.preimage().0)
+                    node.value.has_endpoint_proof &&
+                        !self.pending_find_nodes.contains_key(&node.key.preimage().0)
                 })
                 .take(MAX_NODES_PER_BUCKET)
                 .map(|n| (target_key.distance(&n.key), n.value.record)),
@@ -768,7 +768,7 @@ impl Discv4Service {
             // (e.g. connectivity problems over a long period of time, or issues during initial
             // bootstrapping) so we attempt to bootstrap again
             self.bootstrap();
-            return;
+            return
         }
 
         trace!(target: "discv4", ?target, num = closest.len(), "Start lookup closest nodes");
@@ -1191,8 +1191,8 @@ impl Discv4Service {
             return;
         }
 
-        if self.pending_pings.contains_key(&node.id)
-            || self.pending_find_nodes.contains_key(&node.id)
+        if self.pending_pings.contains_key(&node.id) ||
+            self.pending_find_nodes.contains_key(&node.id)
         {
             return;
         }
@@ -1414,7 +1414,7 @@ impl Discv4Service {
             peers=format!("[{:#}]", msg.nodes.iter()
                 .map(|node_rec| node_rec.id
             ).format(", ")),
-            "discovered peers from Neighbours packet"
+            "Received peers from Neighbours packet"
         );
 
         // This is the recursive lookup step where we initiate new FindNode requests for new nodes
@@ -2647,8 +2647,8 @@ mod tests {
         })
         .await;
 
-        let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
-            + 10000000000000;
+        let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() +
+            10000000000000;
         let msg = Neighbours { nodes: vec![service2.local_node_record], expire: expiry };
         service.on_neighbours(msg, record.tcp_addr(), id);
         // wait for the processed ping
