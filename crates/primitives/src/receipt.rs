@@ -66,59 +66,62 @@ impl Receipt {
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    From,
-    derive_more::Deref,
-    DerefMut,
-    IntoIterator,
-)]
-pub struct Receipts {
-    /// A two-dimensional vector of optional `Receipt` instances.
-    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
-}
+pub type Receipts = alloy_consensus::Receipts<Receipt>;
 
-impl Receipts {
-    /// Returns the length of the `Receipts` vector.
-    pub fn len(&self) -> usize {
-        self.receipt_vec.len()
-    }
+// /// A collection of receipts organized as a two-dimensional vector.
+// #[derive(
+//     Clone,
+//     Debug,
+//     PartialEq,
+//     Eq,
+//     Default,
+//     Serialize,
+//     Deserialize,
+//     From,
+//     derive_more::Deref,
+//     DerefMut,
+//     IntoIterator,
+// )]
+// pub struct Receipts {
+//     /// A two-dimensional vector of optional `Receipt` instances.
+//     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
+// }
 
-    /// Returns `true` if the `Receipts` vector is empty.
-    pub fn is_empty(&self) -> bool {
-        self.receipt_vec.is_empty()
-    }
+// impl Receipts {
+//     /// Returns the length of the `Receipts` vector.
+//     pub fn len(&self) -> usize {
+//         self.receipt_vec.len()
+//     }
 
-    /// Push a new vector of receipts into the `Receipts` collection.
-    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
-        self.receipt_vec.push(receipts);
-    }
+//     /// Returns `true` if the `Receipts` vector is empty.
+//     pub fn is_empty(&self) -> bool {
+//         self.receipt_vec.is_empty()
+//     }
 
-    /// Retrieves all recorded receipts from index and calculates the root using the given closure.
-    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
-        let receipts =
-            self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
-        Some(f(receipts.as_slice()))
-    }
-}
+//     /// Push a new vector of receipts into the `Receipts` collection.
+//     pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
+//         self.receipt_vec.push(receipts);
+//     }
 
-impl From<Vec<Receipt>> for Receipts {
-    fn from(block_receipts: Vec<Receipt>) -> Self {
-        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
-    }
-}
+//     /// Retrieves all recorded receipts from index and calculates the root using the given
+// closure.     pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) ->
+// Option<B256> {         let receipts =
+//             self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
+//         Some(f(receipts.as_slice()))
+//     }
+// }
 
-impl FromIterator<Vec<Option<Receipt>>> for Receipts {
-    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
-        iter.into_iter().collect::<Vec<_>>().into()
-    }
-}
+// impl From<Vec<Receipt>> for Receipts {
+//     fn from(block_receipts: Vec<Receipt>) -> Self {
+//         Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
+//     }
+// }
+
+// impl FromIterator<Vec<Option<Receipt>>> for Receipts {
+//     fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
+//         iter.into_iter().collect::<Vec<_>>().into()
+//     }
+// }
 
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {

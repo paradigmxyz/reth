@@ -182,7 +182,7 @@ impl ExecutionOutcome {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs.iter())).flatten())
+        Some(self.receipts[index].iter().filter_map(|r| Some(r.logs.iter())).flatten())
     }
 
     /// Return blocks logs bloom
@@ -225,7 +225,7 @@ impl ExecutionOutcome {
     }
 
     /// Return all block receipts
-    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
+    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Receipt] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
         &self.receipts[index]
     }
