@@ -109,12 +109,6 @@ impl ReceiptBuilder {
         Ok(Self { base, other: Default::default() })
     }
 
-    /// Adds fields to response body.
-    pub fn add_other_fields(mut self, mut fields: OtherFields) -> Self {
-        self.other.append(&mut fields);
-        self
-    }
-
     /// Builds a receipt response from the base response body, and any set additional fields.
     pub fn build(self) -> TransactionReceipt<AnyReceiptEnvelope<Log>> {
         self.base
