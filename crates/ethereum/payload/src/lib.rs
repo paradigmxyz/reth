@@ -188,10 +188,10 @@ where
         &initialized_block_env,
         parent_block.hash(),
     )
-        .map_err(|err| {
-            warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for payload");
-            PayloadBuilderError::Internal(err.into())
-        })?;
+    .map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for payload");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {

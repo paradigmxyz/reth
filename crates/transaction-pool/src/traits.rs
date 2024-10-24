@@ -815,7 +815,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// A filter that allows to check if a transaction satisfies a set of conditions
-pub trait TransactionFilter: Send + Sync + Clone {
+pub trait TransactionFilter {
     /// The type of the transaction to check.
     type Transaction;
 
@@ -836,7 +836,7 @@ impl<T> Default for NoopTransactionFilter<T> {
     }
 }
 
-impl<T: Clone + Send + Sync> TransactionFilter for NoopTransactionFilter<T> {
+impl<T> TransactionFilter for NoopTransactionFilter<T> {
     type Transaction = T;
 
     fn is_valid(&self, _transaction: &Self::Transaction) -> bool {
