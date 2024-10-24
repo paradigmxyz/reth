@@ -104,6 +104,15 @@ where
             return Ok(Vec::new())
         }
 
+        // Retrieve the block from the block ID
+        let block = match self.eth_api().block_with_senders(at).await? {
+            None => return Err(EthApiError::HeaderNotFound(at).into()),
+            Some(block) => block,
+        };
+
+        // Extract the parent beacon block root from the block
+        let parent_beacon_block_root = block.parent_beacon_block_root;
+
         // replay all transactions of the block
         let this = self.clone();
         self.eth_api()
@@ -112,6 +121,26 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let mut transactions = transactions.into_iter().enumerate().peekable();
+
+                let mut system_caller = SystemCaller::new(
+                    Call::evm_config(this.eth_api()).clone(),
+                    LoadState::provider(this.eth_api()).chain_spec(),
+                );
+
+                // apply relevant system calls
+                system_caller
+                    .pre_block_beacon_root_contract_call(
+                        &mut db,
+                        &cfg,
+                        &block_env,
+                        parent_beacon_block_root,
+                    )
+                    .map_err(|_| {
+                        EthApiError::EvmCustom(
+                            "failed to apply 4788 beacon root system call".to_string(),
+                        )
+                    })?;
+
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
 
