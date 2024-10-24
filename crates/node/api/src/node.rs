@@ -123,25 +123,6 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
         Ok(())
     }
 }
-/// Returns the builder for type.
-pub trait BuilderProvider<N>: Send {
-    /// Context required to build type.
-    type Ctx<'a>;
-
-    /// Returns builder for type.
-    #[allow(clippy::type_complexity)]
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
-}
-
-impl<N> BuilderProvider<N> for () {
-    type Ctx<'a> = ();
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(noop_builder)
-    }
-}
-
-const fn noop_builder(_: ()) {}
 
 /// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
 pub trait NodeTy {

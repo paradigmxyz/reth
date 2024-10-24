@@ -17,7 +17,7 @@ use op_alloy_network::Optimism;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeCore, NodeTypes};
+use reth_node_api::{FullNodeComponents, NodeCore, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
@@ -246,18 +246,6 @@ where
 {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
-    }
-}
-
-impl<N> BuilderProvider<N> for OpEthApi<N>
-where
-    Self: Send,
-    N: FullNodeComponents,
-{
-    type Ctx<'a> = &'a EthApiBuilderCtx<N>;
-
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(Self::with_spawner)
     }
 }
 
