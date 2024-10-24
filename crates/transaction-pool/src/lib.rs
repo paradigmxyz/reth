@@ -547,7 +547,10 @@ where
         self.pool.unique_senders()
     }
 
-    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_blob(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
         self.pool.blob_store().get(tx_hash)
     }
 
