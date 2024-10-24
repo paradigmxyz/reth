@@ -10,7 +10,6 @@ use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
 use reth_primitives::BlockNumberOrTag;
 use std::sync::Arc;
-use syn::{Attribute, parse_quote};
 
 /// The generator type that creates new jobs that builds empty blocks.
 #[derive(Debug)]

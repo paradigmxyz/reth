@@ -12,7 +12,7 @@ pub fn codecs_path(attrs: &[Attribute]) -> syn::Path {
             let mut crate_path = None;
             if let Err(e) = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("crate") {
-                    let lit: Lit = meta.input.parse()?;
+                    let lit: Lit = meta.value()?.parse()?;
                     if let Lit::Str(lit_str) = lit {
                         crate_path = Some(lit_str.value());
                     } else {

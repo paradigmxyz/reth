@@ -4,6 +4,7 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 
 /// Legacy transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[compact(crate = "reth_codecs")]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
 #[cfg_attr(test, crate::add_arbitrary_tests(compact))]
 pub(crate) struct TxLegacy {
