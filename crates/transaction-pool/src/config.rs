@@ -3,9 +3,8 @@ use crate::{
     PoolSize, TransactionOrigin,
 };
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
-use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use reth_primitives::constants::MIN_PROTOCOL_BASE_FEE;
 use std::{collections::HashSet, ops::Mul};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
