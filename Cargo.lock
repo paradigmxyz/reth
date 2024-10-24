@@ -7478,6 +7478,7 @@ dependencies = [
  "eyre",
  "futures",
  "itertools 0.13.0",
+ "libloading",
  "metrics",
  "parking_lot",
  "rand 0.8.5",
