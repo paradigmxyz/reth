@@ -112,7 +112,7 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let mut transactions = transactions.into_iter().enumerate().peekable();
-                let mut shared_inspector = None;
+                let mut inspector = None;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
 
@@ -133,12 +133,10 @@ where
                             tx_hash: Some(tx_hash),
                             tx_index: Some(index),
                         }),
-                        &mut shared_inspector,
+                        &mut inspector,
                     )?;
 
-                    if let Some(i) = shared_inspector.as_mut() {
-                        i.fuse();
-                    }
+                    inspector = inspector.map(|insp| insp.fused());
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
@@ -580,7 +578,7 @@ where
                     let Bundle { transactions, block_override } = bundle;
 
                     let block_overrides = block_override.map(Box::new);
-                    let mut shared_inspector = None;
+                    let mut inspector = None;
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
@@ -601,12 +599,10 @@ where
                             env,
                             &mut db,
                             None,
-                            &mut shared_inspector,
+                            &mut inspector,
                         )?;
 
-                        if let Some(i) = shared_inspector.as_mut() {
-                            i.fuse();
-                        }
+                        inspector = inspector.map(|insp| insp.fused());
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -708,6 +704,12 @@ where
     }
 
     /// Executes the configured transaction with the environment on the given database.
+    ///
+    /// It optionally takes shared inspector to avoid re-creating the inspector for each
+    ///
+    /// transaction. This is useful when tracing multiple transactions in a block.
+    ///
+    /// If the inspector is provided then `opts.tracer_config` is ignored.
     ///
     /// Returns the trace frame and the state that got updated after executing the transaction.
     ///
@@ -841,8 +843,10 @@ where
         }
 
         // default structlog tracer
-        let inspector_config = TracingInspectorConfig::from_geth_config(config);
-        let mut inspector = shared_inspector.get_or_insert(TracingInspector::new(inspector_config));
+        let mut inspector = shared_inspector.get_or_insert_with(|| {
+            let inspector_config = TracingInspectorConfig::from_geth_config(config);
+            TracingInspector::new(inspector_config)
+        });
         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
