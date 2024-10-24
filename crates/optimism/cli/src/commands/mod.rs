@@ -15,6 +15,8 @@ mod build_pipeline;
 pub mod import;
 pub mod import_receipts;
 pub mod init_state;
+
+#[cfg(feature = "dev")]
 pub mod test_vectors;
 
 /// Commands to be executed
