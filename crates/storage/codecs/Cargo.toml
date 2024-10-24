@@ -69,7 +69,9 @@ alloy = [
 ]
 optimism = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [
+	"std",
     "alloy",
+	"arbitrary",
     "dep:visibility",
     "dep:arbitrary"
 ]
