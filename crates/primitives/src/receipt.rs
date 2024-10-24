@@ -503,6 +503,18 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
 
+    #[test]
+    fn test_decode_receipt() {
+        #[cfg(not(feature = "optimism"))]
+        reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
+            "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
+        ));
+        #[cfg(feature = "optimism")]
+        reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
+            "c30328b52ffd23fc426961a00105007eb0042307705a97e503562eacf2b95060cce9de6de68386b6c155b73a9650021a49e2f8baad17f30faff5899d785c4c0873e45bc268bcf07560106424570d11f9a59e8f3db1efa4ceec680123712275f10d92c3411e1caaa11c7c5d591bc11487168e09934a9986848136da1b583babf3a7188e3aed007a1520f1cf4c1ca7d3482c6c28d37c298613c70a76940008816c4c95644579fd08471dc34732fd0f24"
+        ));
+    }
+
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
