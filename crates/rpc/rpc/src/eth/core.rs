@@ -10,7 +10,7 @@ use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
-    EthApiTypes,
+    EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
@@ -137,6 +137,35 @@ where
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone,
+    EvmConfig: Send + Sync + Clone + Unpin,
+{
+    type Provider = Provider;
+    type Pool = Pool;
+    type Network = Network;
+    type Evm = EvmConfig;
+
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.evm_config()
+    }
+
+    fn network(&self) -> &Self::Network {
+        self.inner.network()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.inner.provider()
     }
 }
 
