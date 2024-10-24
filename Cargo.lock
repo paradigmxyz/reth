@@ -8877,6 +8877,7 @@ dependencies = [
  "alloy-serde",
  "reth-primitives",
  "reth-trie-common",
+ "serde",
  "serde_json",
 ]
 

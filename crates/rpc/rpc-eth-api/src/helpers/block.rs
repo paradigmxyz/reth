@@ -63,11 +63,12 @@ pub trait EthBlocks: LoadBlock {
                     .map_err(Self::Error::from_eth_err)?;
             }
 
-            let block = from_block::<Self::TransactionCompat>(
+            let block = from_block(
                 (*block).clone().unseal(),
                 total_difficulty.unwrap_or_default(),
                 full.into(),
                 Some(block_hash),
+                self.tx_resp_builder(),
             )
             .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block))

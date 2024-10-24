@@ -21,7 +21,11 @@ where
 {
     type Transaction = <AnyNetwork as Network>::TransactionResponse;
 
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        tx_info: TransactionInfo,
+    ) -> Self::Transaction {
         let signer = tx.signer();
         let signed_tx = tx.into_signed();
 
