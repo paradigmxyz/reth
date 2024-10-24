@@ -1257,19 +1257,24 @@ mod tests {
         // to test the sparse trie updates.
         const KEY_NIBBLES_LEN: usize = 3;
 
-        fn test(updates: Vec<HashMap<Nibbles, Vec<u8>>>) {
+        fn test<I, T>(updates: I)
+        where
+            I: IntoIterator<Item = T>,
+            T: IntoIterator<Item = (Nibbles, Vec<u8>)> + Clone,
+        {
             let mut rng = generators::rng();
 
             let mut state = BTreeMap::default();
             let mut sparse = RevealedSparseTrie::default();
 
             for update in updates {
-                let keys_to_delete_len = update.len() / 2;
-
+                let mut count = 0;
                 // Insert state updates into the sparse trie and calculate the root
                 for (key, value) in update.clone() {
                     sparse.update_leaf(key, value).unwrap();
+                    count += 1;
                 }
+                let keys_to_delete_len = count / 2;
                 let sparse_root = sparse.root();
 
                 // Insert state updates into the hash builder and calculate the root
@@ -1329,7 +1334,8 @@ mod tests {
                 ),
                 1..100,
             )
-        )| { test(updates.into_iter().collect()) });
+        )| {
+            test(updates) });
     }
 
     /// We have three leaves that share the same prefix: 0x00, 0x01 and 0x02. Hash builder trie has
