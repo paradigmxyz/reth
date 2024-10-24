@@ -1,5 +1,5 @@
 //! Mirrored version of [`ExExContext`](`crate::ExExContext`)
-//! without generic abstraction over [<Node>](`reth_node_api::FullNodeComponents`)
+//! without generic abstraction over [Node](`reth_node_api::FullNodeComponents`)
 
 use std::sync::Arc;
 
