@@ -7,7 +7,7 @@ use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -30,7 +30,6 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -460,26 +459,6 @@ where
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
-    // initialize empty blob sidecars. There are no blob transactions on L2.
-    let blob_sidecars = Vec::new();
-    let mut excess_blob_gas = None;
-    let mut blob_gas_used = None;
-
-    // only determine cancun fields when active
-    if chain_spec.is_cancun_active_at_timestamp(attributes.payload_attributes.timestamp) {
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-            let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
-        } else {
-            // for the first post-fork block, both parent.blob_gas_used and
-            // parent.excess_blob_gas are evaluated as 0
-            Some(calc_excess_blob_gas(0, 0))
-        };
-
-        blob_gas_used = Some(0);
-    }
-
     let header = Header {
         parent_hash: parent_block.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -499,9 +478,12 @@ where
         gas_used: cumulative_gas_used,
         extra_data,
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
-        blob_gas_used,
-        excess_blob_gas: excess_blob_gas.map(Into::into),
         requests_hash: None,
+        // OP doesn't support blobs/EIP-4844.
+        // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
+        // Need [Some] instead of [None] to match block hash.
+        excess_blob_gas: Some(0),
+        blob_gas_used: Some(0),
     };
 
     // seal the block
@@ -522,7 +504,7 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let mut payload = OptimismBuiltPayload::new(
+    let payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
         total_fees,
@@ -530,9 +512,6 @@ where
         attributes,
         Some(executed),
     );
-
-    // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
