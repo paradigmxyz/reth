@@ -26,9 +26,6 @@ pub const MIN_PROTOCOL_BASE_FEE: u64 = 7;
 /// Same as [`MIN_PROTOCOL_BASE_FEE`] but as a U256.
 pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 
-/// Initial base fee as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-pub const EIP1559_INITIAL_BASE_FEE: u64 = 1_000_000_000;
-
 /// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 
@@ -85,15 +82,6 @@ pub const OP_SYSTEM_TX_TO_ADDR: Address = address!("4200000000000000000000000000
 /// Unwind depth of `3` blocks significantly reduces the chance that the reorged block is kept in
 /// the database.
 pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
-
-/// Max seconds from current time allowed for blocks, before they're considered future blocks.
-///
-/// This is only used when checking whether or not the timestamp for pre-merge blocks is in the
-/// future.
-///
-/// See:
-/// <https://github.com/ethereum/go-ethereum/blob/a196f3e8a22b6ad22ced5c2e3baf32bc3ebd4ec9/consensus/ethash/consensus.go#L227-L229>
-pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
 
 #[cfg(test)]
 mod tests {
