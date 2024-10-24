@@ -5,7 +5,8 @@ use alloc::{vec, vec::Vec};
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
-use alloy_primitives::{Bloom, Bytes, Log, B256};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
@@ -204,14 +205,20 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
     }
 }
 
-impl ReceiptWithBloom {
-    /// Returns the enveloped encoded receipt.
-    ///
-    /// See also [`ReceiptWithBloom::encode_enveloped`]
-    pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = Vec::new();
-        self.encode_enveloped(&mut buf);
-        buf.into()
+impl Encodable2718 for ReceiptWithBloom {
+    fn type_flag(&self) -> Option<u8> {
+        match self.receipt.tx_type {
+            TxType::Legacy => None,
+            tx_type => Some(tx_type as u8),
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        let encoder = self.as_encoder();
+        match self.receipt.tx_type {
+            TxType::Legacy => encoder.receipt_length(),
+            _ => 1 + encoder.receipt_length(), // 1 byte for the type prefix
+        }
     }
 
     /// Encodes the receipt into its "raw" format.
@@ -223,10 +230,18 @@ impl ReceiptWithBloom {
     /// of the receipt:
     /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
     ///   logsBloom, logs])`
-    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+    fn encode_2718(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, false)
     }
 
+    fn encoded_2718(&self) -> Vec<u8> {
+        let mut out = vec![];
+        self.encode_2718(&mut out);
+        out
+    }
+}
+
+impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
@@ -501,6 +516,7 @@ impl Encodable for ReceiptWithBloomEncoder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::revm_primitives::Bytes;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex};
 
     #[test]
@@ -660,5 +676,51 @@ mod tests {
         receipt.to_compact(&mut data);
         let (decoded, _) = Receipt::from_compact(&data[..], data.len());
         assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn test_encode_2718_length() {
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
+            },
+            bloom: Bloom::default(),
+        };
+
+        let encoded = receipt.encoded_2718();
+        assert_eq!(
+            encoded.len(),
+            receipt.encode_2718_len(),
+            "Encoded length should match the actual encoded data length"
+        );
+
+        // Test for legacy receipt as well
+        let legacy_receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
+            },
+            bloom: Bloom::default(),
+        };
+
+        let legacy_encoded = legacy_receipt.encoded_2718();
+        assert_eq!(
+            legacy_encoded.len(),
+            legacy_receipt.encode_2718_len(),
+            "Encoded length for legacy receipt should match the actual encoded data length"
+        );
     }
 }
