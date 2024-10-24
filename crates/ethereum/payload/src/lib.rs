@@ -33,9 +33,7 @@ use reth_primitives::{
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, pool::BestTransactionFilter, BestTransactions,
-    BestTransactionsAttributes, NoopTransactionFilter, TransactionFilter, TransactionPool,
-    ValidPoolTransaction,
+    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -55,17 +53,9 @@ pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
 }
 
 impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
-    /// [`EthereumPayloadBuilder`] constructor.
+    /// `EthereumPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { evm_config }
-    }
-
-    /// Returns a new [`EthereumPayloadBuilderWithFilter`].
-    pub const fn with_filter<TxFilter>(
-        self,
-        tx_filter: TxFilter,
-    ) -> EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter> {
-        EthereumPayloadBuilderWithFilter { ethereum_payload_builder: self, tx_filter }
     }
 }
 
@@ -89,7 +79,7 @@ where
     }
 }
 
-/// Default implementation of [`PayloadBuilder`] for unit type
+// Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
@@ -104,8 +94,7 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        let tx_filter = NoopTransactionFilter::default();
-        default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
     }
 
     fn build_empty_payload(
@@ -123,74 +112,21 @@ where
             best_payload: None,
         };
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        let tx_filter = NoopTransactionFilter::default();
-        default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)?
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
-    }
-}
-
-/// Ethereum payload builder with a transaction filter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter> {
-    /// An Ethereum payload builder.
-    ethereum_payload_builder: EthereumPayloadBuilder<EvmConfig>,
-    /// The type responsible for filtering transactions.
-    tx_filter: TxFilter,
-}
-
-/// Implementation of the [`PayloadBuilder`] for an Ethereum payload builder
-/// with a filter on the transactions included in the block.
-impl<EvmConfig, Pool, Client, TxFilter> PayloadBuilder<Pool, Client>
-    for EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter>
-where
-    EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
-    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
-{
-    type Attributes = EthPayloadBuilderAttributes;
-    type BuiltPayload = EthBuiltPayload;
-
-    fn try_build(
-        &self,
-        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
-    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self
-            .ethereum_payload_builder
-            .cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(
-            self.ethereum_payload_builder.evm_config.clone(),
-            args,
-            self.tx_filter.clone(),
-            cfg_env,
-            block_env,
-        )
-    }
-
-    fn build_empty_payload(
-        &self,
-        client: &Client,
-        config: PayloadConfig<Self::Attributes>,
-    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        <EthereumPayloadBuilder<EvmConfig> as PayloadBuilder<Pool, Client>>::build_empty_payload(
-            &self.ethereum_payload_builder,
-            client,
-            config,
-        )
     }
 }
 
 /// Constructs an Ethereum transaction payload using the best transactions from the pool.
 ///
 /// Given build arguments including an Ethereum client, transaction pool,
-/// configuration and transaction filter, this function creates a transaction payload.
-/// Returns a result indicating success with the payload or an error in case of failure.
+/// and configuration, this function creates a transaction payload. Returns
+/// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload<EvmConfig, Pool, Client, TxFilter>(
+pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
-    tx_filter: TxFilter,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
@@ -198,7 +134,6 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
-    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
@@ -218,13 +153,10 @@ where
     let mut executed_txs = Vec::new();
     let mut executed_senders = Vec::new();
 
-    let best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+    let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
     ));
-
-    // Construct the [`BestTransactionFilter`] using as predicate the transactions filter.
-    let mut filtered_txs = BestTransactionFilter::new(best_txs, |tx: &_| tx_filter.is_valid(tx));
 
     let mut total_fees = U256::ZERO;
 
@@ -256,19 +188,19 @@ where
         &initialized_block_env,
         parent_block.hash(),
     )
-    .map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for payload");
-        PayloadBuilderError::Internal(err.into())
-    })?;
+        .map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for payload");
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
     let mut receipts = Vec::new();
-    while let Some(pool_tx) = filtered_txs.next() {
+    while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
             // we can't fit this transaction into the block, so we need to mark it as invalid
             // which also removes all dependent transaction from the iterator before we can
             // continue
-            filtered_txs.mark_invalid(&pool_tx);
+            best_txs.mark_invalid(&pool_tx);
             continue
         }
 
@@ -290,7 +222,7 @@ where
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
-                filtered_txs.mark_invalid(&pool_tx);
+                best_txs.mark_invalid(&pool_tx);
                 continue
             }
         }
@@ -316,7 +248,7 @@ where
                             // if the transaction is invalid, we can skip it and all of its
                             // descendants
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            filtered_txs.mark_invalid(&pool_tx);
+                            best_txs.mark_invalid(&pool_tx);
                         }
 
                         continue
@@ -340,7 +272,7 @@ where
 
             // if we've reached the max data gas per block, we can skip blob txs entirely
             if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                filtered_txs.skip_blobs();
+                best_txs.skip_blobs();
             }
         }
 
