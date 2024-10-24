@@ -4,10 +4,14 @@ use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, Criterion};
 use prop::strategy::ValueTree;
 use proptest::{prelude::*, test_runner::TestRunner};
+use rand::seq::IteratorRandom;
+use reth_testing_utils::generators;
 use reth_trie::Nibbles;
 use reth_trie_sparse::RevealedSparseTrie;
 
 pub fn update_rlp_node_level(c: &mut Criterion) {
+    let mut rng = generators::rng();
+
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
@@ -16,13 +20,23 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
         let state = proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
             .new_tree(&mut runner)
             .unwrap()
-            .current()
-            .into_iter();
+            .current();
 
         let mut sparse = RevealedSparseTrie::default();
-        for (key, value) in state {
+        for (key, value) in &state {
             sparse
-                .update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(&value).to_vec())
+                .update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec())
+                .unwrap();
+        }
+        sparse.root();
+
+        // Update 10% of the keys, that will add them to the prefix set
+        for key in state.keys().choose_multiple(&mut rng, size / 10) {
+            sparse
+                .update_leaf(
+                    Nibbles::unpack(key),
+                    alloy_rlp::encode_fixed_size(&rng.gen::<U256>()).to_vec(),
+                )
                 .unwrap();
         }
 
