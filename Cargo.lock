@@ -6615,6 +6615,7 @@ dependencies = [
  "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
+ "reth-codecs",
  "reth-config",
  "reth-consensus",
  "reth-db",
@@ -6638,10 +6639,13 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-prune-types",
  "reth-stages",
+ "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "secp256k1",
  "serde",
@@ -6696,6 +6700,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test-fuzz",
+ "visibility",
 ]
 
 [[package]]
@@ -8090,6 +8095,8 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
+ "op-alloy-consensus",
+ "proptest",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
@@ -11232,6 +11239,17 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "visibility"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d674d135b4a8c1d7e813e2f8d1c9a58308aee4a680323066025e53132218bd91"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.80",
+]
 
 [[package]]
 name = "wait-timeout"

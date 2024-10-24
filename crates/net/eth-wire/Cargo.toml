@@ -71,7 +71,8 @@ arbitrary = [
 	"dep:arbitrary",
 	"reth-chainspec/arbitrary",
 	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary"
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
 serde = [
 	"dep:serde",
@@ -80,7 +81,8 @@ serde = [
 	"alloy-primitives/serde",
 	"bytes/serde",
 	"rand/serde",
-	"secp256k1/serde"
+	"secp256k1/serde",
+	"reth-codecs/serde"
 ]
 
 [[test]]

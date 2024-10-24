@@ -649,10 +649,12 @@ impl reth_codecs::Compact for Transaction {
                         let (tx, buf) = TxDeposit::from_compact(buf, buf.len());
                         (Self::Deposit(tx), buf)
                     }
-                    _ => unreachable!("Junk data in database: unknown Transaction variant"),
+                    _ => unreachable!(
+                        "Junk data in database: unknown Transaction variant: {identifier}"
+                    ),
                 }
             }
-            _ => unreachable!("Junk data in database: unknown Transaction variant"),
+            _ => unreachable!("Junk data in database: unknown Transaction variant: {identifier}"),
         }
     }
 }
