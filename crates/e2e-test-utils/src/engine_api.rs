@@ -50,12 +50,13 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
         payload: E::BuiltPayload,
         payload_builder_attributes: E::PayloadBuilderAttributes,
         expected_status: PayloadStatusEnum,
-        versioned_hashes: Vec<B256>,
     ) -> eyre::Result<B256>
     where
         E::ExecutionPayloadEnvelopeV3: From<E::BuiltPayload> + PayloadEnvelopeExt,
         E::ExecutionPayloadEnvelopeV4: From<E::BuiltPayload> + PayloadEnvelopeExt,
     {
+        let versioned_hashes =
+            payload.block().blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
         // submit payload to engine api
         let submission = if self
             .chain_spec

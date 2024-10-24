@@ -30,6 +30,7 @@ async fn can_sync() -> eyre::Result<()> {
                 .build(),
         ),
         false,
+        eth_payload_attributes,
     )
     .await?;
 
@@ -41,7 +42,7 @@ async fn can_sync() -> eyre::Result<()> {
     let tx_hash = first_node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = first_node.advance_block(vec![], eth_payload_attributes).await?;
+    let (payload, _) = first_node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -76,7 +77,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     );
 
     let (mut nodes, _tasks, wallet) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false).await?;
+        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let signers = wallet.gen();
     let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
@@ -139,7 +140,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
             pending.push(provider.send_tx_envelope(tx).await?);
         }
 
-        let (payload, _) = node.advance_block(vec![], eth_payload_attributes).await?;
+        let (payload, _) = node.advance_block().await?;
         assert!(payload.block().raw_transactions().len() == tx_count);
 
         for pending in pending {

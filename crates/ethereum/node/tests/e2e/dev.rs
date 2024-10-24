@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::utils::eth_payload_attributes;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
@@ -17,7 +18,8 @@ use reth_tasks::TaskManager;
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, _tasks, _) = setup::<EthereumNode>(1, custom_chain(), true).await?;
+    let (mut nodes, _tasks, _) =
+        setup::<EthereumNode>(1, custom_chain(), true, eth_payload_attributes).await?;
 
     assert_chain_advances(nodes.pop().unwrap().inner).await;
     Ok(())

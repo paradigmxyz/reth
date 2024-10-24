@@ -49,6 +49,7 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec: EthereumHardforks>,
@@ -84,7 +85,7 @@ where
             .launch()
             .await?;
 
-        let mut node = NodeTestContext::new(node).await?;
+        let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {
@@ -109,6 +110,7 @@ pub async fn setup_engine<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, N::AddOns, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     TaskManager,
@@ -166,7 +168,7 @@ where
             })
             .await?;
 
-        let mut node = NodeTestContext::new(node).await?;
+        let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {

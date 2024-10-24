@@ -51,7 +51,6 @@ async fn can_sync() -> eyre::Result<()> {
             side_payload_chain[0].0.clone(),
             side_payload_chain[0].1.clone(),
             PayloadStatusEnum::Valid,
-            Default::default(),
         )
         .await;
 
@@ -81,7 +80,6 @@ async fn can_sync() -> eyre::Result<()> {
                 }
                 .to_string(),
             },
-            Default::default(),
         )
         .await;
 

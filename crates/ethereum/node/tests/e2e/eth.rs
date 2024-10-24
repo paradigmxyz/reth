@@ -26,6 +26,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
                 .build(),
         ),
         false,
+        eth_payload_attributes,
     )
     .await?;
 
@@ -36,7 +37,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = node.advance_block(vec![], eth_payload_attributes).await?;
+    let (payload, _) = node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -74,7 +75,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
         .node(EthereumNode::default())
         .launch()
         .await?;
-    let mut node = NodeTestContext::new(node).await?;
+    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     // Configure wallet from test mnemonic and create dummy transfer tx
     let wallet = Wallet::default();
@@ -84,7 +85,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = node.advance_block(vec![], eth_payload_attributes).await?;
+    let (payload, _) = node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -120,7 +121,7 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
         .launch()
         .await?;
 
-    let node = NodeTestContext::new(node).await?;
+    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     // Ensure that the engine api client is not available
     let client = node.inner.engine_ipc_client().await;

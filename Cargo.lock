@@ -129,6 +129,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-contract"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460ab80ce4bda1c80bcf96fe7460520476f2c7b734581c6567fac2708e2a60ef"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-json-abi",
+ "alloy-network",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-sol-types",
+ "alloy-transport",
+ "futures",
+ "futures-util",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-dyn-abi"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7018,6 +7038,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-signer",
  "alloy-signer-local",
+ "derive_more 1.0.0",
  "eyre",
  "futures-util",
  "jsonrpsee",
@@ -7971,10 +7992,13 @@ name = "reth-node-ethereum"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-contract",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer",
+ "alloy-sol-types",
  "eyre",
  "futures",
  "rand 0.8.5",
