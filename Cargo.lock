@@ -8089,6 +8089,8 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
+ "op-alloy-consensus",
+ "proptest",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",

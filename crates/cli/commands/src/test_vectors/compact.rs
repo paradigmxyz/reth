@@ -31,33 +31,34 @@ use reth_stages_types::{
 };
 use reth_trie::{hash_builder::HashBuilderValue, TrieMask};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredNibbles, StoredNibblesSubKey};
-use std::{collections::HashSet, fs::File, io::BufReader, sync::LazyLock};
+use std::{fs::File, io::BufReader};
 
-const VECTORS_FOLDER: &str = "testdata/micro/compact";
-const VECTOR_SIZE: usize = 100;
+pub const VECTORS_FOLDER: &str = "testdata/micro/compact";
+pub const VECTOR_SIZE: usize = 100;
 
+#[macro_export]
 macro_rules! compact_types {
     (regular: [$($regular_ty:ident),*], identifier: [$($id_ty:ident),*]) => {
-        const GENERATE_VECTORS: &[fn(&mut TestRunner) -> Result<()>] = &[
+        pub const GENERATE_VECTORS: &[fn(&mut TestRunner) -> eyre::Result<()>] = &[
             $(
-                generate_vector::<$regular_ty> as fn(&mut TestRunner) -> Result<()>,
+                generate_vector::<$regular_ty> as fn(&mut TestRunner) -> eyre::Result<()>,
             )*
             $(
-                generate_vector::<$id_ty> as fn(&mut TestRunner) -> Result<()>,
-            )*
-        ];
-
-        const READ_VECTORS: &[fn() -> Result<()>] = &[
-            $(
-                read_vector::<$regular_ty> as fn() -> Result<()>,
-            )*
-            $(
-                read_vector::<$id_ty> as fn() -> Result<()>,
+                generate_vector::<$id_ty> as fn(&mut TestRunner) -> eyre::Result<()>,
             )*
         ];
 
-        static IDENTIFIER_TYPE: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut map = HashSet::new();
+        pub const READ_VECTORS: &[fn() -> eyre::Result<()>] = &[
+            $(
+                read_vector::<$regular_ty> as fn() -> eyre::Result<()>,
+            )*
+            $(
+                read_vector::<$id_ty> as fn() -> eyre::Result<()>,
+            )*
+        ];
+
+        pub static IDENTIFIER_TYPE: std::sync::LazyLock<std::collections::HashSet<String>> = std::sync::LazyLock::new(|| {
+            let mut map = std::collections::HashSet::new();
             $(
                 map.insert(type_name::<$id_ty>());
             )*
@@ -130,7 +131,16 @@ compact_types!(
 );
 
 /// Generates a vector of type `T` to a file.
-pub(crate) fn generate_vectors() -> Result<()> {
+pub fn generate_vectors() -> Result<()> {
+    generate_vectors_with(GENERATE_VECTORS)
+}
+
+pub fn read_vectors() -> Result<()> {
+    read_vectors_with(READ_VECTORS)
+}
+
+/// Generates a vector of type `T` to a file.
+pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
     getrandom(&mut seed)?;
@@ -143,7 +153,7 @@ pub(crate) fn generate_vectors() -> Result<()> {
 
     fs::create_dir_all(VECTORS_FOLDER)?;
 
-    for generate_fn in GENERATE_VECTORS {
+    for generate_fn in gen {
         generate_fn(&mut runner)?;
     }
 
@@ -152,10 +162,10 @@ pub(crate) fn generate_vectors() -> Result<()> {
 
 /// Reads multiple vectors of different types ensuring their correctness by decoding and
 /// re-encoding.
-pub fn read_vectors() -> Result<()> {
+pub fn read_vectors_with(read: &[fn() -> eyre::Result<()>]) -> Result<()> {
     fs::create_dir_all(VECTORS_FOLDER)?;
 
-    for read_fn in READ_VECTORS {
+    for read_fn in read {
         read_fn()?;
     }
 
@@ -163,7 +173,7 @@ pub fn read_vectors() -> Result<()> {
 }
 
 /// Generates test vectors for a specific type `T`.
-fn generate_vector<T>(runner: &mut TestRunner) -> Result<()>
+pub fn generate_vector<T>(runner: &mut TestRunner) -> Result<()>
 where
     T: for<'a> Arbitrary<'a> + reth_codecs::Compact,
 {
@@ -202,7 +212,7 @@ where
 
 /// Reads a vector of type `T` from a file and compares each item with its reconstructed version
 /// using `T::from_compact`.
-fn read_vector<T>() -> Result<()>
+pub fn read_vector<T>() -> Result<()>
 where
     T: reth_codecs::Compact,
 {
@@ -239,6 +249,6 @@ where
     Ok(())
 }
 
-fn type_name<T>() -> String {
+pub fn type_name<T>() -> String {
     std::any::type_name::<T>().replace("::", "__")
 }
