@@ -25,7 +25,7 @@ pub struct ExExNotifications<P, E> {
 /// for all blocks. If the stream is configured with a head via [`ExExNotifications::set_with_head`]
 /// or [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
 pub trait ExExNotificationsStream:
-    Debug + Stream<Item = eyre::Result<ExExNotification>> + Unpin
+    Debug + Send + Sync + Stream<Item = eyre::Result<ExExNotification>> + Unpin
 {
     /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s without a head.
     ///
