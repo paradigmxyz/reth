@@ -256,9 +256,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-network-primitives"
-version = "0.5.3"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a968c063fcfcb937736665c865a71fc2242b68916156f5ffa41fee7b44bb695"
+checksum = "cd15a0990fa8a56d85a42d6a689719aa4eebf5e2f1a5c5354658c0bfc52cac9a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7483,6 +7483,7 @@ dependencies = [
  "eyre",
  "futures",
  "itertools 0.13.0",
+ "libloading",
  "metrics",
  "parking_lot",
  "rand 0.8.5",
@@ -7493,6 +7494,7 @@ dependencies = [
  "reth-db-common",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-exex-test-utils",
  "reth-exex-types",
  "reth-fs-util",
  "reth-metrics",
@@ -9280,9 +9282,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "17.0.0"
+version = "17.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eab16cb0a8cd5ac88b11230b20df588b7e8aae7dfab4b3f830e98aebeb4b365"
+checksum = "055bee6a81aaeee8c2389ae31f0d4de87f44df24f4444a1116f9755fd87a76ad"
 dependencies = [
  "auto_impl",
  "cfg-if",

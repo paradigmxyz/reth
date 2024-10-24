@@ -495,6 +495,7 @@ generic-array = "0.14"
 humantime = "2.1"
 humantime-serde = "1.1"
 itertools = "0.13"
+libloading = "0.8.5"
 linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
 notify = { version = "6.1.1", default-features = false, features = [
