@@ -257,7 +257,7 @@ impl Account {
 }
 
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,
@@ -313,11 +313,11 @@ pub enum ForkSpec {
     Unknown,
 }
 
-impl From<&ForkSpec> for ChainSpec {
-    fn from(fork_spec: &ForkSpec) -> Self {
+impl From<ForkSpec> for ChainSpec {
+    fn from(fork_spec: ForkSpec) -> Self {
         let spec_builder = ChainSpecBuilder::mainnet();
 
-        match *fork_spec {
+        match fork_spec {
             ForkSpec::Frontier => spec_builder.frontier_activated(),
             ForkSpec::Homestead | ForkSpec::FrontierToHomesteadAt5 => {
                 spec_builder.homestead_activated()

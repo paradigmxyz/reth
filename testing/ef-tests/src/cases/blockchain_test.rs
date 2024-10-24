@@ -84,7 +84,7 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let chain_spec: Arc<ChainSpec> = Arc::new((&case.network).into());
+                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
                 let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
                     .database_provider_rw()
                     .unwrap();
