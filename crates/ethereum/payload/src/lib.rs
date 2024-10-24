@@ -436,7 +436,8 @@ where
     let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed));
 
     // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
+    let blob_sidecars_deref = blob_sidecars.into_iter().map(|x| (*x).clone()).collect();
+    payload.extend_sidecars(blob_sidecars_deref);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
