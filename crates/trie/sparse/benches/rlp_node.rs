@@ -22,6 +22,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
             .unwrap()
             .current();
 
+        // Create a sparse trie with `size` leaves
         let mut sparse = RevealedSparseTrie::default();
         for (key, value) in &state {
             sparse
@@ -30,7 +31,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
         }
         sparse.root();
 
-        // Update 10% of the keys, that will add them to the prefix set
+        // Update 10% of the leaves, that will add them to the prefix set
         for key in state.keys().choose_multiple(&mut rng, size / 10) {
             sparse
                 .update_leaf(
@@ -40,7 +41,9 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
                 .unwrap();
         }
 
+        // Calculate the maximum depth of the trie for the given number of leaves
         let max_depth = (size as f64).log(16.0).ceil() as usize;
+
         for depth in 0..=max_depth {
             group.bench_function(format!("size {size} | depth {depth}"), |b| {
                 b.iter_with_setup(
