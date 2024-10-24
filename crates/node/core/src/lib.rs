@@ -22,15 +22,6 @@ pub mod primitives {
 
 /// Re-export of `reth_rpc_*` crates.
 pub mod rpc {
-    /// Re-exported from `reth_rpc_api`.
-    pub mod api {
-        pub use reth_rpc_api::*;
-    }
-    /// Re-exported from `reth_rpc::eth`.
-    pub mod eth {
-        pub use reth_rpc_eth_api::*;
-    }
-
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
         pub use reth_rpc_server_types::result::*;

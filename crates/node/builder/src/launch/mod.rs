@@ -23,15 +23,14 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{
-    AddOnsContext, FullNodeComponents, FullNodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
-};
+use reth_node_api::{AddOnsContext, FullNodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::BlockchainProvider;
+use reth_rpc::eth::RpcNodeCore;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -47,14 +46,14 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`RpcNodeCore`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    <N as FullNodeComponents>::Network,
+    <N as RpcNodeCore>::Provider,
+    <N as RpcNodeCore>::Pool,
+    <N as RpcNodeCore>::Evm,
+    <N as RpcNodeCore>::Network,
     TaskExecutor,
-    <N as FullNodeTypes>::Provider,
+    <N as RpcNodeCore>::Provider,
 >;
 
 /// A general purpose trait that launches a new node of any kind.

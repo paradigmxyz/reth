@@ -15,4 +15,4 @@ pub use pubsub::EthPubSub;
 
 pub use helpers::{signer::DevSigner, types::EthTxBuilder};
 
-pub use reth_rpc_eth_api::EthApiServer;
+pub use reth_rpc_eth_api::{EthApiServer, EthApiTypes, FullEthApiServer, RpcNodeCore};
