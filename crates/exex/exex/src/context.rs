@@ -7,7 +7,7 @@ use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotifications, ExExNotificationsStream};
+use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -55,7 +55,24 @@ where
     }
 }
 
-impl<Node: FullNodeComponents> ExExContext<Node> {
+impl<Node> ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
+    /// Returns dynamic version of the context
+    pub fn into_dyn(self) -> ExExContextDyn {
+        ExExContextDyn::from(self)
+    }
+}
+
+impl<Node> ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
         self.components.pool()
