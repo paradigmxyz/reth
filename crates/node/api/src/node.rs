@@ -125,34 +125,27 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
 }
 
 /// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
-pub trait NodeTy {
-    /// Node's types with the database.
-    type Types;
+pub trait RpcNodeTy {
     /// The provider type used to interact with the node.
     type Provider;
 }
 
-impl<T> NodeTy for T
+impl<T> RpcNodeTy for T
 where
     T: FullNodeTypes,
 {
-    type Types = T::Types;
     type Provider = T::Provider;
 }
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
 /// defining types.
-pub trait NodeCore: NodeTy + Clone {
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Send + Sync + Clone + Unpin;
+pub trait RpcNodeCore: RpcNodeTy + Clone {
     /// The provider type used to interact with the node.
     type Provider: Send + Sync + Clone + Unpin;
     /// The transaction pool of the node.
     type Pool: Send + Sync + Clone + Unpin;
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: Send + Sync + Clone + Unpin;
-    /// The type that knows how to execute blocks.
-    type Executor: Send + Sync + Clone + Unpin;
     /// Network API.
     type Network: Send + Sync + Clone;
 
@@ -162,37 +155,21 @@ pub trait NodeCore: NodeTy + Clone {
     /// Returns the node's evm config.
     fn evm_config(&self) -> &Self::Evm;
 
-    /// Returns the node's executor type.
-    fn block_executor(&self) -> &Self::Executor;
-
-    /// Returns the node's consensus type.
-    fn consensus(&self) -> &Self::Consensus;
-
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
 
-    /// Returns the handle to the payload builder service.
-    fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
-
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
-
-    /// Returns handle to runtime.
-    fn task_executor(&self) -> &TaskExecutor;
 }
 
-impl<T> NodeCore for T
+impl<T> RpcNodeCore for T
 where
     T: FullNodeComponents,
 {
-    type DB = <T::Types as NodeTypesWithDB>::DB;
     type Provider = T::Provider;
     type Pool = T::Pool;
     type Network = <T as FullNodeComponents>::Network;
     type Evm = <T as FullNodeComponents>::Evm;
-    type Executor = <T as FullNodeComponents>::Executor;
 
     fn pool(&self) -> &Self::Pool {
         FullNodeComponents::pool(self)
@@ -202,29 +179,11 @@ where
         FullNodeComponents::evm_config(self)
     }
 
-    fn block_executor(&self) -> &Self::Executor {
-        FullNodeComponents::block_executor(self)
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        FullNodeComponents::consensus(self)
-    }
-
     fn network(&self) -> &Self::Network {
         FullNodeComponents::network(self)
     }
 
-    fn payload_builder(
-        &self,
-    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine> {
-        FullNodeComponents::payload_builder(self)
-    }
-
     fn provider(&self) -> &Self::Provider {
         FullNodeComponents::provider(self)
-    }
-
-    fn task_executor(&self) -> &TaskExecutor {
-        FullNodeComponents::task_executor(self)
     }
 }
