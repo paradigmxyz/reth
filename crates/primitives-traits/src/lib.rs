@@ -14,6 +14,7 @@ extern crate alloc;
 
 /// Common constants.
 pub mod constants;
+
 pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
@@ -23,6 +24,7 @@ pub use account::{Account, Bytecode};
 pub mod receipt;
 pub use receipt::Receipt;
 
+/// Transaction traits
 pub mod transaction;
 pub use transaction::{signed::SignedTransaction, Transaction};
 
