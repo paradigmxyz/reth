@@ -121,10 +121,7 @@ impl BlobStore for DiskFileBlobStore {
         self.inner.get_all(txs)
     }
 
-    fn get_exact(
-        &self,
-        txs: Vec<B256>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
@@ -410,10 +407,7 @@ impl DiskFileBlobStoreInner {
     ///
     /// Returns an error if there are any missing blobs.
     #[inline]
-    fn get_exact(
-        &self,
-        txs: Vec<B256>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         txs.into_iter()
             .map(|tx| self.get_one(tx)?.ok_or(BlobStoreError::MissingSidecar(tx)))
             .collect()

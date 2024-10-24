@@ -93,9 +93,7 @@ impl BlobStore for InMemoryBlobStore {
 
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         let store = self.inner.store.read();
-        txs.into_iter()
-            .map(|tx| store.get(&tx).cloned().ok_or_else(|| BlobStoreError::MissingSidecar(tx)))
-            .collect()
+        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).map(|item| item.clone())).collect())
     }
 
     fn get_by_versioned_hashes(

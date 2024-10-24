@@ -330,8 +330,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 .flatten()
                                 .and_then(|sidecar| {
                                     PooledTransactionsElementEcRecovered::try_from_blob_transaction(
-                                        tx,
-                                        sidecar,
+                                        tx, sidecar,
                                     )
                                     .ok()
                                 })

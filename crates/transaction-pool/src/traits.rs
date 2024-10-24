@@ -431,10 +431,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
     /// store.
-    fn get_blob(
-        &self,
-        tx_hash: TxHash,
-    ) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
 
     /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
     /// blob store.
