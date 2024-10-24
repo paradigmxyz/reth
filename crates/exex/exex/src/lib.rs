@@ -41,6 +41,7 @@ mod context;
 pub use context::*;
 
 mod dyexex;
+pub use dyexex::load;
 
 mod dyn_context;
 pub use dyn_context::*;
