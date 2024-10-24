@@ -206,23 +206,30 @@ impl ConfigureEvm for OptimismEvmConfig {
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{bytes, Address, LogData, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
-    use reth_execution_types::{Chain, ExecutionOutcome};
+    use reth_execution_types::{
+        AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
+    };
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_primitives::{
-        revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Header, Receipt, Receipts, SealedBlockWithSenders, TxType,
+        revm_primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},
+        Account, Header, Log, Receipt, Receipts, SealedBlockWithSenders, TxType,
     };
+
     use reth_revm::{
-        db::{CacheDB, EmptyDBTyped},
+        db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
-    use std::{collections::HashSet, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     fn test_evm_config() -> OptimismEvmConfig {
         OptimismEvmConfig::new(BASE_MAINNET.clone())
@@ -619,5 +626,400 @@ mod tests {
 
         // Assert that the execution outcome at the tip block contains the whole execution outcome
         assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
+    }
+
+    #[test]
+    fn test_initialisation() {
+        // Create a new BundleState object with initial data
+        let bundle = BundleState::new(
+            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+            vec![vec![(Address::new([2; 20]), None, vec![])]],
+            vec![],
+        );
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![],
+                success: true,
+                deposit_nonce: Some(18),
+                deposit_receipt_version: Some(34),
+            })]],
+        };
+
+        // Create a Requests object with a vector of requests
+        let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: bundle.clone(),
+            receipts: receipts.clone(),
+            requests: requests.clone(),
+            first_block,
+        };
+
+        // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
+        assert_eq!(
+            ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
+            exec_res
+        );
+
+        // Create a BundleStateInit object and insert initial data
+        let mut state_init: BundleStateInit = HashMap::default();
+        state_init
+            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
+
+        // Create a HashMap for account reverts and insert initial data
+        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
+        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
+
+        // Create a RevertsInit object and insert the revert_inner data
+        let mut revert_init: RevertsInit = HashMap::default();
+        revert_init.insert(123, revert_inner);
+
+        // Assert that creating a new ExecutionOutcome using the new_init method matches
+        // exec_res
+        assert_eq!(
+            ExecutionOutcome::new_init(
+                state_init,
+                revert_init,
+                vec![],
+                receipts,
+                first_block,
+                requests,
+            ),
+            exec_res
+        );
+    }
+
+    #[test]
+    fn test_block_number_to_index() {
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![],
+                success: true,
+                deposit_nonce: Some(18),
+                deposit_receipt_version: Some(34),
+            })]],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block,
+        };
+
+        // Test before the first block
+        assert_eq!(exec_res.block_number_to_index(12), None);
+
+        // Test after after the first block but index larger than receipts length
+        assert_eq!(exec_res.block_number_to_index(133), None);
+
+        // Test after the first block
+        assert_eq!(exec_res.block_number_to_index(123), Some(0));
+    }
+
+    #[test]
+    fn test_get_logs() {
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![Log::<LogData>::default()],
+                success: true,
+                deposit_nonce: Some(18),
+                deposit_receipt_version: Some(34),
+            })]],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block,
+        };
+
+        // Get logs for block number 123
+        let logs: Vec<&Log> = exec_res.logs(123).unwrap().collect();
+
+        // Assert that the logs match the expected logs
+        assert_eq!(logs, vec![&Log::<LogData>::default()]);
+    }
+
+    #[test]
+    fn test_receipts_by_block() {
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![Log::<LogData>::default()],
+                success: true,
+                deposit_nonce: Some(18),
+                deposit_receipt_version: Some(34),
+            })]],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts,                   // Include the created receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
+
+        // Get receipts for block number 123 and convert the result into a vector
+        let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).iter().collect();
+
+        // Assert that the receipts for block number 123 match the expected receipts
+        assert_eq!(
+            receipts_by_block,
+            vec![&Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![Log::<LogData>::default()],
+                success: true,
+                deposit_nonce: Some(18),
+                deposit_receipt_version: Some(34),
+            })]
+        );
+    }
+
+    #[test]
+    fn test_receipts_len() {
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![Log::<LogData>::default()],
+                success: true,
+                deposit_nonce: Some(18),
+                deposit_receipt_version: Some(34),
+            })]],
+        };
+
+        // Create an empty Receipts object
+        let receipts_empty = Receipts { receipt_vec: vec![] };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts,                   // Include the created receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
+
+        // Assert that the length of receipts in exec_res is 1
+        assert_eq!(exec_res.len(), 1);
+
+        // Assert that exec_res is not empty
+        assert!(!exec_res.is_empty());
+
+        // Create a ExecutionOutcome object with an empty Receipts object
+        let exec_res_empty_receipts = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts: receipts_empty,   // Include the empty receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
+
+        // Assert that the length of receipts in exec_res_empty_receipts is 0
+        assert_eq!(exec_res_empty_receipts.len(), 0);
+
+        // Assert that exec_res_empty_receipts is empty
+        assert!(exec_res_empty_receipts.is_empty());
+    }
+
+    #[test]
+    fn test_revert_to() {
+        // Create a random receipt object
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a request.
+        let request = bytes!("deadbeef");
+
+        // Create a vector of Requests containing the request.
+        let requests =
+            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+
+        // Assert that the revert_to method returns true when reverting to the initial block number.
+        assert!(exec_res.revert_to(123));
+
+        // Assert that the receipts are properly cut after reverting to the initial block number.
+        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
+
+        // Assert that the requests are properly cut after reverting to the initial block number.
+        assert_eq!(exec_res.requests, vec![Requests::new(vec![request])]);
+
+        // Assert that the revert_to method returns false when attempting to revert to a block
+        // number greater than the initial block number.
+        assert!(!exec_res.revert_to(133));
+
+        // Assert that the revert_to method returns false when attempting to revert to a block
+        // number less than the initial block number.
+        assert!(!exec_res.revert_to(10));
+    }
+
+    #[test]
+    fn test_extend_execution_outcome() {
+        // Create a Receipt object with specific attributes.
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object containing the receipt.
+        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
+
+        // Create a request.
+        let request = bytes!("deadbeef");
+
+        // Create a vector of Requests containing the request.
+        let requests = vec![Requests::new(vec![request.clone()])];
+
+        // Define the initial block number.
+        let first_block = 123;
+
+        // Create an ExecutionOutcome object.
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+
+        // Extend the ExecutionOutcome object by itself.
+        exec_res.extend(exec_res.clone());
+
+        // Assert the extended ExecutionOutcome matches the expected outcome.
+        assert_eq!(
+            exec_res,
+            ExecutionOutcome {
+                bundle: Default::default(),
+                receipts: Receipts {
+                    receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
+                },
+                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+                first_block: 123,
+            }
+        );
+    }
+
+    #[test]
+    fn test_split_at_execution_outcome() {
+        // Create a random receipt object
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            deposit_nonce: Some(18),
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![
+                vec![Some(receipt.clone())],
+                vec![Some(receipt.clone())],
+                vec![Some(receipt.clone())],
+            ],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a request.
+        let request = bytes!("deadbeef");
+
+        // Create a vector of Requests containing the request.
+        let requests = vec![
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+        ];
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+
+        // Split the ExecutionOutcome at block number 124
+        let result = exec_res.clone().split_at(124);
+
+        // Define the expected lower ExecutionOutcome after splitting
+        let lower_execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] },
+            requests: vec![Requests::new(vec![request.clone()])],
+            first_block,
+        };
+
+        // Define the expected higher ExecutionOutcome after splitting
+        let higher_execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts {
+                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+            },
+            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+            first_block: 124,
+        };
+
+        // Assert that the split result matches the expected lower and higher outcomes
+        assert_eq!(result.0, Some(lower_execution_outcome));
+        assert_eq!(result.1, higher_execution_outcome);
+
+        // Assert that splitting at the first block number returns None for the lower outcome
+        assert_eq!(exec_res.clone().split_at(123), (None, exec_res));
     }
 }
