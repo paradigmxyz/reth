@@ -43,7 +43,7 @@ impl Debug for ExExContextDyn {
             .field("config", &self.config)
             .field("reth_config", &self.reth_config)
             .field("events", &self.events)
-            .field("notifications", &self.notifications)
+            .field("notifications", &"...")
             .finish()
     }
 }

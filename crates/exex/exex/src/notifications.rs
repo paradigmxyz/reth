@@ -92,8 +92,8 @@ impl<P, E> ExExNotifications<P, E> {
 
 impl<P, E> ExExNotificationsStream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Debug + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Debug + Unpin + 'static,
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
