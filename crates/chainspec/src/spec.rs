@@ -8,7 +8,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use derive_more::From;
 
-use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH};
+use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
 use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
@@ -19,7 +19,7 @@ use reth_network_peers::{
     sepolia_nodes, NodeRecord,
 };
 use reth_primitives_traits::{
-    constants::{EIP1559_INITIAL_BASE_FEE, HOLESKY_GENESIS_HASH, SEPOLIA_GENESIS_HASH},
+    constants::{EIP1559_INITIAL_BASE_FEE, HOLESKY_GENESIS_HASH},
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
