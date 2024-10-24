@@ -761,6 +761,19 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Creates an iterator which uses a closure to determine whether a transaction should be
+    /// returned by the iterator.
+    ///
+    /// All items the closure returns false for are marked as invalid via [`Self::mark_invalid`] and
+    /// descendant transactions will be skipped.
+    fn filter_transactions<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
+    where
+        P: FnMut(&Self::Item) -> bool,
+        Self: Sized,
+    {
+        BestTransactionFilter::new(self, predicate)
+    }
 }
 
 impl<T> BestTransactions for Box<T>
