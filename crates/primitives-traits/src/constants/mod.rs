@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use alloy_primitives::{address, b256, Address, B256, U256};
+use alloy_primitives::{address, b256, Address, B256};
 
 /// Gas units, for example [`GIGAGAS`].
 pub mod gas_units;
@@ -8,20 +8,6 @@ pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
-
-/// The minimum tx fee below which the txpool will reject the transaction.
-///
-/// Configured to `7` WEI which is the lowest possible value of base fee under mainnet EIP-1559
-/// parameters. `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559>
-/// is `8`, or 12.5%. Once the base fee has dropped to `7` WEI it cannot decrease further because
-/// 12.5% of 7 is less than 1.
-///
-/// Note that min base fee under different 1559 parameterizations may differ, but there's no
-/// significant harm in leaving this setting as is.
-pub const MIN_PROTOCOL_BASE_FEE: u64 = 7;
-
-/// Same as [`MIN_PROTOCOL_BASE_FEE`] but as a U256.
-pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 
 /// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
@@ -79,13 +65,3 @@ pub const OP_SYSTEM_TX_TO_ADDR: Address = address!("4200000000000000000000000000
 /// Unwind depth of `3` blocks significantly reduces the chance that the reorged block is kept in
 /// the database.
 pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn min_protocol_sanity() {
-        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u64>(), MIN_PROTOCOL_BASE_FEE);
-    }
-}
