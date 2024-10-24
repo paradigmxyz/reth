@@ -155,6 +155,32 @@ pub trait NodeCore: NodeTy + Clone {
     type Executor: Send + Sync + Clone + Unpin;
     /// Network API.
     type Network: Send + Sync + Clone;
+
+    /// Returns the transaction pool of the node.
+    fn pool(&self) -> &Self::Pool;
+
+    /// Returns the node's evm config.
+    fn evm_config(&self) -> &Self::Evm;
+
+    /// Returns the node's executor type.
+    fn block_executor(&self) -> &Self::Executor;
+
+    /// Returns the node's consensus type.
+    fn consensus(&self) -> &Self::Consensus;
+
+    /// Returns the handle to the network
+    fn network(&self) -> &Self::Network;
+
+    /// Returns the handle to the payload builder service.
+    fn payload_builder(
+        &self,
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
+
+    /// Returns the provider of the node.
+    fn provider(&self) -> &Self::Provider;
+
+    /// Returns handle to runtime.
+    fn task_executor(&self) -> &TaskExecutor;
 }
 
 impl<T> NodeCore for T
@@ -167,4 +193,38 @@ where
     type Network = <T as FullNodeComponents>::Network;
     type Evm = <T as FullNodeComponents>::Evm;
     type Executor = <T as FullNodeComponents>::Executor;
+
+    fn pool(&self) -> &Self::Pool {
+        FullNodeComponents::pool(self)
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        FullNodeComponents::evm_config(self)
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        FullNodeComponents::block_executor(self)
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        FullNodeComponents::consensus(self)
+    }
+
+    fn network(&self) -> &Self::Network {
+        FullNodeComponents::network(self)
+    }
+
+    fn payload_builder(
+        &self,
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine> {
+        FullNodeComponents::payload_builder(self)
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        FullNodeComponents::provider(self)
+    }
+
+    fn task_executor(&self) -> &TaskExecutor {
+        FullNodeComponents::task_executor(self)
+    }
 }
