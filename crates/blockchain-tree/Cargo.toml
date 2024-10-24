@@ -57,6 +57,7 @@ reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-revm.workspace = true
 reth-evm-ethereum.workspace = true
+reth-execution-types.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 alloy-genesis.workspace = true
