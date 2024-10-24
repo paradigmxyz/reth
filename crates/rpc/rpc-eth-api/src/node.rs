@@ -2,8 +2,7 @@
 
 use reth_node_api::FullNodeComponents;
 
-/// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
-/// defining types.
+/// Helper trait to relax trait bounds on [`FullNodeComponents`], when defining types.
 pub trait RpcNodeCore: Clone {
     /// The provider type used to interact with the node.
     type Provider: Send + Sync + Clone + Unpin;
