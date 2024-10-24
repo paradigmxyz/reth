@@ -7,7 +7,7 @@ use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotifications};
+use crate::{ExExEvent, ExExNotifications, ExExNotificationsStream};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
