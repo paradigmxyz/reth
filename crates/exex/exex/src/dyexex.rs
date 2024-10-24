@@ -1,5 +1,8 @@
 //! Type-safe abstractions for Dynamically Loaded ExExes
 
+/// ExEx launch function dynamic library symbol name.
+pub(crate) const LAUNCH_EXEX_FN: &[u8] = b"_launch_exex";
+
 /// Dynamically loads an ExEx entrypoint, which accepts a user-defined function representing the
 /// core ExEx logic. The provided function must take an [`ExExContextDyn`](`crate::ExExContextDyn`)
 /// as its argument.
