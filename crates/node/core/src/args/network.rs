@@ -16,6 +16,12 @@ use reth_discv5::{
 };
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
+    budget::{
+        DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
+        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM, DEFAULT_BUDGET_TRY_DRAIN_SWARM,
+    },
     transactions::{
         constants::{
             tx_fetcher::{
@@ -154,6 +160,36 @@ pub struct NetworkArgs {
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
+
+    #[arg(long = "budget-try-drain-system", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_STREAM, verbatim_doc_comment)]
+    /// Default budget to try and drain streams
+    pub default_budget: u32,
+
+    #[arg(long = "budget-try-drain-downloaders", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, verbatim_doc_comment)]
+    /// Default budget to try and drain headers and bodies download streams.
+    pub budget_blocks_down: u32,
+
+    #[arg(long = "budget-try-drain-swarm", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_SWARM, verbatim_doc_comment)]
+    /// Budget for draining all ingress traffic, eth [and other capability] messages, and p2p
+    /// connection updates. When the node has stabilised at max peer count, work done by an
+    /// iteration in this stream will, to the most part, be accounted for by ingress traffic.
+    pub budget_all_ingress: u32,
+
+    #[arg(long = "budget-try-drain-network-handle-channel", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, verbatim_doc_comment)]
+    /// Budget for draining egress transaction gossip
+    pub budget_egress_gossip: u32,
+
+    #[arg(long = "budget-try-drain-network-transaction-events", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS, verbatim_doc_comment)]
+    /// Budget for draining ingress transaction gossip and transaction requests
+    pub budget_ingress_tx_msgs: u32,
+
+    #[arg(long = "budget-try-drain-pending-pool-imports", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
+    /// Budget for advancing import of transaction batches into pool.
+    pub budget_pool_imports: u32,
+
+    #[arg(long = "budget-try-drain-pool-imports", default_value_t = DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS, verbatim_doc_comment)]
+    /// Budget for propagating transactions that have successfully been imported into pool.
+    pub budget_propagate_gossip: u32,
 }
 
 impl NetworkArgs {
@@ -332,6 +368,13 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
+            default_budget: DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            budget_blocks_down: DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS,
+            budget_all_ingress: DEFAULT_BUDGET_TRY_DRAIN_SWARM,
+            budget_egress_gossip: DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
+            budget_ingress_tx_msgs: DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
+            budget_pool_imports: DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+            budget_propagate_gossip: DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
         }
     }
 }
