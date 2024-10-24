@@ -37,6 +37,8 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+use reth_optimism_chainspec::OpChainSpecBuilder;
+use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::Head;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
@@ -815,6 +817,11 @@ where
         self.node_config().debug.terminate || self.node_config().debug.max_block.is_some()
     }
 
+    /// Returns true if the chain is op-mainnet
+    pub fn chain_specific_db_checks(&self) -> bool {
+        self.chain_spec().chain_id() == 10
+    }
+
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
     /// than the checkpoint of the first stage).
     ///
@@ -856,6 +863,13 @@ where
                 );
                 return self.blockchain_db().block_hash(first_stage_checkpoint);
             }
+        }
+
+        let db_checks_passed = self.chain_specific_db_checks();
+        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+
+        if db_checks_passed && !op_mainnet.is_bedrock_active_at_block(105235063) {
+            warn!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain won't progess without this.");
         }
 
         Ok(None)
