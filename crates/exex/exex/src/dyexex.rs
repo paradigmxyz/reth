@@ -1,8 +1,16 @@
 //! Type-safe abstractions for Dynamically Loaded ExExes
 
-use std::{future::Future, path::Path};
+use std::{
+    env::consts::{DLL_PREFIX, DLL_SUFFIX},
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+    path::Path,
+    pin::Pin,
+    sync::Arc,
+};
 
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use libloading::{Library, Symbol};
 
 use crate::ExExContextDyn;
@@ -38,41 +46,102 @@ macro_rules! define_exex {
         #[no_mangle]
         pub extern "Rust" fn _launch_exex(
             ctx: $crate::ExExContextDyn,
-        ) -> impl std::future::Future<
-            Output = eyre::Result<impl std::future::Future<Output = eyre::Result<()>> + Send>,
+        ) -> futures::future::BoxFuture<
+            'static,
+            eyre::Result<impl std::future::Future<Output = eyre::Result<()>> + Send>,
         > {
-            $user_fn(ctx)
-        }
-    };
-    (async move |ctx| {
-        Ok($user_fn:ident(ctx))
-    }) => {
-        #[allow(no_mangle_generic_items, unreachable_pub)]
-        #[no_mangle]
-        pub async extern "Rust" fn _launch_exex(
-            ctx: $crate::ExExContextDyn,
-        ) -> eyre::Result<impl std::future::Future<Output = eyre::Result<()>> + Send> {
-            Ok($user_fn(ctx))
+            Box::pin($user_fn(ctx))
         }
     };
 }
 
-/// Loads a dynamically loaded ExEx from a given path.
-#[allow(clippy::type_complexity)]
-pub fn load(
-    path: impl AsRef<Path>,
-    ctx: ExExContextDyn,
-) -> Result<Box<dyn Future<Output = dyn Future<Output = Result<()>> + Send> + Send>> {
-    let lib = unsafe { Library::new(path.as_ref()) }?;
-    let raw_func_pointer: Symbol<
-        '_,
-        unsafe fn(
-            ExExContextDyn,
-        )
-            -> *mut (dyn Future<Output = dyn Future<Output = eyre::Result<()>> + Send>
-             + Send),
-    > = unsafe { lib.get(LAUNCH_EXEX_FN)? };
+#[derive(Debug, Default)]
+/// Dynamic ExEx loader
+pub struct DyExExLoader {
+    /// List of loaded Dynamically Loaded ExExes
+    pub loaded: Vec<LoadedExEx>,
+}
 
-    let exex = unsafe { Box::from_raw(raw_func_pointer(ctx)) };
-    Ok(exex)
+impl DyExExLoader {
+    /// Initializes a Dynamic ExEx loader.
+    /// TODO(0xurb) - path to datadir here and loaded list with capacity of dir inner files.
+    pub const fn new() -> Self {
+        Self { loaded: Vec::new() }
+    }
+
+    /// Loads a dynamically loaded ExEx from a given path.
+    #[allow(clippy::type_complexity)]
+    pub fn load(&mut self, path: impl AsRef<Path>, ctx: ExExContextDyn) -> Result<()> {
+        let path = path.as_ref();
+
+        // Dynamically loaded ExEx id it's a filename with stripped [`DLL_PREFIX`] and
+        // [`DLL_SUFFIX`]
+        let name = path
+            .file_name()
+            .ok_or_eyre("cannot obtain a filename for dyexex")?
+            .to_str()
+            .ok_or_eyre("dyexex name is not a valid UTF-8 encoded string")?
+            .strip_prefix(DLL_PREFIX)
+            .ok_or_eyre("dyexex is not a shared dynamic library (has no DLL_PREFIX)")?
+            .strip_suffix(DLL_SUFFIX)
+            .ok_or_eyre("dyexex is not a shared dynamic library (has no DLL_SUFFIX)")?;
+
+        let lib = unsafe { Library::new(path) }?;
+        let symbol: Symbol<
+            '_,
+            unsafe fn(
+                ExExContextDyn,
+            )
+                -> *mut (dyn Future<Output = dyn Future<Output = eyre::Result<()>> + Send>
+                 + Send),
+        > = unsafe { lib.get(LAUNCH_EXEX_FN)? };
+
+        let raw_func_pointer = unsafe { symbol(ctx) };
+        if raw_func_pointer.is_null() {
+            return Err(eyre::eyre!("Failed to load future from dynamic library"));
+        }
+
+        let exex_fut = unsafe { Pin::new_unchecked(Box::from_raw(raw_func_pointer)) };
+        self.loaded.push(LoadedExEx { id: name.to_owned(), lib: Arc::new(lib), exex_fut });
+
+        Ok(())
+    }
+}
+
+/// Dynamically Loaded ExEx representation
+pub struct LoadedExEx {
+    /// ExEx id
+    id: String,
+    /// Loaded [`Library`] pointer
+    lib: Arc<Library>,
+    /// Regarding ExEx launch entrypoint future
+    exex_fut: Pin<Box<dyn Future<Output = dyn Future<Output = Result<()>> + Send> + Send>>,
+}
+
+impl Hash for LoadedExEx {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Debug for LoadedExEx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedExEx")
+            .field("id", &self.id)
+            .field("lib", &self.lib)
+            .field("exex_fut", &"...")
+            .finish()
+    }
+}
+
+impl LoadedExEx {
+    /// Returns this ExEx id and launch entrypoint future.
+    #[inline(always)]
+    #[allow(clippy::type_complexity)]
+    pub fn into_id_and_launch_fn(
+        self,
+    ) -> (String, Pin<Box<dyn Future<Output = dyn Future<Output = Result<()>> + Send> + Send>>)
+    {
+        (self.id, self.exex_fut)
+    }
 }
