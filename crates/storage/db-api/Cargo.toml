@@ -56,11 +56,25 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
 [features]
-test-utils = ["arbitrary"]
-arbitrary = [
-    "reth-primitives/arbitrary",
-    "reth-db-models/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
+test-utils = [
+	"arbitrary",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-codecs/test-utils",
+	"reth-db-models/test-utils",
+	"reth-trie-common/test-utils"
 ]
-optimism = ["reth-primitives/optimism"]
+arbitrary = [
+	"reth-primitives/arbitrary",
+	"reth-db-models/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"reth-primitives-traits/arbitrary",
+	"reth-trie-common/arbitrary",
+	"alloy-primitives/arbitrary",
+	"parity-scale-codec/arbitrary"
+]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-codecs/optimism"
+]

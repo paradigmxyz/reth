@@ -51,7 +51,7 @@ where
                 }
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
-                PayloadServiceCommand::Resolve(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::Resolve(_, _, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Subscribe(_) => None,
             };
         }

@@ -7,6 +7,7 @@ use crate::{
     },
     system_calls::OnStateHook,
 };
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
@@ -62,7 +63,10 @@ impl<DB> Executor<DB> for MockExecutorProvider {
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: requests.into_iter().flatten().collect(),
+            requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
+                reqs.extend(req);
+                reqs
+            }),
             gas_used: 0,
         })
     }
@@ -115,6 +119,7 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
 impl<S, DB> BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
@@ -136,6 +141,7 @@ where
 impl<S, DB> BasicBatchExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R

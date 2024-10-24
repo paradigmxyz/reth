@@ -21,6 +21,40 @@ pub struct ExExNotifications<P, E> {
     inner: ExExNotificationsInner<P, E>,
 }
 
+/// A trait, that represents a stream of [`ExExNotification`]s. The stream will emit notifications
+/// for all blocks. If the stream is configured with a head via [`ExExNotifications::set_with_head`]
+/// or [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
+pub trait ExExNotificationsStream: Stream<Item = eyre::Result<ExExNotification>> + Unpin {
+    /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s without a head.
+    ///
+    /// It's a no-op if the stream has already been configured without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    fn set_without_head(&mut self);
+
+    /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s with the provided
+    /// head.
+    ///
+    /// It's a no-op if the stream has already been configured with a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    fn set_with_head(&mut self, exex_head: ExExHead);
+
+    /// Returns a new [`ExExNotificationsStream`] without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    fn without_head(self) -> Self
+    where
+        Self: Sized;
+
+    /// Returns a new [`ExExNotificationsStream`] with the provided head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    fn with_head(self, exex_head: ExExHead) -> Self
+    where
+        Self: Sized;
+}
+
 #[derive(Debug)]
 enum ExExNotificationsInner<P, E> {
     /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
@@ -52,13 +86,14 @@ impl<P, E> ExExNotifications<P, E> {
             )),
         }
     }
+}
 
-    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s without a head.
-    ///
-    /// It's a no-op if the stream has already been configured without a head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
-    pub fn set_without_head(&mut self) {
+impl<P, E> ExExNotificationsStream for ExExNotifications<P, E>
+where
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider + Clone + Unpin + 'static,
+{
+    fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithoutHead(match current {
             ExExNotificationsInner::WithoutHead(notifications) => notifications,
@@ -73,20 +108,12 @@ impl<P, E> ExExNotifications<P, E> {
         });
     }
 
-    /// Returns a new [`ExExNotifications`] without a head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
-    pub fn without_head(mut self) -> Self {
+    fn without_head(mut self) -> Self {
         self.set_without_head();
         self
     }
 
-    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s with the provided head.
-    ///
-    /// It's a no-op if the stream has already been configured with a head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
-    pub fn set_with_head(&mut self, exex_head: ExExHead) {
+    fn set_with_head(&mut self, exex_head: ExExHead) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithHead(match current {
             ExExNotificationsInner::WithoutHead(notifications) => {
@@ -104,10 +131,7 @@ impl<P, E> ExExNotifications<P, E> {
         });
     }
 
-    /// Returns a new [`ExExNotifications`] with the provided head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
-    pub fn with_head(mut self, exex_head: ExExHead) -> Self {
+    fn with_head(mut self, exex_head: ExExHead) -> Self {
         self.set_with_head(exex_head);
         self
     }

@@ -191,7 +191,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         results.push((env.tx.caller, res.result));
                     }
 
-                    let block = simulate::build_block::<Self::TransactionCompat>(
+                    let block = simulate::build_block(
                         results,
                         transactions,
                         &block_env,
@@ -199,6 +199,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         total_difficulty,
                         return_full_transactions,
                         &db,
+                        this.tx_resp_builder(),
                     )?;
 
                     parent_hash = block.inner.header.hash;
@@ -544,6 +545,16 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
     /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
+    ///
+    /// This is primarily used by `eth_call`.
+    ///
+    /// # Blocking behaviour
+    ///
+    /// This assumes executing the call is relatively more expensive on IO than CPU because it
+    /// transacts a single transaction on an empty in memory database. Because `eth_call`s are
+    /// usually allowed to consume a lot of gas, this also allows a lot of memory operations so
+    /// we assume this is not primarily CPU bound and instead spawn the call on a regular tokio task
+    /// instead, where blocking IO is less problematic.
     fn spawn_with_call_at<F, R>(
         &self,
         request: TransactionRequest,
@@ -561,7 +572,7 @@ pub trait Call: LoadState + SpawnBlocking {
         async move {
             let (cfg, block_env, at) = self.evm_env_at(at).await?;
             let this = self.clone();
-            self.spawn_tracing(move |_| {
+            self.spawn_blocking_io(move |_| {
                 let state = this.state_at_block_id(at)?;
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
@@ -645,14 +656,14 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Returns the index of the target transaction in the given iterator.
     fn replay_transactions_until<'a, DB, I>(
         &self,
-        db: &mut CacheDB<DB>,
+        db: &mut DB,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         transactions: I,
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: DatabaseRef,
+        DB: Database + DatabaseCommit,
         EthApiError: From<DB::Error>,
         I: IntoIterator<Item = (&'a Address, &'a TransactionSigned)>,
     {
@@ -919,14 +930,15 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Executes the requests again after an out of gas error to check if the error is gas related
     /// or not
     #[inline]
-    fn map_out_of_gas_err<S>(
+    fn map_out_of_gas_err<DB>(
         &self,
         env_gas_limit: U256,
         mut env: EnvWithHandlerCfg,
-        db: &mut CacheDB<StateProviderDatabase<S>>,
+        db: &mut DB,
     ) -> Self::Error
     where
-        S: StateProvider,
+        DB: Database,
+        EthApiError: From<DB::Error>,
     {
         let req_gas_limit = env.tx.gas_limit;
         env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);

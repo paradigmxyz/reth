@@ -331,7 +331,9 @@ RPC:
           [default: 500]
 
       --rpc.max-tracing-requests <COUNT>
-          Maximum number of concurrent tracing requests
+          Maximum number of concurrent tracing requests.
+
+          By default this chooses a sensible value based on the number of available cores. Tracing requests are generally CPU bound. Choosing a value that is higher than the available CPU cores can have a negative impact on the performance of the node and affect the node's ability to maintain sync.
 
           [default: <NUM CPU CORES-2>]
 
@@ -588,6 +590,9 @@ Database:
 
           [possible values: true, false]
 
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -613,8 +618,6 @@ Pruning:
 
       --block-interval <BLOCK_INTERVAL>
           Minimum pruning interval measured in blocks
-
-          [default: 0]
 
       --prune.senderrecovery.full
           Prunes all sender recovery data

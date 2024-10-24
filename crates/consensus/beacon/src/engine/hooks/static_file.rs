@@ -9,7 +9,8 @@ use futures::FutureExt;
 use reth_errors::RethResult;
 use reth_primitives::static_file::HighestStaticFiles;
 use reth_provider::{
-    BlockReader, DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+    BlockReader, ChainStateBlockReader, DatabaseProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory,
 };
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
@@ -31,8 +32,9 @@ pub struct StaticFileHook<Provider> {
 impl<Provider> StaticFileHook<Provider>
 where
     Provider: StaticFileProviderFactory
-        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>
-        + 'static,
+        + DatabaseProviderFactory<
+            Provider: StageCheckpointReader + BlockReader + ChainStateBlockReader,
+        > + 'static,
 {
     /// Create a new instance
     pub fn new(
@@ -104,6 +106,11 @@ where
                     return Ok(None)
                 };
 
+                let finalized_block_number = locked_static_file_producer
+                    .last_finalized_block()?
+                    .map(|on_disk| finalized_block_number.min(on_disk))
+                    .unwrap_or(finalized_block_number);
+
                 let targets =
                     locked_static_file_producer.get_static_file_targets(HighestStaticFiles {
                         headers: Some(finalized_block_number),
@@ -137,8 +144,9 @@ where
 impl<Provider> EngineHook for StaticFileHook<Provider>
 where
     Provider: StaticFileProviderFactory
-        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>
-        + 'static,
+        + DatabaseProviderFactory<
+            Provider: StageCheckpointReader + BlockReader + ChainStateBlockReader,
+        > + 'static,
 {
     fn name(&self) -> &'static str {
         "StaticFile"

@@ -40,4 +40,10 @@ tracing.workspace = true
 revm.workspace = true
 
 [features]
-test-utils = ["reth-chain-state"]
+test-utils = [
+	"reth-chain-state",
+	"reth-chain-state?/test-utils",
+	"reth-primitives/test-utils",
+	"reth-provider/test-utils",
+	"revm/test-utils"
+]

@@ -16,10 +16,10 @@ use crate::{
     PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
     TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::BlobAndProofV1};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlobTransactionSidecar};
+use reth_primitives::BlobTransactionSidecar;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 

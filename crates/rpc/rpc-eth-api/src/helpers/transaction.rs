@@ -1,6 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
+use alloy_consensus::Transaction;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_network::TransactionBuilder;
@@ -208,9 +209,10 @@ pub trait EthTransactions: LoadTransaction {
                         index: Some(index as u64),
                     };
 
-                    return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
+                    return Ok(Some(from_recovered_with_block_context(
                         tx.clone().with_signer(*signer),
                         tx_info,
+                        self.tx_resp_builder(),
                     )))
                 }
             }
@@ -236,7 +238,7 @@ pub trait EthTransactions: LoadTransaction {
                     LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction.into())));
+                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
                 }
             }
 
@@ -287,9 +289,10 @@ pub trait EthTransactions: LoadTransaction {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context::<Self::TransactionCompat>(
+                            from_recovered_with_block_context(
                                 tx.clone().with_signer(*signer),
                                 tx_info,
+                                self.tx_resp_builder(),
                             )
                         })
                 })
@@ -364,9 +367,8 @@ pub trait EthTransactions: LoadTransaction {
 
             // set nonce if not already set before
             if request.nonce.is_none() {
-                let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
-                // note: `.to()` can't panic because the nonce is constructed from a `u64`
-                request.nonce = Some(nonce.to());
+                let nonce = self.next_available_nonce(from).await?;
+                request.nonce = Some(nonce);
             }
 
             let chain_id = self.chain_id();
