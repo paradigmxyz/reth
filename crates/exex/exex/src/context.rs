@@ -129,8 +129,9 @@ mod tests {
 
     use crate::ExExContext;
 
+    /// <https://github.com/paradigmxyz/reth/issues/12054>
     #[test]
-    const fn test_context_bounds() {
+    const fn issue_12054() {
         #[allow(dead_code)]
         struct ExEx<Node: FullNodeComponents> {
             ctx: ExExContext<Node>,
