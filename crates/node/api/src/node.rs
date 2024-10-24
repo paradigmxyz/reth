@@ -124,22 +124,9 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
     }
 }
 
-/// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
-pub trait RpcNodeTy {
-    /// The provider type used to interact with the node.
-    type Provider;
-}
-
-impl<T> RpcNodeTy for T
-where
-    T: FullNodeTypes,
-{
-    type Provider = T::Provider;
-}
-
 /// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
 /// defining types.
-pub trait RpcNodeCore: RpcNodeTy + Clone {
+pub trait RpcNodeCore: Clone {
     /// The provider type used to interact with the node.
     type Provider: Send + Sync + Clone + Unpin;
     /// The transaction pool of the node.
