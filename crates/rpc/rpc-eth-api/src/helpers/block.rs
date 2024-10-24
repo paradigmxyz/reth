@@ -63,11 +63,12 @@ pub trait EthBlocks: LoadBlock {
                     .map_err(Self::Error::from_eth_err)?;
             }
 
-            let block = from_block::<Self::TransactionCompat>(
+            let block = from_block(
                 (*block).clone().unseal(),
                 total_difficulty.unwrap_or_default(),
                 full.into(),
                 Some(block_hash),
+                self.tx_resp_builder(),
             )
             .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block))
@@ -219,17 +220,17 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                let maybe_pending = LoadPendingBlock::provider(self)
+                if let Some(pending_block) = LoadPendingBlock::provider(self)
                     .pending_block_with_senders()
-                    .map_err(Self::Error::from_eth_err)?;
-                return if maybe_pending.is_some() {
-                    Ok(maybe_pending.map(Arc::new))
-                } else {
-                    // If no pending block from provider, try to get local pending block
-                    return match self.local_pending_block().await? {
-                        Some((block, _)) => Ok(Some(Arc::new(block))),
-                        None => Ok(None),
-                    };
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    return Ok(Some(Arc::new(pending_block)));
+                }
+
+                // If no pending block from provider, try to get local pending block
+                return match self.local_pending_block().await? {
+                    Some((block, _)) => Ok(Some(Arc::new(block))),
+                    None => Ok(None),
                 };
             }
 

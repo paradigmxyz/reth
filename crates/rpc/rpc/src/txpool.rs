@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::collections::BTreeMap;
 
 use alloy_consensus::Transaction;
 use alloy_primitives::Address;
@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_eth_api::{FullEthApiTypes, RpcTransaction};
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
 use tracing::trace;
@@ -21,33 +20,34 @@ use tracing::trace;
 pub struct TxPoolApi<Pool, Eth> {
     /// An interface to interact with the pool
     pool: Pool,
-    _tx_resp_builder: PhantomData<Eth>,
+    tx_resp_builder: Eth,
 }
 
 impl<Pool, Eth> TxPoolApi<Pool, Eth> {
     /// Creates a new instance of `TxpoolApi`.
-    pub const fn new(pool: Pool) -> Self {
-        Self { pool, _tx_resp_builder: PhantomData }
+    pub const fn new(pool: Pool, tx_resp_builder: Eth) -> Self {
+        Self { pool, tx_resp_builder }
     }
 }
 
 impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    Eth: FullEthApiTypes,
+    Eth: TransactionCompat,
 {
-    fn content(&self) -> TxpoolContent<RpcTransaction<Eth::NetworkTypes>> {
+    fn content(&self) -> TxpoolContent<Eth::Transaction> {
         #[inline]
         fn insert<Tx, RpcTxB>(
             tx: &Tx,
             content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
+            resp_builder: &RpcTxB,
         ) where
             Tx: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>,
             RpcTxB: TransactionCompat,
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                from_recovered::<RpcTxB>(tx.clone().into_consensus().into()),
+                from_recovered(tx.clone().into_consensus().into(), resp_builder),
             );
         }
 
@@ -55,10 +55,10 @@ where
 
         let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
         for pending in pending {
-            insert::<_, Eth::TransactionCompat>(&pending.transaction, &mut content.pending);
+            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder);
         }
         for queued in queued {
-            insert::<_, Eth::TransactionCompat>(&queued.transaction, &mut content.queued);
+            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder);
         }
 
         content
@@ -66,10 +66,10 @@ where
 }
 
 #[async_trait]
-impl<Pool, Eth> TxPoolApiServer<RpcTransaction<Eth::NetworkTypes>> for TxPoolApi<Pool, Eth>
+impl<Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    Eth: FullEthApiTypes + 'static,
+    Eth: TransactionCompat + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -131,7 +131,7 @@ where
     async fn txpool_content_from(
         &self,
         from: Address,
-    ) -> Result<TxpoolContentFrom<RpcTransaction<Eth::NetworkTypes>>> {
+    ) -> Result<TxpoolContentFrom<Eth::Transaction>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().remove_from(&from))
     }
@@ -141,7 +141,7 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
     /// Handler for `txpool_content`
-    async fn txpool_content(&self) -> Result<TxpoolContent<RpcTransaction<Eth::NetworkTypes>>> {
+    async fn txpool_content(&self) -> Result<TxpoolContent<Eth::Transaction>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }

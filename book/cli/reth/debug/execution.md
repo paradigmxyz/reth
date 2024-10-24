@@ -69,6 +69,9 @@ Database:
 
           [possible values: true, false]
 
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
 Networking:
   -d, --disable-discovery
           Disable the discovery service

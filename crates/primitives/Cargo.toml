@@ -20,9 +20,6 @@ reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-codecs = { workspace = true, optional = true }
 
-# op-reth
-reth-optimism-chainspec = { workspace = true, optional = true }
-
 # ethereum
 alloy-consensus.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
@@ -34,14 +31,15 @@ alloy-eips = { workspace = true, features = ["serde"] }
 # optimism
 op-alloy-rpc-types = { workspace = true, optional = true }
 op-alloy-consensus = { workspace = true, features = [
-    "arbitrary",
+	"arbitrary",
+	"serde",
 ], optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = [
-    "global-context",
-    "recovery",
-    "rand",
+	"global-context",
+	"recovery",
+	"rand",
 ], optional = true }
 k256.workspace = true
 # for eip-4844
@@ -83,9 +81,9 @@ test-fuzz.workspace = true
 
 criterion.workspace = true
 pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
+	"flamegraph",
+	"frame-pointer",
+	"criterion",
 ] }
 
 [features]
@@ -101,13 +99,10 @@ std = [
 	"once_cell/std",
 	"revm-primitives/std",
 	"secp256k1?/std",
-	"serde/std"
+	"serde/std",
 ]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
-asm-keccak = [
-	"alloy-primitives/asm-keccak",
-	"revm-primitives/asm-keccak"
-]
+asm-keccak = ["alloy-primitives/asm-keccak", "revm-primitives/asm-keccak"]
 arbitrary = [
 	"dep:arbitrary",
 	"alloy-eips/arbitrary",
@@ -124,38 +119,37 @@ arbitrary = [
 	"alloy-rpc-types?/arbitrary",
 	"alloy-serde?/arbitrary",
 	"op-alloy-consensus?/arbitrary",
-	"op-alloy-rpc-types?/arbitrary"
+	"op-alloy-rpc-types?/arbitrary",
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = [
-    "dep:c-kzg",
-    "alloy-consensus/kzg",
-    "alloy-eips/kzg",
-    "revm-primitives/c-kzg",
+	"dep:c-kzg",
+	"alloy-consensus/kzg",
+	"alloy-eips/kzg",
+	"revm-primitives/c-kzg",
 ]
 optimism = [
-    "dep:op-alloy-consensus",
-    "dep:reth-optimism-chainspec",
-    "reth-codecs?/optimism",
-    "revm-primitives/optimism",
+	"dep:op-alloy-consensus",
+	"reth-codecs?/optimism",
+	"revm-primitives/optimism",
 ]
 alloy-compat = [
-    "dep:alloy-rpc-types",
-    "dep:alloy-serde",
-    "dep:op-alloy-rpc-types",
+	"dep:alloy-rpc-types",
+	"dep:alloy-serde",
+	"dep:op-alloy-rpc-types",
 ]
 test-utils = [
 	"reth-primitives-traits/test-utils",
 	"reth-chainspec/test-utils",
 	"reth-codecs?/test-utils",
-	"reth-trie-common/test-utils"
+	"reth-trie-common/test-utils",
 ]
 serde-bincode-compat = [
 	"alloy-consensus/serde-bincode-compat",
 	"op-alloy-consensus?/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
 	"serde_with",
-	"alloy-eips/serde-bincode-compat"
+	"alloy-eips/serde-bincode-compat",
 ]
 
 [[bench]]

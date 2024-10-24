@@ -3,7 +3,8 @@
 use alloy_primitives::{Bytes, Sealable, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
+    ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    PayloadError,
 };
 use assert_matches::assert_matches;
 use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned, Withdrawals};
@@ -75,7 +76,10 @@ fn payload_validation() {
         b
     });
 
-    assert_matches!(try_into_sealed_block(block_with_valid_extra_data, None, None), Ok(_));
+    assert_matches!(
+        try_into_sealed_block(block_with_valid_extra_data, &ExecutionPayloadSidecar::none()),
+        Ok(_)
+    );
 
     // Invalid extra data
     let block_with_invalid_extra_data = Bytes::from_static(&[0; 33]);
@@ -84,7 +88,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(invalid_extra_data_block, None, None),
+        try_into_sealed_block(invalid_extra_data_block, &ExecutionPayloadSidecar::none()),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -94,7 +98,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_zero_base_fee, None, None),
+        try_into_sealed_block(block_with_zero_base_fee, &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BaseFee(val)) if val.is_zero()
     );
 
@@ -113,7 +117,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_ommers.clone(), None, None),
+        try_into_sealed_block(block_with_ommers.clone(), &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. })
             if consensus == block_with_ommers.block_hash()
     );
@@ -124,7 +128,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_difficulty.clone(), None, None),
+        try_into_sealed_block(block_with_difficulty.clone(), &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
     );
 
@@ -134,9 +138,8 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_nonce.clone(), None, None),
+        try_into_sealed_block(block_with_nonce.clone(), &ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
-
     );
 
     // Valid block
