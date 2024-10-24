@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use alloy_primitives::{address, b256, Address, B256, U256};
+use alloy_primitives::{address, b256, Address, B256};
 
 /// Gas units, for example [`GIGAGAS`].
 pub mod gas_units;
