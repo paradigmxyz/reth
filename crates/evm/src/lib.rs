@@ -111,7 +111,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// Error type for [`ConfigureEvmEnv::next_cfg_and_block_env`].
 pub enum NextCfgError {
     #[error("Invalid config: {0}")]
-    // This is a generic error type that can be used to wrap any error type that implements
+    /// This is a generic error type that can be used to wrap any error type that implements
     InvalidConfigError(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
