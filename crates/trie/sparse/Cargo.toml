@@ -41,3 +41,7 @@ rand.workspace = true
 [[bench]]
 name = "root"
 harness = false
+
+[[bench]]
+name = "rlp_node"
+harness = false
