@@ -191,7 +191,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         results.push((env.tx.caller, res.result));
                     }
 
-                    let block = simulate::build_block::<Self::TransactionCompat>(
+                    let block = simulate::build_block(
                         results,
                         transactions,
                         &block_env,
@@ -199,6 +199,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         total_difficulty,
                         return_full_transactions,
                         &db,
+                        this.tx_resp_builder(),
                     )?;
 
                     parent_hash = block.inner.header.hash;
