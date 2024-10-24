@@ -43,13 +43,13 @@ pub enum FieldTypes {
 pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
-    let DeriveInput { ident, data, generics, .. } = parse_macro_input!(input);
+    let DeriveInput { ident, data, generics, attrs, .. } = parse_macro_input!(input);
 
     let has_lifetime = has_lifetime(&generics);
 
     let fields = get_fields(&data);
     output.extend(generate_flag_struct(&ident, has_lifetime, &fields, is_zstd));
-    output.extend(generate_from_to(&ident, has_lifetime, &fields, is_zstd));
+    output.extend(generate_from_to(&ident, has_lifetime, &fields, is_zstd, &attrs));
     output.into()
 }
 
@@ -233,10 +233,10 @@ mod tests {
 
         // Generate code that will impl the `Compact` trait.
         let mut output = quote! {};
-        let DeriveInput { ident, data, .. } = parse2(f_struct).unwrap();
+        let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
         output.extend(generate_flag_struct(&ident, false, &fields, false));
-        output.extend(generate_from_to(&ident, false, &fields, false));
+        output.extend(generate_from_to(&ident, false, &fields, false, &attrs));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {

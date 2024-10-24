@@ -49,7 +49,7 @@ mod compact;
 ///   own encoding and do not rely on the bitflag struct.
 /// - `Bytes` fields and any types containing a `Bytes` field should be placed last to ensure
 ///   efficient decoding.
-#[proc_macro_derive(Compact, attributes(maybe_zero))]
+#[proc_macro_derive(Compact, attributes(maybe_zero, compact))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let is_zstd = false;
     compact::derive(input, is_zstd)
