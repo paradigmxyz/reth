@@ -227,7 +227,6 @@ impl OpReceiptBuilder {
             from,
             to,
             contract_address,
-            state_root,
             authorization_list,
         } = core_receipt;
 
@@ -265,7 +264,6 @@ impl OpReceiptBuilder {
             from,
             to,
             contract_address,
-            state_root,
             authorization_list,
         };
 

@@ -1,3 +1,5 @@
+//! State changes that are not related to transactions.
+
 use alloy_primitives::{map::HashMap, Address, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
@@ -89,9 +91,9 @@ pub fn insert_post_block_withdrawals_balance_increments<ChainSpec: EthereumHardf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::GWEI_TO_WEI;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
-    use reth_primitives::constants::GWEI_TO_WEI;
 
     /// Tests that the function correctly inserts balance increments when the Shanghai hardfork is
     /// active and there are withdrawals.

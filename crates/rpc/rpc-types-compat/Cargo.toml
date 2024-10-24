@@ -26,5 +26,8 @@ alloy-serde.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
+# io
+serde.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true

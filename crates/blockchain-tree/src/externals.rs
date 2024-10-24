@@ -21,7 +21,6 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - A handle to the database
 /// - A handle to the consensus engine
 /// - The executor factory to execute blocks with
-/// - The chain spec
 #[derive(Debug)]
 pub struct TreeExternals<N: NodeTypesWithDB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.

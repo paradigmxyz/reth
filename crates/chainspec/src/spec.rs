@@ -3,12 +3,13 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
+use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
-use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 
-use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH};
+use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
@@ -17,13 +18,7 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_primitives_traits::{
-    constants::{
-        EIP1559_INITIAL_BASE_FEE, ETHEREUM_BLOCK_GAS_LIMIT, HOLESKY_GENESIS_HASH,
-        SEPOLIA_GENESIS_HASH,
-    },
-    Header, SealedHeader,
-};
+use reth_primitives_traits::{constants::HOLESKY_GENESIS_HASH, Header, SealedHeader};
 use reth_trie_common::root::state_root_ref_unhashed;
 
 use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
@@ -284,8 +279,9 @@ impl ChainSpec {
             };
 
         // If Prague is activated at genesis we set requests root to an empty trie root.
-        let requests_root =
-            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(EMPTY_ROOT_HASH);
+        let requests_hash = self
+            .is_prague_active_at_timestamp(self.genesis.timestamp)
+            .then_some(EMPTY_REQUESTS_HASH);
 
         Header {
             gas_limit: self.genesis.gas_limit,
@@ -301,7 +297,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            requests_root,
+            requests_hash,
             ..Default::default()
         }
     }
@@ -315,7 +311,7 @@ impl ChainSpec {
     pub fn initial_base_fee(&self) -> Option<u64> {
         // If the base fee is set in the genesis block, we use that instead of the default.
         let genesis_base_fee =
-            self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(EIP1559_INITIAL_BASE_FEE);
+            self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         self.hardforks.fork(EthereumHardfork::London).active_at_block(0).then_some(genesis_base_fee)
@@ -616,6 +612,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
+            (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -863,6 +860,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Osaka at genesis.
+    pub fn osaka_activated(mut self) -> Self {
+        self = self.prague_activated();
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -940,6 +944,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
+    use alloy_trie::EMPTY_ROOT_HASH;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 
