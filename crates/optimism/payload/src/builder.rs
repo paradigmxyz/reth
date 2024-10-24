@@ -578,10 +578,10 @@ pub enum EIP1559ParamError {
 /// Extracts the Holcene 1599 parameters from the encoded form:
 /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
 pub fn decode_eip_1559_params(eip_1559_params: B64) -> Result<(u32, u32), EIP1559ParamError> {
-    let elasticity: [u8; 4] =
+    let denominator: [u8; 4] =
         eip_1559_params.0[..4].try_into().map_err(|_| EIP1559ParamError::InvalidElasticity)?;
 
-    let denominator: [u8; 4] =
+    let elasticity: [u8; 4] =
         eip_1559_params.0[4..8].try_into().map_err(|_| EIP1559ParamError::InvalidDenominator)?;
 
     Ok((u32::from_be_bytes(elasticity), u32::from_be_bytes(denominator)))
