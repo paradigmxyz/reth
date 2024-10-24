@@ -27,9 +27,9 @@ use revm_primitives::{
 };
 
 mod config;
+use alloy_eips::eip1559::INITIAL_BASE_FEE;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_primitives::constants::EIP1559_INITIAL_BASE_FEE;
 
 pub mod execute;
 
@@ -163,7 +163,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             gas_limit *= U256::from(elasticity_multiplier);
 
             // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+            basefee = Some(INITIAL_BASE_FEE)
         }
 
         let block_env = BlockEnv {
