@@ -111,7 +111,8 @@ where
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
-                    let transaction = BlobTransaction::try_from_signed(tx.clone(), (*sidecar).clone())
+                    let transaction =
+                        BlobTransaction::try_from_signed(tx.clone(), (*sidecar).clone())
                         .expect("should not fail to convert blob tx if it is already eip4844");
 
                     let block_metadata = BlockMetadata {
