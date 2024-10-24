@@ -179,7 +179,7 @@ use reth_provider::{
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
-    TxPoolApi, Web3Api,
+    TxPoolApi, ValidationApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -1063,6 +1063,11 @@ where
     pub fn reth_api(&self) -> RethApi<Provider> {
         RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
+
+    /// Instantiates `ValidationApi`
+    pub fn validation_api(&self) -> ValidationApi<Provider> {
+        ValidationApi::new(self.provider.clone())
+    }
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor>
@@ -1218,6 +1223,9 @@ where
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
                                 .into_rpc()
                                 .into()
+                        }
+                        RethRpcModule::Flashbots => {
+                            ValidationApi::new(self.provider.clone()).into_rpc().into()
                         }
                     })
                     .clone()
