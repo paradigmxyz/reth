@@ -21,7 +21,8 @@ use reth_db::{
 };
 use reth_fs_util as fs;
 use reth_primitives::{
-    Account, Log, LogData, Receipt, ReceiptWithBloom, StorageEntry, Transaction, TransactionSignedNoHash, TxType, Withdrawals
+    Account, Log, LogData, Receipt, ReceiptWithBloom, StorageEntry, Transaction,
+    TransactionSignedNoHash, TxType, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode};
 use reth_stages_types::{
