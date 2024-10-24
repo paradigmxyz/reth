@@ -8394,7 +8394,6 @@ dependencies = [
  "reth-chainspec",
  "reth-codecs",
  "reth-ethereum-forks",
- "reth-optimism-chainspec",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-testing-utils",
