@@ -522,7 +522,7 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let no_tx_pool = attributes.no_tx_pool.clone();
+    let no_tx_pool = attributes.no_tx_pool;
 
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
