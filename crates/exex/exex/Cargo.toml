@@ -57,7 +57,6 @@ tracing.workspace = true
 reth-blockchain-tree.workspace = true
 reth-db-common.workspace = true
 reth-evm-ethereum.workspace = true
-reth-exex-test-utils.workspace = true
 reth-node-api.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
