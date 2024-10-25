@@ -869,7 +869,7 @@ type SparseNodeHashUpdates = HashMap<Nibbles, Option<B256>>;
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
     use super::*;
     use alloy_primitives::U256;
@@ -1658,38 +1658,41 @@ mod tests {
             .unwrap();
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
-        // assert_eq!(sparse.get_nodes_at_depth(0), HashSet::from([Nibbles::default()]));
-        // assert_eq!(
-        //     sparse.get_nodes_at_depth(1),
-        //     HashSet::from([Nibbles::from_nibbles_unchecked([0x5])])
-        // );
-        // assert_eq!(
-        //     sparse.get_nodes_at_depth(2),
-        //     HashSet::from([
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x0]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x3])
-        //     ])
-        // );
-        // assert_eq!(
-        //     sparse.get_nodes_at_depth(3),
-        //     HashSet::from([
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
-        //     ])
-        // );
-        // assert_eq!(
-        //     sparse.get_nodes_at_depth(4),
-        //     HashSet::from([
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
-        //         Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
-        //     ])
-        // );
+        let get_nodes_at_depth = |depth: usize| {
+            let (sender, receiver) = std::sync::mpsc::sync_channel(sparse.nodes.len());
+            sparse.get_nodes_at_depth(depth, sender);
+            receiver.into_iter().collect::<HashSet<_>>()
+        };
+
+        assert_eq!(get_nodes_at_depth(0), HashSet::from([Nibbles::default()]));
+        assert_eq!(get_nodes_at_depth(1), HashSet::from([Nibbles::from_nibbles_unchecked([0x5])]));
+        assert_eq!(
+            get_nodes_at_depth(2),
+            HashSet::from([
+                Nibbles::from_nibbles_unchecked([0x5, 0x0]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3])
+            ])
+        );
+        assert_eq!(
+            get_nodes_at_depth(3),
+            HashSet::from([
+                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
+            ])
+        );
+        assert_eq!(
+            get_nodes_at_depth(4),
+            HashSet::from([
+                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
+                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
+            ])
+        );
     }
 }
