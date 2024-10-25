@@ -115,7 +115,7 @@ where
 
                 // Set the next hashed entry as a leaf node and return
                 self.current_hashed_entry = self.hashed_cursor.next()?;
-                trace!(target: "trie::node_iter", hashed_key, "Returning leaf");
+                trace!(target: "trie::node_iter", %hashed_key, "Returning leaf");
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
