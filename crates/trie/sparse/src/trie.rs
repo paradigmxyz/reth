@@ -1,5 +1,5 @@
 use crate::{SparseTrieError, SparseTrieResult};
-use alloy_primitives::{hex, keccak256, map::HashMap, B256, U256};
+use alloy_primitives::{hex, keccak256, map::HashMap, Uint, B256, U256};
 use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
 use reth_trie::{
@@ -14,8 +14,10 @@ use smallvec::SmallVec;
 use std::{cell::RefCell, fmt, sync::mpsc::sync_channel, time::Instant};
 
 thread_local! {
-static CHUNK_SIZE: RefCell<U256> =
-    RefCell::new(U256::MAX / U256::from(rayon::current_num_threads()));
+    static CHUNK_SIZE: RefCell<U256> = {
+        type U257 = Uint<257, 5>;
+        RefCell::new(U256::from(U257::from(2).pow(U257::from(256)) / U257::from(rayon::current_num_threads())))
+    }
 }
 
 /// Inner representation of the sparse trie.
