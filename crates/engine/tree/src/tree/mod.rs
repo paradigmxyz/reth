@@ -2222,7 +2222,13 @@ where
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
         } else {
-            debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
+            let best_block_number = self.provider.best_block_number()?;
+            let best_block_hash = self.provider.block_hash(best_block_number)?;
+            debug!(
+                target: "engine::tree",
+                block=?sealed_block.num_hash(), persistence_in_progress, best_block_number, ?best_block_hash,
+                "Failed to compute state root in parallel"
+            );
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
 
@@ -2290,8 +2296,16 @@ where
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
+        let best_block_number = self.provider.best_block_number()?;
+        let best_block_hash = self.provider.block_hash(best_block_number)?;
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
-            debug!(target: "engine::tree", %parent_hash, %historical, "Calculating state root in parallel, parent found in memory");
+            let in_memory_block_num_hashes =
+                blocks.iter().map(|b| b.block.num_hash()).collect::<Vec<_>>();
+            debug!(
+                target: "engine::tree",
+                %parent_hash, %historical, best_block_number, ?best_block_hash, ?in_memory_block_num_hashes,
+                "Calculating state root in parallel, parent found in memory"
+            );
             // Retrieve revert state for historical block.
             let revert_state = consistent_view.revert_state(historical)?;
             input.append(revert_state);
@@ -2302,7 +2316,7 @@ where
             }
         } else {
             // The block attaches to canonical persisted parent.
-            debug!(target: "engine::tree", %parent_hash, "Calculating state root in parallel, parent found in disk");
+            debug!(target: "engine::tree", %parent_hash, best_block_number, ?best_block_hash, "Calculating state root in parallel, parent found in disk");
             let revert_state = consistent_view.revert_state(parent_hash)?;
             input.append(revert_state);
         }
