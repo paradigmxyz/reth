@@ -1,6 +1,11 @@
+//! [`jsonrpsee`] helper layer for rate limiting certain methods.
+
 use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse};
 use std::{
-    future::Future, pin::Pin, sync::Arc, task::{Context, Poll}
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::PollSemaphore;
@@ -10,12 +15,13 @@ use tower::Layer;
 ///
 /// Rate limits expensive calls such as debug_ and trace_.
 #[derive(Debug, Clone)]
-pub(crate) struct RpcRequestRateLimiter {
+pub struct RpcRequestRateLimiter {
     inner: Arc<RpcRequestRateLimiterInner>,
 }
 
 impl RpcRequestRateLimiter {
-    pub(crate) fn new(rate_limit: usize) -> Self {
+    /// Create a new rate limit layer with the given number of permits.
+    pub fn new(rate_limit: usize) -> Self {
         Self {
             inner: Arc::new(RpcRequestRateLimiterInner {
                 call_guard: PollSemaphore::new(Arc::new(Semaphore::new(rate_limit))),
@@ -40,7 +46,6 @@ struct RpcRequestRateLimiterInner {
 }
 
 /// A [`RpcServiceT`] middleware that rate limits RPC calls to the server.
-///
 #[derive(Debug, Clone)]
 pub struct RpcRequestRateLimitingService<S> {
     /// The rate limiter for RPC requests
@@ -50,7 +55,8 @@ pub struct RpcRequestRateLimitingService<S> {
 }
 
 impl<S> RpcRequestRateLimitingService<S> {
-    pub(crate) fn new(service: S, rate_limiter: RpcRequestRateLimiter) -> Self {
+    /// Create a new rate limited service.
+    pub const fn new(service: S, rate_limiter: RpcRequestRateLimiter) -> Self {
         Self { inner: service, rate_limiter }
     }
 }
@@ -72,11 +78,7 @@ where
         } else {
             // if we don't need to rate limit, then there
             // is no need to get a semaphore permit
-            RateLimitingRequestFuture {
-                fut: self.inner.call(req),
-                guard: None,
-                permit: None,
-            }
+            RateLimitingRequestFuture { fut: self.inner.call(req), guard: None, permit: None }
         }
     }
 }
@@ -90,7 +92,6 @@ pub struct RateLimitingRequestFuture<F> {
     permit: Option<OwnedSemaphorePermit>,
 }
 
-
 impl<F> std::fmt::Debug for RateLimitingRequestFuture<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("RateLimitingRequestFuture")
@@ -103,17 +104,11 @@ impl<F: Future<Output = MethodResponse>> Future for RateLimitingRequestFuture<F>
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         if let Some(guard) = this.guard.as_mut() {
-            match guard.poll_acquire(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Some(permit)) => {
-                    *this.permit = Some(permit);
-                    *this.guard = None;
-                },
-                _ => {}
-            }
+            *this.permit = ready!(guard.poll_acquire(cx));
+            *this.guard = None;
         }
         let res = this.fut.poll(cx);
-        if let Poll::Ready(_) = res {
+        if res.is_ready() {
             *this.permit = None;
         }
         res
