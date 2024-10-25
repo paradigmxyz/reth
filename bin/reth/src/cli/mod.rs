@@ -39,7 +39,7 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
 {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<C, Ext>,
+    pub command: Commands<C, Ext>,
 
     /// The chain this node is running.
     ///
