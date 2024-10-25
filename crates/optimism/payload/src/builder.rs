@@ -522,6 +522,8 @@ where
         trie: Arc::new(trie_output),
     };
 
+    let no_tx_pool = attributes.no_tx_pool.clone();
+
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
@@ -534,7 +536,7 @@ where
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);
 
-    if attributes.no_tx_pool {
+    if no_tx_pool {
         Ok(BuildOutcome::Freeze(payload))
     } else {
         Ok(BuildOutcome::Better { payload, cached_reads })
