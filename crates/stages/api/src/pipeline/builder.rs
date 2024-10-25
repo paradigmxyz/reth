@@ -64,7 +64,7 @@ impl<Provider> PipelineBuilder<Provider> {
     }
 
     /// Set the metric events sender.
-    pub fn with_fail_on_unwind(mut self, yes: bool) -> Self {
+    pub const fn with_fail_on_unwind(mut self, yes: bool) -> Self {
         self.fail_on_unwind = yes;
         self
     }
@@ -96,7 +96,13 @@ impl<Provider> PipelineBuilder<Provider> {
 
 impl<Provider> Default for PipelineBuilder<Provider> {
     fn default() -> Self {
-        Self { stages: Vec::new(), max_block: None, tip_tx: None, metrics_tx: None, fail_on_unwind: false }
+        Self {
+            stages: Vec::new(),
+            max_block: None,
+            tip_tx: None,
+            metrics_tx: None,
+            fail_on_unwind: false,
+        }
     }
 }
 
