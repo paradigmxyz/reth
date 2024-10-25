@@ -56,12 +56,15 @@ macro_rules! define_exex {
 
 #[derive(Debug, Default)]
 /// Dynamic ExEx loader
-pub struct DyExExLoader {
+pub struct DyExExLoader<Fut> {
     /// List of loaded Dynamically Loaded ExExes
-    pub loaded: Vec<LoadedExEx>,
+    pub loaded: Vec<LoadedExEx<Fut>>,
 }
 
-impl DyExExLoader {
+impl<Fut> DyExExLoader<Fut>
+where
+    Fut: Future<Output = Result<()>> + Send,
+{
     /// Initializes a Dynamic ExEx loader.
     /// TODO(0xurb) - path to datadir here and loaded list with capacity of dir inner files.
     pub const fn new() -> Self {
@@ -84,7 +87,7 @@ impl DyExExLoader {
 
         // Dynamically loaded ExEx id it's a filename with stripped [`DLL_PREFIX`] and
         // [`DLL_SUFFIX`]
-        let name = path
+        let lib_name = path
             .file_name()
             .ok_or_eyre("cannot obtain a filename for dyexex")?
             .to_str()
@@ -105,11 +108,7 @@ impl DyExExLoader {
         let lib = Library::new(path)?;
         let symbol: Symbol<
             '_,
-            unsafe fn(
-                ExExContextDyn,
-            )
-                -> *mut (dyn Future<Output = dyn Future<Output = eyre::Result<()>> + Send>
-                 + Send),
+            unsafe fn(ExExContextDyn) -> *mut (dyn Future<Output = Fut> + Send),
         > = lib.get(LAUNCH_EXEX_FN)?;
 
         let raw_func_pointer = symbol(ctx);
@@ -121,23 +120,23 @@ impl DyExExLoader {
         // function pointer resolves to the pinned future.
         let exex_fut = Pin::new_unchecked(Box::from_raw(raw_func_pointer));
 
-        self.loaded.push(LoadedExEx { id: name.to_owned(), lib: Arc::new(lib), exex_fut });
+        self.loaded.push(LoadedExEx::new(lib_name, lib, exex_fut));
 
         Ok(())
     }
 }
 
 /// Dynamically Loaded ExEx representation
-pub struct LoadedExEx {
+pub struct LoadedExEx<Fut> {
     /// ExEx id
     id: String,
     /// Loaded [`Library`] pointer
     lib: Arc<Library>,
     /// Regarding ExEx launch entrypoint future
-    exex_fut: Pin<Box<dyn Future<Output = dyn Future<Output = Result<()>> + Send> + Send>>,
+    exex_fut: Pin<Box<dyn Future<Output = Fut> + Send>>,
 }
 
-impl Debug for LoadedExEx {
+impl<Fut> Debug for LoadedExEx<Fut> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoadedExEx")
             .field("id", &self.id)
@@ -147,14 +146,22 @@ impl Debug for LoadedExEx {
     }
 }
 
-impl LoadedExEx {
+impl<Fut> LoadedExEx<Fut>
+where
+    Fut: Future<Output = Result<()>> + Send,
+{
+    /// Create a new [`LoadedExEx`].
+    fn new(
+        lib_name: impl AsRef<str>,
+        lib: Library,
+        exex_fut: Pin<Box<dyn Future<Output = Fut> + Send>>,
+    ) -> Self {
+        Self { id: lib_name.as_ref().to_owned(), lib: Arc::new(lib), exex_fut }
+    }
+
     /// Returns this ExEx id and launch entrypoint future.
     #[inline(always)]
-    #[allow(clippy::type_complexity)]
-    pub fn into_id_and_launch_fn(
-        self,
-    ) -> (String, Pin<Box<dyn Future<Output = dyn Future<Output = Result<()>> + Send> + Send>>)
-    {
+    pub fn into_id_and_launch_fn(self) -> (String, Pin<Box<dyn Future<Output = Fut> + Send>>) {
         (self.id, self.exex_fut)
     }
 }
