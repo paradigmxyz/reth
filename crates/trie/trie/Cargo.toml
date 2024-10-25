@@ -51,8 +51,6 @@ serde_with = { workspace = true, optional = true }
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
-reth-trie-db.workspace = true
 
 # trie
 triehash = "0.8"

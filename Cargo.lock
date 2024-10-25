@@ -9152,14 +9152,12 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rayon",
- "reth-db",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
- "reth-trie-db",
  "revm",
  "serde",
  "serde_json",
@@ -9265,6 +9263,20 @@ dependencies = [
  "reth-trie-common",
  "smallvec",
  "thiserror",
+]
+
+[[package]]
+name = "reth-trie-tests"
+version = "1.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-trie",
+ "nybbles",
+ "reth-db",
+ "reth-primitives",
+ "reth-storage-errors",
+ "reth-trie",
+ "reth-trie-db",
 ]
 
 [[package]]
