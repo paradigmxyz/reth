@@ -81,9 +81,17 @@ impl DyExExLoader {
             .to_str()
             .ok_or_eyre("dyexex name is not a valid UTF-8 encoded string")?
             .strip_prefix(DLL_PREFIX)
-            .ok_or_else(|| eyre::eyre!("dyexex is not a shared dynamic library (has no prefix: `{DLL_PREFIX}`)"))?
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "dyexex is not a shared dynamic library (has no prefix: `{DLL_PREFIX}`)"
+                )
+            })?
             .strip_suffix(DLL_SUFFIX)
-            .ok_or_else(|| eyre::eyre!("dyexex is not a shared dynamic library (has no suffix: `{DLL_SUFFIX}`)"))?;
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "dyexex is not a shared dynamic library (has no suffix: `{DLL_SUFFIX}`)"
+                )
+            })?;
 
         let lib = unsafe { Library::new(path) }?;
         let symbol: Symbol<
