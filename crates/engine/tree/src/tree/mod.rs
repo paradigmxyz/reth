@@ -2194,7 +2194,12 @@ where
             return Err(err.into())
         }
 
-        self.invalid_block_hook.on_invalid_block(&parent_block, &block.seal_slow(), &output, None);
+        self.invalid_block_hook.on_invalid_block(
+            &parent_block,
+            &block.clone().seal_slow(),
+            &output,
+            None,
+        );
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
