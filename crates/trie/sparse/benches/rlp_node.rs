@@ -53,10 +53,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
                     |b| {
                         b.iter_with_setup(
                             || sparse.clone(),
-                            |mut sparse| {
-                                sparse.update_rlp_node_level(depth);
-                                panic!();
-                            },
+                            |mut sparse| sparse.update_rlp_node_level(depth),
                         )
                     },
                 );
