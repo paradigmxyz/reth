@@ -423,7 +423,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         }
     }
 
-    /// Maps the config using the provided closure to update the [`ChainSpec`] generic.
+    /// Modifies the [`ChainSpec`] generic of the config using the provided closure.
     pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
     where
         F: FnOnce(Arc<ChainSpec>) -> C,
