@@ -16,7 +16,11 @@ use std::{cell::RefCell, fmt, sync::mpsc::sync_channel, time::Instant};
 thread_local! {
     static CHUNK_SIZE: RefCell<U256> = {
         type U257 = Uint<257, 5>;
-        RefCell::new(U256::from(U257::from(2).pow(U257::from(256)) / U257::from(rayon::current_num_threads())))
+        RefCell::new(U256::from(
+            U257::from(2)
+                .pow(U257::from(256))
+                .div_ceil(U257::from(rayon::current_num_threads()))
+        ))
     }
 }
 
@@ -581,18 +585,40 @@ impl RevealedSparseTrie {
         let updates = rayon::scope(|s| {
             // Collect targets in parallel
             let (targets_tx, targets_rx) = sync_channel(self.nodes.len());
-            s.spawn(|_| {
-                let targets_tx = targets_tx;
-                for target in NodesAtDepth::new(&self.nodes, depth) {
-                    targets_tx.send(target).unwrap();
+            let branch_node = self.find_first_branch();
+            if let Some((path, state_mask, level)) = branch_node {
+                for bit in CHILD_INDEX_RANGE {
+                    if state_mask.is_bit_set(bit) {
+                        let mut child_path = path.clone();
+                        child_path.push_unchecked(bit);
+
+                        let this = &self;
+                        let targets_tx = targets_tx.clone();
+                        s.spawn(move |_| {
+                            for target in
+                                NodesAtDepth::new(&this.nodes, depth, (child_path, level + 1))
+                            {
+                                targets_tx.send(target).unwrap();
+                            }
+                        })
+                    }
                 }
-            });
+                drop(targets_tx);
+            } else {
+                s.spawn(|_| {
+                    let targets_tx = targets_tx;
+
+                    for target in NodesAtDepth::new_from_root(&self.nodes, depth) {
+                        targets_tx.send(target).unwrap();
+                    }
+                })
+            }
 
             // Calculate updated hashes in parallel
             let (updates_tx, updates_rx) = sync_channel(self.nodes.len());
             let workers = (0..=rayon::current_num_threads())
                 .map(|_| {
-                    let (worker_tx, worker_rx) = sync_channel(self.nodes.len());
+                    let (worker_tx, worker_rx) = sync_channel::<Nibbles>(self.nodes.len());
 
                     let this = &self;
                     let updates_tx = updates_tx.clone();
@@ -647,6 +673,23 @@ impl RevealedSparseTrie {
         debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, updates = ?updates.len(), "Collected hash updates");
 
         self.apply_hash_updates(updates);
+    }
+
+    fn find_first_branch(&self) -> Option<(Nibbles, TrieMask, usize)> {
+        let mut paths = Vec::from([(Nibbles::default(), 0)]);
+
+        while let Some((mut path, level)) = paths.pop() {
+            match self.nodes.get(&path).unwrap() {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, .. } => {
+                    path.extend_from_slice_unchecked(key);
+                    paths.push((path, level + 1));
+                }
+                SparseNode::Branch { state_mask, .. } => return Some((path, *state_mask, level)),
+            }
+        }
+
+        None
     }
 
     fn rlp_node_allocate(
@@ -879,8 +922,12 @@ struct NodesAtDepth<'a> {
 }
 
 impl<'a> NodesAtDepth<'a> {
-    fn new(nodes: &'a HashMap<Nibbles, SparseNode>, depth: usize) -> Self {
-        Self { nodes, depth, paths: Vec::from([(Nibbles::default(), 0)]) }
+    fn new(nodes: &'a HashMap<Nibbles, SparseNode>, depth: usize, start: (Nibbles, usize)) -> Self {
+        Self { nodes, depth, paths: vec![start] }
+    }
+
+    fn new_from_root(nodes: &'a HashMap<Nibbles, SparseNode>, depth: usize) -> Self {
+        Self { nodes, depth, paths: vec![(Nibbles::default(), 0)] }
     }
 }
 
@@ -1712,7 +1759,7 @@ mod tests {
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
         let get_nodes_at_depth =
-            |depth| NodesAtDepth::new(&sparse.nodes, depth).collect::<Vec<_>>();
+            |depth| NodesAtDepth::new_from_root(&sparse.nodes, depth).collect::<Vec<_>>();
 
         assert_eq!(get_nodes_at_depth(0), vec![Nibbles::default()]);
         assert_eq!(get_nodes_at_depth(1), vec![Nibbles::from_nibbles_unchecked([0x5])]);
