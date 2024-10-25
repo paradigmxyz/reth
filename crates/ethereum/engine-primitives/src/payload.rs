@@ -89,6 +89,10 @@ impl BuiltPayload for EthBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn requests(&self) -> Option<Requests> {
+        self.requests.clone()
+    }
 }
 
 impl BuiltPayload for &EthBuiltPayload {
@@ -102,6 +106,10 @@ impl BuiltPayload for &EthBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
+    }
+
+    fn requests(&self) -> Option<Requests> {
+        self.requests.clone()
     }
 }
 
