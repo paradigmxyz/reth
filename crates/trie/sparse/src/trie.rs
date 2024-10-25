@@ -586,8 +586,8 @@ impl RevealedSparseTrie {
         let updates: SparseNodeHashUpdates = targets
             .into_iter()
             .par_bridge()
-            .map_with(
-                {
+            .map_init(
+                || {
                     // Reusable branch child path
                     let branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
                     // Reusable branch value stack
@@ -595,13 +595,12 @@ impl RevealedSparseTrie {
                     // Reusable RLP buffer
                     let rlp_buf = Vec::with_capacity(128);
 
-                    (branch_child_buf, branch_value_stack_buf, rlp_buf)
+                    (branch_child_buf, branch_value_stack_buf, rlp_buf, prefix_set.clone())
                 },
-                |(branch_child_buf, branch_value_stack_buf, rlp_buf), target| {
-                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                |(branch_child_buf, branch_value_stack_buf, rlp_buf, prefix_set), target| {
                     let (_, updates) = self.rlp_node(
                         target,
-                        prefix_set.clone(),
+                        prefix_set,
                         branch_child_buf,
                         branch_value_stack_buf,
                         rlp_buf,
@@ -658,7 +657,7 @@ impl RevealedSparseTrie {
     fn rlp_node_allocate(
         &mut self,
         path: Nibbles,
-        prefix_set: PrefixSet,
+        mut prefix_set: PrefixSet,
     ) -> (RlpNode, SparseNodeHashUpdates) {
         // Reusable branch child path
         let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
@@ -670,7 +669,7 @@ impl RevealedSparseTrie {
 
         let (rlp_node, updates) = self.rlp_node(
             path,
-            prefix_set,
+            &mut prefix_set,
             &mut branch_child_buf,
             &mut branch_value_stack_buf,
             &mut rlp_buf,
@@ -689,7 +688,7 @@ impl RevealedSparseTrie {
     fn rlp_node(
         &self,
         path: Nibbles,
-        mut prefix_set: PrefixSet,
+        prefix_set: &mut PrefixSet,
         branch_child_buf: &mut SmallVec<[Nibbles; 16]>,
         branch_value_stack_buf: &mut SmallVec<[RlpNode; 16]>,
         rlp_buf: &mut Vec<u8>,
