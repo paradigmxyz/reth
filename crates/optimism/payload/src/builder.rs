@@ -537,6 +537,9 @@ where
     payload.extend_sidecars(blob_sidecars);
 
     if no_tx_pool {
+        // if `no_tx_pool` is set only transactions from the payload attributes will be included in
+        // the payload. In other words, the payload is deterministic and we can freeze it once we've
+        // successfully built it.
         Ok(BuildOutcome::Freeze(payload))
     } else {
         Ok(BuildOutcome::Better { payload, cached_reads })
