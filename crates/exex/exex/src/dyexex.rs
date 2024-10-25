@@ -73,10 +73,10 @@ impl DyExExLoader {
     /// # Safety
     ///
     /// The dynamically loaded ExEx library **must** contains a function with
-    /// name [`LAUNCH_EXEX_FN`].
+    /// name `_launch_exex`.
     /// Otherwise, behavior is undefined.
     /// See also [`Library::get`] for more information on what
-    /// restrictions apply to [`LAUNCH_EXEX_FN`].
+    /// restrictions apply to `_launch_exex`.
     #[allow(clippy::type_complexity)]
     pub unsafe fn load(&mut self, path: impl AsRef<Path>, ctx: ExExContextDyn) -> Result<()> {
         let path = path.as_ref();
@@ -116,7 +116,10 @@ impl DyExExLoader {
             return Err(eyre::eyre!("Failed to load future from dynamic library"));
         }
 
+        // SAFETY: We guarantee that the pointed data is pinned, loaded DLL symbol
+        // function pointer resolves to the pinned future.
         let exex_fut = Pin::new_unchecked(Box::from_raw(raw_func_pointer));
+
         self.loaded.push(LoadedExEx { id: name.to_owned(), lib: Arc::new(lib), exex_fut });
 
         Ok(())
