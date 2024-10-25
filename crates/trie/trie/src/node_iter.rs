@@ -136,7 +136,8 @@ where
                         None => break, // no more keys
                     };
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
-                    self.walker.advance()?;
+                    let walker_key = self.walker.advance()?;
+                    trace!(target: "trie::node_iter", ?walker_key, "Walker advanced");
                 }
             }
         }
