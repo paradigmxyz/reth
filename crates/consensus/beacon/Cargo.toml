@@ -33,6 +33,7 @@ reth-chainspec = { workspace = true, optional = true }
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

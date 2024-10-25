@@ -1513,11 +1513,12 @@ impl Discv4Service {
             true
         });
 
-        trace!(target: "discv4", num=%failed_pings.len(), "evicting nodes due to failed pong");
-
-        // remove nodes that failed to pong
-        for node_id in failed_pings {
-            self.remove_node(node_id);
+        if !failed_pings.is_empty() {
+            // remove nodes that failed to pong
+            trace!(target: "discv4", num=%failed_pings.len(), "evicting nodes due to failed pong");
+            for node_id in failed_pings {
+                self.remove_node(node_id);
+            }
         }
 
         let mut failed_lookups = Vec::new();
@@ -1528,11 +1529,13 @@ impl Discv4Service {
             }
             true
         });
-        trace!(target: "discv4", num=%failed_lookups.len(), "evicting nodes due to failed lookup");
 
-        // remove nodes that failed the e2e lookup process, so we can restart it
-        for node_id in failed_lookups {
-            self.remove_node(node_id);
+        if !failed_lookups.is_empty() {
+            // remove nodes that failed the e2e lookup process, so we can restart it
+            trace!(target: "discv4", num=%failed_lookups.len(), "evicting nodes due to failed lookup");
+            for node_id in failed_lookups {
+                self.remove_node(node_id);
+            }
         }
 
         self.evict_failed_find_nodes(now);
@@ -1552,6 +1555,10 @@ impl Discv4Service {
             }
             true
         });
+
+        if failed_find_nodes.is_empty() {
+            return
+        }
 
         trace!(target: "discv4", num=%failed_find_nodes.len(), "processing failed find nodes");
 

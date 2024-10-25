@@ -36,12 +36,15 @@ use crate::eth::EthTxBuilder;
 #[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
+    #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+    /// Transaction RPC response builder.
+    pub tx_resp_builder: EthTxBuilder,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -81,7 +84,7 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -119,7 +122,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -131,6 +134,10 @@ where
     // todo: replace with alloy_network::Ethereum
     type NetworkTypes = AnyNetwork;
     type TransactionCompat = EthTxBuilder;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        &self.tx_resp_builder
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug

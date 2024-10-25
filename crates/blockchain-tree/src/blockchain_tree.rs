@@ -1375,6 +1375,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, EMPTY_ROOT_HASH};
+    use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, Sealable, B256};
     use assert_matches::assert_matches;
@@ -1386,7 +1387,6 @@ mod tests {
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::{
-        constants::EIP1559_INITIAL_BASE_FEE,
         proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, BlockBody, Header, Signature, Transaction, TransactionSigned,
@@ -1560,7 +1560,7 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
+        let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
         let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Eip1559(TxEip1559 {
@@ -1568,7 +1568,7 @@ mod tests {
                     nonce,
                     gas_limit: MIN_TRANSACTION_GAS,
                     to: Address::ZERO.into(),
-                    max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+                    max_fee_per_gas: INITIAL_BASE_FEE as u128,
                     ..Default::default()
                 }),
                 Signature::test_signature(),
@@ -1605,7 +1605,7 @@ mod tests {
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
                 gas_limit: chain_spec.max_gas_limit,
                 mix_hash: B256::random(),
-                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
+                base_fee_per_gas: Some(INITIAL_BASE_FEE),
                 transactions_root,
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(

@@ -1,9 +1,19 @@
 //! Command for generating test vectors.
 
 use clap::{Parser, Subcommand};
-
-pub mod compact;
-pub mod tables;
+use op_alloy_consensus::TxDeposit;
+use proptest::test_runner::TestRunner;
+use reth_cli_commands::{
+    compact_types,
+    test_vectors::{
+        compact,
+        compact::{
+            generate_vector, read_vector, GENERATE_VECTORS as ETH_GENERATE_VECTORS,
+            READ_VECTORS as ETH_READ_VECTORS,
+        },
+        tables,
+    },
+};
 
 /// Generate test-vectors for different data types.
 #[derive(Debug, Parser)]
@@ -20,12 +30,8 @@ pub enum Subcommands {
         /// List of table names. Case-sensitive.
         names: Vec<String>,
     },
-    /// Randomly generate test vectors for each `Compact` type using the `--write` flag.
-    ///
-    /// The generated vectors are serialized in both `json` and `Compact` formats and saved to a
-    /// file.
-    ///
-    /// Use the `--read` flag to read and validate the previously generated vectors from file.
+    /// Generates test vectors for `Compact` types with `--write`. Reads and checks generated
+    /// vectors with `--read`.
     #[group(multiple = false, required = true)]
     Compact {
         /// Write test vectors to a file.
@@ -46,10 +52,18 @@ impl Command {
                 tables::generate_vectors(names)?;
             }
             Subcommands::Compact { write, .. } => {
+                compact_types!(
+                    regular: [
+                        TxDeposit
+                    ], identifier: []
+                );
+
                 if write {
-                    compact::generate_vectors()?;
+                    compact::generate_vectors_with(ETH_GENERATE_VECTORS)?;
+                    compact::generate_vectors_with(GENERATE_VECTORS)?;
                 } else {
-                    compact::read_vectors()?;
+                    compact::read_vectors_with(ETH_READ_VECTORS)?;
+                    compact::read_vectors_with(READ_VECTORS)?;
                 }
             }
         }

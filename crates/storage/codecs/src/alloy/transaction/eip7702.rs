@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyTxEip7702`]
+
 use crate::Compact;
 use alloc::vec::Vec;
 use alloy_consensus::TxEip7702 as AlloyTxEip7702;
@@ -14,7 +16,11 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip7702`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxEip7702 {
     chain_id: ChainId,

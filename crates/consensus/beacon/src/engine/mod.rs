@@ -1,3 +1,4 @@
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -19,9 +20,7 @@ use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockNumHash, Head, Header, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,

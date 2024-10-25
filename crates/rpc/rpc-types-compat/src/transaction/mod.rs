@@ -2,6 +2,7 @@
 mod signature;
 
 pub use signature::*;
+
 use std::fmt;
 
 use alloy_consensus::Transaction as _;
@@ -11,6 +12,7 @@ use alloy_rpc_types::{
 };
 use alloy_serde::WithOtherFields;
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
+use serde::{Deserialize, Serialize};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
@@ -20,21 +22,33 @@ use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
 pub fn from_recovered_with_block_context<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     tx_info: TransactionInfo,
+    resp_builder: &T,
 ) -> T::Transaction {
-    T::fill(tx, tx_info)
+    resp_builder.fill(tx, tx_info)
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
-pub fn from_recovered<T: TransactionCompat>(tx: TransactionSignedEcRecovered) -> T::Transaction {
-    T::fill(tx, TransactionInfo::default())
+pub fn from_recovered<T: TransactionCompat>(
+    tx: TransactionSignedEcRecovered,
+    resp_builder: &T,
+) -> T::Transaction {
+    resp_builder.fill(tx, TransactionInfo::default())
 }
 
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
-    type Transaction: Send + Clone + Default + fmt::Debug;
+    type Transaction: Serialize
+        + for<'de> Deserialize<'de>
+        + Send
+        + Sync
+        + Unpin
+        + Clone
+        + Default
+        + fmt::Debug;
 
+    ///
     /// Formats gas price and max fee per gas for RPC transaction response w.r.t. network specific
     /// transaction type.
     fn gas_price(signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
@@ -63,7 +77,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn fill(tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
+    fn fill(&self, tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
 
     /// Truncates the input of a transaction to only the first 4 bytes.
     // todo: remove in favour of using constructor on `TransactionResponse` or similar
@@ -80,7 +94,11 @@ impl TransactionCompat for () {
     // `alloy_network::AnyNetwork`
     type Transaction = WithOtherFields<Transaction>;
 
-    fn fill(_tx: TransactionSignedEcRecovered, _tx_info: TransactionInfo) -> Self::Transaction {
+    fn fill(
+        &self,
+        _tx: TransactionSignedEcRecovered,
+        _tx_info: TransactionInfo,
+    ) -> Self::Transaction {
         WithOtherFields::default()
     }
 
