@@ -1,11 +1,8 @@
 use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse};
 use std::{
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
+    future::Future, pin::Pin, sync::Arc, task::{Context, Poll}
 };
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::PollSemaphore;
 use tower::Layer;
 
@@ -70,6 +67,7 @@ where
             RateLimitingRequestFuture {
                 fut: self.inner.call(req),
                 guard: Some(self.rate_limiter.inner.call_guard.clone()),
+                permit: None,
             }
         } else {
             // if we don't need to rate limit, then there
@@ -77,6 +75,7 @@ where
             RateLimitingRequestFuture {
                 fut: self.inner.call(req),
                 guard: None,
+                permit: None,
             }
         }
     }
@@ -88,7 +87,9 @@ pub struct RateLimitingRequestFuture<F> {
     #[pin]
     fut: F,
     guard: Option<PollSemaphore>,
+    permit: Option<OwnedSemaphorePermit>,
 }
+
 
 impl<F> std::fmt::Debug for RateLimitingRequestFuture<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,14 +101,21 @@ impl<F: Future<Output = MethodResponse>> Future for RateLimitingRequestFuture<F>
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(mut guard) = self.guard.clone() {
+        let this = self.project();
+        if let Some(guard) = this.guard.as_mut() {
             match guard.poll_acquire(cx) {
                 Poll::Pending => return Poll::Pending,
-                _ => {},
+                Poll::Ready(Some(permit)) => {
+                    *this.permit = Some(permit);
+                    *this.guard = None;
+                },
+                _ => {}
             }
         }
-        let this = self.project();
         let res = this.fut.poll(cx);
+        if let Poll::Ready(_) = res {
+            *this.permit = None;
+        }
         res
     }
 }
