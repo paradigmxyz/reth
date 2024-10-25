@@ -366,10 +366,8 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{bytes, Address, LogData, B256};
-    use reth_primitives::{Receipts, TxType};
-    use std::collections::HashMap;
+    use alloy_primitives::{ Address, B256};
+    use reth_primitives::Receipts;
 
     #[test]
     #[cfg(not(feature = "optimism"))]
