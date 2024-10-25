@@ -233,7 +233,7 @@ mod tests {
         };
         let status = ForkchoiceStatus::Valid;
 
-        tracker.set_latest(state.clone(), status);
+        tracker.set_latest(state, status);
 
         // Assert that the latest state is set
         assert!(tracker.latest.is_some());
@@ -262,7 +262,7 @@ mod tests {
         };
         let status = ForkchoiceStatus::Syncing;
 
-        tracker.set_latest(state.clone(), status);
+        tracker.set_latest(state, status);
 
         // Assert that the latest state is set
         assert!(tracker.latest.is_some());
@@ -291,7 +291,7 @@ mod tests {
         };
         let status = ForkchoiceStatus::Invalid;
 
-        tracker.set_latest(state.clone(), status);
+        tracker.set_latest(state, status);
 
         // Assert that the latest state is set
         assert!(tracker.latest.is_some());
