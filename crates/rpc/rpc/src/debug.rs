@@ -98,20 +98,12 @@ where
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
+        parent_beacon_block_root: Option<B256>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         if transactions.is_empty() {
             // nothing to trace
             return Ok(Vec::new())
         }
-
-        // Retrieve the block from the block ID
-        let block = match self.eth_api().block_with_senders(at).await? {
-            None => return Err(EthApiError::HeaderNotFound(at).into()),
-            Some(block) => block,
-        };
-
-        // Extract the parent beacon block root from the block
-        let parent_beacon_block_root = block.parent_beacon_block_root;
 
         // replay all transactions of the block
         let this = self.clone();
@@ -200,6 +192,7 @@ where
                 block
                     .body
                     .transactions
+                    .clone()
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered()
@@ -211,6 +204,7 @@ where
                 block
                     .body
                     .transactions
+                    .clone()
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
@@ -220,7 +214,15 @@ where
                     .collect::<Result<Vec<_>, Eth::Error>>()?
             };
 
-        self.trace_block(parent.into(), transactions, cfg, block_env, opts).await
+        self.trace_block(
+            parent.into(),
+            transactions,
+            cfg,
+            block_env,
+            opts,
+            block.parent_beacon_block_root,
+        )
+        .await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -252,6 +254,7 @@ where
             cfg,
             block_env,
             opts,
+            block.parent_beacon_block_root,
         )
         .await
     }
