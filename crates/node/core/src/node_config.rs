@@ -426,9 +426,24 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Maps the config using the provided closure to update the [`ChainSpec`] generic.
     pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
     where
-        F: FnOnce(Self) -> NodeConfig<C>,
+        F: FnOnce(Arc<ChainSpec>) -> C,
     {
-        f(self)
+        let chain = Arc::new(f(self.chain));
+        NodeConfig {
+            chain,
+            datadir: self.datadir,
+            config: self.config,
+            metrics: self.metrics,
+            instance: self.instance,
+            network: self.network,
+            rpc: self.rpc,
+            txpool: self.txpool,
+            builder: self.builder,
+            debug: self.debug,
+            db: self.db,
+            dev: self.dev,
+            pruning: self.pruning,
+        }
     }
 }
 

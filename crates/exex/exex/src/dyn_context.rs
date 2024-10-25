@@ -1,10 +1,11 @@
 //! Mirrored version of [`ExExContext`](`crate::ExExContext`)
 //! without generic abstraction over [Node](`reth_node_api::FullNodeComponents`)
 
+use std::fmt::Debug;
+
 use reth_chainspec::{EthChainSpec, Head};
 use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
-use std::{fmt::Debug, sync::Arc};
 use tokio::sync::mpsc;
 
 use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
@@ -54,24 +55,8 @@ where
     Node::Executor: Debug,
 {
     fn from(ctx: ExExContext<Node>) -> Self {
-        let config = ctx.config.map_chainspec(|config| {
-            let chain = Arc::new(Box::new(config.chain) as Box<dyn EthChainSpec>);
-            NodeConfig {
-                chain,
-                datadir: config.datadir,
-                config: config.config,
-                metrics: config.metrics,
-                instance: config.instance,
-                network: config.network,
-                rpc: config.rpc,
-                txpool: config.txpool,
-                builder: config.builder,
-                debug: config.debug,
-                db: config.db,
-                dev: config.dev,
-                pruning: config.pruning,
-            }
-        });
+        let config =
+            ctx.config.map_chainspec(|chainspec| Box::new(chainspec) as Box<dyn EthChainSpec>);
         let notifications = Box::new(ctx.notifications) as Box<dyn ExExNotificationsStream>;
 
         Self {
