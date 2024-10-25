@@ -15,7 +15,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
-    for size in [1_000, 5_000, 10_000, 100_000] {
+    for size in [1_000, 10_000, 100_000] {
         let mut runner = TestRunner::new(ProptestConfig::default());
         let state = proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
             .new_tree(&mut runner)
