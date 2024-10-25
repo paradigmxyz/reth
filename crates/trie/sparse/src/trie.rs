@@ -1,7 +1,6 @@
 use crate::{SparseTrieError, SparseTrieResult};
-use alloy_primitives::{hex, keccak256, map::HashMap, B256};
+use alloy_primitives::{hex, keccak256, map::HashMap, B256, U256};
 use alloy_rlp::Decodable;
-use itertools::Itertools;
 use reth_tracing::tracing::debug;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -12,7 +11,12 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{fmt, sync::mpsc::sync_channel, time::Instant};
+use std::{cell::RefCell, fmt, sync::mpsc::sync_channel, time::Instant};
+
+thread_local! {
+static CHUNK_SIZE: RefCell<U256> =
+    RefCell::new(U256::MAX / U256::from(rayon::current_num_threads()));
+}
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -584,43 +588,52 @@ impl RevealedSparseTrie {
 
             // Calculate updated hashes in parallel
             let (updates_tx, updates_rx) = sync_channel(self.nodes.len());
-            for chunk in &targets_rx
-                .into_iter()
-                // Chunk size is determined by the estimated number of targets divied by the number
-                // of threads. It will get us close to all targets split equally into all threads.
-                .chunks(16usize.pow(depth as u32).div_ceil(rayon::current_num_threads()).min(1))
-            {
-                let chunk = chunk.collect::<Vec<_>>();
-                let updates_tx = updates_tx.clone();
-                // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
-                let mut prefix_set = prefix_set.clone();
-                let this = &self;
+            let workers = (0..=rayon::current_num_threads())
+                .map(|_| {
+                    let (worker_tx, worker_rx) = sync_channel(self.nodes.len());
 
-                s.spawn(move |_| {
-                    let updates_tx = updates_tx;
-                    // Reusable branch child path
-                    let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-                    // Reusable branch value stack
-                    let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
-                    // Reusable RLP buffer
-                    let mut rlp_buf = Vec::with_capacity(128);
+                    let this = &self;
+                    let updates_tx = updates_tx.clone();
+                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                    let mut prefix_set = prefix_set.clone();
+                    s.spawn(move |_| {
+                        // Reusable branch child path
+                        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
+                        // Reusable branch value stack
+                        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+                        // Reusable RLP buffer
+                        let mut rlp_buf = Vec::with_capacity(128);
 
-                    // We can't parallelize here, because prefix set relies on sequential lookups
-                    for target in chunk {
-                        let (_, updates) = this.rlp_node(
-                            target,
-                            &mut prefix_set,
-                            &mut branch_child_buf,
-                            &mut branch_value_stack_buf,
-                            &mut rlp_buf,
-                        );
-                        updates_tx.send(updates).unwrap();
-                    }
-                });
-            }
-            // Drop the original sender manually, so that the receiver is dropped after the last
-            // chunk is finished processing.
+                        // We can't parallelize here, because prefix set relies on sequential
+                        // lookups
+                        for target in worker_rx {
+                            let (_, updates) = this.rlp_node(
+                                target,
+                                &mut prefix_set,
+                                &mut branch_child_buf,
+                                &mut branch_value_stack_buf,
+                                &mut rlp_buf,
+                            );
+                            updates_tx.send(updates).unwrap();
+                        }
+                    });
+
+                    worker_tx
+                })
+                .collect::<Vec<_>>();
+            // Drop original sender to prevent unclosed receiver
             drop(updates_tx);
+
+            for target in targets_rx {
+                let worker_idx = usize::try_from(
+                    U256::from_be_slice(target.pack().as_slice()) / CHUNK_SIZE.with_borrow(|c| *c),
+                )
+                .unwrap();
+
+                workers[worker_idx].send(target).unwrap();
+            }
+            // Drop original sender to prevent unclosed receiver
+            drop(workers);
 
             updates_rx.into_iter().flatten().collect::<Vec<_>>()
         });
