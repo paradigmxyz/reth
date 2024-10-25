@@ -1,11 +1,10 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::B256;
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, Database};
 use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
-use reth_primitives::{Account, StorageEntry};
 use reth_provider::{test_utils::create_test_provider_factory, ProviderError};
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
@@ -18,7 +17,10 @@ use reth_trie_common::{BranchNodeCompact, Nibbles};
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+
+mod common;
+use common::{insert_account, State};
 
 #[test]
 fn walk_nodes_with_common_prefix() {
@@ -146,29 +148,6 @@ fn cursor_rootnode_with_changesets() {
     cursor.advance().unwrap();
     assert_eq!(cursor.key().cloned(), None); // the end of trie
 }
-
-fn insert_account(
-    tx: &impl DbTxMut,
-    address: Address,
-    account: Account,
-    storage: &BTreeMap<B256, U256>,
-) {
-    let hashed_address = keccak256(address);
-    tx.put::<tables::HashedAccounts>(hashed_address, account).unwrap();
-    insert_storage(tx, hashed_address, storage);
-}
-
-fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B256, U256>) {
-    for (k, v) in storage {
-        tx.put::<tables::HashedStorages>(
-            hashed_address,
-            StorageEntry { key: keccak256(k), value: *v },
-        )
-        .unwrap();
-    }
-}
-
-type State = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
 
 #[test]
 fn test_trie_walker_with_real_db_populated_account() {

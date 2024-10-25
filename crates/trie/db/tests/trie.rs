@@ -34,26 +34,8 @@ use reth_trie::{
     IntermediateStateRootState, Nibbles, StateRootProgress, TrieAccount,
 };
 
-fn insert_account(
-    tx: &impl DbTxMut,
-    address: Address,
-    account: Account,
-    storage: &BTreeMap<B256, U256>,
-) {
-    let hashed_address = keccak256(address);
-    tx.put::<tables::HashedAccounts>(hashed_address, account).unwrap();
-    insert_storage(tx, hashed_address, storage);
-}
-
-fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B256, U256>) {
-    for (k, v) in storage {
-        tx.put::<tables::HashedStorages>(
-            hashed_address,
-            StorageEntry { key: keccak256(k), value: *v },
-        )
-        .unwrap();
-    }
-}
+mod common;
+use common::{insert_account, State};
 
 fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     let factory = create_test_provider_factory();
@@ -220,8 +202,6 @@ fn test_storage_root() {
 
     assert_eq!(storage_root(storage.into_iter()), got);
 }
-
-type State = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
 
 #[test]
 fn arbitrary_state_root() {
