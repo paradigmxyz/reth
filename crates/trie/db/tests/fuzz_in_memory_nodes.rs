@@ -12,11 +12,44 @@ use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},
     trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates,
-    HashedPostState, HashedStorage, StateRoot, StorageRoot,
+    updates::{StorageTrieUpdates, TrieUpdates},
+    HashedPostState, HashedStorage, Nibbles, StateRoot, StorageRoot,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
 use std::collections::BTreeMap;
+
+const fn is_bit_set(mask: u16, position: u8) -> bool {
+    (mask & (1 << position)) != 0
+}
+
+fn get_child_paths(path: &Nibbles, tree_mask: u16) -> Vec<Nibbles> {
+    (0..16)
+        .filter(|&pos| is_bit_set(tree_mask, pos as u8))
+        .map(|pos| {
+            let mut child_path = path.clone();
+            child_path.push(pos as u8);
+            child_path
+        })
+        .collect()
+}
+
+fn verify_storage_trie_tree_mask_invariant(trie_updates: &StorageTrieUpdates) -> bool {
+    for (path, branch_node) in trie_updates.storage_nodes_ref() {
+        let child_paths = get_child_paths(path, branch_node.tree_mask.get());
+
+        // for each child path indicated by the tree mask, verify that a corresponding
+        // branch node exists in the trie updates
+        for child_path in child_paths {
+            if !trie_updates.storage_nodes_ref().contains_key(&child_path) &&
+                !trie_updates.removed_nodes_ref().contains(&child_path)
+            {
+                println!("missing child node at path: {:?} for parent: {:?}", child_path, path);
+                return false;
+            }
+        }
+    }
+    true
+}
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -93,6 +126,9 @@ proptest! {
         let (_, _, mut storage_trie_nodes) =
             StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();
 
+        // verify initial tree mask invariant
+        assert!(verify_storage_trie_tree_mask_invariant(&storage_trie_nodes));
+
         let mut storage = init_storage;
         for (is_deleted, mut storage_update) in storage_updates {
             // Insert state updates into database
@@ -130,5 +166,8 @@ proptest! {
             let expected_root = storage_root_prehashed(storage.clone());
             assert_eq!(expected_root, storage_root);
         }
+
+        // verify tree mask invariant after updates
+        assert!(verify_storage_trie_tree_mask_invariant(&storage_trie_nodes));
     }
 }
