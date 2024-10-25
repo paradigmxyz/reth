@@ -1,5 +1,5 @@
 use crate::{SparseTrieError, SparseTrieResult};
-use alloy_primitives::{keccak256, map::HashMap, B256};
+use alloy_primitives::{hex, keccak256, map::HashMap, B256};
 use alloy_rlp::Decodable;
 use reth_tracing::tracing::debug;
 use reth_trie::{
@@ -11,7 +11,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -77,7 +77,7 @@ impl SparseTrie {
 /// - Each leaf entry in `nodes` collection must have a corresponding entry in `values` collection.
 ///   The opposite is also true.
 /// - All keys in `values` collection are full leaf paths.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RevealedSparseTrie {
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
@@ -87,6 +87,17 @@ pub struct RevealedSparseTrie {
     prefix_set: PrefixSetMut,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+}
+
+impl fmt::Debug for RevealedSparseTrie {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RevealedSparseTrie")
+            .field("nodes", &self.nodes)
+            .field("values", &self.values)
+            .field("prefix_set", &self.prefix_set)
+            .field("rlp_buf", &hex::encode(&self.rlp_buf))
+            .finish()
+    }
 }
 
 impl Default for RevealedSparseTrie {
