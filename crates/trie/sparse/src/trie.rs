@@ -11,7 +11,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{collections::HashSet, fmt};
+use std::fmt;
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -579,19 +579,19 @@ impl RevealedSparseTrie {
     /// Returns a list of paths to the nodes that are located at the provided depth when counting
     /// from the root node. If there's a leaf at a depth less than the provided depth, it will be
     /// included in the result.
-    fn get_nodes_at_depth(&self, depth: usize) -> HashSet<Nibbles> {
+    fn get_nodes_at_depth(&self, depth: usize) -> Vec<Nibbles> {
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
-        let mut targets = HashSet::<Nibbles>::default();
+        let mut targets = Vec::new();
 
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
                 SparseNode::Leaf { .. } => {
-                    targets.insert(path);
+                    targets.push(path);
                 }
                 SparseNode::Extension { key, .. } => {
                     if level >= depth {
-                        targets.insert(path);
+                        targets.push(path);
                     } else {
                         path.extend_from_slice_unchecked(key);
                         paths.push((path, level + 1));
@@ -599,9 +599,9 @@ impl RevealedSparseTrie {
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     if level >= depth {
-                        targets.insert(path);
+                        targets.push(path);
                     } else {
-                        for bit in CHILD_INDEX_RANGE {
+                        for bit in CHILD_INDEX_RANGE.rev() {
                             if state_mask.is_bit_set(bit) {
                                 let mut child_path = path.clone();
                                 child_path.push_unchecked(bit);
@@ -1568,38 +1568,35 @@ mod tests {
             .unwrap();
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
-        assert_eq!(sparse.get_nodes_at_depth(0), HashSet::from([Nibbles::default()]));
-        assert_eq!(
-            sparse.get_nodes_at_depth(1),
-            HashSet::from([Nibbles::from_nibbles_unchecked([0x5])])
-        );
+        assert_eq!(sparse.get_nodes_at_depth(0), vec![Nibbles::default()]);
+        assert_eq!(sparse.get_nodes_at_depth(1), vec![Nibbles::from_nibbles_unchecked([0x5])]);
         assert_eq!(
             sparse.get_nodes_at_depth(2),
-            HashSet::from([
+            vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3])
-            ])
+            ]
         );
         assert_eq!(
             sparse.get_nodes_at_depth(3),
-            HashSet::from([
+            vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
-            ])
+            ]
         );
         assert_eq!(
             sparse.get_nodes_at_depth(4),
-            HashSet::from([
+            vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
-            ])
+            ]
         );
     }
 }
