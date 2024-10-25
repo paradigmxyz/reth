@@ -75,6 +75,7 @@ where
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)
+        .with_fail_on_unwind(true)
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
