@@ -72,11 +72,12 @@ impl DyExExLoader {
     ///
     /// # Safety
     ///
-    /// The dynamically loaded ExEx library **must** contains a function with
-    /// name `_launch_exex`.
+    /// The dynamically loaded ExEx library **must** contain a function named `_launch_exex`
+    /// with the correct type signature, that resolves to exact function pointer.
+    ///
     /// Otherwise, behavior is undefined.
     /// See also [`Library::get`] for more information on what
-    /// restrictions apply to `_launch_exex`.
+    /// restrictions apply to `_launch_exex` symbol.
     #[allow(clippy::type_complexity)]
     pub unsafe fn load(&mut self, path: impl AsRef<Path>, ctx: ExExContextDyn) -> Result<()> {
         let path = path.as_ref();
