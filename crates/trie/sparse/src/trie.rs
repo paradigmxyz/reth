@@ -12,11 +12,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{
-    fmt,
-    sync::{atomic::AtomicUsize, mpsc::SyncSender},
-    time::Instant,
-};
+use std::{fmt, sync::mpsc::SyncSender, time::Instant};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -574,56 +570,45 @@ impl RevealedSparseTrie {
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
         let start = Instant::now();
-        let mut targets = rayon::scope(|s| {
+        let targets = rayon::scope(|s| {
             let (targets_tx, targets_rx) = std::sync::mpsc::sync_channel(self.nodes.len());
             s.spawn(|_| self.get_nodes_at_depth(depth, targets_tx));
 
             targets_rx
-        })
-        // TODO(alexey): comment these to collect targets in parallel with hashing
-        .into_iter()
-        .collect::<Vec<_>>();
-        println!("sorted: {:?}", targets.is_sorted());
+        });
         let duration = start.elapsed();
 
-        debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, targets = ?targets.len(), "Collected node targets");
+        debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, "Collected node targets");
 
         let prefix_set = self.prefix_set.clone().freeze();
-
-        // Reusable branch child path
-        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-        // Reusable branch value stack
-        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
-        // Reusable RLP buffer
-        let mut rlp_buf = Vec::with_capacity(128);
 
         let start = Instant::now();
         let updates: SparseNodeHashUpdates = targets
             .into_iter()
-            // .par_bridge()
-            // .map_with(
-            //     {
-            //         // Reusable branch child path
-            //         let branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-            //         // Reusable branch value stack
-            //         let branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
-            //         // Reusable RLP buffer
-            //         let rlp_buf = Vec::with_capacity(128);
-            //
-            //         (branch_child_buf, branch_value_stack_buf, rlp_buf)
-            //     },
-            .map(|target| {
-                println!("target: {:?}", target);
-                // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
-                let (_, updates) = self.rlp_node(
-                    target,
-                    prefix_set.clone(),
-                    &mut branch_child_buf,
-                    &mut branch_value_stack_buf,
-                    &mut rlp_buf,
-                );
-                updates
-            })
+            .par_bridge()
+            .map_with(
+                {
+                    // Reusable branch child path
+                    let branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
+                    // Reusable branch value stack
+                    let branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+                    // Reusable RLP buffer
+                    let rlp_buf = Vec::with_capacity(128);
+
+                    (branch_child_buf, branch_value_stack_buf, rlp_buf)
+                },
+                |(branch_child_buf, branch_value_stack_buf, rlp_buf), target| {
+                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                    let (_, updates) = self.rlp_node(
+                        target,
+                        prefix_set.clone(),
+                        branch_child_buf,
+                        branch_value_stack_buf,
+                        rlp_buf,
+                    );
+                    updates
+                },
+            )
             .flatten()
             .collect();
         let duration = start.elapsed();
