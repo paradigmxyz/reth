@@ -70,7 +70,7 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     pub instance: u16,
 
-    /// The logging configuration for the CLI. 
+    /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
 }
