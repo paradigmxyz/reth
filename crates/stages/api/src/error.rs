@@ -188,4 +188,7 @@ pub enum PipelineError {
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
+    /// The pipeline encountered an unwind when `fail_on_unwind` was set to `true`.
+    #[error("unexpected unwind")]
+    UnexpectedUnwind,
 }
