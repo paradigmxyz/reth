@@ -42,7 +42,9 @@ mod reth;
 mod rpc;
 mod trace;
 mod txpool;
+mod validation;
 mod web3;
+
 pub use admin::AdminApi;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
@@ -53,4 +55,5 @@ pub use reth::RethApi;
 pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
+pub use validation::ValidationApi;
 pub use web3::Web3Api;
