@@ -7,8 +7,7 @@ The CI runs a couple of workflows:
 - **[unit]**: Runs unit tests (tests in `src/`) and doc tests
 - **[integration]**: Runs integration tests (tests in `tests/` and sync tests)
 - **[bench]**: Runs benchmarks
-- **[eth-sync]**: Runs Ethereum mainnet sync tests
-- **[op-sync]**: Runs base mainnet sync tests for Optimism
+- **[sync]**: Runs sync tests
 - **[stage]**: Runs all `stage run` commands
 
 ### Docs
