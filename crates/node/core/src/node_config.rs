@@ -423,27 +423,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         }
     }
 
-    /// Type erases the [`ChainSpec`] generic into a [`Box<dyn EthChainSpec>`].
-    pub fn erased(self) -> NodeConfig<Box<dyn EthChainSpec>>
+    /// Maps the config using the provided closure to update the [`ChainSpec`] generic.
+    pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
     where
-        ChainSpec: EthChainSpec + 'static,
+        F: FnOnce(Self) -> NodeConfig<C>,
     {
-        let chain = Arc::new(Box::new(self.chain) as Box<dyn EthChainSpec>);
-        NodeConfig {
-            chain,
-            datadir: self.datadir,
-            config: self.config,
-            metrics: self.metrics,
-            instance: self.instance,
-            network: self.network,
-            rpc: self.rpc,
-            txpool: self.txpool,
-            builder: self.builder,
-            debug: self.debug,
-            db: self.db,
-            dev: self.dev,
-            pruning: self.pruning,
-        }
+        f(self)
     }
 }
 
