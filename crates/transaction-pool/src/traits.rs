@@ -815,25 +815,6 @@ where
     }
 }
 
-/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
-pub trait BestTransactionsFilter: BestTransactions {
-    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
-    ///
-    /// Given an element the closure must return true or false. The returned iterator will yield
-    /// only the elements for which the closure returns true.
-    ///
-    /// Descendant transactions will be skipped.
-    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
-    where
-        P: FnMut(&Self::Item) -> bool,
-        Self: Sized,
-    {
-        BestTransactionFilter::new(self, predicate)
-    }
-}
-
-impl<T> BestTransactionsFilter for T where T: BestTransactions {}
-
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
