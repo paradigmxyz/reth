@@ -191,7 +191,21 @@ where
         runner.rng().fill_bytes(&mut bytes);
         compact_buffer.clear();
 
-        let obj = T::arbitrary(&mut arbitrary::Unstructured::new(&bytes))?;
+        // Sometimes type T, might require extra arbitrary data, so we retry it a few times.
+        let mut tries = 0;
+        let obj = loop {
+            match T::arbitrary(&mut arbitrary::Unstructured::new(&bytes)) {
+                Ok(obj) => break obj,
+                Err(err) => {
+                    if tries < 5 && matches!(err, arbitrary::Error::NotEnoughData) {
+                        tries += 1;
+                        bytes.extend(std::iter::repeat(0u8).take(256));
+                    } else {
+                        return Err(err)?
+                    }
+                }
+            }
+        };
         let res = obj.to_compact(&mut compact_buffer);
 
         if IDENTIFIER_TYPE.contains(&type_name) {
