@@ -118,12 +118,6 @@ pub struct LoadedExEx {
     exex_fut: Pin<Box<dyn Future<Output = dyn Future<Output = Result<()>> + Send> + Send>>,
 }
 
-impl Hash for LoadedExEx {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
 impl Debug for LoadedExEx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoadedExEx")
