@@ -548,9 +548,7 @@ impl RevealedSparseTrie {
         // take the current prefix set.
         let prefix_set = std::mem::take(&mut self.prefix_set).freeze();
 
-        let mut rlp_buf = self.rlp_buf.take().unwrap();
-        let (root_rlp, updates) = self.rlp_node(Nibbles::default(), prefix_set, &mut rlp_buf);
-        self.rlp_buf = Some(rlp_buf);
+        let (root_rlp, updates) = self.rlp_node_allocate(Nibbles::default(), prefix_set);
 
         self.apply_hash_updates(updates);
 
@@ -570,27 +568,37 @@ impl RevealedSparseTrie {
         let updates = if targets.len() > RLP_NODE_PARALLEL_THRESHOLD {
             targets
                 .into_par_iter()
-                .flat_map(|target| {
-                    let mut rlp_buf = Vec::with_capacity(128);
+                .map_with(
+                    {
+                        // Reusable branch child path
+                        let branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
+                        // Reusable branch value stack
+                        let branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+                        // Reusable RLP buffer
+                        let rlp_buf = Vec::with_capacity(128);
 
-                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
-                    let (_, updates) = self.rlp_node(target, prefix_set.clone(), &mut rlp_buf);
-                    updates
-                })
+                        (branch_child_buf, branch_value_stack_buf, rlp_buf)
+                    },
+                    |(branch_child_buf, branch_value_stack_buf, rlp_buf), target| {
+                        // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                        let (_, updates) = self.rlp_node(
+                            target,
+                            prefix_set.clone(),
+                            branch_child_buf,
+                            branch_value_stack_buf,
+                            rlp_buf,
+                        );
+                        updates
+                    },
+                )
+                .flatten()
                 .collect()
         } else {
             targets
                 .into_iter()
                 .flat_map(|target| {
-                    // Reusable RLP buffer. Guaranteed to be available, because only taken here, in
-                    // the `&mut self`.
-                    let mut rlp_buf = self.rlp_buf.take().unwrap();
-
                     // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
-                    let (_, updates) = self.rlp_node(target, prefix_set.clone(), &mut rlp_buf);
-
-                    // Return the reusable buffer back.
-                    self.rlp_buf = Some(rlp_buf);
+                    let (_, updates) = self.rlp_node_allocate(target, prefix_set.clone());
 
                     updates
                 })
@@ -640,6 +648,33 @@ impl RevealedSparseTrie {
         targets
     }
 
+    fn rlp_node_allocate(
+        &mut self,
+        path: Nibbles,
+        prefix_set: PrefixSet,
+    ) -> (RlpNode, SparseNodeHashUpdates) {
+        // Reusable branch child path
+        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
+        // Reusable branch value stack
+        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+        // Reusable RLP buffer. Guaranteed to be available, because only taken here, in
+        // the `&mut self`.
+        let mut rlp_buf = self.rlp_buf.take().unwrap();
+
+        let (rlp_node, updates) = self.rlp_node(
+            path,
+            prefix_set,
+            &mut branch_child_buf,
+            &mut branch_value_stack_buf,
+            &mut rlp_buf,
+        );
+
+        // Return the reusable buffer back.
+        self.rlp_buf = Some(rlp_buf);
+
+        (rlp_node, updates)
+    }
+
     /// Calculates the RLP node hash for a node at the given path and according to the provided
     /// [`PrefixSet`] of changed paths.
     ///
@@ -648,16 +683,14 @@ impl RevealedSparseTrie {
         &self,
         path: Nibbles,
         mut prefix_set: PrefixSet,
+        branch_child_buf: &mut SmallVec<[Nibbles; 16]>,
+        branch_value_stack_buf: &mut SmallVec<[RlpNode; 16]>,
         rlp_buf: &mut Vec<u8>,
     ) -> (RlpNode, SparseNodeHashUpdates) {
         // stack of paths we need rlp nodes for
         let mut path_stack = Vec::from([path]);
         // stack of rlp nodes
         let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
-        // reusable branch child path
-        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-        // reusable branch value stack
-        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
         // updates to the sparse trie hashes
         let mut updates = SparseNodeHashUpdates::default();
 
@@ -710,7 +743,7 @@ impl RevealedSparseTrie {
                     }
 
                     branch_value_stack_buf.clear();
-                    for child_path in &branch_child_buf {
+                    for child_path in branch_child_buf.iter() {
                         if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
                             let (_, child) = rlp_node_stack.pop().unwrap();
                             branch_value_stack_buf.push(child);
@@ -724,7 +757,7 @@ impl RevealedSparseTrie {
 
                     rlp_buf.clear();
                     let rlp_node =
-                        BranchNodeRef::new(&branch_value_stack_buf, *state_mask).rlp(rlp_buf);
+                        BranchNodeRef::new(branch_value_stack_buf, *state_mask).rlp(rlp_buf);
                     updates.insert(path.clone(), rlp_node.as_hash());
                     rlp_node
                 }
