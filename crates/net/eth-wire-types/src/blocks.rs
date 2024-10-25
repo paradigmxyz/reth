@@ -497,4 +497,13 @@ mod tests {
         let result = RequestPair::decode(&mut &data[..]).unwrap();
         assert_eq!(result, expected);
     }
+
+    #[test]
+    fn empty_block_bodies_rlp() {
+        let body = BlockBodies::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBodies::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
+    }
 }

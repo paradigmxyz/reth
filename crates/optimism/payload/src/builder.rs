@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -14,7 +15,6 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::BEACON_NONCE,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, Header, Receipt, TxType,
@@ -105,13 +105,7 @@ where
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        optimism_payload(
-            self.evm_config.clone(),
-            args,
-            cfg_env,
-            block_env,
-            self.compute_pending_block,
-        )
+        optimism_payload(&self.evm_config, args, cfg_env, block_env, self.compute_pending_block)
     }
 
     fn on_missing_payload(
@@ -140,23 +134,23 @@ where
             best_payload: None,
         };
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
+        optimism_payload(&self.evm_config, args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
-/// Constructs an Ethereum transaction payload from the transactions sent through the
+/// Constructs an Optimism transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
 /// the payload attributes, the transaction pool will be ignored and the only transactions
 /// included in the payload will be those sent through the attributes.
 ///
-/// Given build arguments including an Ethereum client, transaction pool,
+/// Given build arguments including an Optimism client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
-    evm_config: EvmConfig,
+    evm_config: &EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
@@ -430,7 +424,7 @@ where
         &mut db,
         &chain_spec,
         attributes.payload_attributes.timestamp,
-        attributes.clone().payload_attributes.withdrawals,
+        attributes.payload_attributes.withdrawals.clone(),
     )?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes

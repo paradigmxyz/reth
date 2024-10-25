@@ -146,8 +146,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
-        // Install the prometheus recorder to be sure to record task
-        // executor's metrics
+        // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
         let runner = CliRunner::default();
