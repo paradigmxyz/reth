@@ -1,6 +1,7 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
+use tracing::trace;
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -93,6 +94,7 @@ where
                     self.current_walker_key_checked = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
+                        trace!(target: "trie::node_iter", ?key, "Returning branch");
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             self.walker.hash().unwrap(),
@@ -113,6 +115,7 @@ where
 
                 // Set the next hashed entry as a leaf node and return
                 self.current_hashed_entry = self.hashed_cursor.next()?;
+                trace!(target: "trie::node_iter", hashed_key, "Returning leaf");
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
