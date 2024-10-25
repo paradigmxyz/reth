@@ -522,6 +522,8 @@ where
         trie: Arc::new(trie_output),
     };
 
+    let no_tx_pool = attributes.no_tx_pool;
+
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
@@ -534,5 +536,12 @@ where
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);
 
-    Ok(BuildOutcome::Better { payload, cached_reads })
+    if no_tx_pool {
+        // if `no_tx_pool` is set only transactions from the payload attributes will be included in
+        // the payload. In other words, the payload is deterministic and we can freeze it once we've
+        // successfully built it.
+        Ok(BuildOutcome::Freeze(payload))
+    } else {
+        Ok(BuildOutcome::Better { payload, cached_reads })
+    }
 }
