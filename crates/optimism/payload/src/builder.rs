@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -14,7 +15,6 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OptimismHardfork;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::BEACON_NONCE,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, Header, Receipt, TxType,

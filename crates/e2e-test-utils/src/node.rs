@@ -18,9 +18,10 @@ use reth::{
     },
 };
 use reth_chainspec::EthereumHardforks;
-use reth_node_builder::{rpc::RethRpcAddOns, NodeTypesWithEngine};
+use reth_node_builder::{rpc::RethRpcAddOns, NodeTypes, NodeTypesWithEngine};
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
+use url::Url;
 
 use crate::{
     engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
@@ -41,7 +42,10 @@ where
     /// Context for testing network functionalities.
     pub network: NetworkTestContext<Node::Network>,
     /// Context for testing the Engine API.
-    pub engine_api: EngineApiTestContext<<Node::Types as NodeTypesWithEngine>::Engine>,
+    pub engine_api: EngineApiTestContext<
+        <Node::Types as NodeTypesWithEngine>::Engine,
+        <Node::Types as NodeTypes>::ChainSpec,
+    >,
     /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
 }
@@ -63,6 +67,7 @@ where
             payload: PayloadTestContext::new(builder).await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
+                chain_spec: node.chain_spec(),
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
                 _marker: PhantomData::<Engine>,
@@ -89,6 +94,7 @@ where
     ) -> eyre::Result<Vec<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>>
     where
         Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        Engine::ExecutionPayloadEnvelopeV4: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
         AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt + FullEthApiTypes,
     {
         let mut chain = Vec::with_capacity(length as usize);
@@ -136,6 +142,8 @@ where
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
         <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
             From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
         let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
@@ -235,5 +243,11 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Returns the RPC URL.
+    pub fn rpc_url(&self) -> Url {
+        let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
+        format!("http://{}", addr).parse().unwrap()
     }
 }

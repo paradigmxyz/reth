@@ -1,6 +1,6 @@
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{logs_bloom, TxType};
+use crate::TxType;
 use alloc::{vec, vec::Vec};
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
@@ -49,7 +49,7 @@ impl Receipt {
     /// Calculates [`Log`]'s bloom filter. this is slow operation and [`ReceiptWithBloom`] can
     /// be used to cache this value.
     pub fn bloom_slow(&self) -> Bloom {
-        logs_bloom(self.logs.iter())
+        alloy_primitives::logs_bloom(self.logs.iter())
     }
 
     /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
