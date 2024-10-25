@@ -1,6 +1,7 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTransactionSidecar};
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::B256;
+use std::sync::Arc;
 
 /// A blobstore implementation that does nothing
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Eq, Default)]
@@ -28,7 +29,7 @@ impl BlobStore for NoopBlobStore {
         BlobStoreCleanupStat::default()
     }
 
-    fn get(&self, _tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get(&self, _tx: B256) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         Ok(None)
     }
 
@@ -39,11 +40,14 @@ impl BlobStore for NoopBlobStore {
     fn get_all(
         &self,
         _txs: Vec<B256>,
-    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         Ok(vec![])
     }
 
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(vec![])
         }
