@@ -39,20 +39,12 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
+#[derive(Clone)]
 pub struct EthFilter<Provider, Pool, Eth: EthApiTypes> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Provider, Pool, RpcTransaction<Eth::NetworkTypes>>>,
     /// Assembles response data w.r.t. network.
     tx_resp_builder: Eth::TransactionCompat,
-}
-
-impl<Provider, Pool, Eth> Clone for EthFilter<Provider, Pool, Eth>
-where
-    Eth: EthApiTypes,
-{
-    fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
-    }
 }
 
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
