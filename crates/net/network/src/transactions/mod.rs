@@ -490,16 +490,14 @@ where
                     .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
 
                 for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated
-                        .0
-                        .entry(hash)
-                        .or_default()
-                        .push(PropagateKind::Hash(*peer_id));
-        
-                        // Update cache if respecting cache
-                        if let CachePolicy::RespectCache = cache_policy {
-                            peer.seen_transactions.insert(hash);
-                        }
+                    propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
+                }
+
+                // Update cache if respecting cache
+                if cache_policy == CachePolicy::RespectCache {
+                    for hash in new_pooled_hashes.iter_hashes().copied() {
+                        peer.seen_transactions.insert(hash);
+                    }
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
@@ -510,20 +508,17 @@ where
 
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
+                // Record propagated full transactions
+                for tx in &new_full_transactions {
+                    propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(*peer_id));
+                }
+
                 // Update cache if respecting cache
-                if let CachePolicy::RespectCache = cache_policy {
+                if cache_policy == CachePolicy::RespectCache {
                     for tx in &new_full_transactions {
                         // mark transaction as seen by peer
                         peer.seen_transactions.insert(tx.hash());
                     }
-                }
-
-                for tx in &new_full_transactions {
-                    propagated
-                        .0
-                        .entry(tx.hash())
-                        .or_default()
-                        .push(PropagateKind::Full(*peer_id));
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
@@ -585,8 +580,10 @@ where
         if let Some(new_pooled_hashes) = pooled {
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
-                // mark transaction as seen by peer 
-                if let CachePolicy::RespectCache = cache_policy {
+            }
+            // mark transaction as seen by peer
+            if cache_policy == CachePolicy::RespectCache {
+                for hash in new_pooled_hashes.iter_hashes().copied() {
                     peer.seen_transactions.insert(hash);
                 }
             }
@@ -598,8 +595,10 @@ where
         if let Some(new_full_transactions) = full {
             for tx in &new_full_transactions {
                 propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
-               // mark transaction as seen by peer 
-                if let CachePolicy::RespectCache = cache_policy {
+            }
+            // mark transaction as seen by peer
+            if cache_policy == CachePolicy::RespectCache {
+                for tx in &new_full_transactions {
                     peer.seen_transactions.insert(tx.hash());
                 }
             }
@@ -616,7 +615,12 @@ where
     /// Propagate the transaction hashes to the given peer
     ///
     /// Note: This will only send the hashes for transactions that exist in the pool.
-    fn propagate_hashes_to(&mut self, hashes: Vec<TxHash>, peer_id: PeerId, cache_policy: CachePolicy,) {
+    fn propagate_hashes_to(
+        &mut self,
+        hashes: Vec<TxHash>,
+        peer_id: PeerId,
+        cache_policy: CachePolicy,
+    ) {
         trace!(target: "net::tx", "Start propagating transactions as hashes");
 
         // This fetches a transactions from the pool, including the blob transactions, which are
@@ -636,17 +640,16 @@ where
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
 
             for tx in to_propagate {
-                match cache_policy{
+                match cache_policy {
                     CachePolicy::IgnoreCache => {
                         hashes.push(&tx);
                     }
-                    CachePolicy::RespectCache =>{
+                    CachePolicy::RespectCache => {
                         if !peer.seen_transactions.contains(&tx.hash()) {
                             hashes.push(&tx);
                         }
                     }
                 }
-                
             }
 
             let new_pooled_hashes = hashes.build();
@@ -656,15 +659,15 @@ where
                 return
             }
 
-            // Update the cache if respecting cache
-            if let CachePolicy::RespectCache = cache_policy {
-                for tx in new_pooled_hashes.iter_hashes().copied() {
-                    peer.seen_transactions.insert(tx);
-                }
-            }
-
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+            }
+
+            // Update the cache if respecting cache
+            if cache_policy == CachePolicy::RespectCache {
+                for hash in new_pooled_hashes.iter_hashes().copied() {
+                    peer.seen_transactions.insert(hash);
+                }
             }
 
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
@@ -948,7 +951,9 @@ where
                 tx.send(peers).ok();
             }
             TransactionsCommand::PropagateTransactionsTo(txs, peer) => {
-                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, peer, CachePolicy::IgnoreCache) {
+                if let Some(propagated) =
+                    self.propagate_full_transactions_to_peer(txs, peer, CachePolicy::IgnoreCache)
+                {
                     self.pool.on_propagated(propagated);
                 }
             }
@@ -2449,7 +2454,8 @@ mod tests {
         let eip4844_tx = Arc::new(factory.create_eip4844());
         propagate.push(PropagateTransaction::new(eip4844_tx.clone()));
 
-        let propagated = tx_manager.propagate_transactions(propagate.clone(), CachePolicy::RespectCache);
+        let propagated =
+            tx_manager.propagate_transactions(propagate.clone(), CachePolicy::RespectCache);
         assert_eq!(propagated.0.len(), 2);
         let prop_txs = propagated.0.get(eip1559_tx.transaction.hash()).unwrap();
         assert_eq!(prop_txs.len(), 1);
