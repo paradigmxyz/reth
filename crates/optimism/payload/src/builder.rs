@@ -534,5 +534,9 @@ where
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);
 
-    Ok(BuildOutcome::Better { payload, cached_reads })
+    if attributes.no_tx_pool {
+        Ok(BuildOutcome::Freeze(payload))
+    } else {
+        Ok(BuildOutcome::Better { payload, cached_reads })
+    }
 }
