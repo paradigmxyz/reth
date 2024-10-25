@@ -8,6 +8,7 @@ use reth_provider::{
     AccountReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory, WithdrawalsProvider,
 };
 use reth_rpc_api::BlockSubmissionValidationApiServer;
+use reth_rpc_server_types::result::internal_rpc_err;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -55,14 +56,14 @@ where
         &self,
         _request: BuilderBlockValidationRequest,
     ) -> RpcResult<()> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn validate_builder_submission_v2(
         &self,
         _request: BuilderBlockValidationRequestV2,
     ) -> RpcResult<()> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Validates a block submitted to the relay
@@ -70,7 +71,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
-        warn!("validate_builder_submission_v3: blindly accepting {:?}", request);
+        warn!("flashbots_validateBuilderSubmissionV3: blindly accepting request without validation {:?}", request);
         Ok(())
     }
 }
