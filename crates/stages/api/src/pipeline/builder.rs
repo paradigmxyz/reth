@@ -63,7 +63,7 @@ impl<Provider> PipelineBuilder<Provider> {
         self
     }
 
-    /// Set the metric events sender.
+    /// Set whether pipeline should fail on unwind.
     pub const fn with_fail_on_unwind(mut self, yes: bool) -> Self {
         self.fail_on_unwind = yes;
         self
