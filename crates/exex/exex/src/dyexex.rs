@@ -69,8 +69,16 @@ impl DyExExLoader {
     }
 
     /// Loads a dynamically loaded ExEx from a given path.
+    ///
+    /// # Safety
+    ///
+    /// The dynamically loaded ExEx library **must** contains a function with
+    /// name [`LAUNCH_EXEX_FN`].
+    /// Otherwise, behavior is undefined.
+    /// See also [`Library::get`] for more information on what
+    /// restrictions apply to [`LAUNCH_EXEX_FN`].
     #[allow(clippy::type_complexity)]
-    pub fn load(&mut self, path: impl AsRef<Path>, ctx: ExExContextDyn) -> Result<()> {
+    pub unsafe fn load(&mut self, path: impl AsRef<Path>, ctx: ExExContextDyn) -> Result<()> {
         let path = path.as_ref();
 
         // Dynamically loaded ExEx id it's a filename with stripped [`DLL_PREFIX`] and
@@ -93,7 +101,7 @@ impl DyExExLoader {
                 )
             })?;
 
-        let lib = unsafe { Library::new(path) }?;
+        let lib = Library::new(path)?;
         let symbol: Symbol<
             '_,
             unsafe fn(
@@ -101,14 +109,14 @@ impl DyExExLoader {
             )
                 -> *mut (dyn Future<Output = dyn Future<Output = eyre::Result<()>> + Send>
                  + Send),
-        > = unsafe { lib.get(LAUNCH_EXEX_FN)? };
+        > = lib.get(LAUNCH_EXEX_FN)?;
 
-        let raw_func_pointer = unsafe { symbol(ctx) };
+        let raw_func_pointer = symbol(ctx);
         if raw_func_pointer.is_null() {
             return Err(eyre::eyre!("Failed to load future from dynamic library"));
         }
 
-        let exex_fut = unsafe { Pin::new_unchecked(Box::from_raw(raw_func_pointer)) };
+        let exex_fut = Pin::new_unchecked(Box::from_raw(raw_func_pointer));
         self.loaded.push(LoadedExEx { id: name.to_owned(), lib: Arc::new(lib), exex_fut });
 
         Ok(())
