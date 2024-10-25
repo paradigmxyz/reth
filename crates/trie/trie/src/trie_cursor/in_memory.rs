@@ -203,6 +203,11 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
         key: Nibbles,
         exact: bool,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        trace!(
+            target: "trie::trie_cursor::in_memory_storage",
+            hashed_address = %self.hashed_address, ?key, last = ?self.last_key, entries = ?self.in_memory_cursor,
+            "Seeking inner"
+        );
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
         if self.storage_trie_cleared ||
             (exact && in_memory.as_ref().map_or(false, |entry| entry.0 == key))
