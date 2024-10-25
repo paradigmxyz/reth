@@ -12,10 +12,7 @@ mod tests {
         updates::TrieUpdates,
         walker::TrieWalker,
     };
-
-    use reth_trie_db::{
-        DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
-    };
+    use reth_trie_db::DatabaseTrieCursorFactory;
     use std::sync::Arc;
 
     #[test]
@@ -41,13 +38,6 @@ mod tests {
         // Test account trie walker
         let trie_updates = TrieUpdates::default();
         let trie_nodes_sorted = Arc::new(trie_updates.into_sorted());
-
-        let db_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
-        // Verify that DatabaseTrieCursorFactory implements TrieCursorFactory
-        let _: &dyn TrieCursorFactory<
-            AccountTrieCursor = DatabaseAccountTrieCursor<_>,
-            StorageTrieCursor = DatabaseStorageTrieCursor<_>,
-        > = &db_cursor_factory;
 
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(&tx), &trie_nodes_sorted);
