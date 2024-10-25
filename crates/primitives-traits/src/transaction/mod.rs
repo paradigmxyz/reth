@@ -10,7 +10,7 @@ pub mod signed;
 
 #[allow(dead_code)]
 /// Inner trait for a raw transaction.
-trait TransactionInner<T>:
+pub trait Transaction<T>:
     Debug
     + Default
     + Clone
@@ -18,7 +18,6 @@ trait TransactionInner<T>:
     + PartialEq
     + Encodable
     + Hash
-    + Compact
     + Serialize
     + for<'de> Deserialize<'de>
     + From<T>
@@ -50,10 +49,17 @@ trait TransactionInner<T>:
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[cfg(feature = "arbitrary")]
-pub trait Transaction<T>: TransactionInner<T> + for<'b> arbitrary::Arbitrary<'b> {}
+pub trait FullTransaction<T>: Transaction<T> + Compact + for<'b> arbitrary::Arbitrary<'b> {}
+
+#[cfg(feature = "arbitrary")]
+impl<T> FullTransaction<T> for T where T: Transaction<T> + Compact + for<'b> arbitrary::Arbitrary<'b>
+{}
 
 /// Trait that defines methods of a raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[cfg(not(feature = "arbitrary"))]
-pub trait Transaction<T>: TransactionInner<T> {}
+pub trait FullTransaction<T>: Transaction<T> + Compact {}
+
+#[cfg(not(feature = "arbitrary"))]
+impl<T> FullTransaction<T> for T where T: Transaction<T> + Compact {}

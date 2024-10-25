@@ -26,7 +26,7 @@ pub use receipt::Receipt;
 
 /// Transaction traits
 pub mod transaction;
-pub use transaction::{signed::SignedTransaction, Transaction};
+pub use transaction::{signed::SignedTransaction, FullTransaction, Transaction};
 
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
