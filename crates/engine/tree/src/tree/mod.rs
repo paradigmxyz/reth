@@ -2194,6 +2194,8 @@ where
             return Err(err.into())
         }
 
+        self.invalid_block_hook.on_invalid_block(&parent_block, &block.seal_slow(), &output, None);
+
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
