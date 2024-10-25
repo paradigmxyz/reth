@@ -9,42 +9,8 @@ pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
-/// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
-
-/// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
-pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
-
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
-
-/// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-pub const OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u128 = 50;
-
-/// Base fee max change denominator for Optimism Mainnet as defined in the Optimism Canyon
-/// hardfork.
-pub const OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u128 = 250;
-
-/// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-pub const OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 6;
-
-/// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-pub const OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u128 = 50;
-
-/// Base fee max change denominator for Optimism Sepolia as defined in the Optimism Canyon
-/// hardfork.
-pub const OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u128 = 250;
-
-/// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 6;
-
-/// Base fee max change denominator for Base Sepolia as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-pub const BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
 
 /// Holesky genesis hash: `0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4`
 pub const HOLESKY_GENESIS_HASH: B256 =

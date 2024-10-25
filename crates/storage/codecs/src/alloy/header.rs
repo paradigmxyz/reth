@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyHeader`]
+
 use crate::Compact;
 use alloy_consensus::Header as AlloyHeader;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
@@ -10,7 +12,11 @@ use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
 /// will automatically apply to this type.
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::Header`]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(serde::Serialize, serde::Deserialize, arbitrary::Arbitrary)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
 pub(crate) struct Header {
     parent_hash: B256,
@@ -42,7 +48,11 @@ pub(crate) struct Header {
 /// used as a field of [`Header`] for backwards compatibility.
 ///
 /// More information: <https://github.com/paradigmxyz/reth/issues/7820> & [`reth_codecs_derive::Compact`].
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(serde::Serialize, serde::Deserialize, arbitrary::Arbitrary)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
 pub(crate) struct HeaderExt {
     requests_hash: Option<B256>,
