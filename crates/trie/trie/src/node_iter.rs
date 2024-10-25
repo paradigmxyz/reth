@@ -94,7 +94,9 @@ where
                     self.current_walker_key_checked = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
-                        trace!(target: "trie::node_iter", ?key, "Returning branch");
+                        let hash = self.walker.hash().unwrap();
+                        let children_are_in_trie = self.walker.children_are_in_trie();
+                        trace!(target: "trie::node_iter", ?key, %hash, children_are_in_trie, walker_stack = ?self.walker.stack, "Returning branch");
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             self.walker.hash().unwrap(),
