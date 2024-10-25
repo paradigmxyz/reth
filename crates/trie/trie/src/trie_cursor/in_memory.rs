@@ -252,7 +252,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key.clone(), true)?;
-        trace!(target: "trie::trie_cursor::in_memory_storage", ?key, last = ?self.last_key, next = ?entry, "Returning seek_exact");
+        trace!(target: "trie::trie_cursor::in_memory_storage", hashed_address = %self.hashed_address, ?key, last = ?self.last_key, next = ?entry, "Returning seek_exact");
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
@@ -262,7 +262,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key.clone(), false)?;
-        trace!(target: "trie::trie_cursor::in_memory_storage", ?key, last = ?self.last_key, next = ?entry, "Returning seek");
+        trace!(target: "trie::trie_cursor::in_memory_storage", hashed_address = %self.hashed_address, ?key, last = ?self.last_key, next = ?entry, "Returning seek");
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
@@ -278,7 +278,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
             // no previous entry was found
             None => None,
         };
-        trace!(target: "trie::trie_cursor::in_memory_storage", ?last, ?next, "Returning next");
+        trace!(target: "trie::trie_cursor::in_memory_storage", hashed_address = %self.hashed_address, ?last, ?next, "Returning next");
         Ok(next)
     }
 
@@ -287,7 +287,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
             Some(key) => Some(key.clone()),
             None => self.cursor.current()?,
         };
-        trace!(target: "trie::trie_cursor::in_memory_storage", last = ?self.last_key, ?current, "Returning current");
+        trace!(target: "trie::trie_cursor::in_memory_storage", hashed_address = %self.hashed_address, last = ?self.last_key, ?current, "Returning current");
         Ok(current)
     }
 }
