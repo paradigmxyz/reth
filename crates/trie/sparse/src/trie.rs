@@ -657,7 +657,7 @@ impl RevealedSparseTrie {
                     if level >= depth {
                         targets.send(path).unwrap();
                     } else {
-                        for bit in CHILD_INDEX_RANGE {
+                        for bit in CHILD_INDEX_RANGE.rev() {
                             if state_mask.is_bit_set(bit) {
                                 let mut child_path = path.clone();
                                 child_path.push_unchecked(bit);
