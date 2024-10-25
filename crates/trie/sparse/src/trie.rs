@@ -12,7 +12,11 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{fmt, sync::mpsc::SyncSender};
+use std::{
+    fmt,
+    sync::{atomic::AtomicUsize, mpsc::SyncSender},
+    time::Instant,
+};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -569,14 +573,23 @@ impl RevealedSparseTrie {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
+        let start = Instant::now();
         let targets = rayon::scope(|s| {
             let (targets_tx, targets_rx) = std::sync::mpsc::sync_channel(self.nodes.len());
             s.spawn(|_| self.get_nodes_at_depth(depth, targets_tx));
 
             targets_rx
-        });
+        })
+        // TODO(alexey): comment these to collect targets in parallel with hashing
+        .into_iter()
+        .collect::<Vec<_>>();
+        let duration = start.elapsed();
+
+        debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, targets = ?targets.len(), "Collected node targets");
 
         let prefix_set = self.prefix_set.clone().freeze();
+
+        let start = Instant::now();
         let updates: SparseNodeHashUpdates = targets
             .into_iter()
             .par_bridge()
@@ -605,8 +618,9 @@ impl RevealedSparseTrie {
             )
             .flatten()
             .collect();
+        let duration = start.elapsed();
 
-        debug!(target: "trie::sparse", nodes = ?self.nodes.len(), ?depth, updates = ?updates.len(), "Collected hash updates");
+        debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, updates = ?updates.len(), "Collected hash updates");
 
         self.apply_hash_updates(updates);
     }
