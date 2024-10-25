@@ -627,10 +627,14 @@ impl RevealedSparseTrie {
             drop(updates_tx);
 
             for target in targets_rx {
-                let worker_idx = usize::try_from(
-                    U256::from_be_slice(target.pack().as_slice()) / CHUNK_SIZE.with_borrow(|c| *c),
-                )
-                .unwrap();
+                let packed = &target.pack()[..];
+
+                // right-pad with zeros to 32 bytes
+                let mut key = [0u8; 32];
+                key[..packed.len()].copy_from_slice(packed);
+                let worker_idx =
+                    usize::try_from(U256::from_be_bytes(key) / CHUNK_SIZE.with_borrow(|c| *c))
+                        .unwrap();
 
                 workers[worker_idx].send(target).unwrap();
             }
