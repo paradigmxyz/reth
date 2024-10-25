@@ -7189,14 +7189,17 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
  "futures",
+ "itertools 0.13.0",
  "metrics",
  "moka",
+ "rayon",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",

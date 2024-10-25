@@ -38,12 +38,14 @@ reth-trie-parallel.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
 
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 thiserror.workspace = true
 moka = { workspace = true, features = ["sync"] }
+rayon.workspace = true
 
 # metrics
 metrics.workspace = true
@@ -77,6 +79,8 @@ reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 
 assert_matches.workspace = true
+
+itertools.workspace = true
 
 [features]
 test-utils = [

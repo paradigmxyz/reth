@@ -4,15 +4,18 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_consensus::transaction::Transaction;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    BlockNumber, B256, U256,
+    Address, BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
+use cached_state::{CachedStateMetrics, CachedStateProvider};
+use moka::sync::Cache;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -28,7 +31,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -36,9 +39,9 @@ use reth_primitives::{
     Block, GotExpected, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    providers::ConsistentDbView, AccountReader, BlockReader, DatabaseProviderFactory,
+    ExecutionOutcome, ProviderError, StateProvider, StateProviderBox, StateProviderFactory,
+    StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -46,7 +49,11 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     cmp::Ordering,
-    collections::{btree_map, hash_map, BTreeMap, VecDeque},
+    collections::{
+        btree_map,
+        hash_map::{self, Entry},
+        BTreeMap, VecDeque,
+    },
     fmt::Debug,
     ops::Bound,
     sync::{
@@ -2177,13 +2184,114 @@ where
             return Err(e.into())
         }
 
+        let code_cache = Cache::new(1000000);
+        let storage_cache = Cache::new(1000000);
+        let account_cache = Cache::new(1000000);
+        let metrics = CachedStateMetrics::default();
+
         trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let cached_state_provider = CachedStateProvider::new(
+            &state_provider,
+            code_cache.clone(),
+            storage_cache.clone(),
+            account_cache.clone(),
+            metrics.clone(),
+        );
+        let executor =
+            self.executor_provider.executor(StateProviderDatabase::new(&cached_state_provider));
 
         let block_number = block.number;
         let block_hash = block.hash();
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
+
+        info!(target: "engine::tree", "Starting account, code, storage prewarm");
+        let txs_with_senders: Vec<_> = block.transactions_with_sender().collect();
+
+        // accumulate all senders and access lists for an explicit warm, that does not execute.
+        let cloned_code_cache = code_cache.clone();
+        let cloned_storage_cache = storage_cache.clone();
+        let cloned_account_cache = account_cache.clone();
+        let cloned_metrics = metrics.clone();
+        let shared_state_provider = self.state_provider(block.parent_hash)?.unwrap();
+        let to_addrs = txs_with_senders.iter().filter_map(|item| item.1.to());
+        let senders: Vec<_> = txs_with_senders.iter().map(|item| *item.0).chain(to_addrs).collect();
+        rayon::spawn(move || {
+            let cached_state_provider = CachedStateProvider::new(
+                shared_state_provider,
+                cloned_code_cache,
+                cloned_storage_cache,
+                cloned_account_cache,
+                cloned_metrics,
+            );
+
+            for sender in senders {
+                // let's try to get all the storage for all the sender and destination accounts
+                // this won't actually get anything but it will try, and maybe populate some pages
+                let _ = cached_state_provider.storage(sender, B256::ZERO);
+
+                let Ok(Some(account)) = cached_state_provider.basic_account(sender) else {
+                    // nothing to do
+                    continue
+                };
+
+                if let Some(code_hash) = account.bytecode_hash {
+                    let _ = cached_state_provider.bytecode_by_hash(code_hash);
+                }
+            }
+        });
+
+        info!(target: "engine::tree", "Starting to spawn tx parallel threads");
+        // Execute all transactions in parallel and discard the result
+        let mut sender_nonce_map = HashMap::<Address, u64>::default();
+        for (idx, (sender, tx)) in txs_with_senders.into_iter().enumerate() {
+            let state_provider = self.state_provider(block.parent_hash)?.unwrap();
+            let mut tx = tx.clone();
+            // TODO: group txs by same sender with consecutive nonce
+            let executor_provider = self.executor_provider.clone();
+
+            let cloned_code_cache = code_cache.clone();
+            let cloned_storage_cache = storage_cache.clone();
+            let cloned_account_cache = account_cache.clone();
+            let cloned_metrics = metrics.clone();
+
+            // modify the block to contain only
+            let mut modified_block = block.clone();
+
+            // set the nonce to the earliest sender in the block
+            let earliest_sender_nonce = match sender_nonce_map.entry(*sender) {
+                Entry::Vacant(vacant) => {
+                    vacant.insert(tx.nonce());
+                    tx.nonce()
+                }
+                Entry::Occupied(occupied) => *occupied.get(),
+            };
+
+            // modified_block.body.transactions = txs;
+            // debug!(target: "engine::tree", old_nonce=?tx.nonce(), tx_idx=?idx, ?sender,
+            // ?earliest_sender_nonce, "Setting nonce");
+            tx.transaction.set_nonce(earliest_sender_nonce);
+            modified_block.body.transactions = vec![tx];
+            modified_block.senders = vec![*sender];
+
+            // use rayon to avoid stack alloc overhead by using the rayon global threadpool
+            rayon::spawn(move || {
+                let cached_state_provider = CachedStateProvider::new(
+                    state_provider,
+                    cloned_code_cache,
+                    cloned_storage_cache,
+                    cloned_account_cache,
+                    cloned_metrics,
+                );
+                let executor =
+                    executor_provider.executor(StateProviderDatabase::new(&cached_state_provider));
+                if let Err(err) = executor.execute((&modified_block, U256::MAX).into()) {
+                    error!(target: "engine::tree", ?err, tx_idx=?idx, "Execution thread returned an error");
+                }
+            });
+        }
+
+        info!(target: "engine::tree", "Finished spawning tx parallel threads");
 
         let exec_time = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, (&block, U256::MAX).into())?;
