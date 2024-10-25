@@ -569,40 +569,44 @@ impl RevealedSparseTrie {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
-        let updates = rayon::scope(|s| {
-            let prefix_set = self.prefix_set.clone().freeze();
+        let targets = rayon::scope(|s| {
             let (targets_tx, targets_rx) = std::sync::mpsc::sync_channel(self.nodes.len());
             s.spawn(|_| self.get_nodes_at_depth(depth, targets_tx));
 
             targets_rx
-                .into_iter()
-                .par_bridge()
-                .map_with(
-                    {
-                        // Reusable branch child path
-                        let branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-                        // Reusable branch value stack
-                        let branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
-                        // Reusable RLP buffer
-                        let rlp_buf = Vec::with_capacity(128);
-
-                        (branch_child_buf, branch_value_stack_buf, rlp_buf)
-                    },
-                    |(branch_child_buf, branch_value_stack_buf, rlp_buf), target| {
-                        // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
-                        let (_, updates) = self.rlp_node(
-                            target,
-                            prefix_set.clone(),
-                            branch_child_buf,
-                            branch_value_stack_buf,
-                            rlp_buf,
-                        );
-                        updates
-                    },
-                )
-                .flatten()
-                .collect()
         });
+
+        let prefix_set = self.prefix_set.clone().freeze();
+        let updates: SparseNodeHashUpdates = targets
+            .into_iter()
+            .par_bridge()
+            .map_with(
+                {
+                    // Reusable branch child path
+                    let branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
+                    // Reusable branch value stack
+                    let branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+                    // Reusable RLP buffer
+                    let rlp_buf = Vec::with_capacity(128);
+
+                    (branch_child_buf, branch_value_stack_buf, rlp_buf)
+                },
+                |(branch_child_buf, branch_value_stack_buf, rlp_buf), target| {
+                    // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
+                    let (_, updates) = self.rlp_node(
+                        target,
+                        prefix_set.clone(),
+                        branch_child_buf,
+                        branch_value_stack_buf,
+                        rlp_buf,
+                    );
+                    updates
+                },
+            )
+            .flatten()
+            .collect();
+
+        debug!(target: "trie::sparse", nodes = ?self.nodes.len(), ?depth, updates = ?updates.len(), "Collected hash updates");
 
         self.apply_hash_updates(updates);
     }
