@@ -15,7 +15,7 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
-    for size in [1_000, 5_000, 10_000, 100_000] {
+    for size in [1_000, 10_000, 100_000] {
         let mut runner = TestRunner::new(ProptestConfig::default());
         let state = proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
             .new_tree(&mut runner)
@@ -31,26 +31,33 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
         }
         sparse.root();
 
-        // Update 10% of the leaves, that will add them to the prefix set
-        for key in state.keys().choose_multiple(&mut rng, size / 10) {
-            sparse
-                .update_leaf(
-                    Nibbles::unpack(key),
-                    alloy_rlp::encode_fixed_size(&rng.gen::<U256>()).to_vec(),
-                )
-                .unwrap();
-        }
+        for updated_leaves in [0.1, 1.0, 10.0] {
+            for key in state
+                .keys()
+                .choose_multiple(&mut rng, (size as f64 * (updated_leaves / 100.0)) as usize)
+            {
+                sparse
+                    .update_leaf(
+                        Nibbles::unpack(key),
+                        alloy_rlp::encode_fixed_size(&rng.gen::<U256>()).to_vec(),
+                    )
+                    .unwrap();
+            }
 
-        // Calculate the maximum depth of the trie for the given number of leaves
-        let max_depth = (size as f64).log(16.0).ceil() as usize;
+            // Calculate the maximum depth of the trie for the given number of leaves
+            let max_depth = (size as f64).log(16.0).ceil() as usize;
 
-        for depth in 0..=max_depth {
-            group.bench_function(format!("size {size} | depth {depth}"), |b| {
-                b.iter_with_setup(
-                    || sparse.clone(),
-                    |mut sparse| sparse.update_rlp_node_level(depth),
-                )
-            });
+            for depth in 0..=max_depth {
+                group.bench_function(
+                    format!("size {size} | updated {updated_leaves}% | depth {depth}"),
+                    |b| {
+                        b.iter_with_setup(
+                            || sparse.clone(),
+                            |mut sparse| sparse.update_rlp_node_level(depth),
+                        )
+                    },
+                );
+            }
         }
     }
 }
