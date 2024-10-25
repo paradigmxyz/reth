@@ -7,6 +7,7 @@ use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 use std::collections::HashSet;
+use tracing::*;
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -250,7 +251,8 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, true)?;
+        let entry = self.seek_inner(key.clone(), true)?;
+        trace!(target: "trie::trie_cursor::in_memory_storage", ?key, last = ?self.last_key, next = ?entry, "Returning seek_exact");
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
@@ -259,12 +261,14 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, false)?;
+        let entry = self.seek_inner(key.clone(), false)?;
+        trace!(target: "trie::trie_cursor::in_memory_storage", ?key, last = ?self.last_key, next = ?entry, "Returning seek");
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let last = self.last_key.clone();
         let next = match &self.last_key {
             Some(last) => {
                 let entry = self.next_inner(last.clone())?;
@@ -274,14 +278,17 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
             // no previous entry was found
             None => None,
         };
+        trace!(target: "trie::trie_cursor::in_memory_storage", ?last, ?next, "Returning next");
         Ok(next)
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        match &self.last_key {
-            Some(key) => Ok(Some(key.clone())),
-            None => self.cursor.current(),
-        }
+        let current = match &self.last_key {
+            Some(key) => Some(key.clone()),
+            None => self.cursor.current()?,
+        };
+        trace!(target: "trie::trie_cursor::in_memory_storage", last = ?self.last_key, ?current, "Returning current");
+        Ok(current)
     }
 }
 
