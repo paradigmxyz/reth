@@ -9,6 +9,7 @@ use reth_provider::{
 };
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use std::sync::Arc;
+use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
 pub struct ValidationApi<Provider> {
@@ -69,6 +70,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
+        warn!("validate_builder_submission_v3: blindly accepting {:?}", request);
         Ok(())
     }
 }
