@@ -79,6 +79,7 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
+mod cached_state;
 pub mod config;
 mod invalid_block_hook;
 mod metrics;
