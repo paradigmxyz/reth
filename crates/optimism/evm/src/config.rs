@@ -12,7 +12,9 @@ pub fn revm_spec_by_timestamp_after_bedrock(
     chain_spec: &OpChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
-    if chain_spec.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp) {
+    if chain_spec.fork(OptimismHardfork::Holocene).active_at_timestamp(timestamp) {
+        revm_primitives::HOLOCENE
+    } else if chain_spec.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp) {
         revm_primitives::GRANITE
     } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_timestamp(timestamp) {
         revm_primitives::FJORD
@@ -29,7 +31,9 @@ pub fn revm_spec_by_timestamp_after_bedrock(
 
 /// Map the latest active hardfork at the given block to a revm [`SpecId`](revm_primitives::SpecId).
 pub fn revm_spec(chain_spec: &OpChainSpec, block: &Head) -> revm_primitives::SpecId {
-    if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
+    if chain_spec.fork(OptimismHardfork::Holocene).active_at_head(block) {
+        revm_primitives::HOLOCENE
+    } else if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
         revm_primitives::GRANITE
     } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(block) {
         revm_primitives::FJORD

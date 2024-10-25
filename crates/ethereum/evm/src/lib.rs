@@ -20,7 +20,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes, NextCfgError};
 use reth_primitives::{transaction::FillTxEnv, Header, TransactionSigned};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
@@ -131,7 +131,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -179,7 +179,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+        Ok((CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env))
     }
 }
 
