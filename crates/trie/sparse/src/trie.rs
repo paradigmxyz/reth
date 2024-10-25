@@ -569,7 +569,11 @@ impl RevealedSparseTrie {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
+        let prefix_set = self.prefix_set.clone().freeze();
+
+        let start = Instant::now();
         let updates = rayon::scope(|s| {
+            // Collect targets in parallel
             let (targets_tx, targets_rx) = sync_channel(self.nodes.len());
             s.spawn(|_| {
                 let targets_tx = targets_tx;
@@ -577,11 +581,15 @@ impl RevealedSparseTrie {
                     targets_tx.send(target).unwrap();
                 }
             });
-            let prefix_set = self.prefix_set.clone().freeze();
 
-            let start = Instant::now();
+            // Calculate updated hashes in parallel
             let (updates_tx, updates_rx) = sync_channel(self.nodes.len());
-            for chunk in &targets_rx.into_iter().chunks(16usize.pow(depth as u32)) {
+            for chunk in &targets_rx
+                .into_iter()
+                // Chunk size is determined by the estimated number of targets divied by the number
+                // of threads. It will get us close to all targets split equally into all threads.
+                .chunks(16usize.pow(depth as u32).div_ceil(rayon::current_num_threads()).min(1))
+            {
                 let chunk = chunk.collect::<Vec<_>>();
                 let updates_tx = updates_tx.clone();
                 // Prefix set clones are cheap, because the paths inside it are `Arc`ed.
@@ -610,13 +618,14 @@ impl RevealedSparseTrie {
                     }
                 });
             }
+            // Drop the original sender manually, so that the receiver is dropped after the last
+            // chunk is finished processing.
             drop(updates_tx);
-            let updates = updates_rx.into_iter().flatten().collect::<Vec<_>>();
-            let duration = start.elapsed();
-            debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, updates = ?updates.len(), "Collected hash updates");
 
-            updates
+            updates_rx.into_iter().flatten().collect::<Vec<_>>()
         });
+        let duration = start.elapsed();
+        debug!(target: "trie::sparse", ?duration, nodes = ?self.nodes.len(), ?depth, updates = ?updates.len(), "Collected hash updates");
 
         self.apply_hash_updates(updates);
     }
