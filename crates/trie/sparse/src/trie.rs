@@ -618,7 +618,7 @@ impl RevealedSparseTrie {
 
     fn rlp_node(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         // stack of paths we need rlp nodes for
-        let mut path_stack = Vec::from([path]);
+        let mut path_stack = Vec::from([(path, false)]);
         // stack of rlp nodes
         let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
         // reusable branch child path
@@ -626,7 +626,7 @@ impl RevealedSparseTrie {
         // reusable branch value stack
         let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
 
-        'main: while let Some(path) = path_stack.pop() {
+        'main: while let Some((path, is_in_prefix_set)) = path_stack.pop() {
             let rlp_node = match self.nodes.get_mut(&path).unwrap() {
                 SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
                 SparseNode::Hash(hash) => RlpNode::word_rlp(hash),
@@ -646,7 +646,9 @@ impl RevealedSparseTrie {
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) =
+                        hash.filter(|_| !is_in_prefix_set && !prefix_set.contains(&path))
+                    {
                         RlpNode::word_rlp(&hash)
                     } else if rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
                         let (_, child) = rlp_node_stack.pop().unwrap();
@@ -655,12 +657,15 @@ impl RevealedSparseTrie {
                         *hash = rlp_node.as_hash();
                         rlp_node
                     } else {
-                        path_stack.extend([path, child_path]); // need to get rlp node for child first
+                        // need to get rlp node for child first
+                        path_stack.extend([(path, true), (child_path, false)]);
                         continue
                     }
                 }
                 SparseNode::Branch { state_mask, hash } => {
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) =
+                        hash.filter(|_| !is_in_prefix_set && !prefix_set.contains(&path))
+                    {
                         rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
@@ -681,8 +686,8 @@ impl RevealedSparseTrie {
                             branch_value_stack_buf.push(child);
                         } else {
                             debug_assert!(branch_value_stack_buf.is_empty());
-                            path_stack.push(path);
-                            path_stack.extend(branch_child_buf.drain(..));
+                            path_stack.push((path, true));
+                            path_stack.extend(branch_child_buf.drain(..).map(|p| (p, false)));
                             continue 'main
                         }
                     }
