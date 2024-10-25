@@ -256,4 +256,50 @@ mod tests {
         assert_eq!(decoded, bytecode);
         assert!(remainder.is_empty());
     }
+
+    #[test]
+    fn test_account_has_bytecode() {
+        // Account with no bytecode (None)
+        let acc_no_bytecode = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+        assert!(!acc_no_bytecode.has_bytecode(), "Account should not have bytecode");
+
+        // Account with bytecode hash set to KECCAK_EMPTY (should have bytecode)
+        let acc_empty_bytecode =
+            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: Some(KECCAK_EMPTY) };
+        assert!(acc_empty_bytecode.has_bytecode(), "Account should have bytecode");
+
+        // Account with a non-empty bytecode hash
+        let acc_with_bytecode = Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: Some(B256::from_slice(&[0x11u8; 32])),
+        };
+        assert!(acc_with_bytecode.has_bytecode(), "Account should have bytecode");
+    }
+
+    #[test]
+    fn test_account_get_bytecode_hash() {
+        // Account with no bytecode (should return KECCAK_EMPTY)
+        let acc_no_bytecode = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
+        assert_eq!(acc_no_bytecode.get_bytecode_hash(), KECCAK_EMPTY, "Should return KECCAK_EMPTY");
+
+        // Account with bytecode hash set to KECCAK_EMPTY
+        let acc_empty_bytecode =
+            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: Some(KECCAK_EMPTY) };
+        assert_eq!(
+            acc_empty_bytecode.get_bytecode_hash(),
+            KECCAK_EMPTY,
+            "Should return KECCAK_EMPTY"
+        );
+
+        // Account with a valid bytecode hash
+        let bytecode_hash = B256::from_slice(&[0x11u8; 32]);
+        let acc_with_bytecode =
+            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: Some(bytecode_hash) };
+        assert_eq!(
+            acc_with_bytecode.get_bytecode_hash(),
+            bytecode_hash,
+            "Should return the bytecode hash"
+        );
+    }
 }
