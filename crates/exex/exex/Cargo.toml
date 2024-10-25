@@ -82,7 +82,3 @@ serde = [
     "rand/serde",
     "secp256k1/serde",
 ]
-
-[[test]]
-name = "load_dyexex"
-path = "tests/load_dyexex.rs"
