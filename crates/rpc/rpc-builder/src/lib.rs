@@ -1199,9 +1199,12 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
-                        RethRpcModule::Txpool => {
-                            TxPoolApi::<_, EthApi>::new(self.pool.clone()).into_rpc().into()
-                        }
+                        RethRpcModule::Txpool => TxPoolApi::new(
+                            self.pool.clone(),
+                            self.eth.api.tx_resp_builder().clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces
                                 .iter()

@@ -1090,4 +1090,13 @@ mod tests {
         let block = block.seal_slow();
         assert_eq!(sealed, block.hash());
     }
+
+    #[test]
+    fn empty_block_rlp() {
+        let body = BlockBody::default();
+        let mut buf = Vec::new();
+        body.encode(&mut buf);
+        let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
+        assert_eq!(body, decoded);
+    }
 }

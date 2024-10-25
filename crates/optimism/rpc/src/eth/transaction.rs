@@ -6,7 +6,7 @@ use alloy_rpc_types::TransactionInfo;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -88,21 +88,33 @@ where
     }
 }
 
-/// Builds OP transaction response type.
-#[derive(Clone, Debug, Copy)]
-pub struct OpTxBuilder;
-
-impl TransactionCompat for OpTxBuilder {
+impl<N> TransactionCompat for OpEthApi<N>
+where
+    N: FullNodeComponents,
+{
     type Transaction = Transaction;
 
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        tx_info: TransactionInfo,
+    ) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
+        let hash = tx.hash;
 
-        let mut inner = EthTxBuilder::fill(tx, tx_info).inner;
+        let mut inner = EthTxBuilder.fill(tx, tx_info).inner;
 
         if signed_tx.is_deposit() {
             inner.gas_price = Some(signed_tx.max_fee_per_gas())
         }
+
+        let deposit_receipt_version = self
+            .inner
+            .provider()
+            .receipt_by_hash(hash)
+            .ok() // todo: change sig to return result
+            .flatten()
+            .and_then(|receipt| receipt.deposit_receipt_version);
 
         Transaction {
             inner,
@@ -111,7 +123,7 @@ impl TransactionCompat for OpTxBuilder {
             // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
             is_system_tx: (signed_tx.is_deposit() && signed_tx.is_system_transaction())
                 .then_some(true),
-            deposit_receipt_version: None, // todo: how to fill this field?
+            deposit_receipt_version,
         }
     }
 
