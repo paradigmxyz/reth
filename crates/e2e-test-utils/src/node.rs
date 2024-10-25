@@ -59,12 +59,15 @@ where
     AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
-    pub async fn new(node: FullNode<Node, AddOns>) -> eyre::Result<Self> {
+    pub async fn new(
+        node: FullNode<Node, AddOns>,
+        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
+    ) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
 
         Ok(Self {
             inner: node.clone(),
-            payload: PayloadTestContext::new(builder).await?,
+            payload: PayloadTestContext::new(builder, attributes_generator).await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
                 chain_spec: node.chain_spec(),
@@ -90,7 +93,6 @@ where
         &mut self,
         length: u64,
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
-        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + Copy,
     ) -> eyre::Result<Vec<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>>
     where
         Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
@@ -101,7 +103,7 @@ where
         for i in 0..length {
             let raw_tx = tx_generator(i).await;
             let tx_hash = self.rpc.inject_tx(raw_tx).await?;
-            let (payload, eth_attr) = self.advance_block(vec![], attributes_generator).await?;
+            let (payload, eth_attr) = self.advance_block().await?;
             let block_hash = payload.block().hash();
             let block_number = payload.block().number;
             self.assert_new_block(tx_hash, block_hash, block_number).await?;
@@ -116,14 +118,13 @@ where
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(
         &mut self,
-        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
         <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
             From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
         // trigger new payload building draining the pool
-        let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
+        let eth_attr = self.payload.new_payload().await.unwrap();
         // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;
         // wait for the payload builder to have finished building
@@ -137,8 +138,6 @@ where
     /// Advances the node forward one block
     pub async fn advance_block(
         &mut self,
-        versioned_hashes: Vec<B256>,
-        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes,
     ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
         <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
@@ -146,16 +145,11 @@ where
         <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
             From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
-        let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
+        let (payload, eth_attr) = self.new_payload().await?;
 
         let block_hash = self
             .engine_api
-            .submit_payload(
-                payload.clone(),
-                eth_attr.clone(),
-                PayloadStatusEnum::Valid,
-                versioned_hashes,
-            )
+            .submit_payload(payload.clone(), eth_attr.clone(), PayloadStatusEnum::Valid)
             .await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
