@@ -38,7 +38,7 @@ The CI runs a couple of workflows:
 [unit]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/unit.yml
 [integration]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/integration.yml
 [bench]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/bench.yml
-[eth-sync]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/eth-sync.yml
+[sync]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/sync.yml
 [stage]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/stage.yml
 [book]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/book.yml
 [deny]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/deny.yml
