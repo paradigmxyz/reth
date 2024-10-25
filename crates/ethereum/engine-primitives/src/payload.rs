@@ -38,7 +38,9 @@ pub struct EthBuiltPayload {
 // === impl BuiltPayload ===
 
 impl EthBuiltPayload {
-    /// Initializes the payload with the given initial block.
+    /// Initializes the payload with the given initial block
+    ///
+    /// Caution: This does not set any [`BlobTransactionSidecar`].
     pub const fn new(
         id: PayloadId,
         block: SealedBlock,
@@ -69,8 +71,17 @@ impl EthBuiltPayload {
     }
 
     /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
+    pub fn extend_sidecars(&mut self, sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) {
         self.sidecars.extend(sidecars)
+    }
+
+    /// Same as [`Self::extend_sidecars`] but returns the type again.
+    pub fn with_sidecars(
+        mut self,
+        sidecars: impl IntoIterator<Item = BlobTransactionSidecar>,
+    ) -> Self {
+        self.extend_sidecars(sidecars);
+        self
     }
 }
 
@@ -134,7 +145,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: sidecars.into(),
         }
     }
 }
