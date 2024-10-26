@@ -1,5 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
 
+use std::time::{Duration, Instant};
+
 use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, Criterion};
 use prop::strategy::ValueTree;
@@ -51,10 +53,20 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
                 group.bench_function(
                     format!("size {size} | updated {updated_leaves}% | depth {depth}"),
                     |b| {
-                        b.iter_with_setup(
-                            || sparse.clone(),
-                            |mut sparse| sparse.update_rlp_node_level(depth),
-                        )
+                        // Use `iter_custom` to avoid measuring clones and drops
+                        b.iter_custom(|iters| {
+                            let mut elapsed = Duration::ZERO;
+
+                            let mut cloned = sparse.clone();
+                            for _ in 0..iters {
+                                let start = Instant::now();
+                                cloned.update_rlp_node_level(depth);
+                                elapsed += start.elapsed();
+                                cloned = sparse.clone();
+                            }
+
+                            elapsed
+                        })
                     },
                 );
             }
