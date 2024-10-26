@@ -169,7 +169,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             match message {
                 StoredEngineApiMessage::ForkchoiceUpdated { state, payload_attrs } => {
                     let response = beacon_engine_handle
-                        .fork_choice_updated(state, payload_attrs, EngineApiMessageVersion::default())
+                        .fork_choice_updated(
+                            state,
+                            payload_attrs,
+                            EngineApiMessageVersion::default(),
+                        )
                         .await?;
                     debug!(target: "reth::cli", ?response, "Received for forkchoice updated");
                 }

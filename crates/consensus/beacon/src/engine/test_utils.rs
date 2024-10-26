@@ -94,7 +94,9 @@ impl<DB> TestEnv<DB> {
         &self,
         state: ForkchoiceState,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        self.engine_handle.fork_choice_updated(state, None, EngineApiMessageVersion::default()).await
+        self.engine_handle
+            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
+            .await
     }
 
     /// Sends the `ForkchoiceUpdated` message to the consensus engine and retries if the engine
