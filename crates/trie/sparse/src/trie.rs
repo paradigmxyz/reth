@@ -569,8 +569,9 @@ impl RevealedSparseTrie {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
-        let targets = self.get_nodes_at_depth(depth);
         let mut prefix_set = self.prefix_set.clone().freeze();
+
+        let targets = self.get_nodes_at_depth(&mut prefix_set, depth);
         for target in targets {
             self.rlp_node(target, &mut prefix_set);
         }
@@ -579,17 +580,25 @@ impl RevealedSparseTrie {
     /// Returns a list of paths to the nodes that are located at the provided depth when counting
     /// from the root node. If there's a leaf at a depth less than the provided depth, it will be
     /// included in the result.
-    fn get_nodes_at_depth(&self, depth: usize) -> HashSet<Nibbles> {
+    fn get_nodes_at_depth(&self, prefix_set: &mut PrefixSet, depth: usize) -> HashSet<Nibbles> {
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = HashSet::<Nibbles>::default();
 
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { .. } => {
+                SparseNode::Leaf { hash, .. } => {
+                    if hash.is_some() && !prefix_set.contains(&path) {
+                        continue
+                    }
+
                     targets.insert(path);
                 }
-                SparseNode::Extension { key, .. } => {
+                SparseNode::Extension { key, hash } => {
+                    if hash.is_some() && !prefix_set.contains(&path) {
+                        continue
+                    }
+
                     if level >= depth {
                         targets.insert(path);
                     } else {
@@ -597,7 +606,11 @@ impl RevealedSparseTrie {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, .. } => {
+                SparseNode::Branch { state_mask, hash } => {
+                    if hash.is_some() && !prefix_set.contains(&path) {
+                        continue
+                    }
+
                     if level >= depth {
                         targets.insert(path);
                     } else {
@@ -1568,13 +1581,16 @@ mod tests {
             .unwrap();
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
-        assert_eq!(sparse.get_nodes_at_depth(0), HashSet::from([Nibbles::default()]));
         assert_eq!(
-            sparse.get_nodes_at_depth(1),
+            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 0),
+            HashSet::from([Nibbles::default()])
+        );
+        assert_eq!(
+            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 1),
             HashSet::from([Nibbles::from_nibbles_unchecked([0x5])])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(2),
+            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 2),
             HashSet::from([
                 Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
@@ -1582,7 +1598,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(3),
+            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 3),
             HashSet::from([
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
@@ -1591,7 +1607,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(4),
+            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 4),
             HashSet::from([
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
