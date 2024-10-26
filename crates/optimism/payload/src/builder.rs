@@ -413,8 +413,8 @@ where
         }
     }
 
-    // check if we have a better block
-    if !is_better_payload(best_payload.as_ref(), total_fees) {
+    // check if we have a better block, but only if we included transactions from the pool
+    if !attributes.no_tx_pool && !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
