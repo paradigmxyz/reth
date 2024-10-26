@@ -366,8 +366,12 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{ Address, B256};
+    #[cfg(not(feature = "optimism"))]
+    use alloy_primitives::bytes;
+    use alloy_primitives::{Address, B256};
     use reth_primitives::Receipts;
+    #[cfg(not(feature = "optimism"))]
+    use reth_primitives::{LogData, TxType};
 
     #[test]
     #[cfg(not(feature = "optimism"))]
