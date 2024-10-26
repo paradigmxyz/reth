@@ -3817,7 +3817,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     /// * If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
     /// * If withdrawals are not empty, this will modify
     ///   [`BlockWithdrawals`](tables::BlockWithdrawals).
-    /// * If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
     ///
     /// # Arguments
     /// * `block` - Reference to the [`SealedBlockWithSenders`] containing the additional data
@@ -3867,7 +3866,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
     /// If withdrawals are not empty, this will modify
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
-    /// If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
     ///
     /// If the provider has __not__ configured full sender pruning, this will modify
     /// [`TransactionSenders`](tables::TransactionSenders).
