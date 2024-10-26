@@ -59,5 +59,3 @@ optimism = [
 	"reth-optimism-consensus/optimism",
 	"revm-primitives/optimism"
 ]
-
-
