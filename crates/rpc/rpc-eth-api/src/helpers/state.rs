@@ -233,7 +233,7 @@ pub trait LoadState:
                 Ok((cfg, block_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
-                let block_hash = LoadPendingBlock::provider(self)
+                let block_hash = RpcNodeCore::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
@@ -262,7 +262,7 @@ pub trait LoadState:
             let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
 
             let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            LoadPendingBlock::evm_config(self).fill_block_env(&mut block_env, header, after_merge);
+            self.evm_config().fill_block_env(&mut block_env, header, after_merge);
 
             Ok((cfg, block_env))
         }
