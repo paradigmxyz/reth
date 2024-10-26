@@ -6,7 +6,7 @@ use crate::{
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
-use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
+use ffi::{mdbx_txn_renew, MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
@@ -605,7 +605,7 @@ impl TransactionPtr {
         // to the `mdbx_txn_reset`.
         #[cfg(feature = "read-tx-timeouts")]
         if self.is_timed_out() {
-            return Err(Error::ReadTransactionTimeout);
+            return Err(Error::ReadTransactionTimeout)
         }
 
         Ok((f)(self.txn))
