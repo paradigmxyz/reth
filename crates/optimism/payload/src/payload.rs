@@ -13,7 +13,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
@@ -43,8 +43,12 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: OpPayloadAttributes) -> Result<Self, Self::Error> {
-        let id = payload_id_optimism(&parent, &attributes);
+    fn try_new(
+        parent: B256,
+        attributes: OpPayloadAttributes,
+        version: EngineApiMessageVersion,
+    ) -> Result<Self, Self::Error> {
+        let id = payload_id_optimism(&parent, &attributes, version);
 
         let transactions = attributes
             .transactions
@@ -269,7 +273,11 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
 /// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id_optimism(
+    parent: &B256,
+    attributes: &OpPayloadAttributes,
+    version: EngineApiMessageVersion,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
@@ -312,7 +320,8 @@ pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttribute
         hasher.update(eip_1559_params.as_slice());
     }
 
-    let out = hasher.finalize();
+    let mut out = hasher.finalize();
+    out[0] = version as u8;
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 
@@ -349,7 +358,8 @@ mod tests {
             expected,
             payload_id_optimism(
                 &b256!("3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
-                &attrs
+                &attrs,
+                EngineApiMessageVersion::V3
             ) // := "0x6ef26ca02318dcf9"
         );
     }

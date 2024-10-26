@@ -616,7 +616,8 @@ where
             // To do this, we set the payload attrs to `None` if attribute validation failed, but
             // we still apply the forkchoice update.
             if let Err(err) = attr_validation_res {
-                let fcu_res = self.inner.beacon_consensus.fork_choice_updated(state, None).await?;
+                let fcu_res =
+                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
@@ -626,7 +627,7 @@ where
             }
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
     }
 }
 
