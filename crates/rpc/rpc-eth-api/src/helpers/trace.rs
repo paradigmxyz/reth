@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::FromEvmError;
+use crate::{FromEvmError, RpcNodeCore};
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
@@ -60,7 +60,7 @@ pub trait Trace: LoadState {
 
         I: GetInspector<DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
+        let mut evm = Trace::evm_config(self).evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (db, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env, db))
@@ -202,7 +202,7 @@ pub trait Trace: LoadState {
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
                     Trace::evm_config(&this).clone(),
-                    LoadState::provider(&this).chain_spec(),
+                    RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
                     .pre_block_beacon_root_contract_call(
@@ -345,7 +345,7 @@ pub trait Trace: LoadState {
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
                     Trace::evm_config(&this).clone(),
-                    LoadState::provider(&this).chain_spec(),
+                    RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
                     .pre_block_beacon_root_contract_call(

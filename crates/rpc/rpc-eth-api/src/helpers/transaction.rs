@@ -21,7 +21,9 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
+use crate::{
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcReceipt, RpcTransaction,
+};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
@@ -235,7 +237,7 @@ pub trait EthTransactions: LoadTransaction {
             // Check the pool first
             if include_pending {
                 if let Some(tx) =
-                    LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                    RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
                     return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
