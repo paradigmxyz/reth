@@ -27,8 +27,8 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadState, TraceExt},
-    EthApiTypes, FromEthApiError,
+    helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -264,7 +264,7 @@ where
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
                     Call::evm_config(this.eth_api()).clone(),
-                    LoadState::provider(this.eth_api()).chain_spec(),
+                    RpcNodeCore::provider(this.eth_api()).chain_spec(),
                 );
 
                 system_caller

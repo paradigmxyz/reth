@@ -8,7 +8,7 @@ use reth_node_api::FullNodeComponents;
 /// `N: RpcNodeCore` instead, allows access to all the associated types on [`FullNodeComponents`]
 /// that are used in RPC, but with more flexibility since they have no trait bounds (asides auto
 /// traits).
-pub trait RpcNodeCore: Clone {
+pub trait RpcNodeCore: Clone + Send + Sync {
     /// The provider type used to interact with the node.
     type Provider: Send + Sync + Clone + Unpin;
     /// The transaction pool of the node.

@@ -143,7 +143,6 @@ where
 
 impl<N> EthApiSpec for OpEthApi<N>
 where
-    Self: Send + Sync,
     N: RpcNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
                       + BlockNumReader
@@ -213,24 +212,14 @@ where
 
 impl<N> LoadState for OpEthApi<N>
 where
-    Self: Send + Sync + Clone,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: RpcNodeCore<
+        Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool,
+    >,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> {
-        self.inner.provider()
-    }
-
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
     }
 }
 
