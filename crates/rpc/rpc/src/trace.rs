@@ -314,13 +314,15 @@ where
         // add reward traces for all blocks
         for block in &blocks {
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
-                let mut traces = self.extract_reward_traces(
-                    &block.header,
-                    &block.body.ommers,
-                    base_block_reward,
+                all_traces.extend(
+                    self.extract_reward_traces(
+                        &block.header,
+                        &block.body.ommers,
+                        base_block_reward,
+                    )
+                    .into_iter()
+                    .filter(|trace| matcher.matches(&trace.trace)),
                 );
-                traces.retain(|trace| matcher.matches(&trace.trace));
-                all_traces.extend(traces);
             } else {
                 // no block reward, means we're past the Paris hardfork and don't expect any rewards
                 // because the blocks in ascending order

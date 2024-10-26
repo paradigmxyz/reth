@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyTxEip4844`]
+
 use crate::{Compact, CompactPlaceholder};
 use alloc::vec::Vec;
 use alloy_consensus::TxEip4844 as AlloyTxEip4844;
@@ -14,7 +16,8 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip4844`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-utils"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxEip4844 {
     chain_id: ChainId,
@@ -25,6 +28,13 @@ pub(crate) struct TxEip4844 {
     /// TODO(debt): this should be removed if we break the DB.
     /// Makes sure that the Compact bitflag struct has one bit after the above field:
     /// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
+    #[cfg_attr(
+        feature = "test-utils",
+        serde(
+            serialize_with = "serialize_placeholder",
+            deserialize_with = "deserialize_placeholder"
+        )
+    )]
     placeholder: Option<CompactPlaceholder>,
     to: Address,
     value: U256,
@@ -72,6 +82,54 @@ impl Compact for AlloyTxEip4844 {
             input: tx.input,
         };
         (alloy_tx, buf)
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<'a> arbitrary::Arbitrary<'a> for TxEip4844 {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            chain_id: ChainId::arbitrary(u)?,
+            nonce: u64::arbitrary(u)?,
+            gas_limit: u64::arbitrary(u)?,
+            max_fee_per_gas: u128::arbitrary(u)?,
+            max_priority_fee_per_gas: u128::arbitrary(u)?,
+            // Should always be Some for TxEip4844
+            placeholder: Some(()),
+            to: Address::arbitrary(u)?,
+            value: U256::arbitrary(u)?,
+            access_list: AccessList::arbitrary(u)?,
+            blob_versioned_hashes: Vec::<B256>::arbitrary(u)?,
+            max_fee_per_blob_gas: u128::arbitrary(u)?,
+            input: Bytes::arbitrary(u)?,
+        })
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+fn serialize_placeholder<S>(value: &Option<()>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    // Required otherwise `serde_json` will serialize it as null and would be `None` when decoding
+    // it again.
+    match value {
+        Some(()) => serializer.serialize_str("placeholder"), // Custom serialization
+        None => serializer.serialize_none(),
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+fn deserialize_placeholder<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Deserialize;
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s.as_deref() {
+        Some("placeholder") => Ok(Some(())),
+        None => Ok(None),
+        _ => Err(serde::de::Error::custom("unexpected value")),
     }
 }
 

@@ -39,7 +39,7 @@ use reth_tasks::{
 };
 use reth_transaction_pool::TransactionPool;
 
-use crate::{OpEthApiError, OpTxBuilder, SequencerClient};
+use crate::{OpEthApiError, SequencerClient};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -59,7 +59,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone, Deref)]
+#[derive(Deref)]
 pub struct OpEthApi<N: FullNodeComponents> {
     /// Gateway to node's core components.
     #[deref]
@@ -102,7 +102,11 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
-    type TransactionCompat = OpTxBuilder;
+    type TransactionCompat = Self;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        self
+    }
 }
 
 impl<N> EthApiSpec for OpEthApi<N>
@@ -247,5 +251,14 @@ where
 impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
+    }
+}
+
+impl<N> Clone for OpEthApi<N>
+where
+    N: FullNodeComponents,
+{
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), sequencer_client: self.sequencer_client.clone() }
     }
 }

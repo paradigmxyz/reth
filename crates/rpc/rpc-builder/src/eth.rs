@@ -22,7 +22,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<Provider, Pool, EthApi>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi>,
+    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi::TransactionCompat>,
 }
 
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
@@ -94,6 +94,7 @@ where
             ctx.cache.clone(),
             ctx.config.filter_config(),
             Box::new(ctx.executor.clone()),
+            api.tx_resp_builder().clone(),
         );
 
         let pubsub = EthPubSub::with_spawner(
@@ -102,6 +103,7 @@ where
             ctx.events.clone(),
             ctx.network.clone(),
             Box::new(ctx.executor.clone()),
+            api.tx_resp_builder().clone(),
         );
 
         Self { api, cache: ctx.cache, filter, pubsub }

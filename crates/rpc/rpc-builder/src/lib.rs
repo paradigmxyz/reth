@@ -226,6 +226,9 @@ pub use eth::EthHandlers;
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 
+// Rpc rate limiter
+pub mod rate_limiter;
+
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
 pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, BlockExecutor>(
@@ -676,8 +679,8 @@ impl RpcModuleConfigBuilder {
     }
 
     /// Get a reference to the eth namespace config, if any
-    pub const fn get_eth(&self) -> &Option<EthConfig> {
-        &self.eth
+    pub const fn get_eth(&self) -> Option<&EthConfig> {
+        self.eth.as_ref()
     }
 
     /// Get a mutable reference to the eth namespace config, if any
@@ -1199,9 +1202,12 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
-                        RethRpcModule::Txpool => {
-                            TxPoolApi::<_, EthApi>::new(self.pool.clone()).into_rpc().into()
-                        }
+                        RethRpcModule::Txpool => TxPoolApi::new(
+                            self.pool.clone(),
+                            self.eth.api.tx_resp_builder().clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces
                                 .iter()

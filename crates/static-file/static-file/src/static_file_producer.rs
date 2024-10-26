@@ -5,8 +5,8 @@ use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_provider::{
-    providers::StaticFileWriter, BlockReader, DBProvider, DatabaseProviderFactory,
-    StageCheckpointReader, StaticFileProviderFactory,
+    providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
+    DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
@@ -103,6 +103,16 @@ impl StaticFileTargets {
 impl<Provider> StaticFileProducerInner<Provider> {
     fn new(provider: Provider, prune_modes: PruneModes) -> Self {
         Self { provider, prune_modes, event_sender: Default::default() }
+    }
+}
+
+impl<Provider> StaticFileProducerInner<Provider>
+where
+    Provider: StaticFileProviderFactory + DatabaseProviderFactory<Provider: ChainStateBlockReader>,
+{
+    /// Returns the last finalized block number on disk.
+    pub fn last_finalized_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        self.provider.database_provider_ro()?.last_finalized_block_number()
     }
 }
 

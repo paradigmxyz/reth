@@ -6,16 +6,19 @@ pub use reth_execution_errors::{
 };
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
-
-use alloc::{boxed::Box, vec::Vec};
-use alloy_primitives::BlockNumber;
-use core::{fmt::Display, marker::PhantomData};
-use reth_primitives::{BlockWithSenders, Receipt, Request};
-use reth_prune_types::PruneModes;
-use revm::{db::BundleState, State};
-use revm_primitives::db::Database;
+use revm::db::states::bundle_state::BundleRetention;
 
 use crate::system_calls::OnStateHook;
+use alloc::{boxed::Box, vec::Vec};
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::BlockNumber;
+use core::{fmt::Display, marker::PhantomData};
+use reth_consensus::ConsensusError;
+use reth_primitives::{BlockWithSenders, Receipt};
+use reth_prune_types::PruneModes;
+use reth_revm::batch::BlockBatchRecord;
+use revm::{db::BundleState, State};
+use revm_primitives::{db::Database, U256};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -164,31 +167,69 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         DB: Database<Error: Into<ProviderError> + Display>;
 }
 
+/// Helper type for the output of executing a block.
+#[derive(Debug, Clone)]
+pub struct ExecuteOutput {
+    /// Receipts obtained after executing a block.
+    pub receipts: Vec<Receipt>,
+    /// Cumulative gas used in the block execution.
+    pub gas_used: u64,
+}
+
 /// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy<DB> {
+pub trait BlockExecutionStrategy<DB>
+where
+    DB: Database,
+{
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
     /// Applies any necessary changes before executing the block's transactions.
-    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
+    fn apply_pre_execution_changes(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<(), Self::Error>;
 
     /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
-    ) -> Result<(Vec<Receipt>, u64), Self::Error>;
+        total_difficulty: U256,
+    ) -> Result<ExecuteOutput, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
-    fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error>;
+    fn apply_post_execution_changes(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+        receipts: &[Receipt],
+    ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
     fn state_ref(&self) -> &State<DB>;
 
+    /// Returns a mutable reference to the current state.
+    fn state_mut(&mut self) -> &mut State<DB>;
+
     /// Sets a hook to be called after each state change during execution.
-    fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
+    fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
 
     /// Returns the final bundle state.
-    fn finish(&self) -> BundleState;
+    fn finish(&mut self) -> BundleState {
+        self.state_mut().merge_transitions(BundleRetention::Reverts);
+        self.state_mut().take_bundle()
+    }
+
+    /// Validate a block with regard to execution results.
+    fn validate_block_post_execution(
+        &self,
+        _block: &BlockWithSenders,
+        _receipts: &[Receipt],
+        _requests: &Requests,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
 }
 
 /// A strategy factory that can create block execution strategies.
@@ -205,7 +246,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
         DB: Database<Error: Into<ProviderError> + Display>;
 }
 
-impl<F> Clone for GenericBlockExecutorProvider<F>
+impl<F> Clone for BasicBlockExecutorProvider<F>
 where
     F: Clone,
 {
@@ -216,33 +257,33 @@ where
 
 /// A generic block executor provider that can create executors using a strategy factory.
 #[allow(missing_debug_implementations)]
-pub struct GenericBlockExecutorProvider<F> {
+pub struct BasicBlockExecutorProvider<F> {
     strategy_factory: F,
 }
 
-impl<F> GenericBlockExecutorProvider<F> {
-    /// Creates a new `GenericBlockExecutorProvider` with the given strategy factory.
+impl<F> BasicBlockExecutorProvider<F> {
+    /// Creates a new `BasicBlockExecutorProvider` with the given strategy factory.
     pub const fn new(strategy_factory: F) -> Self {
         Self { strategy_factory }
     }
 }
 
-impl<F> BlockExecutorProvider for GenericBlockExecutorProvider<F>
+impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
     F: BlockExecutionStrategyFactory,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        GenericBlockExecutor<F::Strategy<DB>, DB>;
+        BasicBlockExecutor<F::Strategy<DB>, DB>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        GenericBatchExecutor<F::Strategy<DB>, DB>;
+        BasicBatchExecutor<F::Strategy<DB>, DB>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         let strategy = self.strategy_factory.create_strategy(db);
-        GenericBlockExecutor::new(strategy)
+        BasicBlockExecutor::new(strategy)
     }
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
@@ -250,32 +291,36 @@ where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         let strategy = self.strategy_factory.create_strategy(db);
-        GenericBatchExecutor::new(strategy)
+        let batch_record = BlockBatchRecord::default();
+        BasicBatchExecutor::new(strategy, batch_record)
     }
 }
 
 /// A generic block executor that uses a [`BlockExecutionStrategy`] to
 /// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct GenericBlockExecutor<S, DB>
+pub struct BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
-    strategy: S,
+    /// Block execution strategy.
+    pub(crate) strategy: S,
     _phantom: PhantomData<DB>,
 }
 
-impl<S, DB> GenericBlockExecutor<S, DB>
+impl<S, DB> BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
+    DB: Database,
 {
-    /// Creates a new `GenericBlockExecutor` with the given strategy.
+    /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub const fn new(strategy: S) -> Self {
         Self { strategy, _phantom: PhantomData }
     }
 }
 
-impl<S, DB> Executor<DB> for GenericBlockExecutor<S, DB>
+impl<S, DB> Executor<DB> for BasicBlockExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
@@ -285,11 +330,13 @@ where
     type Error = S::Error;
 
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let BlockExecutionInput { block, total_difficulty: _ } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
 
-        self.strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes()?;
+        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
+        let ExecuteOutput { receipts, gas_used } =
+            self.strategy.execute_transactions(block, total_difficulty)?;
+        let requests =
+            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
         let state = self.strategy.finish();
 
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
@@ -303,11 +350,13 @@ where
     where
         F: FnMut(&State<DB>),
     {
-        let BlockExecutionInput { block, total_difficulty: _ } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
 
-        self.strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes()?;
+        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
+        let ExecuteOutput { receipts, gas_used } =
+            self.strategy.execute_transactions(block, total_difficulty)?;
+        let requests =
+            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
 
         state(self.strategy.state_ref());
 
@@ -324,13 +373,15 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let BlockExecutionInput { block, total_difficulty: _ } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
 
         self.strategy.with_state_hook(Some(Box::new(state_hook)));
 
-        self.strategy.apply_pre_execution_changes()?;
-        let (receipts, gas_used) = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes()?;
+        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
+        let ExecuteOutput { receipts, gas_used } =
+            self.strategy.execute_transactions(block, total_difficulty)?;
+        let requests =
+            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
 
         let state = self.strategy.finish();
 
@@ -341,19 +392,30 @@ where
 /// A generic batch executor that uses a [`BlockExecutionStrategy`] to
 /// execute batches.
 #[allow(missing_debug_implementations)]
-pub struct GenericBatchExecutor<S, DB> {
-    _strategy: S,
+pub struct BasicBatchExecutor<S, DB>
+where
+    S: BlockExecutionStrategy<DB>,
+    DB: Database,
+{
+    /// Batch execution strategy.
+    pub(crate) strategy: S,
+    /// Keeps track of batch execution receipts and requests.
+    pub(crate) batch_record: BlockBatchRecord,
     _phantom: PhantomData<DB>,
 }
 
-impl<S, DB> GenericBatchExecutor<S, DB> {
-    /// Creates a new `GenericBatchExecutor` with the given strategy.
-    pub const fn new(_strategy: S) -> Self {
-        Self { _strategy, _phantom: PhantomData }
+impl<S, DB> BasicBatchExecutor<S, DB>
+where
+    S: BlockExecutionStrategy<DB>,
+    DB: Database,
+{
+    /// Creates a new `BasicBatchExecutor` with the given strategy.
+    pub const fn new(strategy: S, batch_record: BlockBatchRecord) -> Self {
+        Self { strategy, batch_record, _phantom: PhantomData }
     }
 }
 
-impl<S, DB> BatchExecutor<DB> for GenericBatchExecutor<S, DB>
+impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S, DB>
 where
     S: BlockExecutionStrategy<DB, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
@@ -362,34 +424,63 @@ where
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
-    fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
-        todo!()
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
+        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
+        let ExecuteOutput { receipts, .. } =
+            self.strategy.execute_transactions(block, total_difficulty)?;
+        let requests =
+            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
+
+        self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
+
+        // prepare the state according to the prune mode
+        let retention = self.batch_record.bundle_retention(block.number);
+        self.strategy.state_mut().merge_transitions(retention);
+
+        // store receipts in the set
+        self.batch_record.save_receipts(receipts)?;
+
+        // store requests in the set
+        self.batch_record.save_requests(requests);
+
+        Ok(())
     }
 
-    fn finalize(self) -> Self::Output {
-        todo!()
+    fn finalize(mut self) -> Self::Output {
+        ExecutionOutcome::new(
+            self.strategy.state_mut().take_bundle(),
+            self.batch_record.take_receipts(),
+            self.batch_record.first_block().unwrap_or_default(),
+            self.batch_record.take_requests(),
+        )
     }
 
-    fn set_tip(&mut self, _tip: BlockNumber) {
-        todo!()
+    fn set_tip(&mut self, tip: BlockNumber) {
+        self.batch_record.set_tip(tip);
     }
 
-    fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
-        todo!()
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.batch_record.set_prune_modes(prune_modes);
     }
 
     fn size_hint(&self) -> Option<usize> {
-        None
+        Some(self.strategy.state_ref().bundle_state.size_hint())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip6110::DepositRequest;
     use alloy_primitives::U256;
     use reth_chainspec::{ChainSpec, MAINNET};
     use revm::db::{CacheDB, EmptyDBTyped};
+    use revm_primitives::bytes;
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -480,15 +571,15 @@ mod tests {
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
         state: State<DB>,
-        execute_transactions_result: (Vec<Receipt>, u64),
-        apply_post_execution_changes_result: Vec<Request>,
+        execute_transactions_result: ExecuteOutput,
+        apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
-        execute_transactions_result: (Vec<Receipt>, u64),
-        apply_post_execution_changes_result: Vec<Request>,
+        execute_transactions_result: ExecuteOutput,
+        apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
 
@@ -519,21 +610,34 @@ mod tests {
         }
     }
 
-    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig> {
+    impl<DB> BlockExecutionStrategy<DB> for TestExecutorStrategy<DB, TestEvmConfig>
+    where
+        DB: Database,
+    {
         type Error = BlockExecutionError;
 
-        fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
+        fn apply_pre_execution_changes(
+            &mut self,
+            _block: &BlockWithSenders,
+            _total_difficulty: U256,
+        ) -> Result<(), Self::Error> {
             Ok(())
         }
 
         fn execute_transactions(
             &mut self,
             _block: &BlockWithSenders,
-        ) -> Result<(Vec<Receipt>, u64), Self::Error> {
+            _total_difficulty: U256,
+        ) -> Result<ExecuteOutput, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
-        fn apply_post_execution_changes(&mut self) -> Result<Vec<Request>, Self::Error> {
+        fn apply_post_execution_changes(
+            &mut self,
+            _block: &BlockWithSenders,
+            _total_difficulty: U256,
+            _receipts: &[Receipt],
+        ) -> Result<Requests, Self::Error> {
             Ok(self.apply_post_execution_changes_result.clone())
         }
 
@@ -541,10 +645,23 @@ mod tests {
             &self.state
         }
 
+        fn state_mut(&mut self) -> &mut State<DB> {
+            &mut self.state
+        }
+
         fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
 
-        fn finish(&self) -> BundleState {
+        fn finish(&mut self) -> BundleState {
             self.finish_result.clone()
+        }
+
+        fn validate_block_post_execution(
+            &self,
+            _block: &BlockWithSenders,
+            _receipts: &[Receipt],
+            _requests: &Requests,
+        ) -> Result<(), ConsensusError> {
+            Ok(())
         }
     }
 
@@ -563,9 +680,9 @@ mod tests {
     fn test_strategy() {
         let expected_gas_used = 10;
         let expected_receipts = vec![Receipt::default()];
-        let expected_execute_transactions_result = (expected_receipts.clone(), expected_gas_used);
-        let expected_apply_post_execution_changes_result =
-            vec![Request::DepositRequest(DepositRequest::default())];
+        let expected_execute_transactions_result =
+            ExecuteOutput { receipts: expected_receipts.clone(), gas_used: expected_gas_used };
+        let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
@@ -574,7 +691,7 @@ mod tests {
                 .clone(),
             finish_result: expected_finish_result.clone(),
         };
-        let provider = GenericBlockExecutorProvider::new(strategy_factory);
+        let provider = BasicBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
         let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));

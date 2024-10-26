@@ -2,6 +2,7 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
@@ -13,7 +14,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_primitives::{constants::EPOCH_SLOTS, Account, Bytecode, StaticFileSegment};
+use reth_primitives::{Account, Bytecode, StaticFileSegment};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -226,6 +227,24 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             // The key has not been written to at all.
             Ok(HistoryInfo::NotYetWritten)
         }
+    }
+
+    /// Set the lowest block number at which the account history is available.
+    pub const fn with_lowest_available_account_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.account_history_block_number = Some(block_number);
+        self
+    }
+
+    /// Set the lowest block number at which the storage history is available.
+    pub const fn with_lowest_available_storage_history_block_number(
+        mut self,
+        block_number: BlockNumber,
+    ) -> Self {
+        self.lowest_available_blocks.storage_history_block_number = Some(block_number);
+        self
     }
 }
 

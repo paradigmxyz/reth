@@ -151,6 +151,11 @@ impl EthApiError {
     pub const fn is_gas_too_high(&self) -> bool {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
     }
+
+    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooLow`]
+    pub const fn is_gas_too_low(&self) -> bool {
+        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
+    }
 }
 
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {

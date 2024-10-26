@@ -18,6 +18,7 @@ use reth_db::DatabaseEnv;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -38,7 +39,7 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
 {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<C, Ext>,
+    pub command: Commands<C, Ext>,
 
     /// The chain this node is running.
     ///
@@ -51,7 +52,7 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
         value_parser = C::parser(),
         global = true,
     )]
-    chain: Arc<C::ChainSpec>,
+    pub chain: Arc<C::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -67,10 +68,11 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    instance: u16,
+    pub instance: u16,
 
+    /// The logging configuration for the CLI.
     #[command(flatten)]
-    logs: LogArgs,
+    pub logs: LogArgs,
 }
 
 impl Cli {
@@ -144,6 +146,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
+        // Install the prometheus recorder to be sure to record all metrics
+        let _ = install_prometheus_recorder();
 
         let runner = CliRunner::default();
         match self.command {

@@ -1,10 +1,9 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
+use alloy_consensus::Transaction;
 use alloy_primitives::{Address, TxKind};
-use alloy_rpc_types::{
-    AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,
-};
-use alloy_serde::{OtherFields, WithOtherFields};
+use alloy_rpc_types::{AnyReceiptEnvelope, Log, ReceiptWithBloom, TransactionReceipt};
+use alloy_serde::OtherFields;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use revm_primitives::calc_blob_gasprice;
 
@@ -101,8 +100,6 @@ impl ReceiptBuilder {
             gas_used: gas_used as u128,
             contract_address,
             effective_gas_price: transaction.effective_gas_price(meta.base_fee),
-            // TODO pre-byzantium receipts have a post-transaction state root
-            state_root: None,
             // EIP-4844 fields
             blob_gas_price,
             blob_gas_used: blob_gas_used.map(u128::from),
@@ -112,15 +109,8 @@ impl ReceiptBuilder {
         Ok(Self { base, other: Default::default() })
     }
 
-    /// Adds fields to response body.
-    pub fn add_other_fields(mut self, mut fields: OtherFields) -> Self {
-        self.other.append(&mut fields);
-        self
-    }
-
     /// Builds a receipt response from the base response body, and any set additional fields.
-    pub fn build(self) -> AnyTransactionReceipt {
-        let Self { base, other } = self;
-        WithOtherFields { inner: base, other }
+    pub fn build(self) -> TransactionReceipt<AnyReceiptEnvelope<Log>> {
+        self.base
     }
 }
