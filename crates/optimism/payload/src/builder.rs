@@ -460,6 +460,7 @@ where
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
     // OP doesn't support blobs/EIP-4844.
+    // But 4844 related fields must still be set.
     // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
     // Need [Some] or [None] based on hardfork to match block hash.
     let (excess_blob_gas, blob_gas_used) =
