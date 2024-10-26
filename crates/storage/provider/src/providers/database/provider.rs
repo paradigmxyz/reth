@@ -1585,9 +1585,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
             if done {
                 break true;
-            } else {
-                deleted_entries += 1;
             }
+
+            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
