@@ -571,16 +571,20 @@ impl RevealedSparseTrie {
     pub fn update_rlp_node_level(&mut self, depth: usize) {
         let mut prefix_set = self.prefix_set.clone().freeze();
 
-        let targets = self.get_nodes_at_depth(&mut prefix_set, depth);
+        let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
         for target in targets {
             self.rlp_node(target, &mut prefix_set);
         }
     }
 
-    /// Returns a list of paths to the nodes that are located at the provided depth when counting
-    /// from the root node. If there's a leaf at a depth less than the provided depth, it will be
-    /// included in the result.
-    fn get_nodes_at_depth(&self, prefix_set: &mut PrefixSet, depth: usize) -> HashSet<Nibbles> {
+    /// Returns a list of paths to the nodes that were changed according to the prefix set and are
+    /// located at the provided depth when counting from the root node. If there's a leaf at a
+    /// depth less than the provided depth, it will be included in the result.
+    fn get_changed_nodes_at_depth(
+        &self,
+        prefix_set: &mut PrefixSet,
+        depth: usize,
+    ) -> HashSet<Nibbles> {
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = HashSet::<Nibbles>::default();
 
@@ -1547,7 +1551,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_trie_get_nodes_at_depth() {
+    fn sparse_trie_get_changed_nodes_at_depth() {
         let mut sparse = RevealedSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -1582,15 +1586,15 @@ mod tests {
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
         assert_eq!(
-            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 0),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
             HashSet::from([Nibbles::default()])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 1),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 1),
             HashSet::from([Nibbles::from_nibbles_unchecked([0x5])])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 2),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 2),
             HashSet::from([
                 Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
@@ -1598,7 +1602,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 3),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 3),
             HashSet::from([
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
@@ -1607,7 +1611,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            sparse.get_nodes_at_depth(&mut PrefixSet::default(), 4),
+            sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 4),
             HashSet::from([
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
