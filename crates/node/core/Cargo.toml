@@ -36,7 +36,7 @@ reth-stages-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
+alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt"] }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
