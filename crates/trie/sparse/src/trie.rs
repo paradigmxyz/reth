@@ -666,7 +666,7 @@ impl RevealedSparseTrie {
                     }
 
                     branch_child_buf.clear();
-                    for bit in CHILD_INDEX_RANGE {
+                    for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
                             child.push_unchecked(bit);
@@ -686,6 +686,7 @@ impl RevealedSparseTrie {
                             continue 'main
                         }
                     }
+                    branch_value_stack_buf.reverse();
 
                     self.rlp_buf.clear();
                     let rlp_node = BranchNodeRef::new(&branch_value_stack_buf, *state_mask)
