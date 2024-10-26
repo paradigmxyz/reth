@@ -33,6 +33,8 @@ pub struct EthBuiltPayload {
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    /// The requests of the payload
+    pub(crate) requests: Option<Requests>,
 }
 
 // === impl BuiltPayload ===
@@ -46,8 +48,9 @@ impl EthBuiltPayload {
         block: SealedBlock,
         fees: U256,
         executed_block: Option<ExecutedBlock>,
+        requests: Option<Requests>,
     ) -> Self {
-        Self { id, block, executed_block, fees, sidecars: Vec::new() }
+        Self { id, block, executed_block, fees, sidecars: Vec::new(), requests }
     }
 
     /// Returns the identifier of the payload.
@@ -97,6 +100,10 @@ impl BuiltPayload for EthBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn requests(&self) -> Option<Requests> {
+        self.requests.clone()
+    }
 }
 
 impl BuiltPayload for &EthBuiltPayload {
@@ -110,6 +117,10 @@ impl BuiltPayload for &EthBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
+    }
+
+    fn requests(&self) -> Option<Requests> {
+        self.requests.clone()
     }
 }
 
@@ -152,15 +163,8 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
 
 impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
     fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, executed_block, .. } = value;
+        let EthBuiltPayload { block, fees, sidecars, requests, .. } = value;
 
-        // if we have an executed block, we pop off the first set of requests from the execution
-        // outcome. the assumption here is that there will always only be one block in the execution
-        // outcome.
-        let execution_requests = executed_block
-            .and_then(|block| block.execution_outcome().requests.first().cloned())
-            .map(Requests::take)
-            .unwrap_or_default();
         Self {
             execution_payload: block_to_payload_v3(block),
             block_value: fees,
@@ -174,7 +178,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            execution_requests,
+            execution_requests: requests.unwrap_or_default().take(),
         }
     }
 }
