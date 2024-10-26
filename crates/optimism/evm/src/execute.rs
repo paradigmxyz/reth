@@ -5,7 +5,6 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
-#[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
