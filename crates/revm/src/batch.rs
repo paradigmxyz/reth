@@ -154,13 +154,10 @@ impl BlockBatchRecord {
         }
 
         if let Some((_, filter)) = &self.pruning_address_filter {
-            for receipt in receipts.iter_mut() {
-                // If there is an address_filter, it does not contain any of the
-                // contract addresses, then remove this receipt.
-                if !receipt.logs.iter().any(|log| filter.contains(&log.address)) {
-                    *receipt = Receipt::default();
-                }
-            }
+            receipts.retain(|receipt| {
+                // Remove the receipt if it does not contain any of the contract addresses.
+                receipt.logs.iter().any(|log| filter.contains(&log.address))
+            });
         }
 
         Ok(())
