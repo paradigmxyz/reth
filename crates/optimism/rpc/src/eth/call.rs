@@ -9,7 +9,7 @@ use reth_primitives::{
 };
 use reth_rpc_eth_api::{
     helpers::{Call, EthCall, LoadState, SpawnBlocking},
-    FromEthApiError, IntoEthApiError,
+    FromEthApiError, IntoEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 
@@ -24,9 +24,9 @@ where
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState + SpawnBlocking,
+    N: RpcNodeCore,
+    Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
-    N: FullNodeComponents,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -36,11 +36,6 @@ where
     #[inline]
     fn max_simulate_blocks(&self) -> u64 {
         self.inner.max_simulate_blocks()
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
     }
 
     fn create_txn_env(
