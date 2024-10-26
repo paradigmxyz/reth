@@ -12,7 +12,7 @@ use reth_primitives::{
     PooledTransactionsElement,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_eth_api::{FromEthApiError, FromEvmError};
+use reth_rpc_eth_api::{FromEthApiError, FromEvmError, RpcNodeCore};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
@@ -166,7 +166,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
-                let mut evm = Call::evm_config(&eth_api).evm_with_env(db, env);
+                let mut evm = RpcNodeCore::evm_config(&eth_api).evm_with_env(db, env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -187,7 +187,7 @@ where
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
                         .map_err(Eth::Error::from_eth_err)?;
-                    Call::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
+                    RpcNodeCore::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;
 

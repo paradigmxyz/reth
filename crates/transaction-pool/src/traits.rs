@@ -747,6 +747,15 @@ pub trait BestTransactions: Iterator + Send {
     /// listen to pool updates.
     fn no_updates(&mut self);
 
+    /// Convenience function for [`Self::no_updates`] that returns the iterator again.
+    fn without_updates(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.no_updates();
+        self
+    }
+
     /// Skip all blob transactions.
     ///
     /// There's only limited blob space available in a block, once exhausted, EIP-4844 transactions
@@ -761,6 +770,15 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Convenience function for [`Self::skip_blobs`] that returns the iterator again.
+    fn without_blobs(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.skip_blobs();
+        self
+    }
 
     /// Creates an iterator which uses a closure to determine whether a transaction should be
     /// returned by the iterator.
@@ -796,25 +814,6 @@ where
         (**self).set_skip_blobs(skip_blobs);
     }
 }
-
-/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
-pub trait BestTransactionsFilter: BestTransactions {
-    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
-    ///
-    /// Given an element the closure must return true or false. The returned iterator will yield
-    /// only the elements for which the closure returns true.
-    ///
-    /// Descendant transactions will be skipped.
-    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
-    where
-        P: FnMut(&Self::Item) -> bool,
-        Self: Sized,
-    {
-        BestTransactionFilter::new(self, predicate)
-    }
-}
-
-impl<T> BestTransactionsFilter for T where T: BestTransactions {}
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {

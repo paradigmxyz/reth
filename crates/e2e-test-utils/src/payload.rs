@@ -5,29 +5,36 @@ use reth_payload_primitives::{Events, PayloadBuilder, PayloadTypes};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct PayloadTestContext<T: PayloadTypes> {
     pub payload_event_stream: BroadcastStream<Events<T>>,
     payload_builder: PayloadBuilderHandle<T>,
     pub timestamp: u64,
+    #[debug(skip)]
+    attributes_generator: Box<dyn Fn(u64) -> T::PayloadBuilderAttributes>,
 }
 
 impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Creates a new payload helper
-    pub async fn new(payload_builder: PayloadBuilderHandle<T>) -> eyre::Result<Self> {
+    pub async fn new(
+        payload_builder: PayloadBuilderHandle<T>,
+        attributes_generator: impl Fn(u64) -> T::PayloadBuilderAttributes + 'static,
+    ) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
         // Cancun timestamp
-        Ok(Self { payload_event_stream, payload_builder, timestamp: 1710338135 })
+        Ok(Self {
+            payload_event_stream,
+            payload_builder,
+            timestamp: 1710338135,
+            attributes_generator: Box::new(attributes_generator),
+        })
     }
 
     /// Creates a new payload job from static attributes
-    pub async fn new_payload(
-        &mut self,
-        attributes_generator: impl Fn(u64) -> T::PayloadBuilderAttributes,
-    ) -> eyre::Result<T::PayloadBuilderAttributes> {
+    pub async fn new_payload(&mut self) -> eyre::Result<T::PayloadBuilderAttributes> {
         self.timestamp += 1;
-        let attributes = attributes_generator(self.timestamp);
+        let attributes = (self.attributes_generator)(self.timestamp);
         self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
         Ok(attributes)
     }

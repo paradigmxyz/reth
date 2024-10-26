@@ -168,7 +168,7 @@ impl ExecutionOutcome {
     }
 
     /// Transform block number to the index of block.
-    fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+    pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
             return None
         }
@@ -369,12 +369,15 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{bytes, Address, LogData, B256};
-    use reth_primitives::{Receipts, TxType};
-    use std::collections::HashMap;
+    #[cfg(not(feature = "optimism"))]
+    use alloy_primitives::bytes;
+    use alloy_primitives::{Address, B256};
+    use reth_primitives::Receipts;
+    #[cfg(not(feature = "optimism"))]
+    use reth_primitives::{LogData, TxType};
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_initialisation() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
@@ -390,11 +393,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            }]],
+            })]],
         };
 
         // Create a Requests object with a vector of requests
@@ -447,6 +446,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
@@ -455,11 +455,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            }]],
+            })]],
         };
 
         // Define the first block number
@@ -485,6 +481,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
@@ -493,11 +490,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            }]],
+            })]],
         };
 
         // Define the first block number
@@ -520,6 +513,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
@@ -528,11 +522,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            }]],
+            })]],
         };
 
         // Define the first block number
@@ -558,15 +548,12 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            }]
+            })]
         );
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
@@ -575,11 +562,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            }]],
+            })]],
         };
 
         // Create an empty Receipts object
@@ -619,6 +602,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_revert_to() {
         // Create a random receipt object
         let receipt = Receipt {
@@ -626,10 +610,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
@@ -669,6 +649,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
         let receipt = Receipt {
@@ -676,10 +657,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object containing the receipt.
@@ -714,6 +691,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
         let receipt = Receipt {
@@ -721,10 +699,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
