@@ -798,15 +798,14 @@ impl EnvironmentBuilder {
     }
 
     /// Sets the interprocess/shared threshold to force flush the data buffers to disk, if
-    /// [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is used.
+    /// [`SyncMode::SafeNoSync`] is used.
     pub fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
         self.sync_bytes = Some(v as u64);
         self
     }
 
     /// Sets the interprocess/shared relative period since the last unsteady commit to force flush
-    /// the data buffers to disk, if [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is
-    /// used.
+    /// the data buffers to disk, if [`SyncMode::SafeNoSync`] is used.
     pub fn set_sync_period(&mut self, v: Duration) -> &mut Self {
         // For this option, mdbx uses units of 1/65536 of a second.
         let as_mdbx_units = (v.as_secs_f64() * 65536f64) as u64;
