@@ -360,7 +360,7 @@ where
         db.take_bundle(),
         vec![receipts].into(),
         block_number,
-        vec![requests.unwrap_or_default()],
+        vec![requests.clone().unwrap_or_default()],
     );
     let receipts_root =
         execution_outcome.receipts_root_slow(block_number).expect("Number is in range");
@@ -449,7 +449,8 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed));
+    let mut payload =
+        EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed), requests);
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);
