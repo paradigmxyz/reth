@@ -1,26 +1,27 @@
+//! Transaction abstraction
+
 use core::{fmt::Debug, hash::Hash};
 
 use alloy_primitives::{TxKind, B256};
 
-use alloy_rlp::Encodable;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 pub mod signed;
 
 #[allow(dead_code)]
-/// Inner trait for a raw transaction.
-pub trait Transaction<T>:
+/// Abstraction of a transaction.
+pub trait Transaction:
     Debug
     + Default
     + Clone
     + Eq
     + PartialEq
-    + Encodable
     + Hash
     + Serialize
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
     + for<'de> Deserialize<'de>
-    + From<T>
     + alloy_consensus::Transaction
 {
     /// Heavy operation that return signature hash over rlp encoded transaction.
@@ -45,21 +46,16 @@ pub trait Transaction<T>:
     fn size(&self) -> usize;
 }
 
-/// Trait that defines methods of a raw transaction.
-///
-/// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
+/// Helper trait that unifies all behaviour required by transaction to support full node operations.
 #[cfg(feature = "arbitrary")]
-pub trait FullTransaction<T>: Transaction<T> + Compact + for<'b> arbitrary::Arbitrary<'b> {}
+pub trait FullTransaction: Transaction + Compact + for<'b> arbitrary::Arbitrary<'b> {}
 
 #[cfg(feature = "arbitrary")]
-impl<T> FullTransaction<T> for T where T: Transaction<T> + Compact + for<'b> arbitrary::Arbitrary<'b>
-{}
+impl<T> FullTransaction for T where T: Transaction + Compact + for<'b> arbitrary::Arbitrary<'b> {}
 
-/// Trait that defines methods of a raw transaction.
-///
-/// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
+/// Helper trait that unifies all behaviour required by transaction to support full node operations.
 #[cfg(not(feature = "arbitrary"))]
-pub trait FullTransaction<T>: Transaction<T> + Compact {}
+pub trait FullTransaction: Transaction + Compact {}
 
 #[cfg(not(feature = "arbitrary"))]
-impl<T> FullTransaction<T> for T where T: Transaction<T> + Compact {}
+impl<T> FullTransaction for T where T: Transaction + Compact {}

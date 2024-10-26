@@ -24,7 +24,6 @@ pub use account::{Account, Bytecode};
 pub mod receipt;
 pub use receipt::Receipt;
 
-/// Transaction traits
 pub mod transaction;
 pub use transaction::{signed::SignedTransaction, FullTransaction, Transaction};
 
