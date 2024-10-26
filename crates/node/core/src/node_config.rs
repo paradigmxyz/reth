@@ -422,6 +422,29 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             Err(e) => Err(eyre!("Failed to load configuration: {e}")),
         }
     }
+
+    /// Modifies the [`ChainSpec`] generic of the config using the provided closure.
+    pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
+    where
+        F: FnOnce(Arc<ChainSpec>) -> C,
+    {
+        let chain = Arc::new(f(self.chain));
+        NodeConfig {
+            chain,
+            datadir: self.datadir,
+            config: self.config,
+            metrics: self.metrics,
+            instance: self.instance,
+            network: self.network,
+            rpc: self.rpc,
+            txpool: self.txpool,
+            builder: self.builder,
+            debug: self.debug,
+            db: self.db,
+            dev: self.dev,
+            pruning: self.pruning,
+        }
+    }
 }
 
 impl Default for NodeConfig<ChainSpec> {

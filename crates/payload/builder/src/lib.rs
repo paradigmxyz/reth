@@ -65,7 +65,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None);
+//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None, None);
 //!     Ok(payload)
 //! }
 //!

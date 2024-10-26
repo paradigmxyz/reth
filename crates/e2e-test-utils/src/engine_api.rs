@@ -62,14 +62,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, Chain
             .chain_spec
             .is_prague_active_at_timestamp(payload_builder_attributes.timestamp())
         {
-            let requests = payload
-                .executed_block()
-                .unwrap()
-                .execution_outcome()
-                .requests
-                .first()
-                .unwrap()
-                .clone();
+            let requests = payload.requests().unwrap();
             let envelope: <E as EngineTypes>::ExecutionPayloadEnvelopeV4 = payload.into();
             EngineApiClient::<E>::new_payload_v4(
                 &self.engine_api_client,
