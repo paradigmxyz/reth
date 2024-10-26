@@ -432,8 +432,6 @@ impl Info {
         let mode = self.0.mi_mode;
         if (mode & ffi::MDBX_RDONLY) != 0 {
             Mode::ReadOnly
-        } else if (mode & ffi::MDBX_SYNC_DURABLE) != 0 {
-            Mode::ReadWrite { sync_mode: SyncMode::Durable }
         } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
             Mode::ReadWrite { sync_mode: SyncMode::UtterlyNoSync }
         } else if (mode & ffi::MDBX_NOMETASYNC) != 0 {
