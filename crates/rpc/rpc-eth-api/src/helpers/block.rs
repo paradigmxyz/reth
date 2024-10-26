@@ -9,7 +9,7 @@ use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
-use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
+use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -220,7 +220,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                if let Some(pending_block) = LoadPendingBlock::provider(self)
+                if let Some(pending_block) = RpcNodeCore::provider(self)
                     .pending_block_with_senders()
                     .map_err(Self::Error::from_eth_err)?
                 {
@@ -234,7 +234,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 };
             }
 
-            let block_hash = match LoadPendingBlock::provider(self)
+            let block_hash = match RpcNodeCore::provider(self)
                 .block_hash_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
             {
