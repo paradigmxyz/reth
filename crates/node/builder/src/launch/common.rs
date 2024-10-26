@@ -37,9 +37,8 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_forks::OptimismHardforks;
-use reth_primitives::Head;
+use reth_optimism_forks::OptimismHardfork;
+use reth_primitives::{Hardforks, Head};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
@@ -866,10 +865,12 @@ where
         }
 
         let db_checks_passed = self.chain_specific_db_checks();
-        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        let chain_spec = self.chain_spec();
+        let is_bedrock_active =
+            chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 105235063);
 
-        if db_checks_passed && !op_mainnet.is_bedrock_active_at_block(105235063) {
-            warn!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain won't progess without this.");
+        if db_checks_passed && !is_bedrock_active {
+            warn!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain won't progress without this.");
         }
 
         Ok(None)
