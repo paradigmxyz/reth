@@ -143,7 +143,6 @@ where
 
 impl<N> EthApiSpec for OpEthApi<N>
 where
-    Self: Send + Sync,
     N: RpcNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
                       + BlockNumReader
