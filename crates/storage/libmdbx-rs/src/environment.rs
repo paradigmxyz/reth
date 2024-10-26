@@ -4,7 +4,7 @@ use crate::{
     flags::EnvironmentFlags,
     transaction::{RO, RW},
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
-    Transaction, TransactionKind,
+    Mode, SyncMode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
 use mem::size_of;
@@ -72,14 +72,14 @@ impl Environment {
 
     /// Returns true if the environment was opened in [`crate::Mode::ReadWrite`] mode.
     #[inline]
-    pub fn is_read_write(&self) -> bool {
-        self.inner.env_kind.is_write_map()
+    pub fn is_read_write(&self) -> Result<bool> {
+        Ok(!self.is_read_only()?)
     }
 
     /// Returns true if the environment was opened in [`crate::Mode::ReadOnly`] mode.
     #[inline]
-    pub fn is_read_only(&self) -> bool {
-        !self.inner.env_kind.is_write_map()
+    pub fn is_read_only(&self) -> Result<bool> {
+        Ok(matches!(self.info()?.mode(), Mode::ReadOnly))
     }
 
     /// Returns the transaction manager.
@@ -118,10 +118,10 @@ impl Environment {
                     warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
                 }
                 sleep(Duration::from_millis(250));
-                continue
+                continue;
             }
 
-            break res
+            break res;
         }?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
     }
@@ -216,7 +216,7 @@ impl Environment {
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
             if value.len() < size_of::<usize>() {
-                return Err(Error::Corrupted)
+                return Err(Error::Corrupted);
             }
 
             let s = &value[..size_of::<usize>()];
@@ -423,6 +423,27 @@ impl Info {
             mincore: self.0.mi_pgop_stat.mincore,
             msync: self.0.mi_pgop_stat.msync,
             fsync: self.0.mi_pgop_stat.fsync,
+        }
+    }
+
+    /// Return the mode of the database
+    #[inline]
+    pub const fn mode(&self) -> Mode {
+        let mode = self.0.mi_mode;
+        if (mode & ffi::MDBX_RDONLY) != 0 {
+            Mode::ReadOnly
+        } else {
+            if (mode & ffi::MDBX_SYNC_DURABLE) != 0 {
+                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+            } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
+                Mode::ReadWrite { sync_mode: SyncMode::UtterlyNoSync }
+            } else if (mode & ffi::MDBX_NOMETASYNC) != 0 {
+                Mode::ReadWrite { sync_mode: SyncMode::NoMetaSync }
+            } else if (mode & ffi::MDBX_SAFE_NOSYNC) != 0 {
+                Mode::ReadWrite { sync_mode: SyncMode::SafeNoSync }
+            } else {
+                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+            }
         }
     }
 }
@@ -709,7 +730,7 @@ impl EnvironmentBuilder {
             })() {
                 ffi::mdbx_env_close_ex(env, false);
 
-                return Err(e)
+                return Err(e);
             }
         }
 
