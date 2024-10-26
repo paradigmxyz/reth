@@ -24,5 +24,11 @@ derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = []
-test-utils = []
+std = [
+	"reth-primitives/std",
+	"alloy-primitives/std",
+	"alloy-eips/std"
+]
+test-utils = [
+	"reth-primitives/test-utils"
+]

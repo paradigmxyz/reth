@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::ConfigureEvm;
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
     AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
 };
@@ -20,7 +20,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
-use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
+use reth_optimism_evm::{OpExecutionStrategyFactory, OptimismEvmConfig};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{Block, Header};
@@ -184,14 +184,16 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type EVM = OptimismEvmConfig;
-    type Executor = OpExecutorProvider<Self::EVM>;
+    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = OptimismEvmConfig::new(ctx.chain_spec());
-        let executor = OpExecutorProvider::new(ctx.chain_spec(), evm_config.clone());
+        let strategy_factory =
+            OpExecutionStrategyFactory::new(ctx.chain_spec(), evm_config.clone());
+        let executor = BasicBlockExecutorProvider::new(strategy_factory);
 
         Ok((evm_config, executor))
     }
@@ -430,6 +432,7 @@ where
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);
+        info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
 
         Ok(handle)
     }

@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyTxDeposit`]
+
 use crate::Compact;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_alloy_consensus::TxDeposit as AlloyTxDeposit;
@@ -12,7 +14,11 @@ use reth_codecs_derive::add_arbitrary_tests;
 ///
 /// Notice: Make sure this struct is 1:1 with [`op_alloy_consensus::TxDeposit`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(compact)]
 pub(crate) struct TxDeposit {
     source_hash: B256,

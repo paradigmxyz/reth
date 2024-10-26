@@ -16,6 +16,7 @@ pub mod bundle;
 pub mod core;
 pub mod filter;
 pub mod helpers;
+pub mod node;
 pub mod pubsub;
 pub mod types;
 
@@ -25,6 +26,7 @@ pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
 pub use helpers::error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+pub use node::RpcNodeCore;
 pub use pubsub::EthPubSubApiServer;
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 

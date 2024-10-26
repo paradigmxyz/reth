@@ -23,12 +23,19 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type NetworkTypes: Network<HeaderResponse = alloy_rpc_types::Header>;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;
+
+    /// Returns reference to transaction response builder.
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat;
 }
 
 impl EthApiTypes for () {
     type Error = EthApiError;
     type NetworkTypes = AnyNetwork;
     type TransactionCompat = ();
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        self
+    }
 }
 
 /// Adapter for network specific transaction type.

@@ -1,4 +1,5 @@
 use crate::{PayloadEvents, PayloadKind, PayloadTypes};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
@@ -65,6 +66,9 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         None
     }
+
+    /// Returns the EIP-7865 requests for the payload if any.
+    fn requests(&self) -> Option<Requests>;
 }
 
 /// This can be implemented by types that describe a currently running payload job.

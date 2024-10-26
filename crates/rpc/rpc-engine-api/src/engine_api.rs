@@ -1,12 +1,12 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
+use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
@@ -140,7 +140,11 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload, None, None).await?)
+        Ok(self
+            .inner
+            .beacon_consensus
+            .new_payload(payload, ExecutionPayloadSidecar::none())
+            .await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -156,7 +160,11 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload, None, None).await?)
+        Ok(self
+            .inner
+            .beacon_consensus
+            .new_payload(payload, ExecutionPayloadSidecar::none())
+            .await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -176,9 +184,17 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
-
-        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields), None).await?)
+        Ok(self
+            .inner
+            .beacon_consensus
+            .new_payload(
+                payload,
+                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                }),
+            )
+            .await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
@@ -187,9 +203,7 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        // TODO(onbjerg): Figure out why we even get these here, since we'll check the requests
-        // from execution against the requests root in the header.
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
@@ -201,14 +215,16 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
-
-        // HACK(onbjerg): We should have a pectra payload fields struct, this is just a temporary
-        // workaround.
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(payload, Some(cancun_fields), Some(execution_requests))
+            .new_payload(
+                payload,
+                ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                    execution_requests,
+                ),
+            )
             .await?)
     }
 
@@ -289,7 +305,7 @@ where
     pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV2> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -324,7 +340,7 @@ where
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV3> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -359,7 +375,7 @@ where
     pub async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV4> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -677,7 +693,7 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Vec<Bytes>,
+        execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
@@ -778,7 +794,7 @@ where
     async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV2> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         let start = Instant::now();
         let res = Self::get_payload_v2(self, payload_id).await;
@@ -798,7 +814,7 @@ where
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV3> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         let start = Instant::now();
         let res = Self::get_payload_v3(self, payload_id).await;
@@ -818,7 +834,7 @@ where
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<EngineT::ExecutionPayloadV4> {
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         let start = Instant::now();
         let res = Self::get_payload_v4(self, payload_id).await;

@@ -21,7 +21,9 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
+use crate::{
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcReceipt, RpcTransaction,
+};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
@@ -209,9 +211,10 @@ pub trait EthTransactions: LoadTransaction {
                         index: Some(index as u64),
                     };
 
-                    return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
+                    return Ok(Some(from_recovered_with_block_context(
                         tx.clone().with_signer(*signer),
                         tx_info,
+                        self.tx_resp_builder(),
                     )))
                 }
             }
@@ -234,10 +237,10 @@ pub trait EthTransactions: LoadTransaction {
             // Check the pool first
             if include_pending {
                 if let Some(tx) =
-                    LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                    RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction.into())));
+                    return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
                 }
             }
 
@@ -288,9 +291,10 @@ pub trait EthTransactions: LoadTransaction {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context::<Self::TransactionCompat>(
+                            from_recovered_with_block_context(
                                 tx.clone().with_signer(*signer),
                                 tx_info,
+                                self.tx_resp_builder(),
                             )
                         })
                 })
@@ -365,9 +369,8 @@ pub trait EthTransactions: LoadTransaction {
 
             // set nonce if not already set before
             if request.nonce.is_none() {
-                let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
-                // note: `.to()` can't panic because the nonce is constructed from a `u64`
-                request.nonce = Some(nonce.to());
+                let nonce = self.next_available_nonce(from).await?;
+                request.nonce = Some(nonce);
             }
 
             let chain_id = self.chain_id();

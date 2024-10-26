@@ -1364,13 +1364,13 @@ impl TransactionsProviderExt for StaticFileProvider {
         // chunks are too big, there will be idle threads waiting for work. Choosing an
         // arbitrary smaller value to make sure it doesn't happen.
         let chunk_size = 100;
-        let mut channels = Vec::new();
 
         // iterator over the chunks
         let chunks = tx_range
             .clone()
             .step_by(chunk_size)
             .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
+        let mut channels = Vec::with_capacity(tx_range_size.div_ceil(chunk_size));
 
         for chunk_range in chunks {
             let (channel_tx, channel_rx) = mpsc::channel();

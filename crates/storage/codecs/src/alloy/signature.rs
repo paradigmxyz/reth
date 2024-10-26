@@ -1,6 +1,7 @@
-use alloy_primitives::{Parity, Signature, U256};
+//! Compact implementation for [`Signature`]
 
 use crate::Compact;
+use alloy_primitives::{Parity, Signature, U256};
 
 impl Compact for Signature {
     fn to_compact<B>(&self, buf: &mut B) -> usize

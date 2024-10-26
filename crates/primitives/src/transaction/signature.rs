@@ -4,9 +4,6 @@ use alloy_rlp::{Decodable, Error as RlpError};
 
 pub use alloy_primitives::Signature;
 
-#[cfg(feature = "optimism")]
-use reth_optimism_chainspec::optimism_deposit_tx_signature;
-
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
 ///
@@ -82,7 +79,7 @@ pub fn legacy_parity(signature: &Signature, chain_id: Option<u64>) -> Parity {
         // transactions with an empty signature
         //
         // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-        if *signature == optimism_deposit_tx_signature() {
+        if *signature == op_alloy_consensus::TxDeposit::signature() {
             return Parity::Parity(false)
         }
         Parity::NonEip155(signature.v().y_parity())

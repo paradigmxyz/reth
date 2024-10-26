@@ -39,7 +39,7 @@ mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
 mod log;
-pub use log::{logs_bloom, Log, LogData};
+pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;

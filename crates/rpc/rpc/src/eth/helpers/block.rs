@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use alloy_rpc_types::{AnyTransactionReceipt, BlockId};
+use alloy_serde::WithOtherFields;
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -55,9 +56,9 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-
                     ReceiptBuilder::new(&tx, meta, receipt, &receipts)
                         .map(|builder| builder.build())
+                        .map(WithOtherFields::new)
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()
                 .map(Some)

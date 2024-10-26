@@ -2,7 +2,7 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::PoolResult,
+    error::{InvalidPoolTransactionError, PoolResult},
     pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
@@ -72,7 +72,6 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Imports all _external_ transactions
     ///
-    ///
     /// Consumer: Utility
     fn add_external_transactions(
         &self,
@@ -83,7 +82,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
     ///
-    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// This is the same as [`TransactionPool::add_transaction`] but returns an event stream for the
     /// given transaction.
     ///
     /// Consumer: Custom
@@ -748,6 +747,15 @@ pub trait BestTransactions: Iterator + Send {
     /// listen to pool updates.
     fn no_updates(&mut self);
 
+    /// Convenience function for [`Self::no_updates`] that returns the iterator again.
+    fn without_updates(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.no_updates();
+        self
+    }
+
     /// Skip all blob transactions.
     ///
     /// There's only limited blob space available in a block, once exhausted, EIP-4844 transactions
@@ -762,6 +770,28 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Convenience function for [`Self::skip_blobs`] that returns the iterator again.
+    fn without_blobs(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.skip_blobs();
+        self
+    }
+
+    /// Creates an iterator which uses a closure to determine whether a transaction should be
+    /// returned by the iterator.
+    ///
+    /// All items the closure returns false for are marked as invalid via [`Self::mark_invalid`] and
+    /// descendant transactions will be skipped.
+    fn filter_transactions<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
+    where
+        P: FnMut(&Self::Item) -> bool,
+        Self: Sized,
+    {
+        BestTransactionFilter::new(self, predicate)
+    }
 }
 
 impl<T> BestTransactions for Box<T>
@@ -785,25 +815,6 @@ where
     }
 }
 
-/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
-pub trait BestTransactionsFilter: BestTransactions {
-    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
-    ///
-    /// Given an element the closure must return true or false. The returned iterator will yield
-    /// only the elements for which the closure returns true.
-    ///
-    /// Descendant transactions will be skipped.
-    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
-    where
-        P: FnMut(&Self::Item) -> bool,
-        Self: Sized,
-    {
-        BestTransactionFilter::new(self, predicate)
-    }
-}
-
-impl<T> BestTransactionsFilter for T where T: BestTransactions {}
-
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
@@ -813,6 +824,36 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn skip_blobs(&mut self) {}
 
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
+}
+
+/// A filter that allows to check if a transaction satisfies a set of conditions
+pub trait TransactionFilter {
+    /// The type of the transaction to check.
+    type Transaction;
+
+    /// Returns true if the transaction satisfies the conditions.
+    fn is_valid(&self, transaction: &Self::Transaction) -> bool;
+}
+
+/// A no-op implementation of [`TransactionFilter`] which
+/// marks all transactions as valid.
+#[derive(Debug, Clone)]
+pub struct NoopTransactionFilter<T>(std::marker::PhantomData<T>);
+
+// We can't derive Default because this forces T to be
+// Default as well, which isn't necessary.
+impl<T> Default for NoopTransactionFilter<T> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<T> TransactionFilter for NoopTransactionFilter<T> {
+    type Transaction = T;
+
+    fn is_valid(&self, _transaction: &Self::Transaction) -> bool {
+        true
+    }
 }
 
 /// A Helper type that bundles the best transactions attributes together.
@@ -962,6 +1003,26 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64>;
+
+    /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
+    ///
+    /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
+    /// where the input data contains the initialization code. If the input code size exceeds
+    /// the configured limit, an [`InvalidPoolTransactionError::ExceedsMaxInitCodeSize`] error is
+    /// returned.
+    fn ensure_max_init_code_size(
+        &self,
+        max_init_code_size: usize,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        if self.kind().is_create() && self.input().len() > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+                self.size(),
+                max_init_code_size,
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions
@@ -1574,5 +1635,28 @@ mod tests {
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_pooled_transaction_limit() {
+        // No limit should never exceed
+        let limit_none = GetPooledTransactionLimit::None;
+        // Any size should return false
+        assert!(!limit_none.exceeds(1000));
+
+        // Size limit of 2MB (2 * 1024 * 1024 bytes)
+        let size_limit_2mb = GetPooledTransactionLimit::ResponseSizeSoftLimit(2 * 1024 * 1024);
+
+        // Test with size below the limit
+        // 1MB is below 2MB, should return false
+        assert!(!size_limit_2mb.exceeds(1024 * 1024));
+
+        // Test with size exactly at the limit
+        // 2MB equals the limit, should return false
+        assert!(!size_limit_2mb.exceeds(2 * 1024 * 1024));
+
+        // Test with size exceeding the limit
+        // 3MB is above the 2MB limit, should return true
+        assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 }
