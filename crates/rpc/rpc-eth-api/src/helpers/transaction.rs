@@ -257,7 +257,7 @@ pub trait EthTransactions: LoadTransaction {
                 return Ok(None);
             }
 
-            let Ok(high) = LoadBlock::provider(self).best_block_number() else {
+            let Ok(high) = RpcNodeCore::provider(self).best_block_number() else {
                 return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 
