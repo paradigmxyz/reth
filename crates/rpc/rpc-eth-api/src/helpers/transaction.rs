@@ -231,7 +231,7 @@ pub trait EthTransactions: LoadTransaction {
         include_pending: bool,
     ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadState + FullEthApiTypes,
+        Self: LoadBlock + LoadState,
     {
         async move {
             // Check the pool first

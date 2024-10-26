@@ -10,10 +10,7 @@ use reth::{
     network::PeersHandleProvider,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
-        api::eth::{
-            helpers::{EthApiSpec, EthTransactions, TraceExt},
-            FullEthApiTypes,
-        },
+        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
         types::engine::PayloadStatusEnum,
     },
 };
@@ -97,7 +94,7 @@ where
     where
         Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
         Engine::ExecutionPayloadEnvelopeV4: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
-        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt + FullEthApiTypes,
+        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
