@@ -114,24 +114,43 @@ where
     }
 }
 
-impl<N> EthApiSpec for OpEthApi<N>
+impl<N> RpcNodeCore for OpEthApi<N>
 where
-    Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Self: Clone,
+    N: RpcNodeCore,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl ChainSpecProvider<ChainSpec: EthereumHardforks> + BlockNumReader + StageCheckpointReader
-    {
-        self.inner.provider()
+    type Provider = N::Provider;
+    type Pool = N::Pool;
+    type Network = <N as RpcNodeCore>::Network;
+    type Evm = <N as RpcNodeCore>::Evm;
+
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
     }
 
-    #[inline]
-    fn network(&self) -> impl NetworkInfo {
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.evm_config()
+    }
+
+    fn network(&self) -> &Self::Network {
         self.inner.network()
     }
 
+    fn provider(&self) -> &Self::Provider {
+        self.inner.provider()
+    }
+}
+
+impl<N> EthApiSpec for OpEthApi<N>
+where
+    Self: Send + Sync,
+    N: RpcNodeCore<
+        Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+                      + BlockNumReader
+                      + StageCheckpointReader,
+        Network: NetworkInfo,
+    >,
+{
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
