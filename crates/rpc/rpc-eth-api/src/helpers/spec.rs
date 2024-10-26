@@ -16,12 +16,11 @@ use crate::{helpers::EthSigner, RpcNodeCore};
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthApiSpec:
     RpcNodeCore<
-        Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
-                      + BlockNumReader
-                      + StageCheckpointReader,
-        Network: NetworkInfo,
-    > + Send
-    + Sync
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+                  + BlockNumReader
+                  + StageCheckpointReader,
+    Network: NetworkInfo,
+>
 {
     /// Returns the block node is started on.
     fn starting_block(&self) -> U256;
