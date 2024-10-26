@@ -27,7 +27,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
+    helpers::{EthApiSpec, EthTransactions, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -120,7 +120,8 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            Call::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+                            RpcNodeCore::evm_config(this.eth_api())
+                                .tx_env(tx.as_signed(), tx.signer()),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -263,7 +264,7 @@ where
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Call::evm_config(this.eth_api()).clone(),
+                    RpcNodeCore::evm_config(this.eth_api()).clone(),
                     RpcNodeCore::provider(this.eth_api()).chain_spec(),
                 );
 
@@ -293,7 +294,7 @@ where
                     env: Env::boxed(
                         cfg.cfg_env.clone(),
                         block_env,
-                        Call::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+                        RpcNodeCore::evm_config(this.eth_api()).tx_env(tx.as_signed(), tx.signer()),
                     ),
                     handler_cfg: cfg.handler_cfg,
                 };
@@ -562,7 +563,7 @@ where
                             env: Env::boxed(
                                 cfg.cfg_env.clone(),
                                 block_env.clone(),
-                                Call::evm_config(this.eth_api()).tx_env(tx, *signer),
+                                RpcNodeCore::evm_config(this.eth_api()).tx_env(tx, *signer),
                             ),
                             handler_cfg: cfg.handler_cfg,
                         };
