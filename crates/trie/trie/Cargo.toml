@@ -79,7 +79,8 @@ test-utils = [
 	"triehash",
 	"reth-trie-common/test-utils",
 	"reth-primitives/test-utils",
-	"revm/test-utils"
+	"revm/test-utils",
+	"reth-stages-types/test-utils"
 ]
 
 [[bench]]

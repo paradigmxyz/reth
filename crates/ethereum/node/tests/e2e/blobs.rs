@@ -41,7 +41,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
         .launch()
         .await?;
 
-    let mut node = NodeTestContext::new(node).await?;
+    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).gen();
     let blob_wallet = wallets.first().unwrap();
@@ -51,7 +51,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, second_wallet.clone()).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
     // build payload with normal tx
-    let (payload, attributes) = node.new_payload(eth_payload_attributes).await?;
+    let (payload, attributes) = node.new_payload().await?;
 
     // clean the pool
     node.inner.pool.remove_transactions(vec![tx_hash]);
@@ -64,16 +64,14 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     // fetch it from rpc
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
     // validate sidecar
-    let versioned_hashes = TransactionTestContext::validate_sidecar(envelope);
+    TransactionTestContext::validate_sidecar(envelope);
 
     // build a payload
-    let (blob_payload, blob_attr) = node.new_payload(eth_payload_attributes).await?;
+    let (blob_payload, blob_attr) = node.new_payload().await?;
 
     // submit the blob payload
-    let blob_block_hash = node
-        .engine_api
-        .submit_payload(blob_payload, blob_attr, PayloadStatusEnum::Valid, versioned_hashes.clone())
-        .await?;
+    let blob_block_hash =
+        node.engine_api.submit_payload(blob_payload, blob_attr, PayloadStatusEnum::Valid).await?;
 
     let (_, _) = tokio::join!(
         // send fcu with blob hash
@@ -83,7 +81,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     );
 
     // submit normal payload
-    node.engine_api.submit_payload(payload, attributes, PayloadStatusEnum::Valid, vec![]).await?;
+    node.engine_api.submit_payload(payload, attributes, PayloadStatusEnum::Valid).await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
