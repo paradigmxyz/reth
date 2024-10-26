@@ -8,7 +8,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV1, PayloadAttributes, PayloadId,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_engine_primitives::EngineApiMessageVersion;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{SealedBlock, Withdrawals};
 use reth_rpc_types_compat::engine::payload::{
@@ -238,11 +237,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(
-        parent: B256,
-        attributes: PayloadAttributes,
-        _version: EngineApiMessageVersion,
-    ) -> Result<Self, Infallible> {
+    fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, Infallible> {
         Ok(Self::new(parent, attributes))
     }
 

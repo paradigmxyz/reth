@@ -1,4 +1,4 @@
-use crate::{EngineApiMessageVersion, PayloadEvents, PayloadKind, PayloadTypes};
+use crate::{PayloadEvents, PayloadKind, PayloadTypes};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types::{
@@ -88,7 +88,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     fn try_new(
         parent: B256,
         rpc_payload_attributes: Self::RpcPayloadAttributes,
-        version: EngineApiMessageVersion,
     ) -> Result<Self, Self::Error>
     where
         Self: Sized;

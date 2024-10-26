@@ -22,9 +22,7 @@ use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::{
-    EngineApiMessageVersion, NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes,
-};
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
@@ -229,7 +227,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
-                EngineApiMessageVersion::default(),
             )?,
         );
 
