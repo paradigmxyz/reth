@@ -10,7 +10,7 @@ use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, TransactionCompat,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -61,20 +61,11 @@ where
 impl<N> LoadTransaction for OpEthApi<N>
 where
     Self: SpawnBlocking + FullEthApiTypes,
-    N: FullNodeComponents,
+    N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    type Pool = N::Pool;
-
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
-
+    #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
-    }
-
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
     }
 }
 

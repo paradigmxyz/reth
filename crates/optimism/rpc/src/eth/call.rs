@@ -1,14 +1,12 @@
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
-use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
     revm_primitives::{BlockEnv, OptimismFields, TxEnv},
     Header,
 };
 use reth_rpc_eth_api::{
-    helpers::{Call, EthCall, LoadState, SpawnBlocking},
+    helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
@@ -17,8 +15,8 @@ use crate::{OpEthApi, OpEthApiError};
 
 impl<N> EthCall for OpEthApi<N>
 where
-    Self: Call,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Self: Call + LoadPendingBlock,
+    N: RpcNodeCore,
 {
 }
 
