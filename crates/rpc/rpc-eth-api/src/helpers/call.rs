@@ -482,7 +482,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = Call::evm_config(self).evm_with_env(db, env);
+        let mut evm = self.evm_config().evm_with_env(db, env);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -500,7 +500,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = Call::evm_config(self).evm_with_env_and_inspector(db, env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -665,7 +665,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
     {
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
 
-        let mut evm = Call::evm_config(self).evm_with_env(db, env);
+        let mut evm = self.evm_config().evm_with_env(db, env);
         let mut index = 0;
         for (sender, tx) in transactions {
             if tx.hash() == target_tx_hash {
@@ -673,7 +673,7 @@ pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
                 break
             }
 
-            Call::evm_config(self).fill_tx_env(evm.tx_mut(), tx, *sender);
+            self.evm_config().fill_tx_env(evm.tx_mut(), tx, *sender);
             evm.transact_commit().map_err(Self::Error::from_evm_err)?;
             index += 1;
         }
