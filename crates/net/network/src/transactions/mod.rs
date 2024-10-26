@@ -324,6 +324,29 @@ where
     }
 }
 
+/// Represents the different modes of transaction propagation.
+///
+/// This enum is used to determine how transactions are propagated to peers in the network.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PropgateKind {
+    /// Default propagation mode.
+    ///
+    /// Transactions are only sent to peers that haven't seen them yet.
+    Basic,
+    /// Forced propagation mode.
+    ///
+    /// Transactions are sent to all peers regardless of whether they have been sent or received
+    /// before.
+    Forced,
+}
+
+impl PropgateKind {
+    /// Returns `true` if the propagation kind is `Forced`.
+    pub const fn is_forced(self) -> bool {
+        matches!(self, Self::Forced)
+    }
+}
+
 impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool + 'static,
@@ -416,7 +439,7 @@ where
     fn propagate_all(&mut self, hashes: Vec<TxHash>) {
         let propagated = self.propagate_transactions(
             self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect(),
-            PropagateKind::Basic,
+            PropgateKind::Basic,
         );
 
         // notify pool so events get fired
@@ -432,7 +455,7 @@ where
     fn propagate_transactions(
         &mut self,
         to_propagate: Vec<PropagateTransaction>,
-        propagate_kind: PropagateKind,
+        propagate_kind: PropgateKind,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
         if self.network.tx_gossip_disabled() {
@@ -531,7 +554,7 @@ where
         &mut self,
         txs: Vec<TxHash>,
         peer_id: PeerId,
-        propagate_kind: PropagateKind,
+        propagate_kind: PropgateKind,
     ) -> Option<PropagatedTransactions> {
         trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
 
@@ -608,7 +631,7 @@ where
         &mut self,
         hashes: Vec<TxHash>,
         peer_id: PeerId,
-        propagate_kind: PropagateKind,
+        propagate_kind: PropgateKind,
     ) {
         trace!(target: "net::tx", "Start propagating transactions as hashes");
 
@@ -930,7 +953,7 @@ where
                 self.on_new_pending_transactions(vec![hash])
             }
             TransactionsCommand::PropagateHashesTo(hashes, peer) => {
-                self.propagate_hashes_to(hashes, peer, PropagateKind::Forced)
+                self.propagate_hashes_to(hashes, peer, PropgateKind::Forced)
             }
             TransactionsCommand::GetActivePeers(tx) => {
                 let peers = self.peers.keys().copied().collect::<HashSet<_>>();
@@ -938,7 +961,7 @@ where
             }
             TransactionsCommand::PropagateTransactionsTo(txs, peer) => {
                 if let Some(propagated) =
-                    self.propagate_full_transactions_to_peer(txs, peer, PropagateKind::Forced)
+                    self.propagate_full_transactions_to_peer(txs, peer, PropgateKind::Forced)
                 {
                     self.pool.on_propagated(propagated);
                 }
@@ -2440,7 +2463,7 @@ mod tests {
         let eip4844_tx = Arc::new(factory.create_eip4844());
         propagate.push(PropagateTransaction::new(eip4844_tx.clone()));
 
-        let propagated = tx_manager.propagate_transactions(propagate.clone(), PropagateKind::Basic);
+        let propagated = tx_manager.propagate_transactions(propagate.clone(), PropgateKind::Basic);
         assert_eq!(propagated.0.len(), 2);
         let prop_txs = propagated.0.get(eip1559_tx.transaction.hash()).unwrap();
         assert_eq!(prop_txs.len(), 1);
@@ -2456,7 +2479,7 @@ mod tests {
         peer.seen_transactions.contains(eip4844_tx.transaction.hash());
 
         // propagate again
-        let propagated = tx_manager.propagate_transactions(propagate, PropagateKind::Basic);
+        let propagated = tx_manager.propagate_transactions(propagate, PropgateKind::Basic);
         assert!(propagated.0.is_empty());
     }
 }

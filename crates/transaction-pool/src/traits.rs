@@ -561,26 +561,16 @@ pub enum PropagateKind {
     Full(PeerId),
     /// Only the Hash was propagated to the peer.
     Hash(PeerId),
-    /// Default propagation mode, filters out txs that we already sent or received
-    Basic,
-    /// Always propagate, even if we already sent or received the txs.
-    Forced,
 }
 
 // === impl PropagateKind ===
 
 impl PropagateKind {
     /// Returns the peer the transaction was sent to
-    pub const fn peer(&self) -> Option<&PeerId> {
+    pub const fn peer(&self) -> &PeerId {
         match self {
-            Self::Full(peer) | Self::Hash(peer) => Some(peer),
-            Self::Basic | Self::Forced => None,
+            Self::Full(peer) | Self::Hash(peer) => peer,
         }
-    }
-
-    /// Returns `true` if the propagation kind is `Forced`.
-    pub const fn is_forced(self) -> bool {
-        matches!(self, Self::Forced)
     }
 
     /// Returns true if the transaction was sent as a full transaction
@@ -591,6 +581,14 @@ impl PropagateKind {
     /// Returns true if the transaction was sent as a hash
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
+    }
+}
+
+impl From<PropagateKind> for PeerId {
+    fn from(value: PropagateKind) -> Self {
+        match value {
+            PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
+        }
     }
 }
 
