@@ -705,11 +705,12 @@ where
 
     /// Executes the configured transaction with the environment on the given database.
     ///
-    /// It optionally takes shared inspector to avoid re-creating the inspector for each
+    /// It optionally takes fused inspector ([`TracingInspector::fused`]) to avoid re-creating the
+    /// inspector for each transaction. This is useful when tracing multiple transactions in a
+    /// block. This is only useful for block tracing which uses the same tracer for all transactions
+    /// in the block.
     ///
-    /// transaction. This is useful when tracing multiple transactions in a block.
-    ///
-    /// If the inspector is provided then `opts.tracer_config` is ignored.
+    /// Caution: If the inspector is provided then `opts.tracer_config` is ignored.
     ///
     /// Returns the trace frame and the state that got updated after executing the transaction.
     ///
@@ -722,7 +723,7 @@ where
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
-        shared_inspector: &mut Option<TracingInspector>,
+        fused_inspector: &mut Option<TracingInspector>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -740,9 +741,11 @@ where
                             .into_call_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                        let mut inspector = shared_inspector.get_or_insert(TracingInspector::new(
-                            TracingInspectorConfig::from_geth_call_config(&call_config),
-                        ));
+                        let mut inspector = fused_inspector.get_or_insert_with(|| {
+                            TracingInspector::new(TracingInspectorConfig::from_geth_call_config(
+                                &call_config,
+                            ))
+                        });
 
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
 
@@ -760,9 +763,11 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                        let mut inspector = shared_inspector.get_or_insert(TracingInspector::new(
-                            TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
-                        ));
+                        let mut inspector = fused_inspector.get_or_insert_with(|| {
+                            TracingInspector::new(
+                                TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
+                            )
+                        });
                         let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                         inspector.set_transaction_gas_limit(env.tx.gas_limit);
@@ -843,7 +848,7 @@ where
         }
 
         // default structlog tracer
-        let mut inspector = shared_inspector.get_or_insert_with(|| {
+        let mut inspector = fused_inspector.get_or_insert_with(|| {
             let inspector_config = TracingInspectorConfig::from_geth_config(config);
             TracingInspector::new(inspector_config)
         });
