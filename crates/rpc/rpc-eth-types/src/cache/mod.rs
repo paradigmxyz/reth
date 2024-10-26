@@ -480,7 +480,7 @@ where
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
                                     Ok(Some(Arc::new(
-                                        block_receipts.receipts.into_iter().flatten().collect(),
+                                        block_receipts.receipts.into_iter().collect(),
                                     ))),
                                 );
                             }
@@ -494,7 +494,7 @@ where
                                 this.on_reorg_receipts(
                                     block_receipts.block_hash,
                                     Ok(Some(Arc::new(
-                                        block_receipts.receipts.into_iter().flatten().collect(),
+                                        block_receipts.receipts.into_iter().collect(),
                                     ))),
                                 );
                             }
@@ -543,7 +543,7 @@ enum CacheAction {
 
 struct BlockReceipts {
     block_hash: B256,
-    receipts: Vec<Option<Receipt>>,
+    receipts: Vec<Receipt>,
 }
 
 /// A change of the canonical chain

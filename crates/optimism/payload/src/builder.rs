@@ -302,7 +302,7 @@ where
         cumulative_gas_used += gas_used;
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        receipts.push(Some(Receipt {
+        receipts.push(Receipt {
             tx_type: sequencer_tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
@@ -317,7 +317,7 @@ where
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),
-        }));
+        });
 
         // append sender and transaction to the respective lists
         executed_senders.push(sequencer_tx.signer());
@@ -393,14 +393,14 @@ where
             cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Some(Receipt {
+            receipts.push(Receipt {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
                 logs: result.into_logs().into_iter().map(Into::into).collect(),
                 deposit_nonce: None,
                 deposit_receipt_version: None,
-            }));
+            });
 
             // update add to total fees
             let miner_fee = tx

@@ -906,7 +906,7 @@ mod tests {
             database_blocks.first().map(|b| b.number).unwrap_or_default(),
             receipts[..database_blocks.len()]
                 .iter()
-                .map(|vec| vec.clone().into_iter().map(Some).collect::<Vec<_>>()),
+                .map(|vec| vec.clone().into_iter().collect::<Vec<_>>()),
         )?;
 
         // Commit to both storages: database and static files

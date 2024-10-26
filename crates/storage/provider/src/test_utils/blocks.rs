@@ -199,7 +199,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
             .revert_account_info(number, account2, Some(None))
             .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
-        vec![vec![Some(
+        vec![vec![
             #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 tx_type: TxType::Eip2930,
@@ -212,7 +212,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
                 )],
                 ..Default::default()
             },
-        )]]
+        ]]
         .into(),
         number,
         Vec::new(),
@@ -261,7 +261,7 @@ fn block2(
             )
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
-        vec![vec![Some(
+        vec![vec![
             #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 tx_type: TxType::Eip1559,
@@ -274,7 +274,7 @@ fn block2(
                 )],
                 ..Default::default()
             },
-        )]]
+        ]]
         .into(),
         number,
         Vec::new(),
@@ -332,7 +332,7 @@ fn block3(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Some(
+        vec![vec![
             #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 tx_type: TxType::Eip1559,
@@ -345,7 +345,7 @@ fn block3(
                 )],
                 ..Default::default()
             },
-        )]]
+        ]]
         .into(),
         number,
         Vec::new(),
@@ -423,7 +423,7 @@ fn block4(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Some(
+        vec![vec![
             #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 tx_type: TxType::Eip1559,
@@ -436,7 +436,7 @@ fn block4(
                 )],
                 ..Default::default()
             },
-        )]]
+        ]]
         .into(),
         number,
         Vec::new(),
@@ -511,7 +511,7 @@ fn block5(
     }
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
-        vec![vec![Some(
+        vec![vec![
             #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 tx_type: TxType::Eip1559,
@@ -524,7 +524,7 @@ fn block5(
                 )],
                 ..Default::default()
             },
-        )]]
+        ]]
         .into(),
         number,
         Vec::new(),

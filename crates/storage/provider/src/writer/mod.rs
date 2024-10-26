@@ -449,7 +449,7 @@ where
     pub fn append_receipts_from_blocks(
         &mut self,
         initial_block_number: BlockNumber,
-        blocks: impl Iterator<Item = Vec<Option<reth_primitives::Receipt>>>,
+        blocks: impl Iterator<Item = Vec<reth_primitives::Receipt>>,
     ) -> ProviderResult<()> {
         let mut bodies_cursor =
             self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
@@ -1377,7 +1377,7 @@ mod tests {
     fn revert_to_indices() {
         let base = ExecutionOutcome {
             bundle: BundleState::default(),
-            receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
+            receipts: vec![vec![Receipt::default(); 2]; 7].into(),
             first_block: 10,
             requests: Vec::new(),
         };
@@ -1594,7 +1594,7 @@ mod tests {
 
         let mut test = ExecutionOutcome {
             bundle: present_state,
-            receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
+            receipts: vec![vec![Receipt::default(); 2]; 1].into(),
             first_block: 2,
             requests: Vec::new(),
         };

@@ -82,6 +82,6 @@ pub trait ReceiptWriter {
         &mut self,
         first_tx_index: TxNumber,
         block_number: BlockNumber,
-        receipts: Vec<Option<Receipt>>,
+        receipts: Vec<Receipt>,
     ) -> ProviderResult<()>;
 }

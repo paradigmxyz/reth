@@ -112,7 +112,7 @@ impl BlockBatchRecord {
 
     /// Save receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
-        let mut receipts = receipts.into_iter().map(Some).collect();
+        let mut receipts = receipts.into_iter().collect();
         // Prune receipts if necessary.
         self.prune_receipts(&mut receipts).map_err(InternalBlockExecutionError::from)?;
         // Save receipts.
@@ -121,10 +121,7 @@ impl BlockBatchRecord {
     }
 
     /// Prune receipts according to the pruning configuration.
-    fn prune_receipts(
-        &mut self,
-        receipts: &mut Vec<Option<Receipt>>,
-    ) -> Result<(), PruneSegmentError> {
+    fn prune_receipts(&mut self, receipts: &mut Vec<Receipt>) -> Result<(), PruneSegmentError> {
         let (Some(first_block), Some(tip)) = (self.first_block, self.tip) else { return Ok(()) };
 
         let block_number = first_block + self.receipts.len() as u64;
@@ -160,9 +157,8 @@ impl BlockBatchRecord {
             for receipt in receipts.iter_mut() {
                 // If there is an address_filter, it does not contain any of the
                 // contract addresses, then remove this receipt.
-                let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
-                    receipt.take();
+                if !receipt.logs.iter().any(|log| filter.contains(&log.address)) {
+                    *receipt = Receipt::default();
                 }
             }
         }
@@ -208,7 +204,7 @@ mod tests {
         // Verify that the first block contains one receipt
         assert_eq!(recorder.receipts()[0].len(), 1);
         // Verify that the saved receipt is the default receipt
-        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+        assert_eq!(recorder.receipts()[0][0], Receipt::default());
     }
 
     #[test]
@@ -230,7 +226,7 @@ mod tests {
         // Verify that the first block contains one receipt
         assert_eq!(recorder.receipts()[0].len(), 1);
         // Verify that the saved receipt is the default receipt
-        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+        assert_eq!(recorder.receipts()[0][0], Receipt::default());
     }
 
     #[test]
@@ -252,7 +248,7 @@ mod tests {
         // Verify that the first block contains one receipt
         assert_eq!(recorder.receipts()[0].len(), 1);
         // Verify that the saved receipt is the default receipt
-        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+        assert_eq!(recorder.receipts()[0][0], Receipt::default());
     }
 
     #[test]
@@ -276,7 +272,7 @@ mod tests {
         // Verify that the first block contains one receipt
         assert_eq!(recorder.receipts()[0].len(), 1);
         // Verify that the saved receipt is the default receipt
-        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+        assert_eq!(recorder.receipts()[0][0], Receipt::default());
     }
 
     // Test saving receipts with pruning configuration and receipts should be pruned
@@ -332,7 +328,7 @@ mod tests {
         assert!(recorder.save_receipts(receipts).is_ok());
         // Verify that the receipts are pruned (empty)
         assert_eq!(recorder.receipts().len(), 1);
-        assert_eq!(recorder.receipts()[0], vec![None]);
+        assert_eq!(recorder.receipts()[0], vec![]);
 
         // With a receipt that should not be pruned (address 1 in the log filter)
         let mut receipt1 = Receipt::default();
@@ -341,7 +337,7 @@ mod tests {
         assert!(recorder.save_receipts(receipts).is_ok());
         // Verify that the second block of receipts contains the receipt
         assert_eq!(recorder.receipts().len(), 2);
-        assert_eq!(recorder.receipts()[1][0], Some(receipt1));
+        assert_eq!(recorder.receipts()[1][0], receipt1);
 
         // With a receipt that should not be pruned (address 2 in the log filter)
         let mut receipt2 = Receipt::default();
@@ -350,7 +346,7 @@ mod tests {
         assert!(recorder.save_receipts(receipts).is_ok());
         // Verify that the third block of receipts contains the receipt
         assert_eq!(recorder.receipts().len(), 3);
-        assert_eq!(recorder.receipts()[2][0], Some(receipt2));
+        assert_eq!(recorder.receipts()[2][0], receipt2);
 
         // With a receipt that should not be pruned (address 3 in the log filter)
         let mut receipt3 = Receipt::default();
@@ -359,6 +355,6 @@ mod tests {
         assert!(recorder.save_receipts(receipts).is_ok());
         // Verify that the fourth block of receipts contains the receipt
         assert_eq!(recorder.receipts().len(), 4);
-        assert_eq!(recorder.receipts()[3][0], Some(receipt3));
+        assert_eq!(recorder.receipts()[3][0], receipt3);
     }
 }

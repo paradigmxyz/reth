@@ -401,8 +401,7 @@ impl StorageInner {
         let receipts = execution_outcome.receipts_by_block(header.number);
 
         // update logs bloom
-        let receipts_with_bloom =
-            receipts.iter().map(|r| r.as_ref().unwrap().bloom_slow()).collect::<Vec<Bloom>>();
+        let receipts_with_bloom = receipts.iter().map(|r| r.bloom_slow()).collect::<Vec<Bloom>>();
         header.logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r);
 
         // update receipts root

@@ -17,12 +17,10 @@ where
         &mut self,
         first_tx_index: TxNumber,
         _: BlockNumber,
-        receipts: Vec<Option<Receipt>>,
+        receipts: Vec<Receipt>,
     ) -> ProviderResult<()> {
         for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-            if let Some(receipt) = receipt {
-                self.0.append(first_tx_index + tx_idx as u64, receipt)?;
-            }
+            self.0.append(first_tx_index + tx_idx as u64, receipt)?;
         }
         Ok(())
     }

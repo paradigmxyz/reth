@@ -11,18 +11,14 @@ impl ReceiptWriter for StaticFileWriter<'_, StaticFileProviderRWRefMut<'_>> {
         &mut self,
         first_tx_index: TxNumber,
         block_number: BlockNumber,
-        receipts: Vec<Option<Receipt>>,
+        receipts: Vec<Receipt>,
     ) -> ProviderResult<()> {
         // Increment block on static file header.
         self.0.increment_block(block_number)?;
-        let receipts = receipts.iter().enumerate().map(|(tx_idx, receipt)| {
-            Ok((
-                first_tx_index + tx_idx as u64,
-                receipt
-                    .as_ref()
-                    .expect("receipt should not be filtered when saving to static files."),
-            ))
-        });
+        let receipts = receipts
+            .iter()
+            .enumerate()
+            .map(|(tx_idx, receipt)| Ok((first_tx_index + tx_idx as u64, receipt)));
         self.0.append_receipts(receipts)?;
         Ok(())
     }

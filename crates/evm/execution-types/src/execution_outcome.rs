@@ -182,7 +182,7 @@ impl ExecutionOutcome {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().filter_map(|r| Some(r.logs.iter())).flatten())
+        Some(self.receipts[index].iter().flat_map(|r| r.logs.iter()))
     }
 
     /// Return blocks logs bloom
@@ -197,10 +197,10 @@ impl ExecutionOutcome {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
+        self.receipts
+            .receipt_vec
+            .get(self.block_number_to_index(_block_number)?)
+            .map(|receipts| reth_primitives::proofs::calculate_receipt_root_no_memo(receipts))
     }
 
     /// Returns the receipt root for all recorded receipts.
@@ -209,9 +209,12 @@ impl ExecutionOutcome {
     pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        f: impl FnOnce(&[&Receipt]) -> B256,
+        f: impl FnOnce(&[Receipt]) -> B256,
     ) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
+        self.receipts
+            .receipt_vec
+            .get(self.block_number_to_index(block_number)?)
+            .map(|receipts| f(receipts))
     }
 
     /// Returns reference to receipts.
@@ -382,7 +385,7 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -391,7 +394,7 @@ mod tests {
                 deposit_nonce: Some(18),
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: Some(34),
-            })]],
+            }]],
         };
 
         // Create a Requests object with a vector of requests
@@ -447,7 +450,7 @@ mod tests {
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -456,7 +459,7 @@ mod tests {
                 deposit_nonce: Some(18),
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: Some(34),
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -485,7 +488,7 @@ mod tests {
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -494,7 +497,7 @@ mod tests {
                 deposit_nonce: Some(18),
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: Some(34),
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -520,7 +523,7 @@ mod tests {
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -529,7 +532,7 @@ mod tests {
                 deposit_nonce: Some(18),
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: Some(34),
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -550,7 +553,7 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(Receipt {
+            vec![&Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -559,7 +562,7 @@ mod tests {
                 deposit_nonce: Some(18),
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: Some(34),
-            })]
+            }]
         );
     }
 
@@ -567,7 +570,7 @@ mod tests {
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -576,7 +579,7 @@ mod tests {
                 deposit_nonce: Some(18),
                 #[cfg(feature = "optimism")]
                 deposit_receipt_version: Some(34),
-            })]],
+            }]],
         };
 
         // Create an empty Receipts object
@@ -630,9 +633,7 @@ mod tests {
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
-        };
+        let receipts = Receipts { receipt_vec: vec![vec![receipt.clone()], vec![receipt.clone()]] };
 
         // Define the first block number
         let first_block = 123;
@@ -653,7 +654,7 @@ mod tests {
         assert!(exec_res.revert_to(123));
 
         // Assert that the receipts are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
+        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![receipt]] });
 
         // Assert that the requests are properly cut after reverting to the initial block number.
         assert_eq!(exec_res.requests, vec![Requests::new(vec![request])]);
@@ -682,7 +683,7 @@ mod tests {
         };
 
         // Create a Receipts object containing the receipt.
-        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
+        let receipts = Receipts { receipt_vec: vec![vec![receipt.clone()]] };
 
         // Create a request.
         let request = bytes!("deadbeef");
@@ -705,9 +706,7 @@ mod tests {
             exec_res,
             ExecutionOutcome {
                 bundle: Default::default(),
-                receipts: Receipts {
-                    receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
-                },
+                receipts: Receipts { receipt_vec: vec![vec![receipt.clone()], vec![receipt]] },
                 requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
                 first_block: 123,
             }
@@ -730,11 +729,7 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![
-                vec![Some(receipt.clone())],
-                vec![Some(receipt.clone())],
-                vec![Some(receipt.clone())],
-            ],
+            receipt_vec: vec![vec![receipt.clone()], vec![receipt.clone()], vec![receipt.clone()]],
         };
 
         // Define the first block number
@@ -761,7 +756,7 @@ mod tests {
         // Define the expected lower ExecutionOutcome after splitting
         let lower_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] },
+            receipts: Receipts { receipt_vec: vec![vec![receipt.clone()]] },
             requests: vec![Requests::new(vec![request.clone()])],
             first_block,
         };
@@ -769,9 +764,7 @@ mod tests {
         // Define the expected higher ExecutionOutcome after splitting
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts {
-                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            },
+            receipts: Receipts { receipt_vec: vec![vec![receipt.clone()], vec![receipt]] },
             requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
             first_block: 124,
         };

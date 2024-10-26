@@ -373,7 +373,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Some(self.assemble_receipt(&tx, result, cumulative_gas_used)));
+            receipts.push(self.assemble_receipt(&tx, result, cumulative_gas_used));
 
             // append transaction to the list of executed transactions
             let (tx, sender) = tx.to_components();
@@ -446,9 +446,6 @@ pub trait LoadPendingBlock: EthApiTypes {
             parent_beacon_block_root,
             requests_hash,
         };
-
-        // Convert Vec<Option<Receipt>> to Vec<Receipt>
-        let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
 
         // seal the block
         let block = Block {

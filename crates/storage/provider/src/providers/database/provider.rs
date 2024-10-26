@@ -902,7 +902,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
+                    block_receipts.push(receipt);
                 }
             }
             receipts.push(block_receipts);
@@ -2681,7 +2681,7 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> StateChangeWriter for DatabaseProvid
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
+                    block_receipts.push(receipt);
                 }
             }
             receipts.push(block_receipts);
