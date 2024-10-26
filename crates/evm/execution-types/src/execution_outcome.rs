@@ -393,7 +393,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-            })]],
+            }]],
         };
 
         // Create a Requests object with a vector of requests
@@ -455,7 +455,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -490,7 +490,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -522,7 +522,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -548,7 +548,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-            })]
+            }]
         );
     }
 
@@ -562,7 +562,7 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-            })]],
+            }]],
         };
 
         // Create an empty Receipts object
