@@ -11,10 +11,10 @@ use reth_node_api::{EngineTypes, FullNodeComponents};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
-    rpc::api::EngineApiClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
+use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 

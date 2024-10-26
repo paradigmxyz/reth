@@ -20,6 +20,7 @@ reth-transaction-pool.workspace = true
 reth-chain-state.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 op-alloy-rpc-types-engine.workspace = true

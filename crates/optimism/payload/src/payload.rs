@@ -2,7 +2,7 @@
 
 //! Optimism builder support
 
-use alloy_eips::eip2718::Decodable2718;
+use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
@@ -182,6 +182,10 @@ impl BuiltPayload for OptimismBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn requests(&self) -> Option<Requests> {
+        None
+    }
 }
 
 impl BuiltPayload for &OptimismBuiltPayload {
@@ -195,6 +199,10 @@ impl BuiltPayload for &OptimismBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
+    }
+
+    fn requests(&self) -> Option<Requests> {
+        None
     }
 }
 
