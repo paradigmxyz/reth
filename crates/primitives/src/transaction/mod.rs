@@ -18,6 +18,8 @@ use derive_more::{AsRef, Deref};
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
+#[cfg(feature = "optimism")]
+use op_alloy_consensus::DepositTransaction;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use signature::{decode_with_eip155_chain_id, with_eip155_parity};
@@ -134,6 +136,31 @@ pub enum Transaction {
     /// Optimism deposit transaction.
     #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
+}
+
+#[cfg(feature = "optimism")]
+impl DepositTransaction for Transaction {
+    fn source_hash(&self) -> Option<B256> {
+        match self {
+            Self::Deposit(tx) => tx.source_hash(),
+            _ => None,
+        }
+    }
+    fn mint(&self) -> Option<u128> {
+        match self {
+            Self::Deposit(tx) => tx.mint(),
+            _ => None,
+        }
+    }
+    fn is_system_transaction(&self) -> bool {
+        match self {
+            Self::Deposit(tx) => tx.is_system_transaction(),
+            _ => false,
+        }
+    }
+    fn is_deposit(&self) -> bool {
+        matches!(self, Self::Deposit(_))
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
