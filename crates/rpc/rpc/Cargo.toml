@@ -45,6 +45,7 @@ alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
+alloy-rpc-types-beacon.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["jsonrpsee-types"] }
 alloy-rpc-types-debug.workspace = true
 alloy-rpc-types-trace.workspace = true
