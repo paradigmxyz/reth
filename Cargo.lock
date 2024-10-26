@@ -8279,7 +8279,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
- "revm-primitives",
  "sha2 0.10.8",
  "thiserror",
  "tracing",
