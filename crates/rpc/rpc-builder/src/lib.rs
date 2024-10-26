@@ -36,7 +36,7 @@
 //!     block_executor: BlockExecutor,
 //! ) where
 //!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
-//!     Pool: TransactionPool + 'static,
+//!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
@@ -85,6 +85,7 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
+//!
 //! pub async fn launch<
 //!     Provider,
 //!     Pool,
@@ -104,7 +105,7 @@
 //!     block_executor: BlockExecutor,
 //! ) where
 //!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
-//!     Pool: TransactionPool + 'static,
+//!     Pool: TransactionPool + Unpin + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
