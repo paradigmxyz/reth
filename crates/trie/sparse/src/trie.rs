@@ -674,19 +674,20 @@ impl RevealedSparseTrie {
                         }
                     }
 
-                    branch_value_stack_buf.clear();
-                    for child_path in &branch_child_buf {
+                    branch_value_stack_buf.resize(branch_child_buf.len(), Default::default());
+                    let mut added_children = false;
+                    for (i, child_path) in branch_child_buf.iter().enumerate() {
                         if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
                             let (_, child) = rlp_node_stack.pop().unwrap();
-                            branch_value_stack_buf.push(child);
+                            branch_value_stack_buf[branch_child_buf.len() - i - 1] = child;
+                            added_children = true;
                         } else {
-                            debug_assert!(branch_value_stack_buf.is_empty());
+                            debug_assert!(!added_children);
                             path_stack.push(path);
                             path_stack.extend(branch_child_buf.drain(..));
                             continue 'main
                         }
                     }
-                    branch_value_stack_buf.reverse();
 
                     self.rlp_buf.clear();
                     let rlp_node = BranchNodeRef::new(&branch_value_stack_buf, *state_mask)
