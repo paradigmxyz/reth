@@ -278,40 +278,40 @@ Networking:
           Name of network interface used to communicate with peers.
 
           If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
-          
+
       --budget-try-drain-system <DEFAULT_BUDGET>
           Default budget to try and drain streams
-          
+
           [default: 10]
 
       --budget-try-drain-downloaders <BUDGET_BLOCKS_DOWN>
           Default budget to try and drain headers and bodies download streams.
-          
+
           [default: 2]
 
       --budget-try-drain-swarm <BUDGET_ALL_INGRESS>
           Budget for draining all ingress traffic, eth [and other capability] messages, and p2p connection updates. When the node has stabilised at max peer count, work done by an iteration in this stream will, to the most part, be accounted for by ingress traffic.
-          
+
           [default: 10]
 
       --budget-try-drain-network-handle-channel <BUDGET_EGRESS_GOSSIP>
           Budget for draining egress transaction gossip
-          
+
           [default: 40]
 
       --budget-try-drain-network-transaction-events <BUDGET_INGRESS_TX_MSGS>
           Budget for draining ingress transaction gossip and transaction requests
-          
+
           [default: 10]
 
       --budget-try-drain-pending-pool-imports <BUDGET_POOL_IMPORTS>
           Budget for advancing import of transaction batches into pool.
-          
+
           [default: 40]
 
       --budget-try-drain-pool-imports <BUDGET_PROPAGATE_GOSSIP>
           Budget for propagating transactions that have successfully been imported into pool.
-          
+
           [default: 40]
 
 Logging:
