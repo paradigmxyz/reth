@@ -74,11 +74,6 @@ where
     Provider: BlockReaderIdExt,
 {
     #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
-    #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }

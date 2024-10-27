@@ -7,7 +7,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::TransactionMeta;
-use reth_provider::{BlockReaderIdExt, HeaderProvider};
+use reth_provider::HeaderProvider;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcReceipt,
@@ -87,11 +87,6 @@ where
     Self: LoadPendingBlock + SpawnBlocking,
     N: FullNodeComponents,
 {
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
