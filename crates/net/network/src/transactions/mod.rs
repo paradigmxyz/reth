@@ -458,6 +458,8 @@ where
                 // transaction lists, before deciding whether or not to send full transactions to
                 // the peer.
                 for tx in &to_propagate {
+                    // Only proceed if the transaction is not in the peer's list of seen
+                    // transactions
                     if !peer.seen_transactions.contains(&tx.hash()) {
                         builder.push(tx);
                     }
