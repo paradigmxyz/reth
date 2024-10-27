@@ -35,7 +35,7 @@ mod tests {
                 eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
                 legacy::TxLegacy,
             },
-            withdrawal::Withdrawal,
+            withdrawal::{Withdrawal, Withdrawals},
         },
         test_utils::UnusedBits,
         validate_bitflag_backwards_compat,
@@ -51,6 +51,7 @@ mod tests {
         validate_bitflag_backwards_compat!(TxEip2930, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntries, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntry, UnusedBits::Zero);
+        validate_bitflag_backwards_compat!(Withdrawals, UnusedBits::Zero);
 
         validate_bitflag_backwards_compat!(GenesisAccountRef<'_>, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(GenesisAccount, UnusedBits::NotZero);

@@ -1,7 +1,7 @@
 //! Compact implementation for [`AlloyWithdrawal`]
 
 use crate::Compact;
-use alloy_eips::eip4895::Withdrawal as AlloyWithdrawal;
+use alloy_eips::eip4895::{Withdrawal as AlloyWithdrawal, Withdrawals as AlloyWithdrawals};
 use alloy_primitives::Address;
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -52,6 +52,52 @@ impl Compact for AlloyWithdrawal {
     }
 }
 
+/// Represents a collection of [`Withdrawals`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
+#[add_arbitrary_tests(compact)]
+pub(crate) struct Withdrawals(Vec<Withdrawal>);
+
+impl Compact for AlloyWithdrawals {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let withdrawals = Withdrawals(
+            self.iter()
+                .map(|w| Withdrawal {
+                    index: w.index,
+                    validator_index: w.validator_index,
+                    address: w.address,
+                    amount: w.amount,
+                })
+                .collect(),
+        );
+        withdrawals.to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (withdrawals, _) = Withdrawals::from_compact(buf, len);
+        let alloy_withdrawals = Self::new(
+            withdrawals
+                .0
+                .into_iter()
+                .map(|w| AlloyWithdrawal {
+                    index: w.index,
+                    validator_index: w.validator_index,
+                    address: w.address,
+                    amount: w.amount,
+                })
+                .collect(),
+        );
+        (alloy_withdrawals, buf)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,11 +106,19 @@ mod tests {
 
     proptest! {
         #[test]
-        fn roundtrip(withdrawal in arb::<AlloyWithdrawal>()) {
+        fn roundtrip_withdrawal(withdrawal in arb::<AlloyWithdrawal>()) {
             let mut compacted_withdrawal = Vec::<u8>::new();
             let len = withdrawal.to_compact(&mut compacted_withdrawal);
             let (decoded, _) = AlloyWithdrawal::from_compact(&compacted_withdrawal, len);
             assert_eq!(withdrawal, decoded)
+        }
+
+        #[test]
+        fn roundtrip_withdrawals(withdrawals in arb::<AlloyWithdrawals>()) {
+            let mut compacted_withdrawals = Vec::<u8>::new();
+            let len = withdrawals.to_compact(&mut compacted_withdrawals);
+            let (decoded, _) = AlloyWithdrawals::from_compact(&compacted_withdrawals, len);
+            assert_eq!(withdrawals, decoded);
         }
     }
 
@@ -76,5 +130,6 @@ mod tests {
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
+        assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 }

@@ -341,7 +341,6 @@ mod tests {
         assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
 
         validate_bitflag_backwards_compat!(Account, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(AccountHashingCheckpoint, UnusedBits::NotZero);
