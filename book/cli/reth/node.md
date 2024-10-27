@@ -239,7 +239,9 @@ Networking:
           [default: 2]
 
       --budget-try-drain-swarm <BUDGET_ALL_INGRESS>
-          Budget for draining all ingress traffic, eth [and other capability] messages, and p2p connection updates. When the node has stabilised at max peer count, work done by an iteration in this stream will, to the most part, be accounted for by ingress traffic.
+          Budget for draining all ingress traffic, eth [and other capability] messages, and p2p
+          connection updates. When the node has stabilised at max peer count, work done by an
+          iteration in this stream will, to the most part, be accounted for by ingress traffic.
 
           [default: 10]
 
@@ -260,7 +262,7 @@ Networking:
 
       --budget-try-drain-pool-imports <BUDGET_PROPAGATE_GOSSIP>
           Budget for propagating transactions that have successfully been imported into pool.
-          
+
           [default: 40]
 
 RPC:
