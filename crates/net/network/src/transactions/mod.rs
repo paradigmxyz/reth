@@ -632,13 +632,6 @@ where
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
             }
 
-            // Update the cache if respecting cache
-            if !propagation_mode.is_forced() {
-                for hash in new_pooled_hashes.iter_hashes().copied() {
-                    peer.seen_transactions.insert(hash);
-                }
-            }
-
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
 
             // send hashes of transactions
