@@ -3,6 +3,7 @@
 
 use crate::{
     AsEthApiError, FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcBlock,
+    RpcNodeCore,
 };
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
@@ -96,7 +97,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             let base_block =
                 self.block_with_senders(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent_hash = base_block.header.hash();
-            let total_difficulty = LoadPendingBlock::provider(self)
+            let total_difficulty = RpcNodeCore::provider(self)
                 .header_td_by_number(block_env.number.to())
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block))?;
@@ -118,7 +119,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                     block_env.timestamp += U256::from(1);
 
                     if validation {
-                        let chain_spec = LoadPendingBlock::provider(&this).chain_spec();
+                        let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                         let base_fee_params =
                             chain_spec.base_fee_params_at_timestamp(block_env.timestamp.to());
                         let base_fee = if let Some(latest) = blocks.last() {
@@ -300,7 +301,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         let env = EnvWithHandlerCfg::new_with_cfg_env(
                             cfg.clone(),
                             block_env.clone(),
-                            Call::evm_config(&this).tx_env(tx, *signer),
+                            RpcNodeCore::evm_config(&this).tx_env(tx, *signer),
                         );
                         let (res, _) = this.transact(&mut db, env)?;
                         db.commit(res.state);
@@ -452,7 +453,7 @@ pub trait EthCall: Call + LoadPendingBlock {
 }
 
 /// Executes code on state.
-pub trait Call: LoadState + SpawnBlocking {
+pub trait Call: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
@@ -460,11 +461,6 @@ pub trait Call: LoadState + SpawnBlocking {
 
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
     fn max_simulate_blocks(&self) -> u64;
-
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, R>(&self, at: BlockId, f: F) -> Result<R, Self::Error>
@@ -636,7 +632,7 @@ pub trait Call: LoadState + SpawnBlocking {
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
                 );
 
                 let (res, _) = this.transact(&mut db, env)?;

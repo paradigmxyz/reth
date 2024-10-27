@@ -16,6 +16,9 @@ pub mod import;
 pub mod import_receipts;
 pub mod init_state;
 
+#[cfg(feature = "dev")]
+pub mod test_vectors;
+
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
 pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
@@ -55,4 +58,8 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<Spec>),
+    /// Generate Test Vectors
+    #[cfg(feature = "dev")]
+    #[command(name = "test-vectors")]
+    TestVectors(test_vectors::Command),
 }

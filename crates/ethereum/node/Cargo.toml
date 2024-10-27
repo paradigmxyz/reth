@@ -52,6 +52,12 @@ alloy-genesis.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 alloy-consensus.workspace = true
+alloy-provider.workspace = true
+rand.workspace = true
+alloy-signer.workspace = true
+alloy-eips.workspace = true
+alloy-sol-types.workspace = true
+alloy-contract.workspace = true
 
 [features]
 default = []

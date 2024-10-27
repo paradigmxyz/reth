@@ -3,10 +3,10 @@
 
 use std::time::{Duration, Instant};
 
-use crate::{EthApiTypes, FromEthApiError, FromEvmError};
+use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
+use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
@@ -17,7 +17,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+    constants::eip4844::MAX_DATA_GAS_PER_BLOCK,
     proofs::calculate_transaction_root,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
@@ -43,31 +43,21 @@ use super::SpawnBlocking;
 /// Loads a pending block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadPendingBlock: EthApiTypes {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(
-        &self,
-    ) -> impl BlockReaderIdExt
-           + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-           + StateProviderFactory;
-
-    /// Returns a handle for reading data from transaction pool.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn pool(&self) -> impl TransactionPool;
-
+pub trait LoadPendingBlock:
+    EthApiTypes
+    + RpcNodeCore<
+        Provider: BlockReaderIdExt
+                      + EvmEnvProvider
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+                      + StateProviderFactory,
+        Pool: TransactionPool,
+        Evm: ConfigureEvm<Header = Header>,
+    >
+{
     /// Returns a handle to the pending block.
     ///
     /// Data access in default (L1) trait method implementations.
     fn pending_block(&self) -> &Mutex<Option<PendingBlock>>;
-
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
 
     /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
     ///

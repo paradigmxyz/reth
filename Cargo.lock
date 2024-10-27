@@ -129,6 +129,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-contract"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460ab80ce4bda1c80bcf96fe7460520476f2c7b734581c6567fac2708e2a60ef"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-json-abi",
+ "alloy-network",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-sol-types",
+ "alloy-transport",
+ "futures",
+ "futures-util",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-dyn-abi"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -286,9 +306,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38f35429a652765189c1c5092870d8360ee7b7769b09b06d89ebaefd34676446"
+checksum = "c71738eb20c42c5fb149571e76536a0f309d142f3957c28791662b96baf77a3d"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -6615,6 +6635,7 @@ dependencies = [
  "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
+ "reth-codecs",
  "reth-config",
  "reth-consensus",
  "reth-db",
@@ -6638,10 +6659,13 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-prune-types",
  "reth-stages",
+ "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "secp256k1",
  "serde",
@@ -6696,6 +6720,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test-fuzz",
+ "visibility",
 ]
 
 [[package]]
@@ -6741,6 +6766,7 @@ name = "reth-consensus-common"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "mockall",
  "rand 0.8.5",
@@ -7012,6 +7038,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-signer",
  "alloy-signer-local",
+ "derive_more 1.0.0",
  "eyre",
  "futures-util",
  "jsonrpsee",
@@ -7019,6 +7046,7 @@ dependencies = [
  "reth",
  "reth-chainspec",
  "reth-db",
+ "reth-engine-local",
  "reth-network-peers",
  "reth-node-builder",
  "reth-payload-builder",
@@ -7032,6 +7060,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7837,7 +7866,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-eth-api",
  "reth-tasks",
  "reth-transaction-pool",
 ]
@@ -7937,8 +7965,6 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives",
  "reth-prune-types",
- "reth-rpc-api",
- "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types-compat",
@@ -7963,10 +7989,16 @@ name = "reth-node-ethereum"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-contract",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer",
+ "alloy-sol-types",
  "eyre",
  "futures",
+ "rand 0.8.5",
  "reth",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
@@ -8084,6 +8116,8 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
+ "op-alloy-consensus",
+ "proptest",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
@@ -8245,7 +8279,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
- "revm-primitives",
  "sha2 0.10.8",
  "thiserror",
  "tracing",
@@ -8336,6 +8369,7 @@ dependencies = [
 name = "reth-payload-primitives"
 version = "1.1.0"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
  "async-trait",
@@ -8563,6 +8597,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
+ "alloy-rpc-types-beacon",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
@@ -8591,7 +8626,6 @@ dependencies = [
  "reth-network-api",
  "reth-network-peers",
  "reth-network-types",
- "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8707,6 +8741,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tower 0.4.13",
  "tower-http",
  "tracing",
@@ -8773,6 +8808,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-types",
  "reth-network-api",
+ "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -11226,6 +11262,17 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "visibility"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d674d135b4a8c1d7e813e2f8d1c9a58308aee4a680323066025e53132218bd91"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.80",
+]
 
 [[package]]
 name = "wait-timeout"

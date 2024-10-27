@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyTxEip1559`]
+
 use crate::Compact;
 use alloy_consensus::TxEip1559 as AlloyTxEip1559;
 use alloy_eips::eip2930::AccessList;
@@ -11,8 +13,12 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::TxEip1559`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, crate::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(arbitrary::Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(any(test, feature = "test-utils"), crate::add_arbitrary_tests(compact))]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 pub(crate) struct TxEip1559 {
     chain_id: ChainId,
     nonce: u64,
