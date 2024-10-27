@@ -575,7 +575,7 @@ where
             // Filter out errors
             <P::Transaction as PoolTransaction>::try_from_consensus(tx.into()).ok()
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
