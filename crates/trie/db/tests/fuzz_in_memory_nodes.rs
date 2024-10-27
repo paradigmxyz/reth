@@ -13,10 +13,25 @@ use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostState, HashedStorage, Nibbles, StateRoot, StorageRoot,
+    BranchNodeCompact, HashedPostState, HashedStorage, Nibbles, StateRoot, StorageRoot,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+trait VerifiableTrieUpdates {
+    fn nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact>;
+    fn removed_nodes_ref(&self) -> &HashSet<Nibbles>;
+}
+
+impl VerifiableTrieUpdates for StorageTrieUpdates {
+    fn nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+        self.storage_nodes_ref()
+    }
+
+    fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        self.removed_nodes_ref()
+    }
+}
 
 const fn is_bit_set(mask: u16, position: u8) -> bool {
     (mask & (1 << position)) != 0
@@ -33,14 +48,14 @@ fn get_child_paths(path: &Nibbles, tree_mask: u16) -> Vec<Nibbles> {
         .collect()
 }
 
-fn verify_storage_trie_tree_mask_invariant(trie_updates: &StorageTrieUpdates) -> bool {
-    for (path, branch_node) in trie_updates.storage_nodes_ref() {
+fn verify_storage_trie_tree_mask_invariant<V: VerifiableTrieUpdates>(trie_updates: &V) -> bool {
+    for (path, branch_node) in trie_updates.nodes_ref() {
         let child_paths = get_child_paths(path, branch_node.tree_mask.get());
 
         // for each child path indicated by the tree mask, verify that a corresponding
         // branch node exists in the trie updates
         for child_path in child_paths {
-            if !trie_updates.storage_nodes_ref().contains_key(&child_path) &&
+            if !trie_updates.nodes_ref().contains_key(&child_path) &&
                 !trie_updates.removed_nodes_ref().contains(&child_path)
             {
                 println!("missing child node at path: {:?} for parent: {:?}", child_path, path);
