@@ -590,7 +590,7 @@ where
         &mut self,
         hashes: Vec<TxHash>,
         peer_id: PeerId,
-        propagate_kind: PropagationMode,
+        propagation_mode: PropagationMode,
     ) {
         trace!(target: "net::tx", "Start propagating transactions as hashes");
 
@@ -610,13 +610,14 @@ where
             // check if transaction is known to peer
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
 
-            for tx in to_propagate {
-                if propagate_kind.is_forced() {
-                    // Always include the transaction
-                    hashes.push(&tx);
-                } else if !peer.seen_transactions.contains(&tx.hash()) {
-                    // Include if the peer hasn't seen it
-                    hashes.push(&tx);
+            if propagation_mode.is_forced() {
+                hashes.extend(to_propagate)
+            } else {
+                for tx in to_propagate {
+                    if !peer.seen_transactions.contains(&tx.hash()) {
+                        // Include if the peer hasn't seen it
+                        hashes.push(&tx);
+                    }
                 }
             }
 
@@ -632,7 +633,7 @@ where
             }
 
             // Update the cache if respecting cache
-            if !propagate_kind.is_forced() {
+            if !propagation_mode.is_forced() {
                 for hash in new_pooled_hashes.iter_hashes().copied() {
                     peer.seen_transactions.insert(hash);
                 }
@@ -1649,6 +1650,13 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
+        }
+    }
+
+    /// Appends all hashes
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
+        for tx in txs {
+            self.push(&tx);
         }
     }
 
