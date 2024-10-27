@@ -363,6 +363,5 @@ mod tests {
         validate_bitflag_backwards_compat!(StoredBlockOmmers, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockWithdrawals, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
-        validate_bitflag_backwards_compat!(Withdrawals, UnusedBits::Zero);
     }
 }
