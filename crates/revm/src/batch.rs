@@ -112,7 +112,7 @@ impl BlockBatchRecord {
 
     /// Save receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
-        let mut receipts = receipts.into_iter().collect();
+        let mut receipts = receipts.clone();
         // Prune receipts if necessary.
         self.prune_receipts(&mut receipts).map_err(InternalBlockExecutionError::from)?;
         // Save receipts.
