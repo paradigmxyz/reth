@@ -196,7 +196,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     }
 }
 
-/// A[`BestTransactions`](crate::traits::BestTransactions) implementation that filters the
+/// A [`BestTransactions`](crate::traits::BestTransactions) implementation that filters the
 /// transactions of iter with predicate.
 ///
 /// Filter out transactions are marked as invalid:
