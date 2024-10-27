@@ -13,7 +13,7 @@ use reth_codecs::alloy::{
         eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
         legacy::TxLegacy,
     },
-    withdrawal::Withdrawal,
+    withdrawal::{Withdrawal, Withdrawals},
 };
 use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
@@ -22,7 +22,7 @@ use reth_db::{
 use reth_fs_util as fs;
 use reth_primitives::{
     Account, Log, LogData, Receipt, ReceiptWithBloom, StorageEntry, Transaction,
-    TransactionSignedNoHash, TxType, Withdrawals,
+    TransactionSignedNoHash, TxType,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode};
 use reth_stages_types::{
