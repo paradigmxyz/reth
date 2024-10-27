@@ -8,6 +8,7 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 10;
 /// Default is 2 iterations.
 pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 2;
 
+#[allow(rustdoc::private_intra_doc_links)]
 /// Default budget to try and drain [`Swarm`](crate::swarm::Swarm).
 ///
 /// Default is 10 [`SwarmEvent`](crate::swarm::SwarmEvent)s.
