@@ -243,13 +243,9 @@ where
 
 impl<N> Trace for OpEthApi<N>
 where
-    Self: LoadState,
-    N: FullNodeComponents,
+    Self: LoadState<Evm: ConfigureEvm<Header = Header>>,
+    N: RpcNodeCore,
 {
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
-    }
 }
 
 impl<N> AddDevSigners for OpEthApi<N>
