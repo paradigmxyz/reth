@@ -152,12 +152,7 @@ where
 impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for Walker<'_, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
-        let start = self.start.take();
-        if start.is_some() {
-            return start
-        }
-
-        self.cursor.next().transpose()
+        self.start.take().or_else(|| self.cursor.next().transpose())
     }
 }
 

@@ -97,7 +97,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             let base_block =
                 self.block_with_senders(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent_hash = base_block.header.hash();
-            let total_difficulty = LoadPendingBlock::provider(self)
+            let total_difficulty = RpcNodeCore::provider(self)
                 .header_td_by_number(block_env.number.to())
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block))?;
@@ -119,7 +119,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                     block_env.timestamp += U256::from(1);
 
                     if validation {
-                        let chain_spec = LoadPendingBlock::provider(&this).chain_spec();
+                        let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                         let base_fee_params =
                             chain_spec.base_fee_params_at_timestamp(block_env.timestamp.to());
                         let base_fee = if let Some(latest) = blocks.last() {
@@ -259,7 +259,8 @@ pub trait EthCall: Call + LoadPendingBlock {
             // if it's not pending, we should always use block_hash over block_number to ensure that
             // different provider calls query data related to the same block.
             if !is_block_target_pending {
-                target_block = LoadBlock::provider(self)
+                target_block = self
+                    .provider()
                     .block_hash_for_id(target_block)
                     .map_err(|_| EthApiError::HeaderNotFound(target_block))?
                     .ok_or_else(|| EthApiError::HeaderNotFound(target_block))?
