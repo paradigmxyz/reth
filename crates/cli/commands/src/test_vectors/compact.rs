@@ -75,7 +75,6 @@ compact_types!(
         // reth-primitives
         Account,
         Receipt,
-        Withdrawals,
         ReceiptWithBloom,
         // reth_codecs::alloy
         Authorization,
@@ -83,6 +82,7 @@ compact_types!(
         Header,
         HeaderExt,
         Withdrawal,
+        Withdrawals,
         TxEip2930,
         TxEip1559,
         TxEip4844,
