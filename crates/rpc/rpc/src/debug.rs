@@ -112,6 +112,26 @@ where
                 let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                let mut system_caller = SystemCaller::new(
+                    RpcNodeCore::evm_config(this.eth_api()).clone(),
+                    RpcNodeCore::provider(this.eth_api()).chain_spec(),
+                );
+
+                // apply relevant system calls
+                system_caller
+                    .pre_block_beacon_root_contract_call(
+                        &mut db,
+                        &cfg,
+                        &block_env,
+                        parent_beacon_block_root,
+                    )
+                    .map_err(|_| {
+                        EthApiError::EvmCustom(
+                            "failed to apply 4788 beacon root system call".to_string(),
+                        )
+                    })?;
+
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, tx)) = transactions.next() {
