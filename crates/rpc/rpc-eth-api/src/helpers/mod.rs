@@ -26,7 +26,7 @@ pub mod spec;
 pub mod state;
 pub mod trace;
 pub mod transaction;
-
+pub mod rpc_tracer;
 pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
 pub use call::{Call, EthCall};

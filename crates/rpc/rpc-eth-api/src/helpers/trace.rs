@@ -331,7 +331,7 @@ pub trait Trace: LoadState {
             self.spawn_tracing(move |this| {
                 // we need to get the state of the parent block because we're replaying this block
                 // on top of its parent block's state
-                let state_at = block.parent_hash;
+                let state_at = block.parent_hash; 
                 let block_hash = block.hash();
 
                 let block_number = block_env.number.saturating_to::<u64>();
