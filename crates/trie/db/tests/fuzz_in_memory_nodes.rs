@@ -33,6 +33,16 @@ impl VerifiableTrieUpdates for StorageTrieUpdates {
     }
 }
 
+impl VerifiableTrieUpdates for TrieUpdates {
+    fn nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+        self.account_nodes_ref()
+    }
+
+    fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        self.removed_nodes_ref()
+    }
+}
+
 const fn is_bit_set(mask: u16, position: u8) -> bool {
     (mask & (1 << position)) != 0
 }
@@ -87,6 +97,9 @@ proptest! {
             .root_with_updates()
             .unwrap();
 
+        // verify initial tree mask invariant
+        assert!(verify_storage_trie_tree_mask_invariant(&trie_nodes));
+
         let mut state = init_state;
         for state_update in state_updates {
              // Insert state updates into database
@@ -120,6 +133,8 @@ proptest! {
             );
             assert_eq!(expected_root, state_root);
         }
+        // verify tree mask invariant after updates
+        assert!(verify_storage_trie_tree_mask_invariant(&trie_nodes));
     }
 
     #[test]
