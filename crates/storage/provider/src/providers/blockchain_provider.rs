@@ -904,7 +904,7 @@ mod tests {
         .append_receipts_from_blocks(
             // The initial block number is required
             database_blocks.first().map(|b| b.number).unwrap_or_default(),
-            receipts[..database_blocks.len()].iter().map(|vec| vec.clone()),
+            receipts[..database_blocks.len()].iter().cloned(),
         )?;
 
         // Commit to both storages: database and static files
