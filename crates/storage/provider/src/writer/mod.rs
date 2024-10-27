@@ -444,8 +444,7 @@ where
     ///
     /// # Parameters
     /// - `initial_block_number`: The starting block number.
-    /// - `blocks`: An iterator over blocks, each block having a vector of optional receipts. If
-    ///   `receipt` is `None`, it has been pruned.
+    /// - `blocks`: An iterator over blocks, each block having a vector of receipts.
     pub fn append_receipts_from_blocks(
         &mut self,
         initial_block_number: BlockNumber,

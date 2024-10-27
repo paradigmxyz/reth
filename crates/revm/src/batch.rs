@@ -19,8 +19,6 @@ pub struct BlockBatchRecord {
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
     receipts: Receipts,
     /// The collection of EIP-7685 requests.
     /// Outer vector stores requests for each block sequentially.
