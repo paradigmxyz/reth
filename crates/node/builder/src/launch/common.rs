@@ -867,7 +867,7 @@ where
         let db_checks_passed = self.chain_specific_db_checks();
         let chain_spec = self.chain_spec();
         let is_bedrock_active =
-            chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 105235063);
+            chain_spec.fork(OptimismHardfork::Bedrock).active_at_block(105235063);
 
         if db_checks_passed && !is_bedrock_active {
             warn!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain won't progress without this.");
