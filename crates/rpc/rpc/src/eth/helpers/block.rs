@@ -17,14 +17,9 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+        Provider: HeaderProvider,
     >,
-    Provider: HeaderProvider,
 {
-    #[inline]
-    fn provider(&self) -> impl HeaderProvider {
-        self.inner.provider()
-    }
-
     async fn block_receipts(
         &self,
         block_id: BlockId,
