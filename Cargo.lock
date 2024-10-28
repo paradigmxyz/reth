@@ -8033,6 +8033,7 @@ name = "reth-node-events"
 version = "1.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "futures",
@@ -8041,7 +8042,6 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-network",
  "reth-network-api",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
