@@ -14,15 +14,15 @@ use std::{fmt, sync::Arc};
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::Optimism;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    HeaderProvider, StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -184,23 +184,21 @@ where
 
 impl<N> LoadFee for OpEthApi<N>
 where
-    Self: LoadBlock,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Self: LoadBlock<Provider = N::Provider>,
+    N: RpcNodeCore<
+        Provider: BlockReaderIdExt
+                      + EvmEnvProvider
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+                      + StateProviderFactory,
+    >,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> {
-        self.inner.provider()
-    }
-
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }
 
     #[inline]
-    fn gas_oracle(&self) -> &GasPriceOracle<impl BlockReaderIdExt> {
+    fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
         self.inner.gas_oracle()
     }
 
