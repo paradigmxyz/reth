@@ -180,6 +180,12 @@ impl<C: TrieCursor> TrieWalker<C> {
             self.stack[0].set_nibble(key[0] as i8);
         }
 
+        if let Some(subnode) = self.stack.last() {
+            if !key.starts_with(subnode.full_key()) {
+                self.stack.pop();
+            }
+        }
+
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
         let nibble = subnode.nibble();
