@@ -77,7 +77,7 @@ impl SparseTrie {
 /// - Each leaf entry in `nodes` collection must have a corresponding entry in `values` collection.
 ///   The opposite is also true.
 /// - All keys in `values` collection are full leaf paths.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RevealedSparseTrie {
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
