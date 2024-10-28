@@ -681,7 +681,7 @@ impl RevealedSparseTrie {
                         if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
                             let (_, child) = rlp_node_stack.pop().unwrap();
                             // Insert children in the resulting buffer in a normal order, because
-                            // initially we iterated in reverse.
+                            // they were added to path stack in reverse.
                             branch_value_stack_buf.insert(0, child);
                             added_children = true;
                         } else {
