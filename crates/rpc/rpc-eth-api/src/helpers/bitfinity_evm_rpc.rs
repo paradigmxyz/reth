@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
@@ -82,6 +83,25 @@ pub trait BitfinityEvmRpc {
                 .into_iter()
                 .map(|(address, balance)| (address.0.into(), U256::from(balance.as_u128())))
                 .collect())
+        }
+    }
+
+    /// Forwards `ic_getLastCertifiedBlock` calls to the Bitfinity EVM
+    fn get_last_certified_block(
+        &self,
+    ) -> impl Future<Output = RpcResult<CertifiedResult<Block<H256>>>> + Send {
+        let chain_spec = self.chain_spec();
+        async move {
+            let (rpc_url, client) = get_client(&chain_spec)?;
+
+            let certified_block  = client.get_last_certified_block().await.map_err(|e| {
+                internal_rpc_err(format!(
+                    "failed to forward get_last_certified_block request to {}: {}",
+                    rpc_url, e
+                ))
+            })?;
+
+            Ok(certified_block)
         }
     }
 }

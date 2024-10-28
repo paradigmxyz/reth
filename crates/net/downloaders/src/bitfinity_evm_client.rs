@@ -36,7 +36,6 @@ use tracing::{debug, error, info, trace, warn};
 ///
 /// Blocks are assumed to have populated transactions, so reading headers will also buffer
 /// transactions in memory for use in the bodies stage.
-
 #[derive(Debug)]
 pub struct BitfinityEvmClient {
     /// The buffered headers retrieved when fetching new bodies.
@@ -75,7 +74,7 @@ pub struct CertificateCheckSettings {
 }
 
 impl BitfinityEvmClient {
-    /// BitfinityEvmClient from rpc url
+    /// `BitfinityEvmClient` from rpc url
     pub async fn from_rpc_url(
         rpc: &str,
         start_block: u64,
@@ -247,7 +246,7 @@ impl BitfinityEvmClient {
         let spec = ChainSpec {
             chain,
             genesis_hash: genesis_block.hash.map(|h| h.0.into()),
-            genesis: genesis.clone(),
+            genesis,
             paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
             hardforks: ChainHardforks::new(vec![
                 (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
@@ -366,7 +365,7 @@ impl BlockCertificateChecker {
     }
 
     fn validate_tree(canister_id: &[u8], certificate: &Certificate, tree: &HashTree) -> bool {
-        let certified_data_path = ["canister".as_bytes(), canister_id, "certified_data".as_bytes()];
+        let certified_data_path = [b"canister", canister_id, b"certified_data"];
 
         let witness = match certificate.tree.lookup_path(&certified_data_path) {
             LookupResult::Found(witness) => witness,
