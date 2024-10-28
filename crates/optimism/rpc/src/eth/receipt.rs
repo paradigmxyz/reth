@@ -11,7 +11,7 @@ use reth_optimism_forks::OptimismHardforks;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
-use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, ReceiptBuilder};
 
 use crate::{OpEthApi, OpEthApiError};
 
@@ -20,18 +20,14 @@ where
     Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
     async fn build_transaction_receipt(
         &self,
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
-        let (block, receipts) = LoadReceipt::cache(self)
+        let (block, receipts) = self
+            .cache()
             .get_block_and_receipts(meta.block_hash)
             .await
             .map_err(Self::Error::from_eth_err)?

@@ -8,7 +8,6 @@ use reth_rpc_eth_api::{
     helpers::{EthState, LoadState, SpawnBlocking},
     RpcNodeCore,
 };
-use reth_rpc_eth_types::EthStateCache;
 
 use crate::EthApi;
 
@@ -21,17 +20,12 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
-where
+impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig> where
     Self: RpcNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
-    >,
+    >
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
 
 #[cfg(test)]
