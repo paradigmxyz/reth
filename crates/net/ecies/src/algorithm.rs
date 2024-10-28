@@ -273,6 +273,12 @@ pub struct RLPxSymmetricKeys {
     pub mac_key: B256,
 }
 
+/// return num alignment value
+#[inline]
+const fn align_num(num: usize, align: usize) -> usize {
+    (num + (align - 1)) & !(align - 1)
+}
+
 impl ECIES {
     /// Create a new client with the given static secret key, remote peer id, nonce, and ephemeral
     /// secret key.
@@ -686,7 +692,7 @@ impl ECIES {
 
     pub fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
-        (if len % 16 == 0 { len } else { (len / 16 + 1) * 16 }) + 16
+        align_num(len, 16) + 16
     }
 
     #[cfg(test)]
@@ -697,7 +703,7 @@ impl ECIES {
     }
 
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
-        let len = if data.len() % 16 == 0 { data.len() } else { (data.len() / 16 + 1) * 16 };
+        let len = align_num(data.len(), 16);
         let old_len = out.len();
         out.resize(old_len + len, 0);
 
