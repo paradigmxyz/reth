@@ -215,17 +215,12 @@ where
     }
 }
 
-impl<N> LoadState for OpEthApi<N>
-where
+impl<N> LoadState for OpEthApi<N> where
     N: RpcNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
-    >,
+    >
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
 
 impl<N> EthState for OpEthApi<N>
