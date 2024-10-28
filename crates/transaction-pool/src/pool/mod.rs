@@ -782,8 +782,7 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
-        self.get_pool_data()
-            .pending_txs_by_sender(sender_id)
+        self.get_pool_data().pending_txs_by_sender(sender_id)
     }
 
     /// Returns all pending transactions of the address by sender
@@ -792,8 +791,7 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
-        self.get_pool_data()
-            .queued_txs_by_sender(sender_id)
+        self.get_pool_data().queued_txs_by_sender(sender_id)
     }
 
     /// Returns the highest transaction of the address

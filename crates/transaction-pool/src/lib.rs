@@ -506,14 +506,14 @@ where
     fn get_pending_transactions_by_sender(
         &self,
         sender: Address,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>{
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_pending_transactions_by_sender(sender)
     }
 
     fn get_queued_transactions_by_sender(
         &self,
         sender: Address,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>{
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_queued_transactions_by_sender(sender)
     }
 
