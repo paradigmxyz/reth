@@ -3,7 +3,7 @@
 //! Optimism builder support
 
 use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
 /// Re-export for use in downstream arguments.
@@ -46,9 +46,9 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     fn try_new(
         parent: B256,
         attributes: OpPayloadAttributes,
-        _version: u8,
+        version: u8,
     ) -> Result<Self, Self::Error> {
-        let id = payload_id_optimism(&parent, &attributes);
+        let id = payload_id_optimism(&parent, &attributes, version);
 
         let transactions = attributes
             .transactions
@@ -281,7 +281,11 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
 /// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id_optimism(
+    parent: &B256,
+    attributes: &OpPayloadAttributes,
+    payload_version: u8,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
@@ -299,15 +303,71 @@ pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttribute
     }
 
     let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
-    hasher.update([no_tx_pool as u8]);
-    if let Some(txs) = &attributes.transactions {
-        txs.iter().for_each(|tx| hasher.update(tx));
+    if no_tx_pool || attributes.transactions.as_ref().is_some_and(|txs| !txs.is_empty()) {
+        hasher.update([no_tx_pool as u8]);
+        let txs_len = attributes.transactions.as_ref().map(|txs| txs.len()).unwrap_or_default();
+        hasher.update(&txs_len.to_be_bytes()[..]);
+        if let Some(txs) = &attributes.transactions {
+            for tx in txs {
+                // we have to just hash the bytes here because otherwise we would need to decode
+                // the transactions here which really isn't ideal
+                let tx_hash = keccak256(tx);
+                // maybe we can try just taking the hash and not decoding
+                hasher.update(tx_hash)
+            }
+        }
     }
 
     if let Some(gas_limit) = attributes.gas_limit {
         hasher.update(gas_limit.to_be_bytes());
     }
 
-    let out = hasher.finalize();
+    if let Some(eip_1559_params) = attributes.eip_1559_params {
+        hasher.update(eip_1559_params.as_slice());
+    }
+
+    let mut out = hasher.finalize();
+    out[0] = payload_version;
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::OpPayloadAttributes;
+    use alloy_primitives::{address, b256, bytes, FixedBytes};
+    use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_payload_primitives::EngineApiMessageVersion;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_payload_id_parity_op_geth() {
+        // INFO rollup_boost::server:received fork_choice_updated_v3 from builder and l2_client
+        // payload_id_builder="0x6ef26ca02318dcf9" payload_id_l2="0x03d2dae446d2a86a"
+        let expected =
+            PayloadId::new(FixedBytes::<8>::from_str("0x03d2dae446d2a86a").unwrap().into());
+        let attrs = OpPayloadAttributes {
+            payload_attributes: PayloadAttributes {
+                timestamp: 1728933301,
+                prev_randao: b256!("9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
+                suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
+                withdrawals: Some([].into()),
+                parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into()
+            },
+            transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
+            no_tx_pool: None,
+            gas_limit: Some(30000000),
+            eip_1559_params: None,
+        };
+
+        // Reth's `PayloadId` should match op-geth's `PayloadId`. This fails
+        assert_eq!(
+            expected,
+            payload_id_optimism(
+                &b256!("3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
+                &attrs,
+                EngineApiMessageVersion::V3 as u8
+            )
+        );
+    }
 }
