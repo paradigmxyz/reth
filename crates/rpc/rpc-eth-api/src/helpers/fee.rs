@@ -3,8 +3,8 @@
 use alloy_primitives::U256;
 use alloy_rpc_types::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
+use reth_chainspec::EthChainSpec;
+use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, EthStateCache,
     FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
@@ -82,7 +82,8 @@ pub trait EthFees: LoadFee {
                 block_count = block_count.saturating_sub(1);
             }
 
-            let end_block = LoadFee::provider(self)
+            let end_block = self
+                .provider()
                 .block_number_for_id(newest_block.into())
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(newest_block.into()))?;
@@ -147,13 +148,12 @@ pub trait EthFees: LoadFee {
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
                 base_fee_per_gas
-                    .push(last_entry.next_block_base_fee(LoadFee::provider(self).chain_spec())
-                        as u128);
+                    .push(last_entry.next_block_base_fee(self.provider().chain_spec()) as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
                 // read the requested header range
-                let headers = LoadFee::provider(self)
+                let headers = self.provider()
                     .sealed_headers_range(start_block..=end_block)
                     .map_err(Self::Error::from_eth_err)?;
                 if headers.len() != block_count as usize {
@@ -197,7 +197,7 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 base_fee_per_gas.push(
-                    LoadFee::provider(self)
+                    self.provider()
                         .chain_spec()
                         .base_fee_params_at_timestamp(last_header.timestamp)
                         .next_block_base_fee(
@@ -242,13 +242,6 @@ pub trait EthFees: LoadFee {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` fees RPC methods.
 pub trait LoadFee: LoadBlock {
-    // Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(
-        &self,
-    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>;
-
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -257,7 +250,7 @@ pub trait LoadFee: LoadBlock {
     /// Returns a handle for reading gas price.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn gas_oracle(&self) -> &GasPriceOracle<impl BlockReaderIdExt>;
+    fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider>;
 
     /// Returns a handle for reading fee history data from memory.
     ///
