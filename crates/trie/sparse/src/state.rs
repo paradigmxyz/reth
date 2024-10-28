@@ -12,10 +12,8 @@ pub struct SparseStateTrie {
     /// Sparse account trie.
     pub(crate) state: SparseTrie,
     /// Sparse storage tries.
-    #[allow(dead_code)]
     pub(crate) storages: HashMap<B256, SparseTrie>,
     /// Collection of revealed account and storage keys.
-    #[allow(dead_code)]
     pub(crate) revealed: HashMap<B256, HashSet<B256>>,
 }
 
@@ -35,7 +33,7 @@ impl SparseStateTrie {
         self.revealed.get(account).map_or(false, |slots| slots.contains(slot))
     }
 
-    /// Reveal unknown trie paths from provided leaf path and its proof for account.
+    /// Reveal unknown trie paths from provided leaf path and its proof for the account.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_account(
         &mut self,
@@ -71,7 +69,7 @@ impl SparseStateTrie {
         Ok(())
     }
 
-    /// Reveal unknown trie paths from provided leaf path and its proof for account.
+    /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_storage_slot(
         &mut self,
