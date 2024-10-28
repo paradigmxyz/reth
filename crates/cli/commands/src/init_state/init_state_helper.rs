@@ -75,7 +75,7 @@ fn append_first_block(
     )?;
 
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
-        &header,
+        header,
         total_difficulty,
         &header_hash,
     )?;

@@ -11,8 +11,7 @@ use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
 
-use std::str::FromStr;
-use std::{fs::File, io::BufReader, path::PathBuf};
+use std::{fs::File, io::BufReader, path::PathBuf, str::FromStr};
 use tracing::info;
 
 pub mod init_state_helper;
