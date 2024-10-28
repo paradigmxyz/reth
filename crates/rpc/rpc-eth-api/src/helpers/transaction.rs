@@ -15,14 +15,15 @@ use reth_primitives::{
 use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
-    EthApiError, EthStateCache, SignError, TransactionSource,
+    EthApiError, SignError, TransactionSource,
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
 use crate::{
-    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcReceipt, RpcTransaction,
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
+    RpcTransaction,
 };
 
 use super::{
@@ -461,13 +462,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
 pub trait LoadTransaction:
-    SpawnBlocking + FullEthApiTypes + RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>
+    SpawnBlocking
+    + FullEthApiTypes
+    + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>
 {
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.

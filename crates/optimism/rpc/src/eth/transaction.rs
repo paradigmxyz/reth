@@ -12,7 +12,7 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
@@ -59,10 +59,6 @@ where
     Self: SpawnBlocking + FullEthApiTypes,
     N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
 
 impl<N> OpEthApi<N>
