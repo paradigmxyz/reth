@@ -31,11 +31,12 @@ reth-node-api.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
-
+reth-db.workspace = true
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # misc
+alloy-eips.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]

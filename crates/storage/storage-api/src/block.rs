@@ -9,7 +9,7 @@ use reth_primitives::{
     Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use std::ops::RangeInclusive;
+use std::{fmt::Debug, ops::RangeInclusive};
 
 /// A helper enum that represents the origin of the requested block.
 ///

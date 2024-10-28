@@ -8083,8 +8083,8 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
- "reth-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
 ]
 
 [[package]]
@@ -9058,6 +9058,7 @@ dependencies = [
  "reth-db-models",
  "reth-execution-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-errors",

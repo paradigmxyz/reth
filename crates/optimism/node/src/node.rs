@@ -2,8 +2,10 @@
 
 use std::sync::Arc;
 
+use alloy_eips::BlockHashOrNumber;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
@@ -23,8 +25,11 @@ use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_evm::{OpExecutionStrategyFactory, OptimismEvmConfig};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{Block, Header};
-use reth_provider::CanonStateSubscriptions;
+use reth_primitives::{Block, BlockBody, Header};
+use reth_provider::{
+    BlockNumReader, BlockReader, CanonStateSubscriptions, ChainStorageReader, DBProvider,
+    HeaderProvider, ProviderResult, TransactionsProvider, WithdrawalsProvider,
+};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
@@ -122,10 +127,66 @@ where
 impl NodeTypes for OptimismNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
+    type Storage = OpStorage;
 }
 
 impl NodeTypesWithEngine for OptimismNode {
     type Engine = OptimismEngineTypes;
+}
+
+/// Ethereum storage that implements [`ChainStorageReader`].
+#[derive(Debug, Default)]
+pub struct OpStorage;
+
+impl ChainStorageReader for OpStorage {
+    type Primitives = OpPrimitives;
+
+    fn read_block<P>(
+        &self,
+        provider: &P,
+        id: BlockHashOrNumber,
+    ) -> ProviderResult<Option<<Self::Primitives as NodePrimitives>::Block>>
+    where
+        P: DBProvider<Tx: DbTx>
+            + TransactionsProvider
+            + BlockReader
+            + WithdrawalsProvider
+            + HeaderProvider
+            + BlockNumReader,
+    {
+        if let Some(number) = provider.convert_hash_or_number(id)? {
+            if let Some(header) = provider.header_by_number(number)? {
+                let withdrawals = provider.withdrawals_by_block(number.into(), header.timestamp)?;
+                let ommers = provider.ommers(number.into())?.unwrap_or_default();
+                // If the body indices are not found, this means that the transactions either do not
+                // exist in the database yet, or they do exit but are not indexed.
+                // If they exist but are not indexed, we don't have enough
+                // information to return the block anyways, so we return `None`.
+                let transactions = match provider.transactions_by_block(number.into())? {
+                    Some(transactions) => transactions,
+                    None => return Ok(None),
+                };
+
+                return Ok(Some(Block {
+                    header,
+                    body: BlockBody { transactions, ommers, withdrawals },
+                }))
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn write_block<P>(
+        &self,
+        _provider: &P,
+        _block: &<Self::Primitives as NodePrimitives>::Block,
+    ) -> ProviderResult<()>
+    where
+        P: DBProvider<Tx: DbTxMut>,
+    {
+        todo!()
+    }
 }
 
 /// Add-ons w.r.t. optimism.

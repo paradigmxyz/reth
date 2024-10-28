@@ -228,6 +228,7 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
     type ChainSpec = ChainSpec;
+    type Storage = ();
 }
 
 /// Configure the node types with the custom engine types

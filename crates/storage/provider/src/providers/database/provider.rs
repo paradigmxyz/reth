@@ -136,6 +136,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     static_file_provider: StaticFileProvider,
     /// Pruning configuration
     prune_modes: PruneModes,
+    /// Chain storage reader
+    #[allow(dead_code)]
+    chain_storage: Arc<N::Storage>,
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -227,8 +230,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
+        chain_storage: Arc<N::Storage>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes }
+        Self { tx, chain_spec, static_file_provider, prune_modes, chain_storage }
     }
 }
 
@@ -371,8 +375,9 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
+        chain_storage: Arc<N::Storage>,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes }
+        Self { tx, chain_spec, static_file_provider, prune_modes, chain_storage }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
