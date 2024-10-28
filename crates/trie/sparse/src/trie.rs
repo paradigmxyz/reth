@@ -665,8 +665,6 @@ impl RevealedSparseTrie {
                         continue
                     }
 
-                    // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
-                    // from the stack.
                     branch_child_buf.clear();
                     for bit in CHILD_INDEX_RANGE {
                         if state_mask.is_bit_set(bit) {
