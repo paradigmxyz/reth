@@ -9,7 +9,7 @@ use reth_provider::{
 };
 use reth_stages::{StageCheckpoint, StageId};
 
-use std::{io::Read, path::PathBuf, fs::File};
+use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
 
 /// Reads the header RLP from a file and returns the Header.
@@ -80,13 +80,9 @@ fn append_first_block(
         &header_hash,
     )?;
 
-    sf_provider
-        .latest_writer(StaticFileSegment::Receipts)?
-        .increment_block(header.number)?;
+    sf_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(header.number)?;
 
-    sf_provider
-        .latest_writer(StaticFileSegment::Transactions)?
-        .increment_block(header.number)?;
+    sf_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(header.number)?;
 
     Ok(())
 }

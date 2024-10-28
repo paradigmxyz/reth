@@ -7,7 +7,9 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
-use reth_provider::{BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter};
+use reth_provider::{
+    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+};
 
 use std::str::FromStr;
 use std::{fs::File, io::BufReader, path::PathBuf};
@@ -80,17 +82,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             // ensure header, total difficulty and header hash are provided
             let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
             let header = init_state_helper::read_header_from_file(header)?;
-            
-            let header_hash = self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
+
+            let header_hash =
+                self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
             let header_hash = B256::from_str(&header_hash)?;
 
-            let total_difficulty = self.total_difficulty.ok_or_else(|| eyre::eyre!("Total difficulty must be provided"))?;
+            let total_difficulty = self
+                .total_difficulty
+                .ok_or_else(|| eyre::eyre!("Total difficulty must be provided"))?;
             let total_difficulty = U256::from_str(&total_difficulty)?;
 
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                init_state_helper::setup_without_evm_history(&provider_rw, &static_file_provider, &header, header_hash, total_difficulty)?;
+                init_state_helper::setup_without_evm_history(
+                    &provider_rw,
+                    &static_file_provider,
+                    &header,
+                    header_hash,
+                    total_difficulty,
+                )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they
                 // will be unwinded according to database checkpoints.
@@ -101,7 +112,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             } else if last_block_number > 0 && last_block_number < header.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-evm-history."
-                ))
+                ));
             }
         }
 
