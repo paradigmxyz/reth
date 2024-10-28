@@ -123,18 +123,22 @@ where
     type Network = <N as RpcNodeCore>::Network;
     type Evm = <N as RpcNodeCore>::Evm;
 
+    #[inline]
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
     }
 
+    #[inline]
     fn evm_config(&self) -> &Self::Evm {
         self.inner.evm_config()
     }
 
+    #[inline]
     fn network(&self) -> &Self::Network {
         self.inner.network()
     }
 
+    #[inline]
     fn provider(&self) -> &Self::Provider {
         self.inner.provider()
     }
