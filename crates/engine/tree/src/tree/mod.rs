@@ -26,7 +26,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -969,6 +969,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<T::PayloadAttributes>,
+        version: EngineApiMessageVersion,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
         self.metrics.engine.forkchoice_updated_messages.increment(1);
@@ -1018,7 +1019,7 @@ where
                         // to return an error
                         ProviderError::HeaderNotFound(state.head_block_hash.into())
                     })?;
-                let updated = self.process_payload_attributes(attr, &tip, state);
+                let updated = self.process_payload_attributes(attr, &tip, state, version);
                 return Ok(TreeOutcome::new(updated))
             }
 
@@ -1038,7 +1039,7 @@ where
             }
 
             if let Some(attr) = attrs {
-                let updated = self.process_payload_attributes(attr, &tip, state);
+                let updated = self.process_payload_attributes(attr, &tip, state, version);
                 return Ok(TreeOutcome::new(updated))
             }
 
@@ -1054,7 +1055,8 @@ where
             if self.engine_kind.is_opstack() {
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number, "handling payload attributes for canonical head");
-                    let updated = self.process_payload_attributes(attr, &canonical_header, state);
+                    let updated =
+                        self.process_payload_attributes(attr, &canonical_header, state, version);
                     return Ok(TreeOutcome::new(updated))
                 }
             }
@@ -1206,8 +1208,14 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                                let mut output = self.on_forkchoice_updated(state, payload_attrs);
+                            BeaconEngineMessage::ForkchoiceUpdated {
+                                state,
+                                payload_attrs,
+                                tx,
+                                version,
+                            } => {
+                                let mut output =
+                                    self.on_forkchoice_updated(state, payload_attrs, version);
 
                                 if let Ok(res) = &mut output {
                                     // track last received forkchoice state
@@ -2484,6 +2492,7 @@ where
         attrs: T::PayloadAttributes,
         head: &Header,
         state: ForkchoiceState,
+        _version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
         //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
@@ -2808,6 +2817,7 @@ mod tests {
                         state: fcu_state,
                         payload_attrs: None,
                         tx,
+                        version: EngineApiMessageVersion::default(),
                     }
                     .into(),
                 ))
@@ -3097,6 +3107,7 @@ mod tests {
                     },
                     payload_attrs: None,
                     tx,
+                    version: EngineApiMessageVersion::default(),
                 }
                 .into(),
             ))
