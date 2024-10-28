@@ -113,7 +113,7 @@ where
 
         let raw_func_pointer = symbol(ctx);
         if raw_func_pointer.is_null() {
-            return Err(eyre::eyre!("Failed to load future from dynamic library"));
+            return Err(eyre::eyre!("Failed to load function from dynamic library"));
         }
 
         // SAFETY: We guarantee that the pointed data is pinned, loaded DLL symbol
