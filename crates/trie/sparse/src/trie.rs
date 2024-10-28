@@ -666,6 +666,8 @@ impl RevealedSparseTrie {
                     }
 
                     branch_child_buf.clear();
+                    // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
+                    // from the stack.
                     for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
@@ -679,6 +681,8 @@ impl RevealedSparseTrie {
                     for (i, child_path) in branch_child_buf.iter().enumerate() {
                         if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
                             let (_, child) = rlp_node_stack.pop().unwrap();
+                            // Insert children in the resulting buffer in a normal order, because
+                            // initially we iterated in reverse.
                             branch_value_stack_buf[branch_child_buf.len() - i - 1] = child;
                             added_children = true;
                         } else {
