@@ -10,7 +10,7 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineTypes, PayloadTypes};
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
@@ -428,7 +428,12 @@ where
                 } else if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
                     let head = outcome.into_header().unseal();
-                    self.process_payload_attributes(attrs, head, state)
+                    self.process_payload_attributes(
+                        attrs,
+                        head,
+                        state,
+                        EngineApiMessageVersion::default(),
+                    )
                 } else {
                     OnForkChoiceUpdated::valid(PayloadStatus::new(
                         PayloadStatusEnum::Valid,
@@ -1160,6 +1165,7 @@ where
         attrs: <N::Engine as PayloadTypes>::PayloadAttributes,
         head: Header,
         state: ForkchoiceState,
+        _version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
         //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
@@ -1855,7 +1861,12 @@ where
                 // sensitive, hence they are polled first.
                 if let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
                     match msg {
-                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                        BeaconEngineMessage::ForkchoiceUpdated {
+                            state,
+                            payload_attrs,
+                            tx,
+                            version: _version,
+                        } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);
                         }
                         BeaconEngineMessage::NewPayload { payload, sidecar, tx } => {
