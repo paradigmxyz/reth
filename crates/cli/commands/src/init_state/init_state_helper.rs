@@ -24,7 +24,7 @@ pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error
 
 /// Creates a dummy chain (with no transactions) up to the last EVM block and appends the
 /// first valid block.
-pub(crate) fn setup_without_evm_history<Provider>(
+pub(crate) fn setup_without_evm<Provider>(
     provider_rw: &Provider,
     static_file_provider: &StaticFileProvider,
     header: &Header,

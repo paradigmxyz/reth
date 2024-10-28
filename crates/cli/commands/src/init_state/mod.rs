@@ -51,7 +51,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     /// - **Note**: **Do not** import receipts and blocks beforehand, or this will fail or be
     ///   ignored.
     #[arg(long, default_value = "false")]
-    without_evm_history: bool,
+    without_evm: bool,
 
     /// Header file containing the header in an RLP encoded format.
     #[arg(long, value_name = "HEADER_FILE", verbatim_doc_comment)]
@@ -78,7 +78,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
         let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.database_provider_rw()?;
 
-        if self.without_evm_history {
+        if self.without_evm {
             // ensure header, total difficulty and header hash are provided
             let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
             let header = init_state_helper::read_header_from_file(header)?;
@@ -95,7 +95,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                init_state_helper::setup_without_evm_history(
+                init_state_helper::setup_without_evm(
                     &provider_rw,
                     &static_file_provider,
                     &header,
