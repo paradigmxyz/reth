@@ -22,9 +22,11 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_eips::{
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
+};
 use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::constants::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{

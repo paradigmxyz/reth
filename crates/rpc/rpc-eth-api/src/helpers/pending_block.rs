@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
+use alloy_eips::{
+    eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE,
+};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use futures::Future;
@@ -17,7 +19,6 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::eip4844::MAX_DATA_GAS_PER_BLOCK,
     proofs::calculate_transaction_root,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,

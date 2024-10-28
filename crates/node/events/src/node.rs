@@ -10,7 +10,6 @@ use reth_beacon_consensus::{
 };
 use reth_network::NetworkEvent;
 use reth_network_api::PeersInfo;
-use reth_primitives::constants;
 use reth_primitives_traits::{format_gas, format_gas_throughput};
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
@@ -265,8 +264,8 @@ impl NodeState {
                     gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
+                    blobs=block.header.blob_gas_used.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );
