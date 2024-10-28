@@ -52,12 +52,7 @@ use super::{
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl BlockReaderIdExt;
-
+pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Singer access in default (L1) trait method implementations.
@@ -111,7 +106,8 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             self.spawn_blocking_io(move |ref this| {
-                Ok(RpcNodeCore::provider(this)
+                Ok(this
+                    .provider()
                     .transaction_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?
                     .map(|tx| tx.encoded_2718().into()))
@@ -166,7 +162,8 @@ pub trait EthTransactions: LoadTransaction {
     {
         let this = self.clone();
         self.spawn_blocking_io(move |_| {
-            let (tx, meta) = match RpcNodeCore::provider(&this)
+            let (tx, meta) = match this
+                .provider()
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
             {
@@ -174,13 +171,11 @@ pub trait EthTransactions: LoadTransaction {
                 None => return Ok(None),
             };
 
-            let receipt = match EthTransactions::provider(&this)
-                .receipt_by_hash(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+            let receipt =
+                match this.provider().receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
+                    Some(recpt) => recpt,
+                    None => return Ok(None),
+                };
 
             Ok(Some((tx, meta, receipt)))
         })
@@ -257,7 +252,7 @@ pub trait EthTransactions: LoadTransaction {
                 return Ok(None);
             }
 
-            let Ok(high) = RpcNodeCore::provider(self).best_block_number() else {
+            let Ok(high) = self.provider().best_block_number() else {
                 return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 

@@ -267,5 +267,5 @@ where
 }
 
 pub fn type_name<T>() -> String {
-    std::any::type_name::<T>().replace("::", "__")
+    std::any::type_name::<T>().split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
 }

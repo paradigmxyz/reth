@@ -777,7 +777,7 @@ pub struct ExecutedBlock {
     pub senders: Arc<Vec<Address>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome>,
-    /// Block's hashedst state.
+    /// Block's hashed state.
     pub hashed_state: Arc<HashedPostState>,
     /// Trie updates that result of applying the block.
     pub trie: Arc<TrieUpdates>,

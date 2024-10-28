@@ -36,7 +36,8 @@ jobs:
           ref: ${{ github.base_ref || 'main' }}
       # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
-        run: ${{ matrix.bin }} -- test-vectors compact --write
+        run: |
+          ${{ matrix.bin }} -- test-vectors compact --write
       - name: Checkout PR
         uses: actions/checkout@v4
         with:
