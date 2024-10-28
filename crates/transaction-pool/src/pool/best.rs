@@ -2,10 +2,10 @@ use crate::{
     identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
     TransactionOrdering, ValidPoolTransaction,
 };
-use alloy_primitives::B256 as TxHash;
+use alloy_primitives::{Address, B256 as TxHash};
 use core::fmt;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -256,6 +256,88 @@ where
 impl<I: fmt::Debug, P> fmt::Debug for BestTransactionFilter<I, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BestTransactionFilter").field("best", &self.best).finish()
+    }
+}
+
+/// Wrapper over [`crate::traits::BestTransactions`] that prioritizes transactions of certain
+/// senders capping total gas used by such transactions.
+#[derive(Debug)]
+pub struct BestTransactionsWithPrioritizedSenders<I: Iterator> {
+    /// Inner iterator
+    inner: I,
+    /// A set of senders which transactions should be prioritized
+    prioritized_senders: HashSet<Address>,
+    /// Maximum total gas limit of prioritized transactions
+    max_prioritized_gas: u64,
+    /// Buffer with transactions that are not being prioritized. Those will be the first to be
+    /// included after the prioritized transactions
+    buffer: VecDeque<I::Item>,
+    /// Tracker of total gas limit of prioritized transactions. Once it reaches
+    /// `max_prioritized_gas` no more transactions will be prioritized
+    prioritized_gas: u64,
+}
+
+impl<I: Iterator> BestTransactionsWithPrioritizedSenders<I> {
+    /// Constructs a new [`BestTransactionsWithPrioritizedSenders`].
+    pub fn new(prioritized_senders: HashSet<Address>, max_prioritized_gas: u64, inner: I) -> Self {
+        Self {
+            inner,
+            prioritized_senders,
+            max_prioritized_gas,
+            buffer: Default::default(),
+            prioritized_gas: Default::default(),
+        }
+    }
+}
+
+impl<I, T> Iterator for BestTransactionsWithPrioritizedSenders<I>
+where
+    I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
+    T: PoolTransaction,
+{
+    type Item = <I as Iterator>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If we have space, try prioritizing transactions
+        if self.prioritized_gas < self.max_prioritized_gas {
+            for item in &mut self.inner {
+                if self.prioritized_senders.contains(&item.transaction.sender()) &&
+                    self.prioritized_gas + item.transaction.gas_limit() <=
+                        self.max_prioritized_gas
+                {
+                    self.prioritized_gas += item.transaction.gas_limit();
+                    return Some(item)
+                }
+                self.buffer.push_back(item);
+            }
+        }
+
+        if let Some(item) = self.buffer.pop_front() {
+            Some(item)
+        } else {
+            self.inner.next()
+        }
+    }
+}
+
+impl<I, T> crate::traits::BestTransactions for BestTransactionsWithPrioritizedSenders<I>
+where
+    I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
+    T: PoolTransaction,
+{
+    fn mark_invalid(&mut self, tx: &Self::Item) {
+        self.inner.mark_invalid(tx)
+    }
+
+    fn no_updates(&mut self) {
+        self.inner.no_updates()
+    }
+
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        if skip_blobs {
+            self.buffer.retain(|tx| !tx.transaction.is_eip4844())
+        }
+        self.inner.set_skip_blobs(skip_blobs)
     }
 }
 

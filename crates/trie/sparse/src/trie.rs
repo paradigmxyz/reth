@@ -574,7 +574,7 @@ impl RevealedSparseTrie {
 
         let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
         for target in targets {
-            buffers.path_stack.push(target);
+            buffers.path_stack.push((target, Some(true)));
             self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
@@ -633,12 +633,17 @@ impl RevealedSparseTrie {
 
     fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
-
         self.rlp_node(prefix_set, &mut buffers)
     }
 
     fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
-        'main: while let Some(path) = buffers.path_stack.pop() {
+        'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
+            // Check if the path is in the prefix set.
+            // First, check the cached value. If it's `None`, then check the prefix set, and update
+            // the cached value.
+            let mut prefix_set_contains =
+                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+
             let rlp_node = match self.nodes.get_mut(&path).unwrap() {
                 SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
                 SparseNode::Hash(hash) => RlpNode::word_rlp(hash),
@@ -646,7 +651,7 @@ impl RevealedSparseTrie {
                     self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         RlpNode::word_rlp(&hash)
                     } else {
                         let value = self.values.get(&path).unwrap();
@@ -658,7 +663,7 @@ impl RevealedSparseTrie {
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         RlpNode::word_rlp(&hash)
                     } else if buffers.rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
                         let (_, child) = buffers.rlp_node_stack.pop().unwrap();
@@ -667,12 +672,13 @@ impl RevealedSparseTrie {
                         *hash = rlp_node.as_hash();
                         rlp_node
                     } else {
-                        buffers.path_stack.extend([path, child_path]); // need to get rlp node for child first
+                        // need to get rlp node for child first
+                        buffers.path_stack.extend([(path, is_in_prefix_set), (child_path, None)]);
                         continue
                     }
                 }
                 SparseNode::Branch { state_mask, hash } => {
-                    if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         buffers.rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
@@ -702,8 +708,10 @@ impl RevealedSparseTrie {
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
-                            buffers.path_stack.push(path);
-                            buffers.path_stack.extend(buffers.branch_child_buf.drain(..));
+                            buffers.path_stack.push((path, is_in_prefix_set));
+                            buffers
+                                .path_stack
+                                .extend(buffers.branch_child_buf.drain(..).map(|p| (p, None)));
                             continue 'main
                         }
                     }
@@ -801,8 +809,8 @@ struct RemovedSparseNode {
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
 #[derive(Debug, Default)]
 struct RlpNodeBuffers {
-    /// Stack of paths we need rlp nodes for
-    path_stack: Vec<Nibbles>,
+    /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
+    path_stack: Vec<(Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
     rlp_node_stack: Vec<(Nibbles, RlpNode)>,
     /// Reusable branch child path
@@ -815,7 +823,7 @@ impl RlpNodeBuffers {
     /// Creates a new instance of buffers with the given path on the stack.
     fn new_with_path(path: Nibbles) -> Self {
         Self {
-            path_stack: vec![path],
+            path_stack: vec![(path, None)],
             rlp_node_stack: Vec::new(),
             branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
             branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
