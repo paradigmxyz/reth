@@ -1,6 +1,7 @@
 //! Compact implementation for [`AlloyWithdrawal`]
 
 use crate::Compact;
+use alloc::vec::Vec;
 use alloy_eips::eip4895::{Withdrawal as AlloyWithdrawal, Withdrawals as AlloyWithdrawals};
 use alloy_primitives::Address;
 use reth_codecs_derive::add_arbitrary_tests;
