@@ -10,12 +10,16 @@ use std::{
 };
 
 use eyre::{OptionExt, Result};
+use futures::future::BoxFuture;
 use libloading::{Library, Symbol};
 
 use crate::ExExContextDyn;
 
 /// ExEx launch function dynamic library symbol name.
 const LAUNCH_EXEX_FN: &[u8] = b"_launch_exex";
+
+/// Regarding ExEx launch entrypoint future
+type ExExFut = BoxFuture<'static, BoxFuture<'static, Result<()>>>;
 
 /// Dynamically loads an ExEx entrypoint, which accepts a user-defined function representing the
 /// core ExEx logic. The provided function must take an [`ExExContextDyn`](`crate::ExExContextDyn`)
@@ -47,24 +51,24 @@ macro_rules! define_exex {
             ctx: $crate::ExExContextDyn,
         ) -> futures::future::BoxFuture<
             'static,
-            eyre::Result<impl std::future::Future<Output = eyre::Result<()>> + Send>,
+            futures::future::BoxFuture<'static, eyre::Result<()>>,
         > {
-            Box::pin($user_fn(ctx))
+            futures::FutureExt::boxed(async move {
+                Box::pin(async move { exex(ctx).await })
+                    as futures::future::BoxFuture<'static, eyre::Result<()>>
+            })
         }
     };
 }
 
 #[derive(Debug, Default)]
 /// Dynamic ExEx loader
-pub struct DyExExLoader<Fut> {
+pub struct DyExExLoader {
     /// List of loaded Dynamically Loaded ExExes
-    pub loaded: Vec<LoadedExEx<Fut>>,
+    pub loaded: Vec<LoadedExEx>,
 }
 
-impl<Fut> DyExExLoader<Fut>
-where
-    Fut: Future<Output = Result<()>> + Send,
-{
+impl DyExExLoader {
     /// Initializes a Dynamic ExEx loader.
     /// TODO(0xurb) - path to datadir here and loaded list with capacity of dir inner files.
     pub const fn new() -> Self {
@@ -108,12 +112,15 @@ where
         let lib = Library::new(path)?;
         let symbol: Symbol<
             '_,
-            unsafe fn(ExExContextDyn) -> *mut (dyn Future<Output = Fut> + Send),
+            unsafe fn(
+                ExExContextDyn,
+            )
+                -> *mut (dyn Future<Output = BoxFuture<'static, Result<()>>> + Send),
         > = lib.get(LAUNCH_EXEX_FN)?;
 
         let raw_func_pointer = symbol(ctx);
         if raw_func_pointer.is_null() {
-            return Err(eyre::eyre!("Failed to load function from dynamic library"));
+            return Err(eyre::eyre!("Failed to load future from dynamic library"));
         }
 
         // SAFETY: We guarantee that the pointed data is pinned, loaded DLL symbol
@@ -127,16 +134,16 @@ where
 }
 
 /// Dynamically Loaded ExEx representation
-pub struct LoadedExEx<Fut> {
+pub struct LoadedExEx {
     /// ExEx id
     id: String,
     /// Loaded [`Library`] pointer
     lib: Arc<Library>,
     /// Regarding ExEx launch entrypoint future
-    exex_fut: Pin<Box<dyn Future<Output = Fut> + Send>>,
+    exex_fut: ExExFut,
 }
 
-impl<Fut> Debug for LoadedExEx<Fut> {
+impl Debug for LoadedExEx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoadedExEx")
             .field("id", &self.id)
@@ -146,22 +153,15 @@ impl<Fut> Debug for LoadedExEx<Fut> {
     }
 }
 
-impl<Fut> LoadedExEx<Fut>
-where
-    Fut: Future<Output = Result<()>> + Send,
-{
+impl LoadedExEx {
     /// Create a new [`LoadedExEx`].
-    fn new(
-        lib_name: impl AsRef<str>,
-        lib: Library,
-        exex_fut: Pin<Box<dyn Future<Output = Fut> + Send>>,
-    ) -> Self {
+    fn new(lib_name: impl AsRef<str>, lib: Library, exex_fut: ExExFut) -> Self {
         Self { id: lib_name.as_ref().to_owned(), lib: Arc::new(lib), exex_fut }
     }
 
     /// Returns this ExEx id and launch entrypoint future.
     #[inline(always)]
-    pub fn into_id_and_launch_fn(self) -> (String, Pin<Box<dyn Future<Output = Fut> + Send>>) {
+    pub fn into_id_and_launch_fn(self) -> (String, ExExFut) {
         (self.id, self.exex_fut)
     }
 }
