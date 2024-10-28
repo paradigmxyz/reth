@@ -218,6 +218,11 @@ impl PeersManager {
         self.backed_off_peers.len()
     }
 
+    /// Returns the number of idle trusted peers.
+    fn num_idle_trusted_peers(&self) -> usize {
+        self.peers.iter().filter(|(_, peer)| peer.kind.is_trusted() && peer.state.is_idle()).count()
+    }
+
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
     /// returns an error if the inbound ip address is on the ban list
@@ -229,9 +234,34 @@ impl PeersManager {
             return Err(InboundConnectionError::IpBanned)
         }
 
-        if !self.connection_info.has_in_capacity() && self.trusted_peer_ids.is_empty() {
-            // if we don't have any inbound slots and no trusted peers, we don't accept any new
-            // connections
+        // check if we even have slots for a new incoming connection
+        if !self.connection_info.has_in_capacity() {
+            if self.trusted_peer_ids.is_empty() {
+                // if we don't have any incoming slots and no trusted peers, we don't accept any new
+                // connections
+                return Err(InboundConnectionError::ExceedsCapacity)
+            }
+
+            // there's an edge case here where no incoming connections besides from trusted peers
+            // are allowed (max_inbound == 0), in which case we still need to allow new pending
+            // incoming connections until all trusted peers are connected.
+            let num_idle_trusted_peers = self.num_idle_trusted_peers();
+            if num_idle_trusted_peers <= self.trusted_peer_ids.len() {
+                // we still want to limit concurrent pending connections
+                let max_inbound =
+                    self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
+                if self.connection_info.num_pending_in <= max_inbound {
+                    self.connection_info.inc_pending_in();
+                }
+                return Ok(())
+            }
+
+            // all trusted peers are either connected or connecting
+            return Err(InboundConnectionError::ExceedsCapacity)
+        }
+
+        // also cap the incoming connections we can process at once
+        if !self.connection_info.has_in_pending_capacity() {
             return Err(InboundConnectionError::ExceedsCapacity)
         }
 
@@ -968,15 +998,20 @@ impl ConnectionInfo {
         Self { config, num_outbound: 0, num_pending_out: 0, num_inbound: 0, num_pending_in: 0 }
     }
 
-    ///  Returns `true` if there's still capacity for a new outgoing connection.
+    ///  Returns `true` if there's still capacity to perform an outgoing connection.
     const fn has_out_capacity(&self) -> bool {
         self.num_pending_out < self.config.max_concurrent_outbound_dials &&
             self.num_outbound < self.config.max_outbound
     }
 
-    ///  Returns `true` if there's still capacity for a new incoming connection.
+    ///  Returns `true` if there's still capacity to accept a new incoming connection.
     const fn has_in_capacity(&self) -> bool {
         self.num_inbound < self.config.max_inbound
+    }
+
+    /// Returns `true` if we can handle an additional incoming pending connection.
+    const fn has_in_pending_capacity(&self) -> bool {
+        self.num_pending_in < self.config.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {
@@ -1595,6 +1630,23 @@ mod tests {
         assert_eq!(peers.connection_info.num_pending_in, 1);
         peers.on_incoming_pending_session_rejected_internally();
         assert_eq!(peers.connection_info.num_pending_in, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reject_incoming_at_pending_capacity() {
+        let mut peers = PeersManager::default();
+
+        for count in 1..=peers.connection_info.config.max_inbound {
+            let socket_addr =
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, count as u8)), 8008);
+            assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+            assert_eq!(peers.connection_info.num_pending_in, count);
+        }
+        assert!(peers.connection_info.has_in_capacity());
+        assert!(!peers.connection_info.has_in_pending_capacity());
+
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 100)), 8008);
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_err());
     }
 
     #[tokio::test]
