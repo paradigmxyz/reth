@@ -630,12 +630,8 @@ impl RevealedSparseTrie {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
             // the cached value.
-            let mut prefix_set_contains = |path: &Nibbles| {
-                if let Some(is_in_prefix_set) = is_in_prefix_set {
-                    return is_in_prefix_set
-                }
-                *is_in_prefix_set.insert(prefix_set.contains(path))
-            };
+            let mut prefix_set_contains =
+                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
             let rlp_node = match self.nodes.get_mut(&path).unwrap() {
                 SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
@@ -644,7 +640,7 @@ impl RevealedSparseTrie {
                     self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| prefix_set_contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         RlpNode::word_rlp(&hash)
                     } else {
                         let value = self.values.get(&path).unwrap();
@@ -656,7 +652,7 @@ impl RevealedSparseTrie {
                 SparseNode::Extension { key, hash } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| prefix_set_contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         RlpNode::word_rlp(&hash)
                     } else if rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
                         let (_, child) = rlp_node_stack.pop().unwrap();
@@ -671,7 +667,7 @@ impl RevealedSparseTrie {
                     }
                 }
                 SparseNode::Branch { state_mask, hash } => {
-                    if let Some(hash) = hash.filter(|_| prefix_set_contains(&path)) {
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
