@@ -7420,6 +7420,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
+ "derive_more 1.0.0",
  "futures-util",
  "metrics",
  "parking_lot",
@@ -7437,7 +7438,6 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "revm-primitives",
- "thiserror",
 ]
 
 [[package]]
@@ -8107,7 +8107,6 @@ dependencies = [
  "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]

@@ -23,7 +23,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
-use derive_more::{Constructor, Deref, From, Into};
+use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
 pub(crate) use once_cell::sync::Lazy as LazyLock;
@@ -222,16 +222,16 @@ impl OpChainSpec {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, Display, Eq, PartialEq)]
 /// Error type for decoding Holocene 1559 parameters
 pub enum DecodeError {
-    #[error("Insufficient data to decode")]
+    #[display("Insufficient data to decode")]
     /// Insufficient data to decode
     InsufficientData,
-    #[error("Invalid denominator parameter")]
+    #[display("Invalid denominator parameter")]
     /// Invalid denominator parameter
     InvalidDenominator,
-    #[error("Invalid elasticity parameter")]
+    #[display("Invalid elasticity parameter")]
     /// Invalid elasticity parameter
     InvalidElasticity,
 }

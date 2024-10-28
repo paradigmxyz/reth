@@ -20,6 +20,7 @@ extern crate alloc;
 use crate::builder::RethEvmBuilder;
 use alloc::boxed::Box;
 use alloy_primitives::{Address, Bytes, B256, U256};
+use derive_more::{Display, From};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
@@ -108,10 +109,10 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, From, Display)]
 /// Error type for [`ConfigureEvmEnv::next_cfg_and_block_env`].
 pub enum NextCfgError {
-    #[error("Invalid config: {0}")]
+    #[display("Invalid config error: {_0}")]
     /// This is a generic error type that can be used to wrap any error type that implements
     InvalidConfigError(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
