@@ -6,7 +6,7 @@ use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadKind, PayloadTypes,
@@ -167,6 +167,7 @@ where
             state: self.forkchoice_state(),
             payload_attrs: None,
             tx,
+            version: EngineApiMessageVersion::default(),
         })?;
 
         let res = rx.await??;
@@ -193,6 +194,7 @@ where
             state: self.forkchoice_state(),
             payload_attrs: Some(self.payload_attributes_builder.build(timestamp)),
             tx,
+            version: EngineApiMessageVersion::default(),
         })?;
 
         let res = rx.await??.await?;
