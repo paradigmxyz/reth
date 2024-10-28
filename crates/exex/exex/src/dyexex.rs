@@ -30,18 +30,39 @@ type ExExFut = BoxFuture<'static, BoxFuture<'static, Result<()>>>;
 ///
 /// ## Example usage:
 /// ```rust
-/// use reth_exex::{define_exex, ExExContextDyn};
-/// use reth_node_api::FullNodeComponents;
-/// use std::future::Future;
+/// use futures::TryStreamExt;
+
+/// use reth_exex::{define_exex, ExExContextDyn, ExExEvent, ExExNotification};
+/// use reth_tracing::tracing::info;
+
+/// /// An ExEx is just a future, which means you can implement all of it in an async function!
+/// ///
+/// /// This ExEx just prints out whenever either a new chain of blocks being added, or a chain of
+/// /// blocks being re-orged. After processing the chain, emits an [ExExEvent::FinishedHeight] event.
+/// async fn exex(mut ctx: ExExContextDyn) -> eyre::Result<()> {
+///     while let Some(notification) = ctx.notifications.try_next().await? {
+///         match &notification {
+///             ExExNotification::ChainCommitted { new } => {
+///                 info!(committed_chain = ?new.range(), "Received commit");
+///             }
+///             ExExNotification::ChainReorged { old, new } => {
+///                 info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+///             }
+///             ExExNotification::ChainReverted { old } => {
+///                 info!(reverted_chain = ?old.range(), "Received revert");
+///             }
+///         };
 ///
-/// // Create a function to produce ExEx logic
-/// async fn exex(_ctx: ExExContextDyn) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-///     let _exex = async move { Ok(()) };
-///     Ok(_exex)
+///         if let Some(committed_chain) = notification.committed_chain() {
+///             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
+///         }
+///     }
+///
+///     Ok(())
 /// }
 ///
 /// // Use the macro to generate the entrypoint function
-/// define_exex!(exex);
+/// define_exex!(exex_init);
 /// ```
 #[macro_export]
 macro_rules! define_exex {
