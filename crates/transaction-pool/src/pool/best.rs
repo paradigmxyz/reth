@@ -279,7 +279,7 @@ pub struct BestTransactionsWithPrioritizedSenders<I: Iterator> {
 
 impl<I: Iterator> BestTransactionsWithPrioritizedSenders<I> {
     /// Constructs a new [`BestTransactionsWithPrioritizedSenders`].
-    pub fn new(inner: I, prioritized_senders: HashSet<Address>, max_prioritized_gas: u64) -> Self {
+    pub fn new(prioritized_senders: HashSet<Address>, max_prioritized_gas: u64, inner: I) -> Self {
         Self {
             inner,
             prioritized_senders,
