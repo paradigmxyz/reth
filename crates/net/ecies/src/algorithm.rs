@@ -686,7 +686,7 @@ impl ECIES {
 
     pub fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
-        align_num(len, 16) + 16
+        Self::align_num(len, 16) + 16
     }
 
     #[cfg(test)]
@@ -697,7 +697,7 @@ impl ECIES {
     }
 
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
-        let len = align_num(data.len(), 16);
+        let len = Self::align_num(data.len(), 16);
         let old_len = out.len();
         out.resize(old_len + len, 0);
 
