@@ -46,9 +46,9 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     fn try_new(
         parent: B256,
         attributes: OpPayloadAttributes,
-        _version: u8,
+        version: u8,
     ) -> Result<Self, Self::Error> {
-        let id = payload_id_optimism(&parent, &attributes);
+        let id = payload_id_optimism(&parent, &attributes, version);
 
         let transactions = attributes
             .transactions
@@ -281,7 +281,11 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
 /// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id_optimism(
+    parent: &B256,
+    attributes: &OpPayloadAttributes,
+    payload_version: u8,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
@@ -298,21 +302,19 @@ pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttribute
         hasher.update(parent_beacon_block);
     }
 
-    if attributes.no_tx_pool.unwrap_or_default() ||
-        attributes.transactions.as_ref().map(|txs| !txs.is_empty()).unwrap_or_default()
-    {
-        let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
+    let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
+    if no_tx_pool || attributes.transactions.as_ref().is_some_and(|txs| !txs.is_empty()) {
         hasher.update([no_tx_pool as u8]);
         let txs_len = attributes.transactions.as_ref().map(|txs| txs.len()).unwrap_or_default();
         hasher.update(&txs_len.to_be_bytes()[..]);
         if let Some(txs) = &attributes.transactions {
-            txs.iter().for_each(|tx| {
+            for tx in txs {
                 // we have to just hash the bytes here because otherwise we would need to decode
                 // the transactions here which really isn't ideal
                 let tx_hash = keccak256(tx);
                 // maybe we can try just taking the hash and not decoding
                 hasher.update(tx_hash)
-            });
+            }
         }
     }
 
@@ -324,7 +326,8 @@ pub(crate) fn payload_id_optimism(parent: &B256, attributes: &OpPayloadAttribute
         hasher.update(eip_1559_params.as_slice());
     }
 
-    let out = hasher.finalize();
+    let mut out = hasher.finalize();
+    out[0] = payload_version;
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 
@@ -334,6 +337,7 @@ mod tests {
     use crate::OpPayloadAttributes;
     use alloy_primitives::{address, b256, bytes, FixedBytes};
     use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_payload_primitives::EngineApiMessageVersion;
     use std::str::FromStr;
 
     #[test]
@@ -345,7 +349,7 @@ mod tests {
         let attrs = OpPayloadAttributes {
             payload_attributes: PayloadAttributes {
                 timestamp: 1728933301,
-                prev_randao: b256!("9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765").into(),
+                prev_randao: b256!("9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
                 suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
                 parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into()
@@ -361,8 +365,9 @@ mod tests {
             expected,
             payload_id_optimism(
                 &b256!("3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
-                &attrs
-            ) // := "0x6ef26ca02318dcf9"
+                &attrs,
+                EngineApiMessageVersion::V3 as u8
+            )
         );
     }
 }
