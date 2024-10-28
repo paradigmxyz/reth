@@ -3,7 +3,10 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH};
+use alloy_eips::{
+    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip7685::EMPTY_REQUESTS_HASH,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use derive_more::From;
@@ -39,7 +42,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         hardforks: EthereumHardfork::mainnet().into(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
-            address!("00000000219ab540356cbb839cbe05303d7705fa"),
+            MAINNET_DEPOSIT_CONTRACT_ADDRESS,
             11052984,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
