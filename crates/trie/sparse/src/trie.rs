@@ -572,24 +572,11 @@ impl RevealedSparseTrie {
         let targets = self.get_nodes_at_depth(depth);
         let mut prefix_set = self.prefix_set.clone().freeze();
 
-        // stack of paths we need rlp nodes for
-        let mut path_stack = Vec::new();
-        // stack of rlp nodes
-        let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
-        // reusable branch child path
-        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-        // reusable branch value stack
-        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+        let mut buffers = RlpNodeBuffers::default();
 
         for target in targets {
-            path_stack.push(target);
-            self.rlp_node(
-                &mut prefix_set,
-                &mut path_stack,
-                &mut rlp_node_stack,
-                &mut branch_child_buf,
-                &mut branch_value_stack_buf,
-            );
+            buffers.path_stack.push(target);
+            self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
 
@@ -634,33 +621,13 @@ impl RevealedSparseTrie {
     }
 
     fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
-        // stack of paths we need rlp nodes for
-        let mut path_stack = Vec::from([path]);
-        // stack of rlp nodes
-        let mut rlp_node_stack = Vec::<(Nibbles, RlpNode)>::new();
-        // reusable branch child path
-        let mut branch_child_buf = SmallVec::<[Nibbles; 16]>::new_const();
-        // reusable branch value stack
-        let mut branch_value_stack_buf = SmallVec::<[RlpNode; 16]>::new_const();
+        let mut buffers = RlpNodeBuffers::new_with_path(path);
 
-        self.rlp_node(
-            prefix_set,
-            &mut path_stack,
-            &mut rlp_node_stack,
-            &mut branch_child_buf,
-            &mut branch_value_stack_buf,
-        )
+        self.rlp_node(prefix_set, &mut buffers)
     }
 
-    fn rlp_node(
-        &mut self,
-        prefix_set: &mut PrefixSet,
-        path_stack: &mut Vec<Nibbles>,
-        rlp_node_stack: &mut Vec<(Nibbles, RlpNode)>,
-        branch_child_buf: &mut SmallVec<[Nibbles; 16]>,
-        branch_value_stack_buf: &mut SmallVec<[RlpNode; 16]>,
-    ) -> RlpNode {
-        'main: while let Some(path) = path_stack.pop() {
+    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+        'main: while let Some(path) = buffers.path_stack.pop() {
             let rlp_node = match self.nodes.get_mut(&path).unwrap() {
                 SparseNode::Empty => RlpNode::word_rlp(&EMPTY_ROOT_HASH),
                 SparseNode::Hash(hash) => RlpNode::word_rlp(hash),
@@ -682,56 +649,56 @@ impl RevealedSparseTrie {
                     child_path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
                         RlpNode::word_rlp(&hash)
-                    } else if rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
-                        let (_, child) = rlp_node_stack.pop().unwrap();
+                    } else if buffers.rlp_node_stack.last().map_or(false, |e| e.0 == child_path) {
+                        let (_, child) = buffers.rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
                         rlp_node
                     } else {
-                        path_stack.extend([path, child_path]); // need to get rlp node for child first
+                        buffers.path_stack.extend([path, child_path]); // need to get rlp node for child first
                         continue
                     }
                 }
                 SparseNode::Branch { state_mask, hash } => {
                     if let Some(hash) = hash.filter(|_| !prefix_set.contains(&path)) {
-                        rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
+                        buffers.rlp_node_stack.push((path, RlpNode::word_rlp(&hash)));
                         continue
                     }
 
-                    branch_child_buf.clear();
+                    buffers.branch_child_buf.clear();
                     for bit in CHILD_INDEX_RANGE {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
                             child.push_unchecked(bit);
-                            branch_child_buf.push(child);
+                            buffers.branch_child_buf.push(child);
                         }
                     }
 
-                    branch_value_stack_buf.clear();
-                    for child_path in branch_child_buf.iter() {
-                        if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
-                            let (_, child) = rlp_node_stack.pop().unwrap();
-                            branch_value_stack_buf.push(child);
+                    buffers.branch_value_stack_buf.clear();
+                    for child_path in &buffers.branch_child_buf {
+                        if buffers.rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
+                            let (_, child) = buffers.rlp_node_stack.pop().unwrap();
+                            buffers.branch_value_stack_buf.push(child);
                         } else {
-                            debug_assert!(branch_value_stack_buf.is_empty());
-                            path_stack.push(path);
-                            path_stack.extend(branch_child_buf.drain(..));
+                            debug_assert!(buffers.branch_value_stack_buf.is_empty());
+                            buffers.path_stack.push(path);
+                            buffers.path_stack.extend(buffers.branch_child_buf.drain(..));
                             continue 'main
                         }
                     }
 
                     self.rlp_buf.clear();
-                    let rlp_node = BranchNodeRef::new(branch_value_stack_buf, *state_mask)
+                    let rlp_node = BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask)
                         .rlp(&mut self.rlp_buf);
                     *hash = rlp_node.as_hash();
                     rlp_node
                 }
             };
-            rlp_node_stack.push((path, rlp_node));
+            buffers.rlp_node_stack.push((path, rlp_node));
         }
 
-        rlp_node_stack.pop().unwrap().1
+        buffers.rlp_node_stack.pop().unwrap().1
     }
 }
 
@@ -809,6 +776,31 @@ struct RemovedSparseNode {
     path: Nibbles,
     node: SparseNode,
     unset_branch_nibble: Option<u8>,
+}
+
+/// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
+#[derive(Debug, Default)]
+struct RlpNodeBuffers {
+    /// Stack of paths we need rlp nodes for
+    path_stack: Vec<Nibbles>,
+    /// Stack of rlp nodes
+    rlp_node_stack: Vec<(Nibbles, RlpNode)>,
+    /// Reusable branch child path
+    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    /// Reusable branch value stack
+    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+}
+
+impl RlpNodeBuffers {
+    /// Creates a new instance of buffers with the given path on the stack.
+    fn new_with_path(path: Nibbles) -> Self {
+        Self {
+            path_stack: vec![path],
+            rlp_node_stack: Vec::new(),
+            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
+            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+        }
+    }
 }
 
 #[cfg(test)]
