@@ -31,10 +31,10 @@ type ExExFut = BoxFuture<'static, BoxFuture<'static, Result<()>>>;
 /// ## Example usage:
 /// ```rust
 /// use futures::TryStreamExt;
-
+///
 /// use reth_exex::{define_exex, ExExContextDyn, ExExEvent, ExExNotification};
 /// use reth_tracing::tracing::info;
-
+///
 /// /// An ExEx is just a future, which means you can implement all of it in an async function!
 /// ///
 /// /// This ExEx just prints out whenever either a new chain of blocks being added, or a chain of
