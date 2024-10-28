@@ -23,7 +23,6 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::NextCfgError;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -39,7 +38,7 @@ use reth_primitives::{
     Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
-use std::sync::Arc;
+use std::{convert::Infallible, sync::Arc};
 
 /// Custom EVM configuration
 #[derive(Debug, Clone)]
@@ -88,6 +87,7 @@ impl MyEvmConfig {
 
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
+    type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender);
@@ -116,7 +116,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
         self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }

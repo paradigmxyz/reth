@@ -19,7 +19,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes, NextCfgError};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -73,7 +73,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),

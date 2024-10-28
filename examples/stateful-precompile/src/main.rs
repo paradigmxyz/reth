@@ -18,7 +18,6 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::NextCfgError;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -31,7 +30,7 @@ use reth_primitives::{
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
@@ -148,6 +147,7 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
+    type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender)
@@ -176,7 +176,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
         self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }

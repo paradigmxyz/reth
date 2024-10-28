@@ -14,8 +14,8 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{Address, U256};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes, NextCfgError};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_optimism_chainspec::{DecodeError, OpChainSpec};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
@@ -56,6 +56,7 @@ impl OptimismEvmConfig {
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
     type Header = Header;
+    type Error = DecodeError;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
@@ -134,7 +135,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -159,7 +160,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             basefee: self
                 .chain_spec
                 .next_block_base_fee(parent, attributes.timestamp)
-                .map_err(|e| NextCfgError::InvalidConfigError(e.to_string().into()))?,
+                .map_err(|e| e.into())?,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };

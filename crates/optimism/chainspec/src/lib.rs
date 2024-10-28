@@ -236,6 +236,13 @@ pub enum DecodeError {
     InvalidElasticity,
 }
 
+impl core::error::Error for DecodeError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        // None of the errors have sub-errors
+        None
+    }
+}
+
 /// Extracts the Holcene 1599 parameters from the encoded form:
 /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
 pub fn decode_holocene_1559_params(extra_data: Bytes) -> Result<(u32, u32), DecodeError> {

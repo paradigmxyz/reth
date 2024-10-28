@@ -7,9 +7,7 @@ use alloy_primitives::{Bytes, B64, U256};
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{BaseFeeParams, ChainSpecProvider};
-use reth_evm::{
-    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes, NextCfgError,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -80,7 +78,7 @@ where
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError> {
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),

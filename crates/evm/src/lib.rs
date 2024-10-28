@@ -18,9 +18,7 @@
 extern crate alloc;
 
 use crate::builder::RethEvmBuilder;
-use alloc::boxed::Box;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use derive_more::{Display, From};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
 use revm::{Database, Evm, GetInspector};
@@ -109,14 +107,6 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
-#[derive(Debug, From, Display)]
-/// Error type for [`ConfigureEvmEnv::next_cfg_and_block_env`].
-pub enum NextCfgError {
-    #[display("Invalid config error: {_0}")]
-    /// This is a generic error type that can be used to wrap any error type that implements
-    InvalidConfigError(#[from] Box<dyn core::error::Error + Send + Sync>),
-}
-
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
 ///
@@ -125,6 +115,9 @@ pub enum NextCfgError {
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The header type used by the EVM.
     type Header: BlockHeader;
+
+    /// The error type that is returned by [`Self::next_cfg_and_block_env`].
+    type Error: core::error::Error + Send + Sync;
 
     /// Returns a [`TxEnv`] from a [`TransactionSigned`] and [`Address`].
     fn tx_env(&self, transaction: &TransactionSigned, signer: Address) -> TxEnv {
@@ -202,7 +195,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), NextCfgError>;
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>;
 }
 
 /// Represents additional attributes required to configure the next block.
