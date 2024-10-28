@@ -30,7 +30,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, RpcNodeCore,
+    EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
@@ -116,7 +116,6 @@ where
 
 impl<N> RpcNodeCore for OpEthApi<N>
 where
-    Self: Clone,
     N: RpcNodeCore,
 {
     type Provider = N::Provider;
@@ -138,6 +137,16 @@ where
 
     fn provider(&self) -> &Self::Provider {
         self.inner.provider()
+    }
+}
+
+impl<N> RpcNodeCoreExt for OpEthApi<N>
+where
+    N: RpcNodeCore,
+{
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
     }
 }
 

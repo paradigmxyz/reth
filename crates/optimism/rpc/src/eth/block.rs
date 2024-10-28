@@ -4,7 +4,6 @@ use alloy_rpc_types::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
-use reth_node_api::FullNodeComponents;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::TransactionMeta;
 use reth_provider::HeaderProvider;
@@ -12,7 +11,6 @@ use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcNodeCore, RpcReceipt,
 };
-use reth_rpc_eth_types::EthStateCache;
 
 use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
@@ -80,10 +78,6 @@ where
 impl<N> LoadBlock for OpEthApi<N>
 where
     Self: LoadPendingBlock + SpawnBlocking,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
