@@ -14,15 +14,15 @@ use std::{fmt, sync::Arc};
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::Optimism;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    HeaderProvider, StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -114,24 +114,42 @@ where
     }
 }
 
-impl<N> EthApiSpec for OpEthApi<N>
+impl<N> RpcNodeCore for OpEthApi<N>
 where
-    Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Self: Clone,
+    N: RpcNodeCore,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl ChainSpecProvider<ChainSpec: EthereumHardforks> + BlockNumReader + StageCheckpointReader
-    {
-        self.inner.provider()
+    type Provider = N::Provider;
+    type Pool = N::Pool;
+    type Network = <N as RpcNodeCore>::Network;
+    type Evm = <N as RpcNodeCore>::Evm;
+
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
     }
 
-    #[inline]
-    fn network(&self) -> impl NetworkInfo {
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.evm_config()
+    }
+
+    fn network(&self) -> &Self::Network {
         self.inner.network()
     }
 
+    fn provider(&self) -> &Self::Provider {
+        self.inner.provider()
+    }
+}
+
+impl<N> EthApiSpec for OpEthApi<N>
+where
+    N: RpcNodeCore<
+        Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+                      + BlockNumReader
+                      + StageCheckpointReader,
+        Network: NetworkInfo,
+    >,
+{
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
@@ -166,23 +184,21 @@ where
 
 impl<N> LoadFee for OpEthApi<N>
 where
-    Self: LoadBlock,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Self: LoadBlock<Provider = N::Provider>,
+    N: RpcNodeCore<
+        Provider: BlockReaderIdExt
+                      + EvmEnvProvider
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+                      + StateProviderFactory,
+    >,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> {
-        self.inner.provider()
-    }
-
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }
 
     #[inline]
-    fn gas_oracle(&self) -> &GasPriceOracle<impl BlockReaderIdExt> {
+    fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
         self.inner.gas_oracle()
     }
 
@@ -194,24 +210,14 @@ where
 
 impl<N> LoadState for OpEthApi<N>
 where
-    Self: Send + Sync + Clone,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: RpcNodeCore<
+        Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool,
+    >,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> {
-        self.inner.provider()
-    }
-
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
     }
 }
 
@@ -235,13 +241,9 @@ where
 
 impl<N> Trace for OpEthApi<N>
 where
-    Self: LoadState,
-    N: FullNodeComponents,
+    Self: LoadState<Evm: ConfigureEvm<Header = Header>>,
+    N: RpcNodeCore,
 {
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
-    }
 }
 
 impl<N> AddDevSigners for OpEthApi<N>
