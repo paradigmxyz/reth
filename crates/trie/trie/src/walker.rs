@@ -136,11 +136,10 @@ impl<C: TrieCursor> TrieWalker<C> {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
-                // match last.nibble() {
-                //     -1 => self.move_to_next_sibling(true)?,
-                //     _ => self.consume_node()?,
-                // }
-                self.move_to_next_sibling(true)?;
+                match last.nibble() {
+                    -1 => self.move_to_next_sibling(true)?,
+                    _ => self.consume_node()?,
+                }
             } else {
                 // If we can skip the current node, move to the next sibling.
                 self.move_to_next_sibling(false)?;
