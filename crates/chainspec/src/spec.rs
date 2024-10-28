@@ -512,34 +512,36 @@ impl ChainSpec {
         }
     }
 
-    /// An internal helper function that returns the block number of the last block-based
-    /// fork that occurs before any existing TTD (merge)/timestamp based forks.
+    /// This internal helper function retrieves the block number of the last block-based fork
+    /// that occurs before:
+    /// - Any existing Total Terminal Difficulty (TTD) or
+    /// - Timestamp-based forks in the current [`ChainSpec`].
     ///
-    /// Note: this returns None if the `ChainSpec` is not configured with a TTD/Timestamp fork.
+    /// The function operates by examining the configured hard forks in the chain. It iterates
+    /// through the fork conditions and identifies the most recent block-based fork that
+    /// precedes any TTD or timestamp-based conditions.
+    ///
+    /// If there are no block-based forks found before these conditions, or if the [`ChainSpec`]
+    /// is not configured with a TTD or timestamp fork, this function will return `None`.
     pub(crate) fn last_block_fork_before_merge_or_timestamp(&self) -> Option<u64> {
         let mut hardforks_iter = self.hardforks.forks_iter().peekable();
         while let Some((_, curr_cond)) = hardforks_iter.next() {
             if let Some((_, next_cond)) = hardforks_iter.peek() {
-                // peek and find the first occurrence of ForkCondition::TTD (merge) , or in
-                // custom ChainSpecs, the first occurrence of
-                // ForkCondition::Timestamp. If curr_cond is ForkCondition::Block at
-                // this point, which it should be in most "normal" ChainSpecs,
-                // return its block_num
+                // Match against the `next_cond` to see if it represents:
+                // - A TTD (merge)
+                // - A timestamp-based fork
                 match next_cond {
-                    ForkCondition::TTD { fork_block, .. } => {
-                        // handle Sepolia merge netsplit case
-                        if fork_block.is_some() {
-                            return *fork_block
-                        }
-                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
+                    // If the next fork is TTD and specifies a specific block, return that block
+                    // number
+                    ForkCondition::TTD { fork_block: Some(block), .. } => return Some(*block),
+
+                    // If the next fork is TTD without a specific block or is timestamp-based,
+                    // return the block number of the current condition if it is block-based.
+                    ForkCondition::TTD { .. } | ForkCondition::Timestamp(_) => {
+                        // Check if `curr_cond` is a block-based fork and return its block number if
+                        // true.
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
-                        }
-                    }
-                    ForkCondition::Timestamp(_) => {
-                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
-                        if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
+                            return Some(block_num);
                         }
                     }
                     ForkCondition::Block(_) | ForkCondition::Never => continue,
