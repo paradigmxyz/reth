@@ -3,7 +3,7 @@
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
 
 use crate::EthApi;
 
@@ -20,11 +20,6 @@ where
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + StateProviderFactory,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
         self.inner.gas_oracle()
