@@ -264,7 +264,7 @@ impl PooledTransactionsElement {
     /// transaction.
     ///
     /// This is the number of blobs times the
-    /// [`DATA_GAS_PER_BLOB`](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    /// [`DATA_GAS_PER_BLOB`](alloy_eips::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
     }

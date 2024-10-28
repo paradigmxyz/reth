@@ -352,6 +352,18 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions sent by a given user
+    fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all queued transactions sent by a given user
+    fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns the highest transaction sent by a given user
     fn get_highest_transaction_by_sender(
         &self,
@@ -747,6 +759,15 @@ pub trait BestTransactions: Iterator + Send {
     /// listen to pool updates.
     fn no_updates(&mut self);
 
+    /// Convenience function for [`Self::no_updates`] that returns the iterator again.
+    fn without_updates(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.no_updates();
+        self
+    }
+
     /// Skip all blob transactions.
     ///
     /// There's only limited blob space available in a block, once exhausted, EIP-4844 transactions
@@ -755,12 +776,23 @@ pub trait BestTransactions: Iterator + Send {
     /// If called then the iterator will no longer yield blob transactions.
     ///
     /// Note: this will also exclude any transactions that depend on blob transactions.
-    fn skip_blobs(&mut self);
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true);
+    }
 
     /// Controls whether the iterator skips blob transactions or not.
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Convenience function for [`Self::skip_blobs`] that returns the iterator again.
+    fn without_blobs(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.skip_blobs();
+        self
+    }
 
     /// Creates an iterator which uses a closure to determine whether a transaction should be
     /// returned by the iterator.
@@ -796,25 +828,6 @@ where
         (**self).set_skip_blobs(skip_blobs);
     }
 }
-
-/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
-pub trait BestTransactionsFilter: BestTransactions {
-    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
-    ///
-    /// Given an element the closure must return true or false. The returned iterator will yield
-    /// only the elements for which the closure returns true.
-    ///
-    /// Descendant transactions will be skipped.
-    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
-    where
-        P: FnMut(&Self::Item) -> bool,
-        Self: Sized,
-    {
-        BestTransactionFilter::new(self, predicate)
-    }
-}
-
-impl<T> BestTransactionsFilter for T where T: BestTransactions {}
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
@@ -1333,7 +1346,7 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
             }
             EIP4844_TX_TYPE_ID => {
                 // doesn't have a blob sidecar
-                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
             }
             unsupported => {
                 // unsupported transaction type
@@ -1485,7 +1498,8 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 mod tests {
     use super::*;
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
-    use reth_primitives::{constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
+    use reth_primitives::{Signature, TransactionSigned};
 
     #[test]
     fn test_pool_size_invariants() {

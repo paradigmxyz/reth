@@ -1,4 +1,5 @@
 use crate::{PayloadEvents, PayloadKind, PayloadTypes};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
@@ -65,6 +66,9 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         None
     }
+
+    /// Returns the EIP-7865 requests for the payload if any.
+    fn requests(&self) -> Option<Requests>;
 }
 
 /// This can be implemented by types that describe a currently running payload job.
@@ -80,7 +84,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [`PayloadId`] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent, attributes and version.
     fn try_new(
         parent: B256,
         rpc_payload_attributes: Self::RpcPayloadAttributes,

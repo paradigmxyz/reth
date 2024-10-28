@@ -19,13 +19,13 @@ reth-network-api.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # async
 tokio.workspace = true

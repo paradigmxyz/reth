@@ -18,7 +18,7 @@ use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
-use crate::{EthApiTypes, FromEthApiError};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
@@ -105,7 +105,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
 
             // Check whether the distance to the block exceeds the maximum configured window.
-            let block_number = LoadState::provider(self)
+            let block_number = self
+                .provider()
                 .block_number_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -138,9 +139,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             let Some(account) = account else { return Ok(None) };
 
             // Check whether the distance to the block exceeds the maximum configured proof window.
-            let chain_info =
-                LoadState::provider(&this).chain_info().map_err(Self::Error::from_eth_err)?;
-            let block_number = LoadState::provider(&this)
+            let chain_info = this.provider().chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_number = this
+                .provider()
                 .block_number_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -167,23 +168,18 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState: EthApiTypes {
-    /// Returns a handle for reading state from database.
-    ///
-    /// Data access in default trait method implementations.
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>;
-
+pub trait LoadState:
+    EthApiTypes
+    + RpcNodeCore<
+        Provider: StateProviderFactory
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
+        Pool: TransactionPool,
+    >
+{
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
     fn cache(&self) -> &EthStateCache;
-
-    /// Returns a handle for reading data from transaction pool.
-    ///
-    /// Data access in default trait method implementations.
-    fn pool(&self) -> impl TransactionPool;
 
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
@@ -237,7 +233,7 @@ pub trait LoadState: EthApiTypes {
                 Ok((cfg, block_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
-                let block_hash = LoadPendingBlock::provider(self)
+                let block_hash = RpcNodeCore::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;

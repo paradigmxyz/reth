@@ -50,5 +50,6 @@ test-utils = [
 	"reth-consensus/test-utils",
 	"reth-network-p2p/test-utils",
 	"reth-primitives-traits/test-utils",
-	"reth-provider/test-utils"
+	"reth-provider/test-utils",
+	"reth-stages-types/test-utils"
 ]

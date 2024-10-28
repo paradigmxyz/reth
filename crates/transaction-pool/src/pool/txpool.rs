@@ -22,9 +22,11 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_eips::{
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
+};
 use alloy_primitives::{Address, TxHash, B256};
-use reth_primitives::constants::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -362,9 +364,24 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.all()
     }
 
+    /// Returns all pending transactions for the specified sender
+    pub(crate) fn pending_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pending_transactions_iter().filter(|tx| tx.sender_id() == sender).collect()
+    }
+
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.basefee_pool.all().chain(self.queued_pool.all()).collect()
+    }
+
+    /// Returns an iterator over all transactions from parked pools
+    pub(crate) fn queued_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+        self.basefee_pool.all().chain(self.queued_pool.all())
     }
 
     /// Returns queued and pending transactions for the specified sender
@@ -373,6 +390,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
     ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
+    }
+
+    /// Returns all queued transactions for the specified sender
+    pub(crate) fn queued_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.queued_transactions_iter().filter(|tx| tx.sender_id() == sender).collect()
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.
