@@ -17,7 +17,6 @@ use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
@@ -177,7 +176,7 @@ where
 impl<N> SpawnBlocking for OpEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -237,7 +236,7 @@ where
 impl<N> EthState for OpEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -248,7 +247,7 @@ where
 impl<N> EthFees for OpEthApi<N>
 where
     Self: LoadFee,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
 }
 
@@ -261,10 +260,10 @@ where
 
 impl<N> AddDevSigners for OpEthApi<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: RpcNodeCore,
 {
     fn with_dev_accounts(&self) {
-        *self.signers().write() = DevSigner::random_signers(20)
+        *self.inner.signers().write() = DevSigner::random_signers(20)
     }
 }
 
