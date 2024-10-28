@@ -273,12 +273,6 @@ pub struct RLPxSymmetricKeys {
     pub mac_key: B256,
 }
 
-/// return num alignment value
-#[inline]
-const fn align_num(num: usize, align: usize) -> usize {
-    (num + (align - 1)) & !(align - 1)
-}
-
 impl ECIES {
     /// Create a new client with the given static secret key, remote peer id, nonce, and ephemeral
     /// secret key.
@@ -735,6 +729,12 @@ impl ECIES {
         let ret = body;
         self.ingress_aes.as_mut().unwrap().apply_keystream(ret);
         Ok(split_at_mut(ret, size)?.0)
+    }
+
+    /// return num alignment value
+    #[inline]
+    const fn align_num(num: usize, align: usize) -> usize {
+        (num + (align - 1)) & !(align - 1)
     }
 }
 
