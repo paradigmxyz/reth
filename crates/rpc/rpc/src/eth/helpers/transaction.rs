@@ -13,15 +13,8 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction,
-    Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
 {
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()

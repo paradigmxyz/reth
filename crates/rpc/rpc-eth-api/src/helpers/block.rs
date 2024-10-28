@@ -20,7 +20,7 @@ pub type BlockAndReceiptsResult<E> = Result<Option<(SealedBlock, Arc<Vec<Receipt
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthBlocks: LoadBlock<Provider: HeaderProvider> {
+pub trait EthBlocks: LoadBlock {
     /// Returns the block header for the given block id.
     fn rpc_block_header(
         &self,

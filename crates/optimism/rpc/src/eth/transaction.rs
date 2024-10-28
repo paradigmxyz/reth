@@ -19,13 +19,9 @@ use crate::{OpEthApi, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction,
-    N: FullNodeComponents,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    N: RpcNodeCore,
 {
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
@@ -71,7 +67,7 @@ where
 
 impl<N> OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
