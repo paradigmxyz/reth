@@ -258,6 +258,8 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
+    /// `flashbots_` module
+    Flashbots,
 }
 
 // === impl RethRpcModule ===
@@ -306,6 +308,7 @@ impl FromStr for RethRpcModule {
             "rpc" => Self::Rpc,
             "reth" => Self::Reth,
             "ots" => Self::Ots,
+            "flashbots" => Self::Flashbots,
             _ => return Err(ParseError::VariantNotFound),
         })
     }
