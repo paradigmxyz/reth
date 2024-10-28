@@ -21,7 +21,9 @@ use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_blo
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
+use crate::{
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcReceipt, RpcTransaction,
+};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, SpawnBlocking,
@@ -109,7 +111,7 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             self.spawn_blocking_io(move |ref this| {
-                Ok(LoadTransaction::provider(this)
+                Ok(RpcNodeCore::provider(this)
                     .transaction_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?
                     .map(|tx| tx.encoded_2718().into()))
@@ -164,7 +166,7 @@ pub trait EthTransactions: LoadTransaction {
     {
         let this = self.clone();
         self.spawn_blocking_io(move |_| {
-            let (tx, meta) = match LoadTransaction::provider(&this)
+            let (tx, meta) = match RpcNodeCore::provider(&this)
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
             {
@@ -229,13 +231,13 @@ pub trait EthTransactions: LoadTransaction {
         include_pending: bool,
     ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadState + FullEthApiTypes,
+        Self: LoadBlock + LoadState,
     {
         async move {
             // Check the pool first
             if include_pending {
                 if let Some(tx) =
-                    LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                    RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
                     return Ok(Some(from_recovered(transaction.into(), self.tx_resp_builder())));
@@ -255,7 +257,7 @@ pub trait EthTransactions: LoadTransaction {
                 return Ok(None);
             }
 
-            let Ok(high) = LoadBlock::provider(self).best_block_number() else {
+            let Ok(high) = RpcNodeCore::provider(self).best_block_number() else {
                 return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 
@@ -381,10 +383,15 @@ pub trait EthTransactions: LoadTransaction {
 
             let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
-            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(transaction.into()).map_err(|_| EthApiError::TransactionConversionError)?;
+            let pool_transaction =
+                <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
+                    transaction.into(),
+                )
+                .map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
-            let hash = LoadTransaction::pool(self)
+            let hash = self
+                .pool()
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
@@ -458,25 +465,13 @@ pub trait EthTransactions: LoadTransaction {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
-    /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
-    /// supported transaction type.
-    type Pool: TransactionPool;
-
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl TransactionsProvider;
-
+pub trait LoadTransaction:
+    SpawnBlocking + FullEthApiTypes + RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>
+{
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
     fn cache(&self) -> &EthStateCache;
-
-    /// Returns a handle for reading data from pool.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn pool(&self) -> &Self::Pool;
 
     /// Returns the transaction by hash.
     ///

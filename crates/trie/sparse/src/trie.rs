@@ -11,7 +11,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{collections::HashSet, fmt};
+use std::fmt;
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -580,13 +580,9 @@ impl RevealedSparseTrie {
     /// Returns a list of paths to the nodes that were changed according to the prefix set and are
     /// located at the provided depth when counting from the root node. If there's a leaf at a
     /// depth less than the provided depth, it will be included in the result.
-    fn get_changed_nodes_at_depth(
-        &self,
-        prefix_set: &mut PrefixSet,
-        depth: usize,
-    ) -> HashSet<Nibbles> {
+    fn get_changed_nodes_at_depth(&self, prefix_set: &mut PrefixSet, depth: usize) -> Vec<Nibbles> {
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
-        let mut targets = HashSet::<Nibbles>::default();
+        let mut targets = Vec::new();
 
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
@@ -596,7 +592,7 @@ impl RevealedSparseTrie {
                         continue
                     }
 
-                    targets.insert(path);
+                    targets.push(path);
                 }
                 SparseNode::Extension { key, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
@@ -604,7 +600,7 @@ impl RevealedSparseTrie {
                     }
 
                     if level >= depth {
-                        targets.insert(path);
+                        targets.push(path);
                     } else {
                         path.extend_from_slice_unchecked(key);
                         paths.push((path, level + 1));
@@ -616,9 +612,9 @@ impl RevealedSparseTrie {
                     }
 
                     if level >= depth {
-                        targets.insert(path);
+                        targets.push(path);
                     } else {
-                        for bit in CHILD_INDEX_RANGE {
+                        for bit in CHILD_INDEX_RANGE.rev() {
                             if state_mask.is_bit_set(bit) {
                                 let mut child_path = path.clone();
                                 child_path.push_unchecked(bit);
@@ -683,7 +679,9 @@ impl RevealedSparseTrie {
                     }
 
                     branch_child_buf.clear();
-                    for bit in CHILD_INDEX_RANGE {
+                    // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
+                    // from the stack.
+                    for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
                             child.push_unchecked(bit);
@@ -691,13 +689,17 @@ impl RevealedSparseTrie {
                         }
                     }
 
-                    branch_value_stack_buf.clear();
-                    for child_path in &branch_child_buf {
+                    branch_value_stack_buf.resize(branch_child_buf.len(), Default::default());
+                    let mut added_children = false;
+                    for (i, child_path) in branch_child_buf.iter().enumerate() {
                         if rlp_node_stack.last().map_or(false, |e| &e.0 == child_path) {
                             let (_, child) = rlp_node_stack.pop().unwrap();
-                            branch_value_stack_buf.push(child);
+                            // Insert children in the resulting buffer in a normal order, because
+                            // initially we iterated in reverse.
+                            branch_value_stack_buf[branch_child_buf.len() - i - 1] = child;
+                            added_children = true;
                         } else {
-                            debug_assert!(branch_value_stack_buf.is_empty());
+                            debug_assert!(!added_children);
                             path_stack.push(path);
                             path_stack.extend(branch_child_buf.drain(..));
                             continue 'main
@@ -1587,39 +1589,39 @@ mod tests {
 
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
-            HashSet::from([Nibbles::default()])
+            vec![Nibbles::default()]
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 1),
-            HashSet::from([Nibbles::from_nibbles_unchecked([0x5])])
+            vec![Nibbles::from_nibbles_unchecked([0x5])]
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 2),
-            HashSet::from([
+            vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3])
-            ])
+            ]
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 3),
-            HashSet::from([
+            vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
-            ])
+            ]
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 4),
-            HashSet::from([
+            vec![
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
                 Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
-            ])
+            ]
         );
     }
 }

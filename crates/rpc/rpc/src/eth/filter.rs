@@ -145,8 +145,7 @@ where
 impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    <Pool as TransactionPool>::Transaction: 'static,
+    Pool: TransactionPool<Transaction: 'static> + 'static,
     Eth: FullEthApiTypes,
 {
     /// Returns all the filter changes for the given id, if any

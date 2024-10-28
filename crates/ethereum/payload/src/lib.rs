@@ -10,7 +10,7 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::{eip7685::Requests, merge::BEACON_NONCE};
+use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -25,7 +25,6 @@ use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::eip4844::MAX_DATA_GAS_PER_BLOCK,
     proofs::{self},
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, EthereumHardforks, Header, Receipt,
