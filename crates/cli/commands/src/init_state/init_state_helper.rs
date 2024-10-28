@@ -123,8 +123,6 @@ fn append_dummy_chain(
                 // TODO: should we fill with real parent_hash?
                 empty_header.number = block_num;
                 writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
-
-                dbg!("finished writing header {}", block_num);
             }
             Ok(())
         });
