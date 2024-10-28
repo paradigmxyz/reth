@@ -18,6 +18,7 @@
 extern crate alloc;
 
 use crate::builder::RethEvmBuilder;
+use alloc::boxed::Box;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::BlockHeader;
@@ -107,7 +108,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug, thiserror_no_std::Error)]
 /// Error type for [`ConfigureEvmEnv::next_cfg_and_block_env`].
 pub enum NextCfgError {
     #[error("Invalid config: {0}")]

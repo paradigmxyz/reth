@@ -222,7 +222,7 @@ impl OpChainSpec {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 /// Error type for decoding Holocene 1559 parameters
 pub enum DecodeError {
     #[error("Insufficient data to decode")]
