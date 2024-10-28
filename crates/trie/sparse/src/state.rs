@@ -116,6 +116,11 @@ impl SparseStateTrie {
     pub fn root(&mut self) -> Option<B256> {
         self.state.root()
     }
+
+    /// Returns storage sparse trie root if the trie has been revealed.
+    pub fn storage_root(&mut self, account: B256) -> Option<B256> {
+        self.storages.get_mut(&account).and_then(|trie| trie.root())
+    }
 }
 
 #[cfg(test)]
