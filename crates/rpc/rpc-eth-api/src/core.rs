@@ -2,6 +2,7 @@
 //! the `eth_` namespace.
 
 use alloy_dyn_abi::TypedData;
+use ethereum_json_rpc_client::CertifiedResult;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_eth_types::EthApiError;
@@ -16,7 +17,8 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::helpers::{
-    bitfinity_evm_rpc::BitfinityEvmRpc, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace
+    bitfinity_evm_rpc::BitfinityEvmRpc, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
+    EthTransactions, LoadReceipt, Trace,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -321,10 +323,16 @@ pub trait EthApi {
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
     /// Aliases don't use the namespace.
-	/// Thus, this will generate `eth_getGenesisBalances` and `ic_getGenesisBalances`.
-	#[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
-	async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
+    /// Thus, this will generate `eth_getGenesisBalances` and `ic_getGenesisBalances`.
+    #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
+    async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
 
+    /// Aliases don't use the namespace.
+    /// Thus, this will generate `eth_getLastCertifiedBlock` and `ic_getLastCertifiedBlock`.
+    #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
+    async fn get_last_certified_block(
+        &self,
+    ) -> RpcResult<CertifiedResult<ethereum_json_rpc_client::Block<ethereum_json_rpc_client::H256>>>;
 }
 
 #[async_trait::async_trait]
@@ -633,7 +641,7 @@ where
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        return Ok(EthFees::blob_base_fee(self).await?)
+        return Ok(EthFees::blob_base_fee(self).await?);
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -654,7 +662,7 @@ where
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         return Ok(
             EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
-        )
+        );
     }
 
     /// Handler for: `eth_mining`
@@ -739,5 +747,13 @@ where
     async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {
         trace!(target: "rpc::eth", "Serving eth_getGenesisBalances/ic_getGenesisBalances");
         BitfinityEvmRpc::get_genesis_balances(self).await
+    }
+
+    async fn get_last_certified_block(
+        &self,
+    ) -> RpcResult<CertifiedResult<ethereum_json_rpc_client::Block<ethereum_json_rpc_client::H256>>>
+    {
+        trace!(target: "rpc::eth", "Serving get_last_certified_block");
+        BitfinityEvmRpc::get_last_certified_block(self).await
     }
 }

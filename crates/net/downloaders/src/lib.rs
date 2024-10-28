@@ -56,6 +56,6 @@ pub mod test_utils;
 
 /// Module managing remote data retrieval and buffering.
 ///
-/// Contains [RemoteClient](remote_client::RemoteClient) to read block data from remote sources,
+/// Contains [`RemoteClient`](remote_client::RemoteClient) to read block data from remote sources,
 /// efficiently buffering headers and bodies for retrieval.
 pub mod bitfinity_evm_client;

@@ -6,12 +6,16 @@ use super::utils::*;
 use did::keccak;
 use eth_server::{EthImpl, EthServer};
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
 use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
 };
 use rand::RngCore;
-use reth::{args::{DatadirArgs, RpcServerArgs}, dirs::{DataDirPath, MaybePlatformPath}};
+use reth::{
+    args::{DatadirArgs, RpcServerArgs},
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use reth_consensus::Consensus;
 use reth_db::{init_db, test_utils::tempdir_path};
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
@@ -19,7 +23,6 @@ use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
 use revm_primitives::{Address, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
-
 
 #[tokio::test]
 async fn bitfinity_test_should_start_local_reth_node() {
@@ -29,6 +32,36 @@ async fn bitfinity_test_should_start_local_reth_node() {
 
     // Act & Assert
     assert!(reth_client.get_chain_id().await.is_ok());
+}
+
+#[tokio::test]
+async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    // Act
+    let result = reth_client.get_last_certified_block().await;
+
+    // Assert
+    assert!(result.is_ok());
+
+    // Try with `ic_getLastCertifiedBlock` alias
+    let result: CertifiedResult<Block<H256>> = reth_client
+        .single_request(
+            "ic_getLastCertifiedBlock".to_owned(),
+            ethereum_json_rpc_client::Params::None,
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(!result.certificate.is_empty());
 }
 
 #[tokio::test]
@@ -81,9 +114,14 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
-    let result: Vec<(ethereum_json_rpc_client::H160, ethereum_json_rpc_client::U256)> = 
-        reth_client.single_request("eth_getGenesisBalances".to_owned(), 
-            ethereum_json_rpc_client::Params::None, ethereum_json_rpc_client::Id::Num(1)).await.unwrap();
+    let result: Vec<(ethereum_json_rpc_client::H160, ethereum_json_rpc_client::U256)> = reth_client
+        .single_request(
+            "eth_getGenesisBalances".to_owned(),
+            ethereum_json_rpc_client::Params::None,
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
 
     // Assert
     assert_eq!(result.len(), 3);
@@ -96,7 +134,6 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
 
     assert_eq!(did::H160::from(result[2].0), Address::from_slice(&[3u8; 20]).into());
     assert_eq!(did::U256::from(result[2].1), U256::from(30).into());
-
 }
 
 #[tokio::test]
@@ -124,7 +161,6 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
 
     assert_eq!(did::H160::from(result[2].0), Address::from_slice(&[3u8; 20]).into());
     assert_eq!(did::U256::from(result[2].1), U256::from(30).into());
-
 }
 
 #[tokio::test]
@@ -154,54 +190,86 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 /// Start a local reth node
 async fn start_reth_node(
     bitfinity_evm_url: Option<String>,
-    import_data: Option<ImportData>) -> (
+    import_data: Option<ImportData>,
+) -> (
     EthJsonRpcClient<ReqwestClient>,
-    NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, Arc<reth_db::DatabaseEnv>, reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, Arc<reth_db::DatabaseEnv>, reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider, Arc<dyn Consensus>>>>,
-    ) {
+    NodeHandle<
+        reth_node_builder::NodeAdapter<
+            reth_node_api::FullNodeTypesAdapter<
+                EthereumNode,
+                Arc<reth_db::DatabaseEnv>,
+                reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>,
+            >,
+            reth_node_builder::components::Components<
+                reth_node_api::FullNodeTypesAdapter<
+                    EthereumNode,
+                    Arc<reth_db::DatabaseEnv>,
+                    reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>,
+                >,
+                reth_transaction_pool::Pool<
+                    reth_transaction_pool::TransactionValidationTaskExecutor<
+                        reth_transaction_pool::EthTransactionValidator<
+                            reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>,
+                            reth_transaction_pool::EthPooledTransaction,
+                        >,
+                    >,
+                    reth_transaction_pool::CoinbaseTipOrdering<
+                        reth_transaction_pool::EthPooledTransaction,
+                    >,
+                    reth_transaction_pool::blobstore::DiskFileBlobStore,
+                >,
+                reth_node_ethereum::EthEvmConfig,
+                reth_node_ethereum::EthExecutorProvider,
+                Arc<dyn Consensus>,
+            >,
+        >,
+    >,
+) {
+    let tasks = TaskManager::current();
 
-        let tasks = TaskManager::current();
+    // create node config
+    let mut node_config =
+        NodeConfig::test().dev().with_rpc(RpcServerArgs::default().with_http()).with_unused_ports();
+    node_config.dev.dev = false;
 
-        // create node config
-        let mut node_config =
-            NodeConfig::test().dev().with_rpc(RpcServerArgs::default().with_http()).with_unused_ports();
-        node_config.dev.dev = false;
-    
-        let mut chain = node_config.chain.as_ref().clone();
-        chain.bitfinity_evm_url = bitfinity_evm_url;
-        let mut node_config = node_config.with_chain(chain);
-    
-        let database = if let Some(import_data) = import_data {
-            let data_dir = MaybePlatformPath::<DataDirPath>::from_str(import_data.data_dir.data_dir().to_str().unwrap()).unwrap();
-            let mut data_dir_args = node_config.datadir.clone();
-            data_dir_args.datadir = data_dir;
-            data_dir_args.static_files_path = Some(import_data.data_dir.static_files());
-            node_config = node_config.with_datadir_args(data_dir_args);
-            node_config = node_config.with_chain(import_data.chain.clone());
-            import_data.database
-        } else {
-            let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
-            node_config = node_config
-                .with_datadir_args(DatadirArgs { datadir: path.clone(), ..Default::default() });
-            let data_dir =
-                path.unwrap_or_chain_default(node_config.chain.chain, node_config.datadir.clone());
-            Arc::new(init_db(data_dir.db(), Default::default()).unwrap())
-        };
+    let mut chain = node_config.chain.as_ref().clone();
+    chain.bitfinity_evm_url = bitfinity_evm_url;
+    let mut node_config = node_config.with_chain(chain);
 
-        let node_handle = NodeBuilder::new(node_config)
-            .with_database(database)
-            .with_launch_context(tasks.executor())
-            .launch_node(EthereumNode::default())
-            .await
-            .unwrap();
-    
-        let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
-    
-        let client: EthJsonRpcClient<ReqwestClient> =
-            EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
-    
-        (client, node_handle)
+    let database = if let Some(import_data) = import_data {
+        let data_dir = MaybePlatformPath::<DataDirPath>::from_str(
+            import_data.data_dir.data_dir().to_str().unwrap(),
+        )
+        .unwrap();
+        let mut data_dir_args = node_config.datadir.clone();
+        data_dir_args.datadir = data_dir;
+        data_dir_args.static_files_path = Some(import_data.data_dir.static_files());
+        node_config = node_config.with_datadir_args(data_dir_args);
+        node_config = node_config.with_chain(import_data.chain.clone());
+        import_data.database
+    } else {
+        let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
+        node_config = node_config
+            .with_datadir_args(DatadirArgs { datadir: path.clone(), ..Default::default() });
+        let data_dir =
+            path.unwrap_or_chain_default(node_config.chain.chain, node_config.datadir.clone());
+        Arc::new(init_db(data_dir.db(), Default::default()).unwrap())
+    };
 
-    }
+    let node_handle = NodeBuilder::new(node_config)
+        .with_database(database)
+        .with_launch_context(tasks.executor())
+        .launch_node(EthereumNode::default())
+        .await
+        .unwrap();
+
+    let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
+
+    let client: EthJsonRpcClient<ReqwestClient> =
+        EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
+
+    (client, node_handle)
+}
 
 /// Start a local Eth server.
 /// Reth requests will be forwarded to this server
