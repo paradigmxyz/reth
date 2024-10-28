@@ -8,7 +8,7 @@ use alloy_rpc_types_engine::{
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
@@ -211,18 +211,32 @@ where
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
+                            version: EngineApiMessageVersion::default(),
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
+                (
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    }),
+                    _,
+                ) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        tx,
+                        version,
+                    })
                 }
                 (item, _) => item,
             };

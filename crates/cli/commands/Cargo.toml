@@ -17,6 +17,7 @@ reth-cli.workspace = true
 reth-ethereum-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
+reth-codecs = { workspace = true, optional = true }
 reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -38,11 +39,14 @@ reth-node-metrics.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
+reth-prune-types = { workspace = true, optional = true }
 reth-stages.workspace = true
+reth-stages-types = { workspace = true, optional = true }
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-common = { workspace = true, optional = true }
 
 # ethereum
 alloy-eips.workspace = true
@@ -89,14 +93,22 @@ reth-discv4.workspace = true
 [features]
 default = []
 arbitrary = [
-    "dep:proptest",
-    "dep:arbitrary",
-    "dep:proptest-arbitrary-interop",
-    "reth-primitives/arbitrary",
-    "reth-db-api/arbitrary",
-    "reth-eth-wire/arbitrary",
-    "reth-db/arbitrary",
-    "reth-chainspec/arbitrary",
-    "alloy-eips/arbitrary",
-    "alloy-primitives/arbitrary",
+	"dep:proptest",
+	"dep:arbitrary",
+	"dep:proptest-arbitrary-interop",
+	"reth-primitives/arbitrary",
+	"reth-db-api/arbitrary",
+	"reth-eth-wire/arbitrary",
+	"reth-db/arbitrary",
+	"reth-chainspec/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary",
+	"reth-codecs/test-utils",
+	"reth-prune-types/test-utils",
+	"reth-stages-types/test-utils",
+	"reth-trie-common/test-utils",
+	"reth-codecs?/arbitrary",
+	"reth-prune-types?/arbitrary",
+	"reth-stages-types?/arbitrary",
+	"reth-trie-common?/arbitrary"
 ]

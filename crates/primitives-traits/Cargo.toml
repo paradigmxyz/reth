@@ -74,7 +74,8 @@ arbitrary = [
 	"dep:proptest",
 	"dep:proptest-arbitrary-interop",
 	"alloy-eips/arbitrary",
-	"revm-primitives/arbitrary"
+	"revm-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde_with",

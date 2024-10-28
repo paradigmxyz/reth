@@ -220,6 +220,20 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pending_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_queued_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn get_highest_transaction_by_sender(
         &self,
         _sender: Address,
