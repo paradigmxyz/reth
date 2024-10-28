@@ -95,10 +95,11 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     /// Returns the maximum duration a job should be allowed to run.
     ///
     /// This adheres to the following specification:
-    // > Client software SHOULD stop the updating process when either a call to engine_getPayload
-    // > with the build process's payloadId is made or SECONDS_PER_SLOT (12s in the Mainnet
-    // > configuration) have passed since the point in time identified by the timestamp parameter.
-    // See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
+    /// > Client software SHOULD stop the updating process when either a call to engine_getPayload
+    /// > with the build process's payloadId is made or SECONDS_PER_SLOT (12s in the Mainnet
+    /// > configuration) have passed since the point in time identified by the timestamp parameter.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
     #[inline]
     fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
         let duration_until_timestamp = duration_until(unix_timestamp);

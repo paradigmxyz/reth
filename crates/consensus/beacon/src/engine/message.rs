@@ -4,7 +4,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use futures::{future::Either, FutureExt};
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_errors::RethResult;
 use reth_payload_primitives::PayloadBuilderError;
 use std::{
@@ -156,6 +156,8 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
         state: ForkchoiceState,
         /// The payload attributes for block building.
         payload_attrs: Option<Engine::PayloadAttributes>,
+        /// The Engine API Version.
+        version: EngineApiMessageVersion,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },

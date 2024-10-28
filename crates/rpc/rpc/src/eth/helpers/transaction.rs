@@ -3,7 +3,7 @@
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FullEthApiTypes,
+    FullEthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
@@ -13,15 +13,8 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction,
-    Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
 {
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
@@ -31,25 +24,13 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: SpawnBlocking + FullEthApiTypes,
-    Provider: TransactionsProvider,
-    Pool: TransactionPool,
+    Self: SpawnBlocking
+        + FullEthApiTypes
+        + RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    type Pool = Pool;
-
-    #[inline]
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
-
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
     }
 }
 

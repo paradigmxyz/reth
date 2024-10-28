@@ -19,6 +19,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_engine_primitives::EngineApiMessageVersion;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
@@ -93,7 +94,9 @@ impl<DB> TestEnv<DB> {
         &self,
         state: ForkchoiceState,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        self.engine_handle.fork_choice_updated(state, None).await
+        self.engine_handle
+            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
+            .await
     }
 
     /// Sends the `ForkchoiceUpdated` message to the consensus engine and retries if the engine
@@ -103,7 +106,10 @@ impl<DB> TestEnv<DB> {
         state: ForkchoiceState,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         loop {
-            let result = self.engine_handle.fork_choice_updated(state, None).await?;
+            let result = self
+                .engine_handle
+                .fork_choice_updated(state, None, EngineApiMessageVersion::default())
+                .await?;
             if !result.is_syncing() {
                 return Ok(result)
             }

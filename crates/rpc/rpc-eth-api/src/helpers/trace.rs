@@ -21,12 +21,7 @@ use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndSta
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState {
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
-
+pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
@@ -60,7 +55,7 @@ pub trait Trace: LoadState {
 
         I: GetInspector<DB>,
     {
-        let mut evm = Trace::evm_config(self).evm_with_env_and_inspector(db, env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (db, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env, db))
@@ -201,7 +196,7 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this).clone(),
+                    this.evm_config().clone(),
                     RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
@@ -344,7 +339,7 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this).clone(),
+                    this.evm_config().clone(),
                     RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
@@ -379,7 +374,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(tx, *signer);
+                        let tx_env = this.evm_config().tx_env(tx, *signer);
                         (tx_info, tx_env)
                     })
                     .peekable();

@@ -776,6 +776,24 @@ where
         self.get_pool_data().get_transactions_by_sender(sender_id)
     }
 
+    /// Returns all queued transactions of the address by sender
+    pub(crate) fn get_queued_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().pending_txs_by_sender(sender_id)
+    }
+
+    /// Returns all pending transactions of the address by sender
+    pub(crate) fn get_pending_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().queued_txs_by_sender(sender_id)
+    }
+
     /// Returns the highest transaction of the address
     pub(crate) fn get_highest_transaction_by_sender(
         &self,

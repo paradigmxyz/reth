@@ -15,10 +15,9 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
+use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_primitives::{
-    constants::eip4844::MAX_BLOBS_PER_BLOCK, GotExpected, InvalidTransactionError, SealedBlock,
-};
+use reth_primitives::{GotExpected, InvalidTransactionError, SealedBlock};
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
