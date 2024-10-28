@@ -84,6 +84,8 @@ pub struct PeersManager {
     max_backoff_count: u8,
     /// Tracks the connection state of the node
     net_connection_state: NetworkConnectionState,
+    /// How long to temporarily ban ip on an incoming connection attempt.
+    incoming_ip_throttle_duration: Duration,
 }
 
 impl PeersManager {
@@ -100,6 +102,7 @@ impl PeersManager {
             trusted_nodes_only,
             basic_nodes,
             max_backoff_count,
+            incoming_ip_throttle_duration,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -148,6 +151,7 @@ impl PeersManager {
             last_tick: Instant::now(),
             max_backoff_count,
             net_connection_state: NetworkConnectionState::default(),
+            incoming_ip_throttle_duration,
         }
     }
 
@@ -265,6 +269,9 @@ impl PeersManager {
             return Err(InboundConnectionError::ExceedsCapacity)
         }
 
+        // apply the rate limit
+        self.throttle_incoming_ip(addr);
+
         self.connection_info.inc_pending_in();
         Ok(())
     }
@@ -381,6 +388,12 @@ impl PeersManager {
     /// Bans the IP temporarily with the configured ban timeout
     fn ban_ip(&mut self, ip: IpAddr) {
         self.ban_list.ban_ip_until(ip, std::time::Instant::now() + self.ban_duration);
+    }
+
+    /// Bans the IP temporarily to rate limit inbound connection attempts per IP.
+    fn throttle_incoming_ip(&mut self, ip: IpAddr) {
+        self.ban_list
+            .ban_ip_until(ip, std::time::Instant::now() + self.incoming_ip_throttle_duration);
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
@@ -1129,15 +1142,6 @@ impl Display for InboundConnectionError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        future::{poll_fn, Future},
-        io,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        pin::Pin,
-        task::{Context, Poll},
-        time::Duration,
-    };
-
     use alloy_primitives::B512;
     use reth_eth_wire::{
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
@@ -1148,6 +1152,14 @@ mod tests {
     use reth_network_peers::{PeerId, TrustedPeer};
     use reth_network_types::{
         peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
+    };
+    use std::{
+        future::{poll_fn, Future},
+        io,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
     };
     use url::Host;
 
@@ -2327,6 +2339,39 @@ mod tests {
         assert_eq!(
             peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
             InboundConnectionError::ExceedsCapacity
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incoming_rate_limit() {
+        let config = PeersConfig {
+            incoming_ip_throttle_duration: Duration::from_millis(100),
+            ..PeersConfig::test()
+        };
+        let mut peers = PeersManager::new(config);
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 2)), 8009);
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::IpBanned
+        );
+
+        peers.release_interval.reset_immediately();
+        tokio::time::sleep(peers.incoming_ip_throttle_duration).await;
+
+        // await unban
+        poll_fn(|cx| loop {
+            if peers.poll(cx).is_pending() {
+                return Poll::Ready(());
+            }
+        })
+        .await;
+
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::IpBanned
         );
     }
 
