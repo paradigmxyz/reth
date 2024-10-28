@@ -108,7 +108,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
-#[derive(Debug, thiserror_no_std::Error)]
+#[derive(Debug, thiserror::Error)]
 /// Error type for [`ConfigureEvmEnv::next_cfg_and_block_env`].
 pub enum NextCfgError {
     #[error("Invalid config: {0}")]

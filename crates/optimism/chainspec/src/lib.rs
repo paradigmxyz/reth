@@ -23,6 +23,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{Bytes, Parity, Signature, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
+use core::error;
 use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
@@ -222,7 +223,7 @@ impl OpChainSpec {
     }
 }
 
-#[derive(Debug, thiserror_no_std::Error)]
+#[derive(Debug, thiserror::Error)]
 /// Error type for decoding Holocene 1559 parameters
 pub enum DecodeError {
     #[error("Insufficient data to decode")]

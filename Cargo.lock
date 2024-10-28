@@ -7437,7 +7437,7 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "revm-primitives",
- "thiserror-no-std",
+ "thiserror",
 ]
 
 [[package]]
@@ -8107,7 +8107,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
- "thiserror-no-std",
+ "thiserror",
 ]
 
 [[package]]
