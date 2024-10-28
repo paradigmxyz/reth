@@ -10,6 +10,7 @@ use reth_primitives::BlockNumberOrTag;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
+    node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
@@ -166,6 +167,17 @@ where
 
     fn provider(&self) -> &Self::Provider {
         self.inner.provider()
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: RpcNodeCore,
+{
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
     }
 }
 

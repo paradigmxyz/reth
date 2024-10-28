@@ -8,7 +8,7 @@ use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcReceipt,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, ReceiptBuilder};
 
 use crate::EthApi;
 
@@ -68,8 +68,4 @@ where
     Self: LoadPendingBlock + SpawnBlocking,
     Provider: BlockReaderIdExt,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }

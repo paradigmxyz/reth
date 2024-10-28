@@ -6,10 +6,9 @@ use alloy_rpc_types::{Header, Index};
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
-use crate::{FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
+use crate::{node::RpcNodeCoreExt, FromEthApiError, FullEthApiTypes, RpcBlock, RpcReceipt};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -196,12 +195,7 @@ pub trait EthBlocks: LoadBlock {
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
+pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
     fn block_with_senders(
         &self,
