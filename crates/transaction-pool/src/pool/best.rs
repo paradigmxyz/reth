@@ -95,6 +95,13 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Mark the transaction and it's descendants as invalid.
     pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
         self.invalid.insert(*tx.hash());
+
+        // Mark all descendants as invalid
+        let mut descendant_id = tx.id().descendant();
+        while let Some(descendant) = self.all.get(&descendant_id) {
+            self.invalid.insert(*descendant.transaction.hash());
+            descendant_id = descendant.transaction.id().descendant();
+        }
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
@@ -397,8 +404,9 @@ mod tests {
         let invalid = best.independent.iter().next().unwrap();
         best.mark_invalid(&invalid.transaction.clone());
 
-        // iterator is empty
-        assert!(best.next().is_none());
+        // all descendant transactions have been marked invalid
+        let all: Vec<_> = best.collect();
+        assert!(all.is_empty());
     }
 
     #[test]
