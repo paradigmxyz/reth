@@ -22,9 +22,9 @@ where
 
 impl<N> Call for OpEthApi<N>
 where
-    N: RpcNodeCore,
     Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
+    N: RpcNodeCore,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
