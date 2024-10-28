@@ -4,6 +4,7 @@ use alloy_primitives::U256;
 use alloy_rpc_types::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_primitives::{Receipt, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, EthStateCache,
@@ -42,6 +43,16 @@ pub trait EthFees: LoadFee {
         Self: 'static,
     {
         LoadFee::suggested_priority_fee(self)
+    }
+
+    /// Converts a pending block to a `fee_history_entry`
+    fn pending_block_to_fee_entry(
+        &self,
+        pending_block: &SealedBlockWithSenders,
+        pending_receipts: &[Receipt],
+    ) -> Result<FeeHistoryEntry, Self::Error> {
+        let percentiles = &[self.gas_oracle().config().percentile as f64];
+        Ok(FeeHistoryEntry::from_block_and_receipts(pending_block, pending_receipts, percentiles))
     }
 
     /// Reports the fee history, for the given amount of blocks, up until the given newest block.
@@ -86,6 +97,9 @@ pub trait EthFees: LoadFee {
                 .block_number_for_id(newest_block.into())
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(newest_block.into()))?;
+
+            let pending_block =
+                if newest_block.is_pending() { self.local_pending_block().await? } else { None };
 
             // need to add 1 to the end block to get the correct (inclusive) range
             let end_block_plus = end_block + 1;
@@ -142,7 +156,34 @@ pub trait EthFees: LoadFee {
                         rewards.push(block_rewards);
                     }
                 }
-                let last_entry = fee_entries.last().expect("is not empty");
+
+                let mut entries = fee_entries;
+
+                // Add pending block if available and there's room
+                if let Some((pending_block, pending_receipts)) = pending_block {
+                    if entries.len() < block_count as usize {
+                        let pending_entry =
+                            self.pending_block_to_fee_entry(&pending_block, &pending_receipts)?;
+                        entries.push(pending_entry);
+                    }
+                }
+
+                for entry in &entries {
+                    base_fee_per_gas.push(entry.base_fee_per_gas as u128);
+                    gas_used_ratio.push(entry.gas_used_ratio);
+                    base_fee_per_blob_gas.push(entry.base_fee_per_blob_gas.unwrap_or_default());
+                    blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
+
+                    if let Some(percentiles) = &reward_percentiles {
+                        let mut block_rewards = Vec::with_capacity(percentiles.len());
+                        for &percentile in percentiles {
+                            block_rewards.push(self.approximate_percentile(entry, percentile));
+                        }
+                        rewards.push(block_rewards);
+                    }
+                }
+
+                let last_entry = entries.last().expect("is not empty");
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
@@ -160,6 +201,16 @@ pub trait EthFees: LoadFee {
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
 
+                let mut headers = LoadFee::provider(self)
+                .sealed_headers_range(start_block..=end_block)
+                .map_err(Self::Error::from_eth_err)?;
+
+                // Add pending block if available and there's room
+                if let Some((pending_block, _)) = pending_block {
+                   if headers.len() < block_count as usize {
+                      headers.push(pending_block.header.clone());
+                   }
+                }
 
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
