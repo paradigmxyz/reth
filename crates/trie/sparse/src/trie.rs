@@ -836,13 +836,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use alloy_primitives::U256;
+    use alloy_primitives::{map::HashSet, U256};
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use prop::sample::SizeRange;
     use proptest::prelude::*;
     use rand::seq::IteratorRandom;
-    use reth_testing_utils::generators;
     use reth_trie::{BranchNode, ExtensionNode, LeafNode};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1304,6 +1303,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {
         // Having only the first 3 nibbles set, we narrow down the range of keys
@@ -1311,63 +1311,51 @@ mod tests {
         // to test the sparse trie updates.
         const KEY_NIBBLES_LEN: usize = 3;
 
-        fn test<I, T>(updates: I)
-        where
-            I: IntoIterator<Item = T>,
-            T: IntoIterator<Item = (Nibbles, Vec<u8>)> + Clone,
-        {
-            let mut rng = generators::rng();
+        fn test(updates: Vec<(HashMap<Nibbles, Vec<u8>>, HashSet<Nibbles>)>) {
+            {
+                let mut state = BTreeMap::default();
+                let mut sparse = RevealedSparseTrie::default();
 
-            let mut state = BTreeMap::default();
-            let mut sparse = RevealedSparseTrie::default();
+                for (update, keys_to_delete) in updates {
+                    // Insert state updates into the sparse trie and calculate the root
+                    for (key, value) in update.clone() {
+                        sparse.update_leaf(key, value).unwrap();
+                    }
+                    let sparse_root = sparse.root();
 
-            for update in updates {
-                let mut count = 0;
-                // Insert state updates into the sparse trie and calculate the root
-                for (key, value) in update.clone() {
-                    sparse.update_leaf(key, value).unwrap();
-                    count += 1;
+                    // Insert state updates into the hash builder and calculate the root
+                    state.extend(update);
+                    let (hash_builder_root, hash_builder_proof_nodes) =
+                        hash_builder_root_with_proofs(
+                            state.clone(),
+                            state.keys().cloned().collect::<Vec<_>>(),
+                        );
+
+                    // Assert that the sparse trie root matches the hash builder root
+                    assert_eq!(sparse_root, hash_builder_root);
+                    // Assert that the sparse trie nodes match the hash builder proof nodes
+                    assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+
+                    // Delete some keys from both the hash builder and the sparse trie and check
+                    // that the sparse trie root still matches the hash builder root
+                    for key in keys_to_delete {
+                        state.remove(&key).unwrap();
+                        sparse.remove_leaf(&key).unwrap();
+                    }
+
+                    let sparse_root = sparse.root();
+
+                    let (hash_builder_root, hash_builder_proof_nodes) =
+                        hash_builder_root_with_proofs(
+                            state.clone(),
+                            state.keys().cloned().collect::<Vec<_>>(),
+                        );
+
+                    // Assert that the sparse trie root matches the hash builder root
+                    assert_eq!(sparse_root, hash_builder_root);
+                    // Assert that the sparse trie nodes match the hash builder proof nodes
+                    assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
                 }
-                let keys_to_delete_len = count / 2;
-                let sparse_root = sparse.root();
-
-                // Insert state updates into the hash builder and calculate the root
-                state.extend(update);
-                let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
-                    state.clone(),
-                    state.keys().cloned().collect::<Vec<_>>(),
-                );
-
-                // Assert that the sparse trie root matches the hash builder root
-                assert_eq!(sparse_root, hash_builder_root);
-                // Assert that the sparse trie nodes match the hash builder proof nodes
-                assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
-
-                // Delete some keys from both the hash builder and the sparse trie and check
-                // that the sparse trie root still matches the hash builder root
-
-                let keys_to_delete = state
-                    .keys()
-                    .choose_multiple(&mut rng, keys_to_delete_len)
-                    .into_iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                for key in keys_to_delete {
-                    state.remove(&key).unwrap();
-                    sparse.remove_leaf(&key).unwrap();
-                }
-
-                let sparse_root = sparse.root();
-
-                let (hash_builder_root, hash_builder_proof_nodes) = hash_builder_root_with_proofs(
-                    state.clone(),
-                    state.keys().cloned().collect::<Vec<_>>(),
-                );
-
-                // Assert that the sparse trie root matches the hash builder root
-                assert_eq!(sparse_root, hash_builder_root);
-                // Assert that the sparse trie nodes match the hash builder proof nodes
-                assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
             }
         }
 
@@ -1379,17 +1367,41 @@ mod tests {
             base
         }
 
+        fn transform_updates(
+            updates: Vec<HashMap<Nibbles, Vec<u8>>>,
+            mut rng: impl Rng,
+        ) -> Vec<(HashMap<Nibbles, Vec<u8>>, HashSet<Nibbles>)> {
+            let mut keys = HashSet::new();
+            updates
+                .into_iter()
+                .map(|update| {
+                    keys.extend(update.keys().cloned());
+
+                    let keys_to_delete_len = update.len() / 2;
+                    let keys_to_delete = (0..keys_to_delete_len)
+                        .map(|_| {
+                            let key = keys.iter().choose(&mut rng).unwrap().clone();
+                            keys.take(&key).unwrap()
+                        })
+                        .collect();
+
+                    (update, keys_to_delete)
+                })
+                .collect::<Vec<_>>()
+        }
+
         proptest!(ProptestConfig::with_cases(10), |(
             updates in proptest::collection::vec(
                 proptest::collection::hash_map(
                     any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles),
                     any::<Vec<u8>>(),
                     1..100,
-                ),
+                ).prop_map(HashMap::from_iter),
                 1..100,
-            )
+            ).prop_perturb(transform_updates)
         )| {
-            test(updates) });
+            test(updates)
+        });
     }
 
     /// We have three leaves that share the same prefix: 0x00, 0x01 and 0x02. Hash builder trie has
