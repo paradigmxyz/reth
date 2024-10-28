@@ -6,15 +6,13 @@ use reth_cli_commands::common::{AccessRights, Environment};
 use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::bedrock::BEDROCK_HEADER;
+use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
 };
 use std::{fs::File, io::BufReader};
 use tracing::info;
-
-mod bedrock;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -53,7 +51,13 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                bedrock::setup_op_mainnet_without_ovm(&provider_rw, &static_file_provider)?;
+                reth_cli_commands::init_state::init_state_helper::setup_without_evm(
+                    &provider_rw,
+                    &static_file_provider,
+                    &BEDROCK_HEADER,
+                    BEDROCK_HEADER_HASH,
+                    BEDROCK_HEADER_TTD,
+                )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they
                 // will be unwinded according to database checkpoints.
@@ -64,7 +68,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
             } else if last_block_number > 0 && last_block_number < BEDROCK_HEADER.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-ovm."
-                ))
+                ));
             }
         }
 
