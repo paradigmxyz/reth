@@ -35,11 +35,31 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
+alloy-consensus.workspace = true
 
 [features]
 default = ["std", "serde", "rustc-hash"]
-arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-serde = ["dep:serde"]
-std = ["thiserror-no-std/std", "rustc-hash/std"]
+arbitrary = [
+	"dep:arbitrary",
+	"dep:proptest",
+	"dep:proptest-derive",
+	"alloy-chains/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary"
+]
+serde = [
+	"dep:serde",
+	"alloy-chains/serde",
+	"alloy-consensus/serde",
+	"alloy-primitives/serde"
+]
+std = [
+	"alloy-chains/std",
+	"alloy-primitives/std",
+	"thiserror-no-std/std",
+	"rustc-hash/std",
+	"alloy-consensus/std",
+	"once_cell/std",
+	"serde?/std"
+]
 rustc-hash = ["dep:rustc-hash"]

@@ -1,18 +1,17 @@
 //! Chain specification for the Base Sepolia testnet network.
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use once_cell::sync::Lazy;
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OptimismHardfork;
 
-use crate::OpChainSpec;
+use crate::{LazyLock, OpChainSpec};
 
 /// The Base Sepolia spec
-pub static BASE_SEPOLIA: Lazy<Arc<OpChainSpec>> = Lazy::new(|| {
+pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     OpChainSpec {
         inner: ChainSpec {
             chain: Chain::base_sepolia(),

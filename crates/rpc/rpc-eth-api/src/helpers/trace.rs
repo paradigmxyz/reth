@@ -1,12 +1,14 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use crate::FromEvmError;
+use std::sync::Arc;
+
+use crate::{FromEvmError, RpcNodeCore};
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::Header;
+use reth_primitives::{Header, SealedBlockWithSenders};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -19,12 +21,7 @@ use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndSta
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState {
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
-
+pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
@@ -115,7 +112,7 @@ pub trait Trace: LoadState {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res, db)
         })
     }
@@ -199,8 +196,8 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this).clone(),
-                    LoadState::provider(&this).chain_spec(),
+                    this.evm_config().clone(),
+                    RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
                     .pre_block_beacon_root_contract_call(
@@ -227,7 +224,7 @@ pub trait Trace: LoadState {
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
@@ -247,6 +244,7 @@ pub trait Trace: LoadState {
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
@@ -266,6 +264,7 @@ pub trait Trace: LoadState {
     {
         self.trace_block_until_with_inspector(
             block_id,
+            block,
             highest_index,
             move || TracingInspector::new(config),
             f,
@@ -285,6 +284,7 @@ pub trait Trace: LoadState {
     fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -305,8 +305,15 @@ pub trait Trace: LoadState {
         R: Send + 'static,
     {
         async move {
+            let block = async {
+                if block.is_some() {
+                    return Ok(block)
+                }
+                self.block_with_senders(block_id).await
+            };
+
             let ((cfg, block_env, _), block) =
-                futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
+                futures::try_join!(self.evm_env_at(block_id), block)?;
 
             let Some(block) = block else { return Ok(None) };
 
@@ -332,8 +339,8 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this).clone(),
-                    LoadState::provider(&this).chain_spec(),
+                    this.evm_config().clone(),
+                    RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
                     .pre_block_beacon_root_contract_call(
@@ -367,7 +374,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(tx, *signer);
+                        let tx_env = this.evm_config().tx_env(tx, *signer);
                         (tx_info, tx_env)
                     })
                     .peekable();
@@ -409,6 +416,7 @@ pub trait Trace: LoadState {
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         config: TracingInspectorConfig,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -427,7 +435,7 @@ pub trait Trace: LoadState {
             + 'static,
         R: Send + 'static,
     {
-        self.trace_block_until(block_id, None, config, f)
+        self.trace_block_until(block_id, block, None, config, f)
     }
 
     /// Executes all transactions of a block and returns a list of callback results invoked for each
@@ -447,6 +455,7 @@ pub trait Trace: LoadState {
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
+        block: Option<Arc<SealedBlockWithSenders>>,
         insp_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -467,6 +476,6 @@ pub trait Trace: LoadState {
         Insp: for<'a, 'b> Inspector<StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
-        self.trace_block_until_with_inspector(block_id, None, insp_setup, f)
+        self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
 }

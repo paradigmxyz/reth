@@ -305,7 +305,7 @@ pub fn calculate_reward_percentiles_for_block(
     // the percentiles are monotonically increasing.
     let mut tx_index = 0;
     let mut cumulative_gas_used = transactions.first().map(|tx| tx.gas_used).unwrap_or_default();
-    let mut rewards_in_block = Vec::new();
+    let mut rewards_in_block = Vec::with_capacity(percentiles.len());
     for percentile in percentiles {
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
@@ -366,7 +366,7 @@ impl FeeHistoryEntry {
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),
             blob_gas_used_ratio: block.blob_gas_used() as f64 /
-                reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.excess_blob_gas,
             blob_gas_used: block.blob_gas_used,
             gas_used: block.gas_used,

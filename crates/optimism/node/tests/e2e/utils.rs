@@ -1,7 +1,9 @@
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
-use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
+use reth_e2e_test_utils::{
+    transaction::TransactionTestContext, wallet::Wallet, Adapter, NodeHelperType,
+};
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
     node::OptimismAddOns, OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes,
@@ -11,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
-pub(crate) type OpNode = NodeHelperType<OptimismNode, OptimismAddOns>;
+pub(crate) type OpNode = NodeHelperType<OptimismNode, OptimismAddOns<Adapter<OptimismNode>>>;
 
 pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -19,6 +21,7 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
         num_nodes,
         Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build()),
         false,
+        optimism_payload_attributes,
     )
     .await
 }
@@ -29,23 +32,19 @@ pub(crate) async fn advance_chain(
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
 ) -> eyre::Result<Vec<(OptimismBuiltPayload, OptimismPayloadBuilderAttributes)>> {
-    node.advance(
-        length as u64,
-        |_| {
-            let wallet = wallet.clone();
-            Box::pin(async move {
-                let mut wallet = wallet.lock().await;
-                let tx_fut = TransactionTestContext::optimism_l1_block_info_tx(
-                    wallet.chain_id,
-                    wallet.inner.clone(),
-                    wallet.inner_nonce,
-                );
-                wallet.inner_nonce += 1;
-                tx_fut.await
-            })
-        },
-        optimism_payload_attributes,
-    )
+    node.advance(length as u64, |_| {
+        let wallet = wallet.clone();
+        Box::pin(async move {
+            let mut wallet = wallet.lock().await;
+            let tx_fut = TransactionTestContext::optimism_l1_block_info_tx(
+                wallet.chain_id,
+                wallet.inner.clone(),
+                wallet.inner_nonce,
+            );
+            wallet.inner_nonce += 1;
+            tx_fut.await
+        })
+    })
     .await
 }
 

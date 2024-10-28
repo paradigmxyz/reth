@@ -18,7 +18,9 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_api::{
+    EngineApiMessageVersion, NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
@@ -166,12 +168,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             debug!(target: "reth::cli", filepath = %filepath.display(), ?message, "Forwarding Engine API message");
             match message {
                 StoredEngineApiMessage::ForkchoiceUpdated { state, payload_attrs } => {
-                    let response =
-                        beacon_engine_handle.fork_choice_updated(state, payload_attrs).await?;
+                    let response = beacon_engine_handle
+                        .fork_choice_updated(
+                            state,
+                            payload_attrs,
+                            EngineApiMessageVersion::default(),
+                        )
+                        .await?;
                     debug!(target: "reth::cli", ?response, "Received for forkchoice updated");
                 }
-                StoredEngineApiMessage::NewPayload { payload, cancun_fields } => {
-                    let response = beacon_engine_handle.new_payload(payload, cancun_fields).await?;
+                StoredEngineApiMessage::NewPayload { payload, sidecar } => {
+                    let response = beacon_engine_handle.new_payload(payload, sidecar).await?;
                     debug!(target: "reth::cli", ?response, "Received for new payload");
                 }
             };

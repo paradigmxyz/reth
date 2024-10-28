@@ -35,15 +35,19 @@ proptest = { workspace = true, optional = true }
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
 
-arbitrary = { workspace = true, features = ["derive"] }
 proptest-arbitrary-interop.workspace = true
-proptest.workspace = true
 test-fuzz.workspace = true
 
 [features]
-test-utils = ["arbitrary"]
+test-utils = [
+	"arbitrary",
+	"reth-primitives/test-utils",
+	"reth-codecs/test-utils"
+]
 arbitrary = [
-    "reth-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
+	"reth-primitives/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"alloy-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]

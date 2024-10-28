@@ -1,14 +1,10 @@
 //! Collection of methods for block validation.
 
+use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    constants::{
-        eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-        MAXIMUM_EXTRA_DATA_SIZE,
-    },
-    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader};
 use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -77,24 +73,6 @@ pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
     Ok(())
 }
 
-/// Validate that requests root is present if Prague is active.
-///
-/// See [EIP-7685]: General purpose execution layer requests
-///
-/// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
-#[inline]
-pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
-    let requests_root =
-        block.body.calculate_requests_root().ok_or(ConsensusError::BodyRequestsMissing)?;
-    let header_requests_root = block.requests_root.ok_or(ConsensusError::RequestsRootMissing)?;
-    if requests_root != *header_requests_root {
-        return Err(ConsensusError::BodyRequestsRootDiff(
-            GotExpected { got: requests_root, expected: header_requests_root }.into(),
-        ));
-    }
-    Ok(())
-}
-
 /// Validate a block without regard for state:
 ///
 /// - Compares the ommer hash in the block header to the block body
@@ -125,10 +103,6 @@ pub fn validate_block_pre_execution<ChainSpec: EthereumHardforks>(
 
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
         validate_cancun_gas(block)?;
-    }
-
-    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        validate_prague_request(block)?;
     }
 
     Ok(())
@@ -228,7 +202,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
 
         let expected_base_fee =
             if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
-                reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
+                alloy_eips::eip1559::INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have
                 // them.
@@ -300,7 +274,7 @@ pub fn validate_against_parent_4844(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxEip4844;
+    use alloy_consensus::{TxEip4844, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
     use alloy_primitives::{
         hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Parity, Sealable, U256,
     };
@@ -441,11 +415,11 @@ mod tests {
 
         let header = Header {
             parent_hash: hex!("859fad46e75d9be177c2584843501f2270c7e5231711e90848290d12d7c6dcdd").into(),
-            ommers_hash: hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").into(),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: hex!("4675c7e5baafbffbca748158becba61ef3b0a263").into(),
             state_root: hex!("8337403406e368b3e40411138f4868f79f6d835825d55fd0c2f6e17b1a3948e9").into(),
-            transactions_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
-            receipts_root: hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").into(),
+            transactions_root: EMPTY_ROOT_HASH,
+            receipts_root: EMPTY_ROOT_HASH,
             logs_bloom: hex!("002400000000004000220000800002000000000000000000000000000000100000000000000000100000000000000021020000000800000006000000002100040000000c0004000000000008000008200000000000000000000000008000000001040000020000020000002000000800000002000020000000022010000000000000010002001000000000020200000000000001000200880000004000000900020000000000020000000040000000000000000000000000000080000000000001000002000000000000012000200020000000000000001000000000000020000010321400000000100000000000000000000000000000400000000000000000").into(),
             difficulty: U256::ZERO, // total difficulty: 0xc70d815d562d3cfa955).into(),
             number: 0xf21d20,
@@ -460,7 +434,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
-            requests_root: None
+            requests_hash: None
         };
         // size: 0x9b5
 
@@ -480,7 +454,7 @@ mod tests {
         (
             SealedBlock {
                 header: SealedHeader::new(header, seal),
-                body: BlockBody { transactions, ommers, withdrawals: None, requests: None },
+                body: BlockBody { transactions, ommers, withdrawals: None },
             },
             parent,
         )
@@ -552,7 +526,6 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
-            requests: None,
         };
 
         let block = SealedBlock::new(header, body);

@@ -2,7 +2,7 @@
 
 //! Optimism builder support
 
-use alloy_eips::eip2718::Decodable2718;
+use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
@@ -18,8 +18,7 @@ use reth_primitives::{
     transaction::WithEncoded, BlobTransactionSidecar, SealedBlock, TransactionSigned, Withdrawals,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
-    convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use std::sync::Arc;
 
@@ -44,7 +43,11 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(parent: B256, attributes: OpPayloadAttributes) -> Result<Self, Self::Error> {
+    fn try_new(
+        parent: B256,
+        attributes: OpPayloadAttributes,
+        _version: u8,
+    ) -> Result<Self, Self::Error> {
         let id = payload_id_optimism(&parent, &attributes);
 
         let transactions = attributes
@@ -179,6 +182,10 @@ impl BuiltPayload for OptimismBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn requests(&self) -> Option<Requests> {
+        None
+    }
 }
 
 impl BuiltPayload for &OptimismBuiltPayload {
@@ -192,6 +199,10 @@ impl BuiltPayload for &OptimismBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
+    }
+
+    fn requests(&self) -> Option<Requests> {
+        None
     }
 }
 
@@ -249,7 +260,7 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
                 B256::ZERO
             };
         Self {
-            execution_payload: block_to_payload_v4(block),
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -262,6 +273,7 @@ impl From<OptimismBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
             parent_beacon_block_root,
+            execution_requests: vec![],
         }
     }
 }

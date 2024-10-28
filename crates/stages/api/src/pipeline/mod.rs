@@ -78,6 +78,9 @@ pub struct Pipeline<N: ProviderNodeTypes> {
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
+    /// Whether an unwind should fail the syncing process. Should only be set when downloading
+    /// blocks from trusted sources and expecting them to be valid.
+    fail_on_unwind: bool,
 }
 
 impl<N: ProviderNodeTypes> Pipeline<N> {
@@ -163,6 +166,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
         loop {
             let next_action = self.run_loop().await?;
+
+            if next_action.is_unwind() && self.fail_on_unwind {
+                return Err(PipelineError::UnexpectedUnwind)
+            }
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -275,6 +282,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     ) -> Result<(), PipelineError> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
+
+        // Legacy Engine: This prevents a race condition in which the `StaticFileProducer` could
+        // attempt to proceed with a finalized block which has been unwinded
+        let _locked_sf_producer = self.static_file_producer.lock();
 
         let mut provider_rw = self.provider_factory.database_provider_rw()?;
 
@@ -582,6 +593,7 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
             .field("event_sender", &self.event_sender)
+            .field("fail_on_unwind", &self.fail_on_unwind)
             .finish()
     }
 }

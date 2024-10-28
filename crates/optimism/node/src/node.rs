@@ -4,23 +4,26 @@ use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::ConfigureEvm;
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager};
-use reth_node_api::{EngineValidator, FullNodeComponents, NodeAddOns};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
+use reth_node_api::{
+    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives,
+};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, EngineValidatorBuilder, ExecutorBuilder,
-        NetworkBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    BuilderContext, Node, PayloadBuilderConfig,
+    rpc::{EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
-use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
+use reth_optimism_evm::{OpExecutionStrategyFactory, OptimismEvmConfig};
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::Header;
+use reth_primitives::{Block, Header};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -34,6 +37,14 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OptimismEngineTypes,
 };
+
+/// Optimism primitive types.
+#[derive(Debug)]
+pub struct OpPrimitives;
+
+impl NodePrimitives for OpPrimitives {
+    type Block = Block;
+}
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -59,7 +70,6 @@ impl OptimismNode {
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
-        OptimismEngineValidatorBuilder,
     >
     where
         Node: FullNodeTypes<
@@ -77,7 +87,6 @@ impl OptimismNode {
             })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
-            .engine_validator(OptimismEngineValidatorBuilder::default())
     }
 }
 
@@ -94,10 +103,11 @@ where
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
-        OptimismEngineValidatorBuilder,
     >;
 
-    type AddOns = OptimismAddOns;
+    type AddOns = OptimismAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
@@ -110,7 +120,7 @@ where
 }
 
 impl NodeTypes for OptimismNode {
-    type Primitives = ();
+    type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
 }
 
@@ -119,25 +129,49 @@ impl NodeTypesWithEngine for OptimismNode {
 }
 
 /// Add-ons w.r.t. optimism.
-#[derive(Debug, Clone)]
-pub struct OptimismAddOns {
-    sequencer_http: Option<String>,
+#[derive(Debug)]
+pub struct OptimismAddOns<N: FullNodeComponents>(
+    pub RpcAddOns<N, OpEthApi<N>, OptimismEngineValidatorBuilder>,
+);
+
+impl<N: FullNodeComponents> Default for OptimismAddOns<N> {
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
-impl OptimismAddOns {
+impl<N: FullNodeComponents> OptimismAddOns<N> {
     /// Create a new instance with the given `sequencer_http` URL.
-    pub const fn new(sequencer_http: Option<String>) -> Self {
-        Self { sequencer_http }
-    }
-
-    /// Returns the sequencer HTTP URL.
-    pub fn sequencer_http(&self) -> Option<&str> {
-        self.sequencer_http.as_deref()
+    pub fn new(sequencer_http: Option<String>) -> Self {
+        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
     }
 }
 
-impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
+impl<N> NodeAddOns<N> for OptimismAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+{
+    type Handle = RpcHandle<N, OpEthApi<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        self.0.launch_add_ons(ctx).await
+    }
+}
+
+impl<N> RethRpcAddOns<N> for OptimismAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    OptimismEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+{
     type EthApi = OpEthApi<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.0.hooks_mut()
+    }
 }
 
 /// A regular optimism evm and executor builder.
@@ -150,14 +184,16 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type EVM = OptimismEvmConfig;
-    type Executor = OpExecutorProvider<Self::EVM>;
+    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = OptimismEvmConfig::new(ctx.chain_spec());
-        let executor = OpExecutorProvider::new(ctx.chain_spec(), evm_config.clone());
+        let strategy_factory =
+            OpExecutionStrategyFactory::new(ctx.chain_spec(), evm_config.clone());
+        let executor = BasicBlockExecutorProvider::new(strategy_factory);
 
         Ok((evm_config, executor))
     }
@@ -396,6 +432,7 @@ where
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);
+        info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
 
         Ok(handle)
     }
@@ -429,12 +466,12 @@ pub struct OptimismEngineValidatorBuilder;
 impl<Node, Types> EngineValidatorBuilder<Node> for OptimismEngineValidatorBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
-    Node: FullNodeTypes<Types = Types>,
+    Node: FullNodeComponents<Types = Types>,
     OptimismEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = OptimismEngineValidator;
 
-    async fn build_validator(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Validator> {
-        Ok(OptimismEngineValidator::new(ctx.chain_spec()))
+    async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
+        Ok(OptimismEngineValidator::new(ctx.config.chain.clone()))
     }
 }

@@ -20,12 +20,15 @@ pub fn from_block<T: TransactionCompat>(
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
+    tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction>, BlockError> {
     match kind {
         BlockTransactionsKind::Hashes => {
             Ok(from_block_with_tx_hashes::<T::Transaction>(block, total_difficulty, block_hash))
         }
-        BlockTransactionsKind::Full => from_block_full::<T>(block, total_difficulty, block_hash),
+        BlockTransactionsKind::Full => {
+            from_block_full::<T>(block, total_difficulty, block_hash, tx_resp_builder)
+        }
     }
 }
 
@@ -60,6 +63,7 @@ pub fn from_block_full<T: TransactionCompat>(
     mut block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
+    tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction>, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
     let block_number = block.block.number;
@@ -83,7 +87,7 @@ pub fn from_block_full<T: TransactionCompat>(
                 index: Some(idx as u64),
             };
 
-            from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info)
+            from_recovered_with_block_context::<T>(signed_tx_ec_recovered, tx_info, tx_resp_builder)
         })
         .collect::<Vec<_>>();
 
@@ -124,7 +128,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         blob_gas_used,
         excess_blob_gas,
         parent_beacon_block_root,
-        requests_root,
+        requests_hash,
     } = header;
 
     Header {
@@ -150,7 +154,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         excess_blob_gas,
         parent_beacon_block_root,
         total_difficulty: None,
-        requests_root,
+        requests_hash,
     }
 }
 
@@ -179,14 +183,14 @@ fn from_block_with_transactions<T>(
 /// an Uncle from its header.
 pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
     let hash = header.hash_slow();
-    let rpc_header = from_primitive_with_hash(SealedHeader::new(header.clone(), hash));
     let uncle_block = PrimitiveBlock { header, ..Default::default() };
     let size = Some(U256::from(uncle_block.length()));
+    let rpc_header = from_primitive_with_hash(SealedHeader::new(uncle_block.header, hash));
     Block {
         uncles: vec![],
         header: rpc_header,
         transactions: BlockTransactions::Uncle,
-        withdrawals: Some(vec![]),
+        withdrawals: None,
         size,
     }
 }
