@@ -776,7 +776,9 @@ pub trait BestTransactions: Iterator + Send {
     /// If called then the iterator will no longer yield blob transactions.
     ///
     /// Note: this will also exclude any transactions that depend on blob transactions.
-    fn skip_blobs(&mut self);
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true);
+    }
 
     /// Controls whether the iterator skips blob transactions or not.
     ///
