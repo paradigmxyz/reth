@@ -5,7 +5,6 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FullEthApiTypes, RpcNodeCore,
 };
-use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
 
 use crate::EthApi;
@@ -28,10 +27,6 @@ where
         + FullEthApiTypes
         + RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
 
 #[cfg(test)]
