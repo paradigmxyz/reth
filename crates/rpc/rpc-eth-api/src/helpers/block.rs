@@ -145,7 +145,8 @@ pub trait EthBlocks: LoadBlock {
             if let Some(block_hash) =
                 self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
             {
-                return LoadReceipt::cache(self)
+                return self
+                    .cache()
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
