@@ -162,23 +162,11 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
 }
 
 /// Convert [`reth_primitives::TxType`] to [`alloy_consensus::TxType`]
-pub const fn tx_type_to_alloy(tx_type: TxType) -> alloy_consensus::TxType {
-    match tx_type {
-        TxType::Legacy => alloy_consensus::TxType::Legacy,
-        TxType::Eip2930 => alloy_consensus::TxType::Eip2930,
-        TxType::Eip1559 => alloy_consensus::TxType::Eip1559,
-        TxType::Eip4844 => alloy_consensus::TxType::Eip4844,
-        TxType::Eip7702 => alloy_consensus::TxType::Eip7702,
-    }
+pub fn tx_type_to_alloy(tx_type: TxType) -> alloy_consensus::TxType {
+    Into::<u8>::into(tx_type).try_into().unwrap()
 }
 
 /// Convert [`alloy_consensus::TxType`] to [`reth_primitives::TxType`]
-pub const fn tx_type_from_alloy(tx_type: alloy_consensus::TxType) -> TxType {
-    match tx_type {
-        alloy_consensus::TxType::Legacy => TxType::Legacy,
-        alloy_consensus::TxType::Eip2930 => TxType::Eip2930,
-        alloy_consensus::TxType::Eip1559 => TxType::Eip1559,
-        alloy_consensus::TxType::Eip4844 => TxType::Eip4844,
-        alloy_consensus::TxType::Eip7702 => TxType::Eip7702,
-    }
+pub fn tx_type_from_alloy(tx_type: alloy_consensus::TxType) -> TxType {
+    Into::<u8>::into(tx_type).try_into().unwrap()
 }
