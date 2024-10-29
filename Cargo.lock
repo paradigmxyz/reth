@@ -8618,6 +8618,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-consensus",
  "reth-consensus-common",
  "reth-errors",
  "reth-evm",
@@ -8625,6 +8626,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-peers",
  "reth-network-types",
+ "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8674,6 +8676,8 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives",
  "reth-rpc-eth-api",
+ "serde",
+ "serde_with",
 ]
 
 [[package]]
@@ -8713,6 +8717,7 @@ dependencies = [
  "pin-project",
  "reth-beacon-consensus",
  "reth-chainspec",
+ "reth-consensus",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
  "reth-evm",

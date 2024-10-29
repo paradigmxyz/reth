@@ -1,56 +1,228 @@
+use alloy_eips::eip4844::kzg_to_versioned_hash;
+use alloy_rpc_types::engine::{CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar};
 use alloy_rpc_types_beacon::relay::{
-    BuilderBlockValidationRequest, BuilderBlockValidationRequestV2, BuilderBlockValidationRequestV3,
+    BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_consensus::{Consensus, PostExecutionInput};
+use reth_errors::{BlockExecutionError, ConsensusError, ProviderError, RethError};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_payload_validator::ExecutionPayloadValidator;
+use reth_primitives::{Block, GotExpected, Receipt, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
-    AccountReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory, WithdrawalsProvider,
+    AccountReader, BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, HeaderProvider,
+    StateProviderFactory, WithdrawalsProvider,
 };
-use reth_rpc_api::BlockSubmissionValidationApiServer;
-use reth_rpc_server_types::result::internal_rpc_err;
+use reth_revm::database::StateProviderDatabase;
+use reth_rpc_api::{BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3};
+use reth_rpc_eth_types::EthApiError;
+use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_trie::HashedPostState;
+use revm_primitives::{B256, U256};
 use std::sync::Arc;
-use tracing::warn;
 
-/// The type that implements the `validation` rpc namespace trait
-pub struct ValidationApi<Provider> {
-    inner: Arc<ValidationApiInner<Provider>>,
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationApiError {
+    #[error("block gas limit mismatch: {_0}")]
+    GasLimitMismatch(GotExpected<u64>),
+    #[error("block gas used mismatch: {_0}")]
+    GasUsedMismatch(GotExpected<u64>),
+    #[error("block parent hash mismatch: {_0}")]
+    ParentHashMismatch(GotExpected<B256>),
+    #[error("block hash mismatch: {_0}")]
+    BlockHashMismatch(GotExpected<B256>),
+    #[error("missing latest block in database")]
+    MissingLatestBlock,
+    #[error("could not verify proposer payment")]
+    ProposerPayment,
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    #[error(transparent)]
+    Execution(#[from] BlockExecutionError),
 }
 
-impl<Provider> ValidationApi<Provider>
-where
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider
-        + StateProviderFactory
-        + HeaderProvider
-        + AccountReader
-        + WithdrawalsProvider
-        + Clone
-        + 'static,
-{
+#[derive(Debug, Clone)]
+pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     /// The provider that can interact with the chain.
-    pub fn provider(&self) -> Provider {
-        self.inner.provider.clone()
-    }
+    provider: Provider,
+    /// Consensus implementation.
+    consensus: Arc<dyn Consensus>,
+    /// Execution payload validator.
+    payload_validator: ExecutionPayloadValidator<Provider::ChainSpec>,
+    /// Block executor factory.
+    executor_provider: E,
+    /// Whether to exclude withdrawals when validating proposer payment.
+    exclude_withdrawals: bool,
+}
 
+/// The type that implements the `validation` rpc namespace trait
+#[derive(Clone, Debug, derive_more::Deref)]
+pub struct ValidationApi<Provider: ChainSpecProvider, E> {
+    #[deref]
+    inner: Arc<ValidationApiInner<Provider, E>>,
+}
+
+impl<Provider, E> ValidationApi<Provider, E>
+where
+    Provider: ChainSpecProvider,
+{
     /// Create a new instance of the [`ValidationApi`]
-    pub fn new(provider: Provider) -> Self {
-        let inner = Arc::new(ValidationApiInner { provider });
+    pub fn new(provider: Provider, consensus: Arc<dyn Consensus>, executor_provider: E) -> Self {
+        let payload_validator = ExecutionPayloadValidator::new(provider.chain_spec());
+        let inner = Arc::new(ValidationApiInner {
+            provider,
+            consensus,
+            payload_validator,
+            executor_provider,
+            exclude_withdrawals: false,
+        });
         Self { inner }
     }
 }
 
-#[async_trait]
-impl<Provider> BlockSubmissionValidationApiServer for ValidationApi<Provider>
+impl<Provider, E> ValidationApi<Provider, E>
 where
     Provider: BlockReaderIdExt
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + HeaderProvider
         + AccountReader
         + WithdrawalsProvider
         + Clone
         + 'static,
+    E: BlockExecutorProvider,
+{
+    /// Validates the given block and a [`BidTrace`] against it.
+    pub fn validate_message_against_block(
+        &self,
+        block: SealedBlockWithSenders,
+        message: BidTrace,
+    ) -> Result<(), ValidationApiError> {
+        self.validate_message_against_header(&block.header, &message)?;
+
+        self.consensus.validate_header_with_total_difficulty(&block.header, U256::MAX)?;
+        self.consensus.validate_header(&block.header)?;
+        self.consensus.validate_block_pre_execution(&block)?;
+
+        let latest_header =
+            self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
+
+        if latest_header.hash() != block.header.parent_hash {
+            return Err(ConsensusError::ParentHashMismatch(
+                GotExpected { got: block.header.parent_hash, expected: latest_header.hash() }
+                    .into(),
+            )
+            .into())
+        }
+        self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
+
+        let state_provider = self.provider.state_by_block_hash(latest_header.hash())?;
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+
+        let block = block.unseal();
+        let output = executor.execute(BlockExecutionInput::new(&block, U256::MAX))?;
+
+        self.consensus.validate_block_post_execution(
+            &block,
+            PostExecutionInput::new(&output.receipts, &output.requests),
+        )?;
+
+        self.ensure_payment(&block, &output, &message)?;
+
+        let state_root =
+            state_provider.state_root(HashedPostState::from_bundle_state(&output.state.state))?;
+
+        if state_root != block.state_root {
+            return Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: state_root, expected: block.state_root }.into(),
+            )
+            .into())
+        }
+
+        Ok(())
+    }
+
+    fn validate_message_against_header(
+        &self,
+        header: &SealedHeader,
+        message: &BidTrace,
+    ) -> Result<(), ValidationApiError> {
+        if header.hash() != message.block_hash {
+            Err(ValidationApiError::BlockHashMismatch(GotExpected {
+                got: message.block_hash,
+                expected: header.hash(),
+            }))
+        } else if header.parent_hash != message.parent_hash {
+            Err(ValidationApiError::ParentHashMismatch(GotExpected {
+                got: message.parent_hash,
+                expected: header.parent_hash,
+            }))
+        } else if header.gas_limit != message.gas_limit {
+            Err(ValidationApiError::GasLimitMismatch(GotExpected {
+                got: message.gas_limit,
+                expected: header.gas_limit,
+            }))
+        } else if header.gas_used != message.gas_used {
+            return Err(ValidationApiError::GasUsedMismatch(GotExpected {
+                got: message.gas_used,
+                expected: header.gas_used,
+            }))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_payment(
+        &self,
+        block: &Block,
+        output: &BlockExecutionOutput<Receipt>,
+        message: &BidTrace,
+    ) -> Result<(), ValidationApiError> {
+        let (balance_before, balance_after) =
+            if let Some(acc) = output.state.state.get(&message.proposer_fee_recipient) {
+                let mut balance_before =
+                    acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
+                let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+
+                if self.exclude_withdrawals {
+                    if let Some(withdrawals) = &block.body.withdrawals {
+                        for withdrawal in withdrawals {
+                            if withdrawal.address == message.proposer_fee_recipient {
+                                balance_before += withdrawal.amount_wei();
+                            }
+                        }
+                    }
+                }
+
+                (balance_before, balance_after)
+            } else {
+                (U256::ZERO, U256::ZERO)
+            };
+
+        if balance_after < balance_before + message.value {
+            return Err(ValidationApiError::ProposerPayment)
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
+where
+    Provider: BlockReaderIdExt
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + StateProviderFactory
+        + HeaderProvider
+        + AccountReader
+        + WithdrawalsProvider
+        + Clone
+        + 'static,
+    E: BlockExecutorProvider,
 {
     async fn validate_builder_submission_v1(
         &self,
@@ -71,24 +243,27 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
-        warn!("flashbots_validateBuilderSubmissionV3: blindly accepting request without validation {:?}", request);
-        Ok(())
-    }
-}
+        let block = self
+            .payload_validator
+            .ensure_well_formed_payload(
+                ExecutionPayload::V3(request.request.execution_payload),
+                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: request
+                        .request
+                        .blobs_bundle
+                        .commitments
+                        .iter()
+                        .map(|c| kzg_to_versioned_hash(c.as_slice()))
+                        .collect(),
+                }),
+            )
+            .to_rpc_result()?
+            .try_seal_with_senders()
+            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
-impl<Provider> std::fmt::Debug for ValidationApi<Provider> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidationApi").finish_non_exhaustive()
+        self.validate_message_against_block(block, request.request.message)
+            .map_err(|e| RethError::Other(e.into()))
+            .to_rpc_result()
     }
-}
-
-impl<Provider> Clone for ValidationApi<Provider> {
-    fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
-    }
-}
-
-struct ValidationApiInner<Provider> {
-    /// The provider that can interact with the chain.
-    provider: Provider,
 }
