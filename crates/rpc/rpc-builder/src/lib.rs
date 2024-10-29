@@ -673,6 +673,7 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use reth_consensus::noop::NoopConsensus;
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
@@ -692,6 +693,7 @@ where
     ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
     ///         .with_block_executor(EthExecutorProvider::mainnet())
+    ///         .with_consensus(NoopConsensus::default())
     ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner));
     ///
     ///     let eth_api = registry.eth_api();
