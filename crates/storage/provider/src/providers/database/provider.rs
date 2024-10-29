@@ -6,15 +6,14 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     writer::UnifiedStorageWriter,
-    AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateChangeWriter, StateProviderBox, StateReader, StateWriter, StaticFileProviderFactory,
-    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
+    BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter, DBProvider, EvmEnvProvider,
+    HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider,
+    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
+    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -682,152 +681,6 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
 
             assemble_block(header, body, ommers, withdrawals, senders)
         })
-    }
-
-    /// Get requested blocks transaction with senders
-    pub(crate) fn get_block_transaction_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
-        // Raad range of block bodies to get all transactions id's of this range.
-        let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
-
-        if block_bodies.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        // Compute the first and last tx ID in the range
-        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
-        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
-
-        // If this is the case then all of the blocks in the range are empty
-        if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
-        }
-
-        // Get transactions and senders
-        let transactions = self
-            .get::<tables::Transactions>(first_transaction..=last_transaction)?
-            .into_iter()
-            .map(|(id, tx)| (id, tx.into()))
-            .collect::<Vec<(u64, TransactionSigned)>>();
-
-        let mut senders =
-            self.get::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
-
-        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
-
-        // Merge transaction into blocks
-        let mut block_tx = Vec::with_capacity(block_bodies.len());
-        let mut senders = senders.into_iter();
-        let mut transactions = transactions.into_iter();
-        for (block_number, block_body) in block_bodies {
-            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                let tx = transactions.next();
-                let sender = senders.next();
-
-                let recovered = match (tx, sender) {
-                    (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id == sender_tx_id {
-                            Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
-                        } else {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        }
-                    }
-                    (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
-                        Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                    }
-                    (None, None) => Err(ProviderError::BlockBodyTransactionCount),
-                }?;
-                one_block_tx.push(recovered)
-            }
-            block_tx.push((block_number, one_block_tx));
-        }
-
-        Ok(block_tx)
-    }
-
-    /// Get the given range of blocks.
-    pub fn get_block_range(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>>
-    where
-        Spec: EthereumHardforks,
-    {
-        // For blocks we need:
-        //
-        // - Headers
-        // - Bodies (transactions)
-        // - Uncles/ommers
-        // - Withdrawals
-        // - Signers
-
-        let block_headers = self.get::<tables::Headers>(range.clone())?;
-        if block_headers.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let block_header_hashes = self.get::<tables::CanonicalHeaders>(range.clone())?;
-        let block_ommers = self.get::<tables::BlockOmmers>(range.clone())?;
-        let block_withdrawals = self.get::<tables::BlockWithdrawals>(range.clone())?;
-
-        let block_tx = self.get_block_transaction_range(range)?;
-        let mut blocks = Vec::with_capacity(block_headers.len());
-
-        // merge all into block
-        let block_header_iter = block_headers.into_iter();
-        let block_header_hashes_iter = block_header_hashes.into_iter();
-        let block_tx_iter = block_tx.into_iter();
-
-        // Ommers can be empty for some blocks
-        let mut block_ommers_iter = block_ommers.into_iter();
-        let mut block_withdrawals_iter = block_withdrawals.into_iter();
-        let mut block_ommers = block_ommers_iter.next();
-        let mut block_withdrawals = block_withdrawals_iter.next();
-
-        for ((main_block_number, header), (_, header_hash), (_, tx)) in
-            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
-        {
-            let header = SealedHeader::new(header, header_hash);
-
-            let (transactions, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
-
-            // Ommers can be missing
-            let mut ommers = Vec::new();
-            if let Some((block_number, _)) = block_ommers.as_ref() {
-                if *block_number == main_block_number {
-                    ommers = block_ommers.take().unwrap().1.ommers;
-                    block_ommers = block_ommers_iter.next();
-                }
-            };
-
-            // withdrawal can be missing
-            let shanghai_is_active =
-                self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
-            let mut withdrawals = Some(Withdrawals::default());
-            if shanghai_is_active {
-                if let Some((block_number, _)) = block_withdrawals.as_ref() {
-                    if *block_number == main_block_number {
-                        withdrawals = Some(block_withdrawals.take().unwrap().1.withdrawals);
-                        block_withdrawals = block_withdrawals_iter.next();
-                    }
-                }
-            } else {
-                withdrawals = None
-            }
-
-            blocks.push(SealedBlockWithSenders {
-                block: SealedBlock {
-                    header,
-                    body: BlockBody { transactions, ommers, withdrawals },
-                },
-                senders,
-            })
-        }
-
-        Ok(blocks)
     }
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
@@ -3104,23 +2957,6 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
         }
 
         Ok(())
-    }
-}
-
-impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> BlockExecutionReader
-    for DatabaseProvider<TX, Spec>
-{
-    fn get_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        // get blocks
-        let blocks = self.get_block_range(range.clone())?;
-
-        // get execution res
-        let execution_state = self.get_state(range)?.unwrap_or_default();
-
-        Ok(Chain::new(blocks, execution_state, None))
     }
 }
 
