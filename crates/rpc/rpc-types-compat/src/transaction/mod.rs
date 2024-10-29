@@ -23,7 +23,7 @@ pub fn from_recovered_with_block_context<T: TransactionCompat>(
     tx_info: TransactionInfo,
     resp_builder: &T,
 ) -> T::Transaction {
-    resp_builder.fill(tx, tx_info)
+    resp_builder.fill(tx, tx_info).unwrap()
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
@@ -32,7 +32,7 @@ pub fn from_recovered<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
     resp_builder: &T,
 ) -> T::Transaction {
-    resp_builder.fill(tx, TransactionInfo::default())
+    resp_builder.fill(tx, TransactionInfo::default()).unwrap()
 }
 
 /// Builds RPC transaction w.r.t. network.
@@ -46,6 +46,9 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + Clone
         + Default
         + fmt::Debug;
+
+    /// RPC transaction error type.
+    type TransactionError: fmt::Debug;
 
     ///
     /// Formats gas price and max fee per gas for RPC transaction response w.r.t. network specific
@@ -76,7 +79,11 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn fill(&self, tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        tx_inf: TransactionInfo,
+    ) -> Result<Self::Transaction, Self::TransactionError>;
 
     /// Truncates the input of a transaction to only the first 4 bytes.
     // todo: remove in favour of using constructor on `TransactionResponse` or similar

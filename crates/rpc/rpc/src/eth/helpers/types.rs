@@ -20,11 +20,13 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
+    type TransactionError = ();
+
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::TransactionError> {
         let signer = tx.signer();
         let signed_tx = tx.into_signed();
 
@@ -52,7 +54,7 @@ where
             signed_tx.chain_id(),
         );
 
-        Transaction {
+        Ok(Transaction {
             hash: signed_tx.hash(),
             nonce: signed_tx.nonce(),
             from: signer,
@@ -76,7 +78,7 @@ where
             max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
             blob_versioned_hashes,
             authorization_list,
-        }
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {

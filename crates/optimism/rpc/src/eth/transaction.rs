@@ -3,11 +3,12 @@
 use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::TransactionInfo;
+use derive_more::derive::Display;
 use op_alloy_consensus::DepositTransaction;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_provider::{BlockReaderIdExt, ProviderError, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -17,6 +18,16 @@ use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
+
+/// Bundled errors variants thrown by `TransactionCompat`.
+#[derive(Clone, Debug, Display, PartialEq, Eq)]
+pub enum TransactionError {
+    /// Error when building an Ethereum transaction.
+    #[display("error building transaction")]
+    EthTxBuilderError,
+    /// Provider error.
+    ProviderError(ProviderError),
+}
 
 impl<N> EthTransactions for OpEthApi<N>
 where
@@ -77,16 +88,19 @@ where
     N: FullNodeComponents,
 {
     type Transaction = Transaction;
+    type TransactionError = TransactionError;
 
     fn fill(
         &self,
         tx: TransactionSignedEcRecovered,
         tx_info: TransactionInfo,
-    ) -> Self::Transaction {
+    ) -> Result<Self::Transaction, Self::TransactionError> {
         let signed_tx = tx.clone().into_signed();
         let hash = tx.hash;
 
-        let mut inner = EthTxBuilder.fill(tx, tx_info);
+        let mut inner = EthTxBuilder
+            .fill(tx, tx_info)
+            .map_err(|_| Self::TransactionError::EthTxBuilderError)?;
 
         if signed_tx.is_deposit() {
             inner.gas_price = Some(signed_tx.max_fee_per_gas())
@@ -96,11 +110,10 @@ where
             .inner
             .provider()
             .receipt_by_hash(hash)
-            .ok() // todo: change sig to return result
-            .flatten()
+            .map_err(Self::TransactionError::ProviderError)?
             .and_then(|receipt| receipt.deposit_receipt_version);
 
-        Transaction {
+        Ok(Transaction {
             inner,
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint(),
@@ -108,7 +121,7 @@ where
             is_system_tx: (signed_tx.is_deposit() && signed_tx.is_system_transaction())
                 .then_some(true),
             deposit_receipt_version,
-        }
+        })
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
