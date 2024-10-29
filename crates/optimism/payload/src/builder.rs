@@ -548,8 +548,8 @@ where
     }
 }
 
-#[derive(Debug, thiserror::Error)]
 /// Error type for EIP-1559 parameters
+#[derive(Debug, thiserror::Error)]
 pub enum EIP1559ParamError {
     #[error("No EIP-1559 parameters provided")]
     /// No EIP-1559 parameters provided
