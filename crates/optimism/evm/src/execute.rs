@@ -158,7 +158,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             // An optimism block should never contain blob transactions.
