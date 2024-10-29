@@ -198,7 +198,7 @@ mod tests {
             "4398046511104",
         ])
         .unwrap();
-        assert_eq!(cmd.args.max_size, Some(ByteSize(TERABYTE * 4)));
+        assert_eq!(cmd.args.max_size, Some(TERABYTE * 4));
     }
 
     #[test]
