@@ -98,7 +98,7 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self
-            .cfg_and_block_env(&args.config, &args.config.parent_block)
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
@@ -123,7 +123,7 @@ where
         );
 
         let (cfg_env, block_env) = self
-            .cfg_and_block_env(&args.config, &args.config.parent_block)
+            .cfg_and_block_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
@@ -158,13 +158,13 @@ where
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
     let chain_spec = client.chain_spec();
-    let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
+    let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let PayloadConfig { parent_block, extra_data, attributes } = config;
+    let PayloadConfig { parent_header, extra_data, attributes } = config;
 
-    debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
+    debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.to::<u64>();
@@ -193,7 +193,7 @@ where
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
+                parent_hash=%parent_header.hash(),
                 %err,
                 "failed to apply beacon root contract call for payload"
             );
@@ -205,10 +205,10 @@ where
         &mut db,
         &initialized_cfg,
         &initialized_block_env,
-        parent_block.hash(),
+        parent_header.hash(),
     )
     .map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for payload");
+        warn!(target: "payload_builder", parent_hash=%parent_header.hash(), %err, "failed to update parent header blockhashes for payload");
         PayloadBuilderError::Internal(err.into())
     })?;
 
@@ -375,7 +375,7 @@ where
         let state_provider = db.database.0.inner.borrow_mut();
         state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
             warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
+                parent_hash=%parent_header.hash(),
                 %err,
                 "failed to calculate state root for payload"
             );
@@ -397,9 +397,9 @@ where
             executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
         )?;
 
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-            let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
+        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
+            let parent_excess_blob_gas = parent_header.excess_blob_gas.unwrap_or_default();
+            let parent_blob_gas_used = parent_header.blob_gas_used.unwrap_or_default();
             Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
@@ -411,7 +411,7 @@ where
     }
 
     let header = Header {
-        parent_hash: parent_block.hash(),
+        parent_hash: parent_header.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
@@ -423,7 +423,7 @@ where
         mix_hash: attributes.prev_randao,
         nonce: BEACON_NONCE.into(),
         base_fee_per_gas: Some(base_fee),
-        number: parent_block.number + 1,
+        number: parent_header.number + 1,
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,

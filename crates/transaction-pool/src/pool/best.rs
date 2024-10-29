@@ -1,14 +1,14 @@
 use crate::{
-    identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
-    TransactionOrdering, ValidPoolTransaction,
+    identifier::{SenderId, TransactionId},
+    pool::pending::PendingTransaction,
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
-use alloy_primitives::{Address, B256 as TxHash};
+use alloy_primitives::Address;
 use core::fmt;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
 };
-
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
 use tracing::debug;
 
@@ -80,7 +80,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// then can be moved from the `all` set to the `independent` set.
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
-    pub(crate) invalid: HashSet<TxHash>,
+    pub(crate) invalid: HashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
     /// iterator was static fileted
     ///
@@ -94,7 +94,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
 impl<T: TransactionOrdering> BestTransactions<T> {
     /// Mark the transaction and it's descendants as invalid.
     pub(crate) fn mark_invalid(&mut self, tx: &Arc<ValidPoolTransaction<T::Transaction>>) {
-        self.invalid.insert(*tx.hash());
+        self.invalid.insert(tx.sender_id());
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
@@ -168,14 +168,14 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
             self.add_new_transactions();
             // Remove the next independent tx with the highest priority
             let best = self.independent.pop_last()?;
-            let hash = best.transaction.hash();
+            let sender_id = best.transaction.sender_id();
 
-            // skip transactions that were marked as invalid
-            if self.invalid.contains(hash) {
+            // skip transactions for which sender was marked as invalid
+            if self.invalid.contains(&sender_id) {
                 debug!(
                     target: "txpool",
                     "[{:?}] skipping invalid transaction",
-                    hash
+                    best.transaction.hash()
                 );
                 continue
             }
@@ -186,7 +186,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
             }
 
             if self.skip_blobs && best.transaction.transaction.is_eip4844() {
-                // blobs should be skipped, marking the as invalid will ensure that no dependent
+                // blobs should be skipped, marking them as invalid will ensure that no dependent
                 // transactions are returned
                 self.mark_invalid(&best.transaction)
             } else {
