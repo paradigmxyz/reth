@@ -81,20 +81,10 @@ impl Compact for AlloyWithdrawals {
         withdrawals.to_compact(buf)
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (withdrawals, _) = Withdrawals::from_compact(buf, len);
-        let alloy_withdrawals = Self::new(
-            withdrawals
-                .0
-                .into_iter()
-                .map(|w| AlloyWithdrawal {
-                    index: w.index,
-                    validator_index: w.validator_index,
-                    address: w.address,
-                    amount: w.amount,
-                })
-                .collect(),
-        );
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let (withdrawals, new_buf) = Vec::from_compact(buf, buf.len());
+        buf = new_buf;
+        let alloy_withdrawals = Self::new(withdrawals);
         (alloy_withdrawals, buf)
     }
 }
