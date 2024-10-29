@@ -7,6 +7,7 @@ use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
+use reth_primitives::SealedHeader;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
@@ -51,11 +52,10 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                reth_cli_commands::init_state::init_state_helper::setup_without_evm(
+                reth_cli_commands::init_state::without_evm::setup_without_evm(
                     &provider_rw,
                     &static_file_provider,
-                    &BEDROCK_HEADER,
-                    BEDROCK_HEADER_HASH,
+                    SealedHeader::new(BEDROCK_HEADER.clone(), BEDROCK_HEADER_HASH),
                     BEDROCK_HEADER_TTD,
                 )?;
 

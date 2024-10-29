@@ -7,6 +7,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
+use reth_primitives::SealedHeader;
 use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
@@ -14,7 +15,7 @@ use reth_provider::{
 use std::{fs::File, io::BufReader, path::PathBuf, str::FromStr};
 use tracing::info;
 
-pub mod init_state_helper;
+pub mod without_evm;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -80,7 +81,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
         if self.without_evm {
             // ensure header, total difficulty and header hash are provided
             let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
-            let header = init_state_helper::read_header_from_file(header)?;
+            let header = without_evm::read_header_from_file(header)?;
 
             let header_hash =
                 self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
@@ -94,11 +95,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                init_state_helper::setup_without_evm(
+                without_evm::setup_without_evm(
                     &provider_rw,
                     &static_file_provider,
-                    &header,
-                    header_hash,
+                    // &header,
+                    // header_hash,
+                    SealedHeader::new(header, header_hash),
                     total_difficulty,
                 )?;
 

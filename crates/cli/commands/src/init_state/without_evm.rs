@@ -27,8 +27,7 @@ pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error
 pub fn setup_without_evm<Provider>(
     provider_rw: &Provider,
     static_file_provider: &StaticFileProvider,
-    header: &Header,
-    header_hash: B256,
+    header: SealedHeader,
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
@@ -41,7 +40,13 @@ where
 
     info!(target: "reth::cli", "Appending first valid block.");
 
-    append_first_block(provider_rw, static_file_provider, header, header_hash, total_difficulty)?;
+    append_first_block(
+        provider_rw,
+        static_file_provider,
+        header.header(),
+        header.hash(),
+        total_difficulty,
+    )?;
 
     for stage in StageId::ALL {
         provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(header.number))?;
