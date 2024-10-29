@@ -184,11 +184,15 @@ impl<C: TrieCursor> TrieWalker<C> {
             // if !key.starts_with(subnode.full_key()) {
             //     self.stack.pop();
             // }
-            assert!(
-                key.starts_with(subnode.full_key()),
-                "key: {key:?}. subnode: {subnode:?}. stack: {:?}",
-                self.stack
-            );
+            // assert!(
+            //     key.starts_with(subnode.full_key()),
+            //     "key: {key:?}. subnode: {subnode:?}. stack: {:?}",
+            //     self.stack
+            // );
+            if !key.starts_with(subnode.full_key()) {
+                self.move_to_next_sibling(false)?;
+                return Ok(())
+            }
         }
 
         // Create a new CursorSubNode and push it to the stack.
