@@ -64,7 +64,7 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     executor_provider: E,
     /// Whether to exclude withdrawals when validating proposer payment.
     exclude_withdrawals: bool,
-    /// Whether to try verifying profit through fee receipient balance difference.
+    /// Whether to try verifying profit through fee recipient balance difference.
     use_balance_diff_profit: bool,
 }
 
