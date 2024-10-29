@@ -39,6 +39,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+op-alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
@@ -54,5 +55,5 @@ optimism = [
 	"reth-optimism-evm/optimism",
 	"revm/optimism",
 	"reth-execution-types/optimism",
-	"reth-optimism-consensus/optimism",
+	"reth-optimism-consensus/optimism"
 ]

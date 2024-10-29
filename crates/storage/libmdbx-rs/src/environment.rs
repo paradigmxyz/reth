@@ -489,8 +489,10 @@ pub struct PageOps {
     pub mincore: u64,
 }
 
+/// Represents the geometry settings for the database environment
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Geometry<R> {
+    /// The size range in bytes.
     pub size: Option<R>,
     pub growth_step: Option<isize>,
     pub shrink_threshold: Option<isize>,

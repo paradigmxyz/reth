@@ -29,7 +29,8 @@ use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, BlobTransaction, BlobTransactionSidecar,
-    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
+    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
+    TransactionSigned,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
@@ -224,7 +225,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             withdrawals: None,
         };
         let payload_config = PayloadConfig::new(
-            Arc::clone(&best_block),
+            Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
             Bytes::default(),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
