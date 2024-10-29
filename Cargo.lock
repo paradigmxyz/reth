@@ -6922,6 +6922,7 @@ dependencies = [
  "discv5",
  "enr",
  "generic-array",
+ "itertools 0.13.0",
  "parking_lot",
  "rand 0.8.5",
  "reth-ethereum-forks",

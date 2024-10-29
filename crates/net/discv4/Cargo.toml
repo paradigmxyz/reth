@@ -42,6 +42,7 @@ parking_lot.workspace = true
 rand = { workspace = true, optional = true }
 generic-array.workspace = true
 serde = { workspace = true, optional = true }
+itertools.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
