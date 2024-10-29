@@ -55,7 +55,8 @@ impl DatabaseArgs {
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
-            .with_geometry(self.max_size, self.growth_step)
+            .with_geometry_max_size(self.max_size)
+            .with_growth_step(self.growth_step)
     }
 }
 

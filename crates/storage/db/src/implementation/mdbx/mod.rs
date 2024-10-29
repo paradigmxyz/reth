@@ -116,19 +116,19 @@ impl DatabaseArguments {
         }
     }
 
-    /// Set the geometry.
-    ///
-    /// # Arguments
-    ///
-    /// * `max_size` - Maximum database size in bytes
-    /// * `growth_step` - Database growth step in bytes
-    pub fn with_geometry(mut self, max_size: Option<usize>, growth_step: Option<usize>) -> Self {
-        self.geometry = Geometry {
-            size: max_size.map(|size| 0..size),
-            growth_step: growth_step.map(|growth_step| growth_step as isize),
-            shrink_threshold: Some(0),
-            page_size: Some(PageSize::Set(default_page_size())),
-        };
+    /// Sets the upper size limit of the db environment, the maximum database size in bytes.
+    pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
+        if let Some(max_size) = max_size {
+            self.geometry.size = Some(0..max_size);
+        }
+        self
+    }
+
+    /// Configures the database growth step in bytes.
+    pub const fn with_growth_step(mut self, growth_step: Option<usize>) -> Self {
+        if let Some(growth_step) = growth_step {
+            self.geometry.growth_step = Some(growth_step as isize);
+        }
         self
     }
 
