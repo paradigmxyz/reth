@@ -6616,6 +6616,7 @@ dependencies = [
  "ahash",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "arbitrary",
  "backon",
  "clap",
