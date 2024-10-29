@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, BlockHash, Bytes, B256};
 use alloy_rpc_types::{Block, Bundle, StateContext};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -141,6 +141,17 @@ pub trait DebugApi {
     /// indicating whether to include the preimages of keys in the response.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(&self, block: BlockNumberOrTag)
+        -> RpcResult<ExecutionWitness>;
+
+    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
+    /// to their preimages that were required during the execution of the block, including during
+    /// state root recomputation.
+    ///
+    /// The first argument is the block number or block hash. The second argument is a boolean
+    /// indicating whether to include the preimages of keys in the response.
+    #[method(name = "executePayload")]
+    async fn debug_execute_payload(&self, transactions: Vec<Bytes>, parent_block_hash: BlockHash)
         -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is

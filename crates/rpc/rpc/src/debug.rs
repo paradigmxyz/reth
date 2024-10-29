@@ -1,8 +1,8 @@
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, BlockHash, Bytes, Keccak256, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
-    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
+    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo
 };
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -15,9 +15,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    execute::{BlockExecutorProvider, Executor},
-    system_calls::SystemCaller,
-    ConfigureEvmEnv,
+    execute::{BlockExecutorProvider, Executor}, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv
 };
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
@@ -30,18 +28,18 @@ use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
     db::{CacheDB, State},
-    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg}
 };
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use revm_primitives::{keccak256, HashMap};
+use revm_primitives::{keccak256, HashMap, ResultAndState, TxEnv};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -659,9 +657,9 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-    ) -> Result<ExecutionWitness, Eth::Error> {
-        let this = self.clone();
-        let block = this
+    ) -> Result<ExecutionWitness, Eth::Error, > {
+        let block_executor = self.inner.block_executor.clone();
+        let block = self
             .eth_api()
             .block_with_senders(block_id.into())
             .await?
@@ -670,13 +668,13 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash.into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.inner.block_executor.executor(db);
+                let block_executor_provider = block_executor.executor(db);
 
                 let mut hashed_state = HashedPostState::default();
                 let mut keys = HashMap::default();
                 let mut codes = HashMap::default();
 
-                let _ = block_executor
+                let _ = block_executor_provider
                     .execute_with_state_closure(
                         (&(*block).clone().unseal(), block.difficulty).into(),
                         |statedb: &State<_>| {
@@ -731,6 +729,105 @@ where
                 Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
             })
             .await
+    }
+
+
+    /// The `debug_executePayload` method allows for execution of a block with the purpose of
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
+    /// to their preimages that were required during the execution of the block, including during
+    /// state root recomputation.
+    pub async fn debug_execute_payload(
+        &self,
+        txs: Vec<Bytes>,
+        parent_block_hash: BlockHash,
+    ) -> Result<ExecutionWitness, Eth::Error> {
+        let transactions = txs
+            .into_iter()
+            .map(recover_raw_transaction)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|tx| tx.into_components())
+            .collect::<Vec<_>>();
+
+        let eth_api = self.eth_api().clone();
+        let (cfg, block_env, _at) = self.eth_api().evm_env_at(parent_block_hash.into()).await?;
+
+        self.eth_api()
+            .spawn_with_state_at_block(parent_block_hash.into(), move |state_provider: reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper<'_>| {
+                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let db = StateProviderDatabase::new(&state_provider);
+                let state_db =
+                    State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+                let mut evm = eth_api.evm_config().evm_with_env(state_db, env);
+                let mut hasher: Keccak256 = Keccak256::new();
+
+                let mut tx_iter = transactions.into_iter().peekable();
+
+                while let Some((tx, signer)) = tx_iter.next() {
+                    let tx = tx.into_transaction();
+
+                    hasher.update(tx.hash());
+                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
+
+                    match evm.transact() {
+                        Ok(ResultAndState { result: _result, state }) => {
+                            // need to apply the state changes of this call before executing the
+                            // next call
+                            if tx_iter.peek().is_some() {
+                                // need to apply the state changes of this call before executing
+                                // the next call
+                                evm.context.evm.db.commit(state)
+                            }
+                        }
+                        Err(_evm_err) => {
+                            // errors are currently ignored, but stop processing more txs
+                            break
+                        }
+                    }
+                }
+
+
+                let mut hashed_state = HashedPostState::default();
+                let mut keys = HashMap::default();
+
+                let codes = evm.context.evm.db.cache
+                    .contracts
+                    .iter()
+                    .map(|(hash, code)| (*hash, code.original_bytes()))
+                    .collect();
+
+                for (address, account) in &evm.context.evm.db.cache.accounts {
+                    let hashed_address = keccak256(address);
+                    hashed_state.accounts.insert(
+                        hashed_address,
+                        account.account.as_ref().map(|a| a.info.clone().into()),
+                    );
+
+                    let storage =
+                        hashed_state.storages.entry(hashed_address).or_insert_with(
+                            || HashedStorage::new(account.status.was_destroyed()),
+                        );
+
+                    if let Some(account) = &account.account {
+                        keys.insert(hashed_address, address.to_vec().into());
+
+                        for (slot, value) in &account.storage {
+                            let slot = B256::from(*slot);
+                            let hashed_slot = keccak256(slot);
+                            storage.storage.insert(hashed_slot, *value);
+
+                            keys.insert(hashed_slot, slot.into());
+                        }
+                    }
+                }
+                // drop evm so db is released.
+                drop(evm);
+
+                let state =
+                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
+                Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+            })
+        .await
     }
 
     /// Executes the configured transaction with the environment on the given database.
@@ -1065,6 +1162,13 @@ where
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness(self, block).await.map_err(Into::into)
+    }
+
+    async fn debug_execute_payload(
+        &self, transactions: Vec<Bytes>, parent_block_hash: BlockHash
+    ) -> RpcResult<ExecutionWitness> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_execute_payload(self, transactions, parent_block_hash).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
