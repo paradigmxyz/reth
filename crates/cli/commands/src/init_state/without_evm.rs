@@ -8,6 +8,7 @@ use reth_provider::{
     providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
+use reth_static_file::DEFAULT_BLOCKS_PER_STATIC_FILE;
 
 use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
@@ -89,38 +90,57 @@ fn append_dummy_chain(
     target_height: BlockNumber,
 ) -> Result<(), eyre::Error> {
     let (tx, rx) = std::sync::mpsc::channel();
+    let chunk_size = DEFAULT_BLOCKS_PER_STATIC_FILE;
+
+    // Calculate chunk ranges
+    let chunks: Vec<_> = (1..=target_height)
+        .step_by(chunk_size as usize)
+        .map(|start: u64| {
+            let end = (start + chunk_size - 1).min(target_height);
+            start..=end
+        })
+        .collect();
 
     // Spawn jobs for incrementing the block end range of transactions and receipts
     for segment in [StaticFileSegment::Transactions, StaticFileSegment::Receipts] {
-        let tx_clone = tx.clone();
-        let provider = sf_provider.clone();
-        std::thread::spawn(move || {
-            let result = provider.latest_writer(segment).and_then(|mut writer| {
-                for block_num in 1..=target_height {
-                    writer.increment_block(block_num)?;
-                }
-                Ok(())
-            });
+        for chunk_range in chunks.clone() {
+            let tx_clone = tx.clone();
+            let provider = sf_provider.clone();
 
-            tx_clone.send(result).unwrap();
-        });
+            std::thread::spawn(move || {
+                let result: Result<(), reth_provider::ProviderError> =
+                    provider.get_writer(*chunk_range.start(), segment).and_then(|mut writer| {
+                        for block_num in chunk_range {
+                            writer.increment_block(block_num)?;
+                        }
+                        writer.commit()?;
+                        Ok(())
+                    });
+                tx_clone.send(result).unwrap();
+            });
+        }
     }
 
     // Spawn job for appending empty headers
-    let provider = sf_provider.clone();
-    std::thread::spawn(move || {
-        let mut empty_header = Header::default();
-        let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
-            for block_num in 1..=target_height {
-                // TODO: should we fill with real parent_hash?
-                empty_header.number = block_num;
-                writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
-            }
-            Ok(())
-        });
+    for chunk_range in chunks {
+        let tx_clone = tx.clone();
+        let provider = sf_provider.clone();
 
-        tx.send(result).unwrap();
-    });
+        std::thread::spawn(move || {
+            let mut empty_header = Header::default();
+            let result = provider
+                .get_writer(*chunk_range.start(), StaticFileSegment::Headers)
+                .and_then(|mut writer| {
+                    for block_num in chunk_range {
+                        empty_header.number = block_num;
+                        writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
+                    }
+                    writer.commit()?;
+                    Ok(())
+                });
+            tx_clone.send(result).unwrap();
+        });
+    }
 
     // Catches any StaticFileWriter error.
     while let Ok(r) = rx.recv() {
