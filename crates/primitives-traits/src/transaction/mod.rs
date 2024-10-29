@@ -58,5 +58,4 @@ pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullTransaction: Transaction + Compact {}
 
-#[cfg(feature = "arbitrary")]
 impl<T> FullTransaction for T where T: Transaction + Compact {}
