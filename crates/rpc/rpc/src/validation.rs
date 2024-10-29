@@ -217,7 +217,7 @@ where
 
     /// Ensures that the proposer has received [`BidTrace::value`] for this block.
     ///
-    /// Firstly attemts to verify the payment by checking the state changes, otherwise falls back to
+    /// Firstly attempts to verify the payment by checking the state changes, otherwise falls back to
     /// checking the latest block transaction.
     fn ensure_payment(
         &self,
