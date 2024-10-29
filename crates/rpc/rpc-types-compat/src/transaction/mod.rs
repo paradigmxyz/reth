@@ -162,7 +162,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
 }
 
 /// Convert [`reth_primitives::TxType`] to [`alloy_consensus::TxType`]
-/// Will panics if the `TxType` is `TxType::Deposit` (when optimism feature is enabled)
+/// Will panics if the `TxType` is `TxType::Deposit` (Optimism Deposit transaction)
 pub fn tx_type_to_alloy(tx_type: TxType) -> alloy_consensus::TxType {
     u8::from(tx_type).try_into().unwrap()
 }
