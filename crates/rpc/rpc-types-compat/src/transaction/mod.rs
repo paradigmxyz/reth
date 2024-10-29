@@ -3,6 +3,7 @@ mod signature;
 
 pub use signature::*;
 
+use core::error;
 use std::fmt;
 
 use alloy_consensus::Transaction as _;
@@ -48,7 +49,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         + fmt::Debug;
 
     /// RPC transaction error type.
-    type TransactionError: fmt::Debug;
+    type TransactionError: error::Error;
 
     ///
     /// Formats gas price and max fee per gas for RPC transaction response w.r.t. network specific

@@ -29,6 +29,8 @@ pub enum TransactionError {
     ProviderError(ProviderError),
 }
 
+impl core::error::Error for TransactionError {}
+
 impl<N> EthTransactions for OpEthApi<N>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,

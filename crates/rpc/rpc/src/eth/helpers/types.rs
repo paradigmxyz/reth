@@ -1,5 +1,7 @@
 //! L1 `eth` API types.
 
+use std::convert::Infallible;
+
 use alloy_consensus::Transaction as _;
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::{Address, TxKind};
@@ -20,7 +22,7 @@ where
 {
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
-    type TransactionError = ();
+    type TransactionError = Infallible;
 
     fn fill(
         &self,
