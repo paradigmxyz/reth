@@ -23,6 +23,7 @@ pub trait Transaction:
     + alloy_rlp::Decodable
     + for<'de> Deserialize<'de>
     + alloy_consensus::Transaction
+    + MaybeArbitrary
 {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
@@ -46,16 +47,16 @@ pub trait Transaction:
     fn size(&self) -> usize;
 }
 
-/// Helper trait that unifies all behaviour required by transaction to support full node operations.
-#[cfg(feature = "arbitrary")]
-pub trait FullTransaction: Transaction + Compact + for<'b> arbitrary::Arbitrary<'b> {}
-
-#[cfg(feature = "arbitrary")]
-impl<T> FullTransaction for T where T: Transaction + Compact + for<'b> arbitrary::Arbitrary<'b> {}
-
-/// Helper trait that unifies all behaviour required by transaction to support full node operations.
 #[cfg(not(feature = "arbitrary"))]
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+pub trait MaybeArbitrary {}
+
+#[cfg(feature = "arbitrary")]
+/// Helper trait that requires arbitrary implementation if the feature is enabled.
+pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
+
+/// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullTransaction: Transaction + Compact {}
 
-#[cfg(not(feature = "arbitrary"))]
+#[cfg(feature = "arbitrary")]
 impl<T> FullTransaction for T where T: Transaction + Compact {}
