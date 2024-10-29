@@ -8,7 +8,6 @@ use alloy_rpc_types::{calc_excess_blob_gas, BlockId};
 use alloy_rpc_types_mev::{
     BundleItem, SendBundleRequest, SimBundleLogs, SimBundleOverrides, SimBundleResponse, Validity,
 };
-use alloy_signer::Signer;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
@@ -18,7 +17,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    FromEthApiError,
+    FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
@@ -71,7 +70,7 @@ where
         for item in &bundle.bundle_body {
             if let BundleItem::Bundle { bundle: nested_bundle } = item {
                 // Recursively calculate depth for nested bundles
-                let nested_depth = self.calculate_bundle_depth(nested_bundle, current_depth + 1);
+                let nested_depth = self.calculate_bundle_depth(&nested_bundle, current_depth + 1);
                 if nested_depth > max_depth {
                     max_depth = nested_depth;
                 }
@@ -145,9 +144,14 @@ where
                                 info!("initial_coinbase: {:?}", initial_coinbase);
                                 let coinbase_balance_before_tx = initial_coinbase;
 
-                                let mut evm = Call::evm_config(&eth_api).evm_with_env(db, env);
+                                let mut evm =
+                                    RpcNodeCore::evm_config(&eth_api).evm_with_env(db, env);
 
-                                Call::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
+                                RpcNodeCore::evm_config(&eth_api).fill_tx_env(
+                                    evm.tx_mut(),
+                                    &tx,
+                                    signer,
+                                );
                                 let ResultAndState { result, state } =
                                     evm.transact().map_err(Eth::Error::from_eth_err)?;
 
@@ -292,7 +296,7 @@ where
         let (cfg, mut block_env, ..) =
             self.inner.eth_api.evm_env_at(block_id).await.map_err(Into::into)?;
 
-        let parent_header = LoadPendingBlock::provider(&self.inner.eth_api)
+        let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
             .header_by_number(block_env.number.saturating_to::<u64>())
             .map_err(|e| EthApiError::from_eth_err(e))? // Explicitly map the error
             .ok_or_else(|| {
@@ -320,7 +324,7 @@ where
             block_env.basefee = U256::from(base_fee);
         } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
             if let Some(base_fee) = parent_header.next_block_base_fee(
-                LoadPendingBlock::provider(&self.inner.eth_api)
+                RpcNodeCore::provider(&self.inner.eth_api)
                     .chain_spec()
                     .base_fee_params_at_block(block_env.number.saturating_to::<u64>()),
             ) {
