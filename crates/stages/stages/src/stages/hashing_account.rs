@@ -234,7 +234,7 @@ where
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Aggregate all transition changesets and make a list of accounts that have been changed.
-        provider.unwind_account_hashing(range)?;
+        provider.unwind_account_hashing_range(range)?;
 
         let mut stage_checkpoint =
             input.checkpoint.account_hashing_stage_checkpoint().unwrap_or_default();
