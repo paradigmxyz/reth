@@ -8621,6 +8621,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-errors",
+ "reth-ethereum-consensus",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-network-api",

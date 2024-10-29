@@ -18,6 +18,7 @@ reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-errors.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true

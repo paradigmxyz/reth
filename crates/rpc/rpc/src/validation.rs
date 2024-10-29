@@ -11,6 +11,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError, RethError};
+use reth_ethereum_consensus::GAS_LIMIT_BOUND_DIVISOR;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, GotExpected, Receipt, SealedBlockWithSenders, SealedHeader};
@@ -64,8 +65,6 @@ pub struct ValidationApiInner<Provider: ChainSpecProvider, E> {
     executor_provider: E,
     /// Whether to exclude withdrawals when validating proposer payment.
     exclude_withdrawals: bool,
-    /// Whether to try verifying profit through fee recipient balance difference.
-    use_balance_diff_profit: bool,
 }
 
 /// The type that implements the `validation` rpc namespace trait
@@ -88,7 +87,6 @@ where
             payload_validator,
             executor_provider,
             exclude_withdrawals: false,
-            use_balance_diff_profit: true,
         });
         Self { inner }
     }
@@ -111,6 +109,7 @@ where
         &self,
         block: SealedBlockWithSenders,
         message: BidTrace,
+        registered_gas_limit: u64,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(&block.header, &message)?;
 
@@ -129,6 +128,7 @@ where
             .into())
         }
         self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
+        self.validate_gas_limit(registered_gas_limit, &latest_header, &block.header)?;
 
         let state_provider = self.provider.state_by_block_hash(latest_header.hash())?;
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
@@ -156,6 +156,7 @@ where
         Ok(())
     }
 
+    /// Ensures that fields of [`BidTrace`] match the fields of the [`SealedHeader`].
     fn validate_message_against_header(
         &self,
         header: &SealedHeader,
@@ -186,39 +187,69 @@ where
         }
     }
 
+    /// Ensures that the chosen gas limit is the closest possible value for the validator's
+    /// registered gas limit.
+    ///
+    /// Ref: <https://github.com/flashbots/builder/blob/a742641e24df68bc2fc476199b012b0abce40ffe/core/blockchain.go#L2474-L2477>
+    fn validate_gas_limit(
+        &self,
+        registered_gas_limit: u64,
+        parent_header: &SealedHeader,
+        header: &SealedHeader,
+    ) -> Result<(), ValidationApiError> {
+        let max_gas_limit =
+            parent_header.gas_limit + parent_header.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1;
+        let min_gas_limit =
+            parent_header.gas_limit - parent_header.gas_limit / GAS_LIMIT_BOUND_DIVISOR + 1;
+
+        let best_gas_limit =
+            std::cmp::max(min_gas_limit, std::cmp::min(max_gas_limit, registered_gas_limit));
+
+        if best_gas_limit != header.gas_limit {
+            return Err(ValidationApiError::GasLimitMismatch(GotExpected {
+                got: header.gas_limit,
+                expected: best_gas_limit,
+            }))
+        }
+
+        Ok(())
+    }
+
+    /// Ensures that the proposer has received [`BidTrace::value`] for this block.
+    ///
+    /// Firstly attemts to verify the payment by checking the state changes, otherwise falls back to
+    /// checking the latest block transaction.
     fn ensure_payment(
         &self,
         block: &Block,
         output: &BlockExecutionOutput<Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
-        if self.use_balance_diff_profit {
-            let (mut balance_before, balance_after) =
-                if let Some(acc) = output.state.state.get(&message.proposer_fee_recipient) {
-                    let balance_before =
-                        acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
-                    let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+        let (mut balance_before, balance_after) = if let Some(acc) =
+            output.state.state.get(&message.proposer_fee_recipient)
+        {
+            let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
+            let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
 
-                    (balance_before, balance_after)
-                } else {
-                    // account might have balance but considering it zero is fine as long as we know
-                    // that balance have not changed
-                    (U256::ZERO, U256::ZERO)
-                };
+            (balance_before, balance_after)
+        } else {
+            // account might have balance but considering it zero is fine as long as we know
+            // that balance have not changed
+            (U256::ZERO, U256::ZERO)
+        };
 
-            if self.exclude_withdrawals {
-                if let Some(withdrawals) = &block.body.withdrawals {
-                    for withdrawal in withdrawals {
-                        if withdrawal.address == message.proposer_fee_recipient {
-                            balance_before += withdrawal.amount_wei();
-                        }
+        if self.exclude_withdrawals {
+            if let Some(withdrawals) = &block.body.withdrawals {
+                for withdrawal in withdrawals {
+                    if withdrawal.address == message.proposer_fee_recipient {
+                        balance_before += withdrawal.amount_wei();
                     }
                 }
             }
+        }
 
-            if balance_after >= balance_before + message.value {
-                return Ok(())
-            }
+        if balance_after >= balance_before + message.value {
+            return Ok(())
         }
 
         let (receipt, tx) = output
@@ -325,8 +356,12 @@ where
             .try_seal_with_senders()
             .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
-        self.validate_message_against_block(block, request.request.message)
-            .map_err(|e| RethError::Other(e.into()))
-            .to_rpc_result()
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+        )
+        .map_err(|e| RethError::Other(e.into()))
+        .to_rpc_result()
     }
 }
