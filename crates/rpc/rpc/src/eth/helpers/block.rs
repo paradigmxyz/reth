@@ -8,7 +8,7 @@ use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcReceipt,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, ReceiptBuilder};
 
 use crate::EthApi;
 
@@ -17,14 +17,9 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+        Provider: HeaderProvider,
     >,
-    Provider: HeaderProvider,
 {
-    #[inline]
-    fn provider(&self) -> impl HeaderProvider {
-        self.inner.provider()
-    }
-
     async fn block_receipts(
         &self,
         block_id: BlockId,
@@ -73,13 +68,4 @@ where
     Self: LoadPendingBlock + SpawnBlocking,
     Provider: BlockReaderIdExt,
 {
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }

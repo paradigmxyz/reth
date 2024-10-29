@@ -412,7 +412,7 @@ pub fn discv5_sockets_wrt_rlpx_addr(
                 discv5_addr_ipv6.map(|ip| SocketAddrV6::new(ip, discv5_port_ipv6, 0, 0));
 
             if let Some(discv5_addr) = discv5_addr_ipv4 {
-                warn!(target: "discv5",
+                warn!(target: "net::discv5",
                     %discv5_addr,
                     %rlpx_addr,
                     "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
@@ -429,7 +429,7 @@ pub fn discv5_sockets_wrt_rlpx_addr(
                 discv5_addr_ipv4.map(|ip| SocketAddrV4::new(ip, discv5_port_ipv4));
 
             if let Some(discv5_addr) = discv5_addr_ipv6 {
-                warn!(target: "discv5",
+                warn!(target: "net::discv5",
                     %discv5_addr,
                     %rlpx_addr,
                     "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"

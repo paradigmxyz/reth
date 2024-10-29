@@ -2,20 +2,15 @@
 
 use alloy_serde::WithOtherFields;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
-use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
+use reth_rpc_eth_types::{EthApiError, ReceiptBuilder};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: Send + Sync,
+    Self: RpcNodeCoreExt,
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
     async fn build_transaction_receipt(
         &self,
         tx: TransactionSigned,

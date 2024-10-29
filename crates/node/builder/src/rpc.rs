@@ -14,12 +14,14 @@ use reth_node_api::{
 };
 use reth_node_core::{
     node_config::NodeConfig,
-    rpc::eth::{EthApiTypes, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::providers::ProviderNodeTypes;
-use reth_rpc::EthApi;
+use reth_rpc::{
+    eth::{EthApiTypes, FullEthApiServer},
+    EthApi,
+};
 use reth_rpc_api::eth::helpers::AddDevSigners;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},

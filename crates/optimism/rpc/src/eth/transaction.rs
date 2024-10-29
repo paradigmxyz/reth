@@ -10,22 +10,18 @@ use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, TransactionCompat,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction,
-    N: FullNodeComponents,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    N: RpcNodeCore,
 {
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
@@ -61,26 +57,13 @@ where
 impl<N> LoadTransaction for OpEthApi<N>
 where
     Self: SpawnBlocking + FullEthApiTypes,
-    N: FullNodeComponents,
+    N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    type Pool = N::Pool;
-
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
-
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
-    }
 }
 
 impl<N> OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {

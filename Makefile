@@ -497,6 +497,7 @@ test:
 pr:
 	make lint && \
 	make update-book-cli && \
+	cargo docs --document-private-items && \
 	make test
 
 check-features:
