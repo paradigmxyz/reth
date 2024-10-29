@@ -940,7 +940,7 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| receipt.with_bloom().envelope_encoded())
+            .map(|receipt| receipt.with_bloom().encoded_2718().into())
             .collect())
     }
 

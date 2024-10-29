@@ -6,8 +6,8 @@ use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
-    fee_history::calculate_reward_percentiles_for_block, EthApiError, EthStateCache,
-    FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
+    fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
+    FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use tracing::debug;
 
@@ -172,7 +172,7 @@ pub trait EthFees: LoadFee {
 
                     // Percentiles were specified, so we need to collect reward percentile ino
                     if let Some(percentiles) = &reward_percentiles {
-                        let (block, receipts) = LoadFee::cache(self)
+                        let (block, receipts) = self.cache()
                             .get_block_and_receipts(header.hash())
                             .await
                             .map_err(Self::Error::from_eth_err)?
@@ -242,11 +242,6 @@ pub trait EthFees: LoadFee {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` fees RPC methods.
 pub trait LoadFee: LoadBlock {
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
     /// Returns a handle for reading gas price.
     ///
     /// Data access in default (L1) trait method implementations.

@@ -23,7 +23,7 @@ use reth_payload_primitives::{
     BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
 use reth_primitives::{
-    constants::RETH_CLIENT_VERSION, proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
+    constants::RETH_CLIENT_VERSION, proofs, BlockNumberOrTag, SealedHeader, Withdrawals,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -122,7 +122,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         &self.executor
     }
 
-    /// Returns the pre-cached reads for the given parent block if it matches the cached state's
+    /// Returns the pre-cached reads for the given parent header if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
         self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
@@ -163,13 +163,17 @@ where
             block.seal(attributes.parent())
         };
 
+        let hash = parent_block.hash();
+        let parent_header = parent_block.header();
+        let header = SealedHeader::new(parent_header.clone(), hash);
+
         let config =
-            PayloadConfig::new(Arc::new(parent_block), self.config.extradata.clone(), attributes);
+            PayloadConfig::new(Arc::new(header), self.config.extradata.clone(), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        let cached_reads = self.maybe_pre_cached(config.parent_block.hash());
+        let cached_reads = self.maybe_pre_cached(hash);
 
         let mut job = BasicPayloadJob {
             config,
@@ -706,8 +710,8 @@ impl Drop for Cancelled {
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
 pub struct PayloadConfig<Attributes> {
-    /// The parent block.
-    pub parent_block: Arc<SealedBlock>,
+    /// The parent header.
+    pub parent_header: Arc<SealedHeader>,
     /// Block extra data.
     pub extra_data: Bytes,
     /// Requested attributes for the payload.
@@ -727,11 +731,11 @@ where
 {
     /// Create new payload config.
     pub const fn new(
-        parent_block: Arc<SealedBlock>,
+        parent_header: Arc<SealedHeader>,
         extra_data: Bytes,
         attributes: Attributes,
     ) -> Self {
-        Self { parent_block, extra_data, attributes }
+        Self { parent_header, extra_data, attributes }
     }
 
     /// Returns the payload id.

@@ -17,7 +17,6 @@ use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_primitives::Header;
 use reth_provider::{
@@ -30,7 +29,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, RpcNodeCore,
+    EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
@@ -116,7 +115,6 @@ where
 
 impl<N> RpcNodeCore for OpEthApi<N>
 where
-    Self: Clone,
     N: RpcNodeCore,
 {
     type Provider = N::Provider;
@@ -124,20 +122,34 @@ where
     type Network = <N as RpcNodeCore>::Network;
     type Evm = <N as RpcNodeCore>::Evm;
 
+    #[inline]
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
     }
 
+    #[inline]
     fn evm_config(&self) -> &Self::Evm {
         self.inner.evm_config()
     }
 
+    #[inline]
     fn network(&self) -> &Self::Network {
         self.inner.network()
     }
 
+    #[inline]
     fn provider(&self) -> &Self::Provider {
         self.inner.provider()
+    }
+}
+
+impl<N> RpcNodeCoreExt for OpEthApi<N>
+where
+    N: RpcNodeCore,
+{
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
     }
 }
 
@@ -164,7 +176,7 @@ where
 impl<N> SpawnBlocking for OpEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -193,11 +205,6 @@ where
     >,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
         self.inner.gas_oracle()
     }
@@ -208,23 +215,18 @@ where
     }
 }
 
-impl<N> LoadState for OpEthApi<N>
-where
+impl<N> LoadState for OpEthApi<N> where
     N: RpcNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
-    >,
+    >
 {
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
 }
 
 impl<N> EthState for OpEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -235,7 +237,7 @@ where
 impl<N> EthFees for OpEthApi<N>
 where
     Self: LoadFee,
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
 }
 
@@ -248,10 +250,10 @@ where
 
 impl<N> AddDevSigners for OpEthApi<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: RpcNodeCore,
 {
     fn with_dev_accounts(&self) {
-        *self.signers().write() = DevSigner::random_signers(20)
+        *self.inner.signers().write() = DevSigner::random_signers(20)
     }
 }
 
