@@ -76,42 +76,26 @@ impl BlobStore for InMemoryBlobStore {
 
     // Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
-        let store = self.inner.store.read();
-        Ok(store.get(&tx).cloned())
+        Ok(self.inner.store.read().get(&tx).cloned())
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
-        let store = self.inner.store.read();
-        Ok(store.contains_key(&tx))
+        Ok(self.inner.store.read().contains_key(&tx))
     }
 
     fn get_all(
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
-        let mut items = Vec::with_capacity(txs.len());
         let store = self.inner.store.read();
-        for tx in txs {
-            if let Some(item) = store.get(&tx) {
-                items.push((tx, item.clone()));
-            }
-        }
-
-        Ok(items)
+        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).map(|item| (tx, item.clone()))).collect())
     }
 
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
-        let mut items = Vec::with_capacity(txs.len());
         let store = self.inner.store.read();
-        for tx in txs {
-            if let Some(item) = store.get(&tx) {
-                items.push(item.clone());
-            } else {
-                return Err(BlobStoreError::MissingSidecar(tx))
-            }
-        }
-
-        Ok(items)
+        txs.into_iter()
+            .map(|tx| store.get(&tx).cloned().ok_or_else(|| BlobStoreError::MissingSidecar(tx)))
+            .collect()
     }
 
     fn get_by_versioned_hashes(

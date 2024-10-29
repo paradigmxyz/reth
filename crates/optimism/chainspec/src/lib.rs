@@ -20,10 +20,9 @@ mod op_sepolia;
 use alloc::{vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Parity, Signature, B256, U256};
+use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
-use core::fmt::Display;
 use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
@@ -31,8 +30,8 @@ pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
-    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
+    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
@@ -178,12 +177,6 @@ pub struct OpChainSpec {
     pub inner: ChainSpec,
 }
 
-/// Returns the signature for the optimism deposit transactions, which don't include a
-/// signature.
-pub fn optimism_deposit_tx_signature() -> Signature {
-    Signature::new(U256::ZERO, U256::ZERO, Parity::Parity(false))
-}
-
 impl EthChainSpec for OpChainSpec {
     fn chain(&self) -> alloy_chains::Chain {
         self.inner.chain()
@@ -209,7 +202,7 @@ impl EthChainSpec for OpChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> impl Display {
+    fn display_hardforks(&self) -> DisplayHardforks {
         self.inner.display_hardforks()
     }
 

@@ -39,13 +39,13 @@ pub use block::{
 };
 #[cfg(feature = "reth-codec")]
 pub use compression::*;
-pub use constants::{HOLESKY_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+pub use constants::HOLESKY_GENESIS_HASH;
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, Request, Requests, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
+    LogData, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 

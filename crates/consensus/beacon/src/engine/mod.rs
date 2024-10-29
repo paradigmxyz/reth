@@ -1,6 +1,7 @@
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
 use futures::{stream::BoxStream, Future, StreamExt};
@@ -9,7 +10,7 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_engine_primitives::{EngineTypes, PayloadTypes};
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes, PayloadTypes};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
@@ -19,9 +20,7 @@ use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockNumHash, Head, Header, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
     ChainSpecProvider, ProviderError, StageCheckpointReader,
@@ -429,7 +428,12 @@ where
                 } else if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
                     let head = outcome.into_header().unseal();
-                    self.process_payload_attributes(attrs, head, state)
+                    self.process_payload_attributes(
+                        attrs,
+                        head,
+                        state,
+                        EngineApiMessageVersion::default(),
+                    )
                 } else {
                     OnForkChoiceUpdated::valid(PayloadStatus::new(
                         PayloadStatusEnum::Valid,
@@ -1080,11 +1084,11 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash = ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload, sidecar), fields(block_hash = ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
-        cancun_fields: Option<CancunPayloadFields>,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<Either<PayloadStatus, SealedBlock>, BeaconOnNewPayloadError> {
         self.metrics.new_payload_messages.increment(1);
 
@@ -1114,10 +1118,7 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-        let block = match self
-            .payload_validator
-            .ensure_well_formed_payload(payload, cancun_fields.into())
-        {
+        let block = match self.payload_validator.ensure_well_formed_payload(payload, sidecar) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", %error, "Invalid payload");
@@ -1164,6 +1165,7 @@ where
         attrs: <N::Engine as PayloadTypes>::PayloadAttributes,
         head: Header,
         state: ForkchoiceState,
+        version: EngineApiMessageVersion,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
         //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
@@ -1181,6 +1183,7 @@ where
         match <<N:: Engine as PayloadTypes>::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,
+            version as u8
         ) {
             Ok(attributes) => {
                 // send the payload to the builder and return the receiver for the pending payload
@@ -1859,11 +1862,16 @@ where
                 // sensitive, hence they are polled first.
                 if let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
                     match msg {
-                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                        BeaconEngineMessage::ForkchoiceUpdated {
+                            state,
+                            payload_attrs,
+                            tx,
+                            version: _version,
+                        } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);
                         }
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                            match this.on_new_payload(payload, cancun_fields) {
+                        BeaconEngineMessage::NewPayload { payload, sidecar, tx } => {
+                            match this.on_new_payload(payload, sidecar) {
                                 Ok(Either::Right(block)) => {
                                     this.set_blockchain_tree_action(
                                         BlockchainTreeAction::InsertNewPayload { block, tx },
@@ -2051,7 +2059,12 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(block_to_payload_v1(SealedBlock::default()), None).await;
+        let _ = env
+            .send_new_payload(
+                block_to_payload_v1(SealedBlock::default()),
+                ExecutionPayloadSidecar::none(),
+            )
+            .await;
 
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
@@ -2616,7 +2629,7 @@ mod tests {
                         0,
                         BlockParams { ommers_count: Some(0), ..Default::default() },
                     )),
-                    None,
+                    ExecutionPayloadSidecar::none(),
                 )
                 .await;
 
@@ -2631,7 +2644,7 @@ mod tests {
                         1,
                         BlockParams { ommers_count: Some(0), ..Default::default() },
                     )),
-                    None,
+                    ExecutionPayloadSidecar::none(),
                 )
                 .await;
 
@@ -2709,7 +2722,10 @@ mod tests {
 
             // Send new payload
             let result = env
-                .send_new_payload_retry_on_syncing(block_to_payload_v1(block2.clone()), None)
+                .send_new_payload_retry_on_syncing(
+                    block_to_payload_v1(block2.clone()),
+                    ExecutionPayloadSidecar::none(),
+                )
                 .await
                 .unwrap();
 
@@ -2844,7 +2860,9 @@ mod tests {
                 2,
                 BlockParams { parent: Some(parent), ommers_count: Some(0), ..Default::default() },
             );
-            let res = env.send_new_payload(block_to_payload_v1(block), None).await;
+            let res = env
+                .send_new_payload(block_to_payload_v1(block), ExecutionPayloadSidecar::none())
+                .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2914,7 +2932,10 @@ mod tests {
 
             // Send new payload
             let result = env
-                .send_new_payload_retry_on_syncing(block_to_payload_v1(block2.clone()), None)
+                .send_new_payload_retry_on_syncing(
+                    block_to_payload_v1(block2.clone()),
+                    ExecutionPayloadSidecar::none(),
+                )
                 .await
                 .unwrap();
 

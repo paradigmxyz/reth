@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// Prune mode.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Compact)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub enum PruneMode {
     /// Prune all blocks.
@@ -15,6 +15,13 @@ pub enum PruneMode {
     Distance(u64),
     /// Prune blocks before the specified block number. The specified block number is not pruned.
     Before(BlockNumber),
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl Default for PruneMode {
+    fn default() -> Self {
+        Self::Full
+    }
 }
 
 impl PruneMode {
@@ -66,13 +73,6 @@ impl PruneMode {
     /// Returns true if the prune mode is [`PruneMode::Full`].
     pub const fn is_full(&self) -> bool {
         matches!(self, Self::Full)
-    }
-}
-
-#[cfg(test)]
-impl Default for PruneMode {
-    fn default() -> Self {
-        Self::Full
     }
 }
 

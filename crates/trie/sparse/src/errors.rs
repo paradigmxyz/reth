@@ -4,6 +4,8 @@ use alloy_primitives::{Bytes, B256};
 use reth_trie::Nibbles;
 use thiserror::Error;
 
+use crate::SparseNode;
+
 /// Result type with [`SparseStateTrieError`] as error.
 pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
 
@@ -42,6 +44,14 @@ pub enum SparseTrieError {
         path: Nibbles,
         /// Node hash
         hash: B256,
+    },
+    /// Encountered unexpected node at path when revealing.
+    #[error("encountered an invalid node at path {path:?} when revealing: {node:?}")]
+    Reveal {
+        /// Path to the node.
+        path: Nibbles,
+        /// Node that was at the path when revealing.
+        node: Box<SparseNode>,
     },
     /// RLP error.
     #[error(transparent)]

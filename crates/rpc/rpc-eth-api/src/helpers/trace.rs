@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::FromEvmError;
+use crate::{FromEvmError, RpcNodeCore};
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockId, TransactionInfo};
 use futures::Future;
@@ -21,12 +21,7 @@ use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndSta
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState {
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
-
+pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
@@ -117,7 +112,7 @@ pub trait Trace: LoadState {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res, db)
         })
     }
@@ -201,8 +196,8 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this).clone(),
-                    LoadState::provider(&this).chain_spec(),
+                    this.evm_config().clone(),
+                    RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
                     .pre_block_beacon_root_contract_call(
@@ -229,7 +224,7 @@ pub trait Trace: LoadState {
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg,
                     block_env,
-                    Call::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
@@ -344,8 +339,8 @@ pub trait Trace: LoadState {
 
                 // apply relevant system calls
                 let mut system_caller = SystemCaller::new(
-                    Trace::evm_config(&this).clone(),
-                    LoadState::provider(&this).chain_spec(),
+                    this.evm_config().clone(),
+                    RpcNodeCore::provider(&this).chain_spec(),
                 );
                 system_caller
                     .pre_block_beacon_root_contract_call(
@@ -379,7 +374,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(tx, *signer);
+                        let tx_env = this.evm_config().tx_env(tx, *signer);
                         (tx_info, tx_env)
                     })
                     .peekable();

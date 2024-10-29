@@ -3,12 +3,16 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
+use alloy_eips::{
+    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip7685::EMPTY_REQUESTS_HASH,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
-use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 
-use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH};
+use alloy_consensus::constants::{DEV_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
@@ -17,13 +21,7 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_primitives_traits::{
-    constants::{
-        EIP1559_INITIAL_BASE_FEE, ETHEREUM_BLOCK_GAS_LIMIT, HOLESKY_GENESIS_HASH,
-        SEPOLIA_GENESIS_HASH,
-    },
-    Header, SealedHeader,
-};
+use reth_primitives_traits::{constants::HOLESKY_GENESIS_HASH, Header, SealedHeader};
 use reth_trie_common::root::state_root_ref_unhashed;
 
 use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
@@ -44,7 +42,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         hardforks: EthereumHardfork::mainnet().into(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
-            address!("00000000219ab540356cbb839cbe05303d7705fa"),
+            MAINNET_DEPOSIT_CONTRACT_ADDRESS,
             11052984,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
@@ -284,8 +282,9 @@ impl ChainSpec {
             };
 
         // If Prague is activated at genesis we set requests root to an empty trie root.
-        let requests_root =
-            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(EMPTY_ROOT_HASH);
+        let requests_hash = self
+            .is_prague_active_at_timestamp(self.genesis.timestamp)
+            .then_some(EMPTY_REQUESTS_HASH);
 
         Header {
             gas_limit: self.genesis.gas_limit,
@@ -301,7 +300,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
-            requests_root,
+            requests_hash,
             ..Default::default()
         }
     }
@@ -315,7 +314,7 @@ impl ChainSpec {
     pub fn initial_base_fee(&self) -> Option<u64> {
         // If the base fee is set in the genesis block, we use that instead of the default.
         let genesis_base_fee =
-            self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(EIP1559_INITIAL_BASE_FEE);
+            self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         self.hardforks.fork(EthereumHardfork::London).active_at_block(0).then_some(genesis_base_fee)
@@ -513,34 +512,36 @@ impl ChainSpec {
         }
     }
 
-    /// An internal helper function that returns the block number of the last block-based
-    /// fork that occurs before any existing TTD (merge)/timestamp based forks.
+    /// This internal helper function retrieves the block number of the last block-based fork
+    /// that occurs before:
+    /// - Any existing Total Terminal Difficulty (TTD) or
+    /// - Timestamp-based forks in the current [`ChainSpec`].
     ///
-    /// Note: this returns None if the `ChainSpec` is not configured with a TTD/Timestamp fork.
+    /// The function operates by examining the configured hard forks in the chain. It iterates
+    /// through the fork conditions and identifies the most recent block-based fork that
+    /// precedes any TTD or timestamp-based conditions.
+    ///
+    /// If there are no block-based forks found before these conditions, or if the [`ChainSpec`]
+    /// is not configured with a TTD or timestamp fork, this function will return `None`.
     pub(crate) fn last_block_fork_before_merge_or_timestamp(&self) -> Option<u64> {
         let mut hardforks_iter = self.hardforks.forks_iter().peekable();
         while let Some((_, curr_cond)) = hardforks_iter.next() {
             if let Some((_, next_cond)) = hardforks_iter.peek() {
-                // peek and find the first occurrence of ForkCondition::TTD (merge) , or in
-                // custom ChainSpecs, the first occurrence of
-                // ForkCondition::Timestamp. If curr_cond is ForkCondition::Block at
-                // this point, which it should be in most "normal" ChainSpecs,
-                // return its block_num
+                // Match against the `next_cond` to see if it represents:
+                // - A TTD (merge)
+                // - A timestamp-based fork
                 match next_cond {
-                    ForkCondition::TTD { fork_block, .. } => {
-                        // handle Sepolia merge netsplit case
-                        if fork_block.is_some() {
-                            return *fork_block
-                        }
-                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
+                    // If the next fork is TTD and specifies a specific block, return that block
+                    // number
+                    ForkCondition::TTD { fork_block: Some(block), .. } => return Some(*block),
+
+                    // If the next fork is TTD without a specific block or is timestamp-based,
+                    // return the block number of the current condition if it is block-based.
+                    ForkCondition::TTD { .. } | ForkCondition::Timestamp(_) => {
+                        // Check if `curr_cond` is a block-based fork and return its block number if
+                        // true.
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
-                        }
-                    }
-                    ForkCondition::Timestamp(_) => {
-                        // ensure curr_cond is indeed ForkCondition::Block and return block_num
-                        if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
+                            return Some(block_num);
                         }
                     }
                     ForkCondition::Block(_) | ForkCondition::Never => continue,
@@ -616,6 +617,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
+            (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -863,6 +865,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Osaka at genesis.
+    pub fn osaka_activated(mut self) -> Self {
+        self = self.prague_activated();
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -940,6 +949,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
+    use alloy_trie::EMPTY_ROOT_HASH;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 

@@ -3,7 +3,7 @@ use crate::{
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
@@ -60,6 +60,9 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
+
+mod consistent;
+pub use consistent::ConsistentProvider;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
 pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
@@ -118,7 +121,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<N>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
+        let best = provider.chain_info()?;
         let latest_header = provider
             .header_by_number(best.best_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
@@ -501,16 +504,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.database.latest_withdrawal()
-    }
-}
-
-impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider<N> {
-    fn requests_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.database.requests_by_block(id, timestamp)
     }
 }
 

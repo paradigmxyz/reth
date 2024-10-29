@@ -1,15 +1,15 @@
 //! Contains the implementation of the mining mode for the local engine.
 
 use alloy_primitives::{TxHash, B256};
-use alloy_rpc_types_engine::{CancunPayloadFields, ForkchoiceState};
+use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar, ForkchoiceState};
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineApiMessageVersion, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadKind, PayloadTypes,
 };
 use reth_provider::{BlockReader, ChainSpecProvider};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
@@ -167,6 +167,7 @@ where
             state: self.forkchoice_state(),
             payload_attrs: None,
             tx,
+            version: EngineApiMessageVersion::default(),
         })?;
 
         let res = rx.await??;
@@ -193,6 +194,7 @@ where
             state: self.forkchoice_state(),
             payload_attrs: Some(self.payload_attributes_builder.build(timestamp)),
             tx,
+            version: EngineApiMessageVersion::default(),
         })?;
 
         let res = rx.await??.await?;
@@ -202,10 +204,9 @@ where
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
 
-        // wait for some time to let the payload be built
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        let Some(Ok(payload)) = self.payload_builder.best_payload(payload_id).await else {
+        let Some(Ok(payload)) =
+            self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await
+        else {
             eyre::bail!("No payload")
         };
 
@@ -222,7 +223,10 @@ where
         let (tx, rx) = oneshot::channel();
         self.to_engine.send(BeaconEngineMessage::NewPayload {
             payload: block_to_payload(payload.block().clone()),
-            cancun_fields,
+            // todo: prague support
+            sidecar: cancun_fields
+                .map(ExecutionPayloadSidecar::v3)
+                .unwrap_or_else(ExecutionPayloadSidecar::none),
             tx,
         })?;
 

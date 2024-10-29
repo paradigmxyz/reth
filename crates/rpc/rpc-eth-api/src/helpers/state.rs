@@ -13,12 +13,12 @@ use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
-use crate::{EthApiTypes, FromEthApiError};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
@@ -105,7 +105,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
 
             // Check whether the distance to the block exceeds the maximum configured window.
-            let block_number = LoadState::provider(self)
+            let block_number = self
+                .provider()
                 .block_number_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -138,9 +139,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             let Some(account) = account else { return Ok(None) };
 
             // Check whether the distance to the block exceeds the maximum configured proof window.
-            let chain_info =
-                LoadState::provider(&this).chain_info().map_err(Self::Error::from_eth_err)?;
-            let block_number = LoadState::provider(&this)
+            let chain_info = this.provider().chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_number = this
+                .provider()
                 .block_number_for_id(block_id)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -167,24 +168,14 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState: EthApiTypes {
-    /// Returns a handle for reading state from database.
-    ///
-    /// Data access in default trait method implementations.
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>;
-
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
-    /// Returns a handle for reading data from transaction pool.
-    ///
-    /// Data access in default trait method implementations.
-    fn pool(&self) -> impl TransactionPool;
-
+pub trait LoadState:
+    EthApiTypes
+    + RpcNodeCoreExt<
+        Provider: StateProviderFactory
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
+        Pool: TransactionPool,
+    >
+{
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
@@ -237,7 +228,7 @@ pub trait LoadState: EthApiTypes {
                 Ok((cfg, block_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
-                let block_hash = LoadPendingBlock::provider(self)
+                let block_hash = RpcNodeCore::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
@@ -270,6 +261,42 @@ pub trait LoadState: EthApiTypes {
 
             Ok((cfg, block_env))
         }
+    }
+
+    /// Returns the next available nonce without gaps for the given address
+    /// Next available nonce is either the on chain nonce of the account or the highest consecutive
+    /// nonce in the pool + 1
+    fn next_available_nonce(
+        &self,
+        address: Address,
+    ) -> impl Future<Output = Result<u64, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            // first fetch the on chain nonce of the account
+            let on_chain_account_nonce = this
+                .latest_state()?
+                .account_nonce(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
+            let mut next_nonce = on_chain_account_nonce;
+            // Retrieve the highest consecutive transaction for the sender from the transaction pool
+            if let Some(highest_tx) = this
+                .pool()
+                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            {
+                // Return the nonce of the highest consecutive transaction + 1
+                next_nonce = highest_tx.nonce().checked_add(1).ok_or_else(|| {
+                    Self::Error::from(EthApiError::InvalidTransaction(
+                        RpcInvalidTransactionError::NonceMaxValue,
+                    ))
+                })?;
+            }
+
+            Ok(next_nonce)
+        })
     }
 
     /// Returns the number of transactions sent from an address at the given block identifier.

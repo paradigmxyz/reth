@@ -21,10 +21,7 @@ use reth_primitives::{BlockId, Header};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{
-    helpers::{Call, TraceExt},
-    FromEthApiError,
-};
+use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -124,7 +121,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block,
-            Call::evm_config(self.eth_api()).tx_env(tx.as_signed(), tx.signer()),
+            RpcNodeCore::evm_config(self.eth_api()).tx_env(tx.as_signed(), tx.signer()),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
@@ -314,13 +311,15 @@ where
         // add reward traces for all blocks
         for block in &blocks {
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
-                let mut traces = self.extract_reward_traces(
-                    &block.header,
-                    &block.body.ommers,
-                    base_block_reward,
+                all_traces.extend(
+                    self.extract_reward_traces(
+                        &block.header,
+                        &block.body.ommers,
+                        base_block_reward,
+                    )
+                    .into_iter()
+                    .filter(|trace| matcher.matches(&trace.trace)),
                 );
-                traces.retain(|trace| matcher.matches(&trace.trace));
-                all_traces.extend(traces);
             } else {
                 // no block reward, means we're past the Paris hardfork and don't expect any rewards
                 // because the blocks in ascending order

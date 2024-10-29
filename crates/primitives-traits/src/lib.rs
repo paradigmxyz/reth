@@ -29,9 +29,6 @@ pub use transaction::{signed::SignedTransaction, Transaction};
 mod integer_list;
 pub use integer_list::{IntegerList, IntegerListError};
 
-pub mod request;
-pub use request::{Request, Requests};
-
 pub mod signature;
 pub use signature::Signature;
 
@@ -45,7 +42,7 @@ mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
 mod log;
-pub use log::{logs_bloom, Log, LogData};
+pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;

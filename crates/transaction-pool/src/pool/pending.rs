@@ -197,7 +197,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             } else {
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx, &id);
+                self.update_independents_and_highest_nonces(&tx);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -243,7 +243,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx, &id);
+                self.update_independents_and_highest_nonces(&tx);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -254,12 +254,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Updates the independent transaction and highest nonces set, assuming the given transaction
     /// is being _added_ to the pool.
-    fn update_independents_and_highest_nonces(
-        &mut self,
-        tx: &PendingTransaction<T>,
-        tx_id: &TransactionId,
-    ) {
-        let ancestor_id = tx_id.unchecked_ancestor();
+    fn update_independents_and_highest_nonces(&mut self, tx: &PendingTransaction<T>) {
+        let ancestor_id = tx.transaction.id().unchecked_ancestor();
         if let Some(ancestor) = ancestor_id.and_then(|id| self.by_id.get(&id)) {
             // the transaction already has an ancestor, so we only need to ensure that the
             // highest nonces set actually contains the highest nonce for that sender
@@ -305,7 +301,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let priority = self.ordering.priority(&tx.transaction, base_fee);
         let tx = PendingTransaction { submission_id, transaction: tx, priority };
 
-        self.update_independents_and_highest_nonces(&tx, &tx_id);
+        self.update_independents_and_highest_nonces(&tx);
         self.all.insert(tx.clone());
 
         // send the new transaction to any existing pendingpool static file iterators

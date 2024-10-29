@@ -6,26 +6,22 @@ use alloy_rpc_types::TransactionInfo;
 use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, TransactionCompat,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{OpEthApi, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction,
-    N: FullNodeComponents,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    N: RpcNodeCore,
 {
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
@@ -61,26 +57,13 @@ where
 impl<N> LoadTransaction for OpEthApi<N>
 where
     Self: SpawnBlocking + FullEthApiTypes,
-    N: FullNodeComponents,
+    N: RpcNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
 {
-    type Pool = N::Pool;
-
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
-
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
-    }
 }
 
 impl<N> OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: RpcNodeCore,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
@@ -88,21 +71,33 @@ where
     }
 }
 
-/// Builds OP transaction response type.
-#[derive(Clone, Debug, Copy)]
-pub struct OpTxBuilder;
-
-impl TransactionCompat for OpTxBuilder {
+impl<N> TransactionCompat for OpEthApi<N>
+where
+    N: FullNodeComponents,
+{
     type Transaction = Transaction;
 
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        tx_info: TransactionInfo,
+    ) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
+        let hash = tx.hash;
 
-        let mut inner = EthTxBuilder::fill(tx, tx_info).inner;
+        let mut inner = EthTxBuilder.fill(tx, tx_info).inner;
 
         if signed_tx.is_deposit() {
             inner.gas_price = Some(signed_tx.max_fee_per_gas())
         }
+
+        let deposit_receipt_version = self
+            .inner
+            .provider()
+            .receipt_by_hash(hash)
+            .ok() // todo: change sig to return result
+            .flatten()
+            .and_then(|receipt| receipt.deposit_receipt_version);
 
         Transaction {
             inner,
@@ -111,7 +106,7 @@ impl TransactionCompat for OpTxBuilder {
             // only include is_system_tx if true: <https://github.com/ethereum-optimism/op-geth/blob/641e996a2dcf1f81bac9416cb6124f86a69f1de7/internal/ethapi/api.go#L1518-L1518>
             is_system_tx: (signed_tx.is_deposit() && signed_tx.is_system_transaction())
                 .then_some(true),
-            deposit_receipt_version: None, // todo: how to fill this field?
+            deposit_receipt_version,
         }
     }
 

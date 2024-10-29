@@ -3,18 +3,18 @@
 use std::sync::Arc;
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_forks::{OptimismHardfork, OptimismHardforks};
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
-    constants::BEACON_NONCE,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, BlockBody, Header, Receipt, TxType,
@@ -30,7 +30,6 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit,
 };
-use revm_primitives::calc_excess_blob_gas;
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -105,13 +104,7 @@ where
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        optimism_payload(
-            self.evm_config.clone(),
-            args,
-            cfg_env,
-            block_env,
-            self.compute_pending_block,
-        )
+        optimism_payload(&self.evm_config, args, cfg_env, block_env, self.compute_pending_block)
     }
 
     fn on_missing_payload(
@@ -140,23 +133,23 @@ where
             best_payload: None,
         };
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
+        optimism_payload(&self.evm_config, args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
-/// Constructs an Ethereum transaction payload from the transactions sent through the
+/// Constructs an Optimism transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
 /// the payload attributes, the transaction pool will be ignored and the only transactions
 /// included in the payload will be those sent through the attributes.
 ///
-/// Given build arguments including an Ethereum client, transaction pool,
+/// Given build arguments including an Optimism client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
-    evm_config: EvmConfig,
+    evm_config: &EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
@@ -420,8 +413,8 @@ where
         }
     }
 
-    // check if we have a better block
-    if !is_better_payload(best_payload.as_ref(), total_fees) {
+    // check if we have a better block, but only if we included transactions from the pool
+    if !attributes.no_tx_pool && !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
@@ -430,7 +423,7 @@ where
         &mut db,
         &chain_spec,
         attributes.payload_attributes.timestamp,
-        attributes.clone().payload_attributes.withdrawals,
+        attributes.payload_attributes.withdrawals.clone(),
     )?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
@@ -466,25 +459,15 @@ where
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
-    // initialize empty blob sidecars. There are no blob transactions on L2.
-    let blob_sidecars = Vec::new();
-    let mut excess_blob_gas = None;
-    let mut blob_gas_used = None;
-
-    // only determine cancun fields when active
-    if chain_spec.is_cancun_active_at_timestamp(attributes.payload_attributes.timestamp) {
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-            let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+    // OP doesn't support blobs/EIP-4844.
+    // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
+    // Need [Some] or [None] based on hardfork to match block hash.
+    let (excess_blob_gas, blob_gas_used) =
+        if chain_spec.is_ecotone_active_at_timestamp(attributes.payload_attributes.timestamp) {
+            (Some(0), Some(0))
         } else {
-            // for the first post-fork block, both parent.blob_gas_used and
-            // parent.excess_blob_gas are evaluated as 0
-            Some(calc_excess_blob_gas(0, 0))
+            (None, None)
         };
-
-        blob_gas_used = Some(0);
-    }
 
     let header = Header {
         parent_hash: parent_block.hash(),
@@ -506,14 +489,14 @@ where
         extra_data,
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,
-        excess_blob_gas: excess_blob_gas.map(Into::into),
-        requests_root: None,
+        excess_blob_gas,
+        requests_hash: None,
     };
 
     // seal the block
     let block = Block {
         header,
-        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals, requests: None },
+        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
     };
 
     let sealed_block = block.seal_slow();
@@ -528,7 +511,9 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let mut payload = OptimismBuiltPayload::new(
+    let no_tx_pool = attributes.no_tx_pool;
+
+    let payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
         total_fees,
@@ -537,8 +522,12 @@ where
         Some(executed),
     );
 
-    // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
-
-    Ok(BuildOutcome::Better { payload, cached_reads })
+    if no_tx_pool {
+        // if `no_tx_pool` is set only transactions from the payload attributes will be included in
+        // the payload. In other words, the payload is deterministic and we can freeze it once we've
+        // successfully built it.
+        Ok(BuildOutcome::Freeze(payload))
+    } else {
+        Ok(BuildOutcome::Better { payload, cached_reads })
+    }
 }

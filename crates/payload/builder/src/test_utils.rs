@@ -7,7 +7,7 @@ use crate::{
 
 use alloy_primitives::U256;
 use reth_chain_state::ExecutedBlock;
-use reth_payload_primitives::{PayloadBuilderError, PayloadTypes};
+use reth_payload_primitives::{PayloadBuilderError, PayloadKind, PayloadTypes};
 use reth_primitives::Block;
 use reth_provider::CanonStateNotification;
 use std::{
@@ -89,6 +89,7 @@ impl PayloadJob for TestPayloadJob {
             Block::default().seal_slow(),
             U256::ZERO,
             Some(ExecutedBlock::default()),
+            Some(Default::default()),
         ))
     }
 
@@ -96,7 +97,10 @@ impl PayloadJob for TestPayloadJob {
         Ok(self.attr.clone())
     }
 
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+    fn resolve_kind(
+        &mut self,
+        _kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let fut = futures_util::future::ready(self.best_payload());
         (fut, KeepPayloadJobAlive::No)
     }
