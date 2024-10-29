@@ -31,8 +31,6 @@ pub use error::{
 };
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-#[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
-pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
