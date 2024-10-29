@@ -1669,6 +1669,7 @@ impl PooledTransactionsHashesBuilder {
         match version {
             EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
             EthVersion::Eth68 => Self::Eth68(Default::default()),
+            EthVersion::Eth69 => todo!(),
         }
     }
 
