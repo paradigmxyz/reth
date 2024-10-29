@@ -181,9 +181,10 @@ impl<C: TrieCursor> TrieWalker<C> {
         }
 
         if let Some(subnode) = self.stack.last() {
-            if !key.starts_with(subnode.full_key()) {
-                self.stack.pop();
-            }
+            // if !key.starts_with(subnode.full_key()) {
+            //     self.stack.pop();
+            // }
+            assert!(key.starts_with(subnode.full_key()), "key: {key:?}. subnode: {subnode:?}");
         }
 
         // Create a new CursorSubNode and push it to the stack.
