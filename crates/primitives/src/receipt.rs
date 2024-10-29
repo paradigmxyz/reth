@@ -6,11 +6,11 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Bloom, Log, B256};
+use alloy_primitives::{Bloom, Log};
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
-use derive_more::{DerefMut, From, IntoIterator};
+use derive_more::{From, IntoIterator};
 #[cfg(feature = "reth-codec")]
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
@@ -67,59 +67,7 @@ impl Receipt {
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    From,
-    derive_more::Deref,
-    DerefMut,
-    IntoIterator,
-)]
-pub struct Receipts {
-    /// A two-dimensional vector of optional `Receipt` instances.
-    pub receipt_vec: Vec<Vec<Option<Receipt>>>,
-}
-
-impl Receipts {
-    /// Returns the length of the `Receipts` vector.
-    pub fn len(&self) -> usize {
-        self.receipt_vec.len()
-    }
-
-    /// Returns `true` if the `Receipts` vector is empty.
-    pub fn is_empty(&self) -> bool {
-        self.receipt_vec.is_empty()
-    }
-
-    /// Push a new vector of receipts into the `Receipts` collection.
-    pub fn push(&mut self, receipts: Vec<Option<Receipt>>) {
-        self.receipt_vec.push(receipts);
-    }
-
-    /// Retrieves all recorded receipts from index and calculates the root using the given closure.
-    pub fn root_slow(&self, index: usize, f: impl FnOnce(&[&Receipt]) -> B256) -> Option<B256> {
-        let receipts =
-            self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?;
-        Some(f(receipts.as_slice()))
-    }
-}
-
-impl From<Vec<Receipt>> for Receipts {
-    fn from(block_receipts: Vec<Receipt>) -> Self {
-        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
-    }
-}
-
-impl FromIterator<Vec<Option<Receipt>>> for Receipts {
-    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
-        iter.into_iter().collect::<Vec<_>>().into()
-    }
-}
+pub type Receipts = alloy_consensus::Receipts<Option<Receipt>>;
 
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {

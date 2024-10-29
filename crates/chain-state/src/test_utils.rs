@@ -287,7 +287,8 @@ impl TestBlockBuilder {
             Vec::new(),
         );
 
-        execution_outcome.with_receipts(Receipts::from(receipts))
+        execution_outcome
+            .with_receipts(receipts.into_iter().map(Option::Some).collect::<Vec<_>>().into())
     }
 }
 /// A test `ChainEventSubscriptions`

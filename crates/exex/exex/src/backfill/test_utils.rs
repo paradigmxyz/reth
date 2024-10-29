@@ -26,7 +26,13 @@ pub(crate) fn to_execution_outcome(
 ) -> ExecutionOutcome {
     ExecutionOutcome {
         bundle: block_execution_output.state.clone(),
-        receipts: block_execution_output.receipts.clone().into(),
+        receipts: block_execution_output
+            .receipts
+            .clone()
+            .into_iter()
+            .map(Option::Some)
+            .collect::<Vec<_>>()
+            .into(),
         first_block: block_number,
         requests: vec![block_execution_output.requests.clone()],
     }
