@@ -51,7 +51,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     /// - **Note**: **Do not** import receipts and blocks beforehand, or this will fail or be
     ///   ignored.
     #[arg(long, default_value = "false")]
-    without_evm: bool,
+    pub without_evm: bool,
 
     /// Header file containing the header in an RLP encoded format.
     #[arg(long, value_name = "HEADER_FILE", verbatim_doc_comment)]
