@@ -24,10 +24,10 @@ pub struct DatabaseArgs {
     pub exclusive: Option<bool>,
     /// Maximum database size (e.g., 4TB, 8MB)
     #[arg(long = "db.max-size", value_parser = parse_byte_size)]
-    pub max_size: Option<ByteSize>,
+    pub max_size: Option<usize>,
     /// Database growth step (e.g., 4GB, 4KB)
     #[arg(long = "db.growth-step", value_parser = parse_byte_size)]
-    pub growth_step: Option<ByteSize>,
+    pub growth_step: Option<usize>,
     /// Read transaction timeout in seconds, 0 means no timeout.
     #[arg(long = "db.read-transaction-timeout")]
     pub read_transaction_timeout: Option<u64>,
@@ -55,7 +55,7 @@ impl DatabaseArgs {
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
-            .with_geometry(self.max_size.map(|s| s.0), self.growth_step.map(|s| s.0))
+            .with_geometry(self.max_size, self.growth_step)
     }
 }
 
@@ -101,6 +101,12 @@ impl TypedValueParser for LogLevelValueParser {
 /// Size in bytes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ByteSize(pub usize);
+
+impl From<ByteSize> for usize {
+    fn from(s: ByteSize) -> Self {
+        s.0
+    }
+}
 
 impl FromStr for ByteSize {
     type Err = String;
@@ -159,8 +165,9 @@ impl fmt::Display for ByteSize {
     }
 }
 
-fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
-    s.parse()
+/// Value parser function that supports various formats.
+fn parse_byte_size(s: &str) -> Result<usize, String> {
+    s.parse::<ByteSize>().map(Into::into)
 }
 
 #[cfg(test)]
@@ -209,7 +216,7 @@ mod tests {
             "4294967296",
         ])
         .unwrap();
-        assert_eq!(cmd.args.growth_step, Some(ByteSize(GIGABYTE * 4)));
+        assert_eq!(cmd.args.growth_step, Some(GIGABYTE * 4));
     }
 
     #[test]
@@ -229,8 +236,8 @@ mod tests {
             "1GB",
         ])
         .unwrap();
-        assert_eq!(cmd.args.max_size, Some(ByteSize(TERABYTE * 2)));
-        assert_eq!(cmd.args.growth_step, Some(ByteSize(GIGABYTE)));
+        assert_eq!(cmd.args.max_size, Some(TERABYTE * 2));
+        assert_eq!(cmd.args.growth_step, Some(GIGABYTE));
 
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
             "reth",
@@ -240,8 +247,8 @@ mod tests {
             "2KB",
         ])
         .unwrap();
-        assert_eq!(cmd.args.max_size, Some(ByteSize(MEGABYTE * 12)));
-        assert_eq!(cmd.args.growth_step, Some(ByteSize(KILOBYTE * 2)));
+        assert_eq!(cmd.args.max_size, Some(MEGABYTE * 12));
+        assert_eq!(cmd.args.growth_step, Some(KILOBYTE * 2));
 
         // with spaces
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
@@ -252,8 +259,8 @@ mod tests {
             "2 KB",
         ])
         .unwrap();
-        assert_eq!(cmd.args.max_size, Some(ByteSize(MEGABYTE * 12)));
-        assert_eq!(cmd.args.growth_step, Some(ByteSize(KILOBYTE * 2)));
+        assert_eq!(cmd.args.max_size, Some(MEGABYTE * 12));
+        assert_eq!(cmd.args.growth_step, Some(KILOBYTE * 2));
 
         let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
             "reth",
@@ -263,8 +270,8 @@ mod tests {
             "1048576",
         ])
         .unwrap();
-        assert_eq!(cmd.args.max_size, Some(ByteSize(GIGABYTE)));
-        assert_eq!(cmd.args.growth_step, Some(ByteSize(MEGABYTE)));
+        assert_eq!(cmd.args.max_size, Some(GIGABYTE));
+        assert_eq!(cmd.args.growth_step, Some(MEGABYTE));
     }
 
     #[test]
