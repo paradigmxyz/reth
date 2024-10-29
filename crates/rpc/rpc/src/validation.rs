@@ -244,7 +244,7 @@ where
         }
 
         if let Some(block_base_fee) = block.base_fee_per_gas {
-            if tx.effective_tip_per_gas(block_base_fee) > 0 {
+            if tx.effective_tip_per_gas(block_base_fee) != Some(0) {
                 return Err(ValidationApiError::ProposerPayment)
             }
         }
