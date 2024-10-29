@@ -27,13 +27,14 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //!
-//! pub async fn launch<Provider, Pool, Network, Events, EvmConfig, BlockExecutor>(
+//! pub async fn launch<Provider, Pool, Network, Events, EvmConfig, BlockExecutor, Consensus>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     events: Events,
 //!     evm_config: EvmConfig,
 //!     block_executor: BlockExecutor,
+//!     consensus: Consensus,
 //! ) where
 //!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -41,6 +42,7 @@
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider,
+//!     Consensus: reth_consensus::Consensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -57,6 +59,7 @@
 //!         events,
 //!         evm_config,
 //!         block_executor,
+//!         consensus,
 //!     )
 //!     .build(transports, Box::new(EthApi::with_spawner));
 //!     let handle = RpcServerConfig::default()
@@ -95,6 +98,7 @@
 //!     EngineT,
 //!     EvmConfig,
 //!     BlockExecutor,
+//!     Consensus,
 //! >(
 //!     provider: Provider,
 //!     pool: Pool,
@@ -103,6 +107,7 @@
 //!     engine_api: EngineApi,
 //!     evm_config: EvmConfig,
 //!     block_executor: BlockExecutor,
+//!     consensus: Consensus,
 //! ) where
 //!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Unpin + 'static,
@@ -112,6 +117,7 @@
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header>,
 //!     BlockExecutor: BlockExecutorProvider,
+//!     Consensus: reth_consensus::Consensus + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -128,6 +134,7 @@
 //!         events,
 //!         evm_config,
 //!         block_executor,
+//!         consensus,
 //!     );
 //!
 //!     // configure the server modules
